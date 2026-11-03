@@ -64,8 +64,10 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
     <tr><td><kbd>R</kbd></td><td>Ride in the train’s cab. R or V again steps off beside the track</td></tr>
     <tr><td><kbd>F</kbd></td><td>Board the nearest ferry wherever it is. While it lies at a landing it may also be boarded by its gangway. On board, W A S D walk about the decks and the mouse looks round. F or V again steps ashore, or at the next landing while the ferry is under way</td></tr>
     <tr><td><kbd>C</kbd></td><td>Follow the train from behind. The mouse moves the camera round it and <kbd>+</kbd><kbd>−</kbd> change the distance. C or V again steps off beside the track</td></tr>
-    <tr><td><kbd>N</kbd></td><td>Generate a new island</td></tr>
+    <tr><td><kbd>N</kbd></td><td>Night or day</td></tr>
+    <tr><td><kbd>I</kbd></td><td>Generate a new island</td></tr>
     <tr><td><kbd>M</kbd></td><td>Mute or unmute the ambient sound</td></tr>
+    <tr><td>Double click</td><td>Go down to street level at that spot in the bird’s-eye view</td></tr>
     <tr><td><kbd>Tab</kbd></td><td>Full screen</td></tr>
     <tr><td><kbd>H</kbd></td><td>Show or hide this panel</td></tr>
     <tr><td><kbd>Controller</kbd></td><td>The left stick moves and the right stick looks. A jumps, B switches the view, X boards the ferry, Y rides in the train’s cab and LB follows the train. RB sets tilt-shift, the triggers zoom, pressing the left stick switches between running and walking, the D-pad turns and tilts, Back mutes and Start shows this panel</td></tr>
@@ -73,8 +75,11 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
   <p class="about">An island that never ends to the east or west, between half a kilometre and two kilometres wide. Villages are laid out from the rules of medieval hill towns, with open country, olive groves and a coastal railway between them. Draw distance adjusts itself to hold 60 frames per second: <span id="viewState">—</span>.</p>
 </aside>
 
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"}}</script>
 <script type="module">
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+// the cat of Michi-Neko: The Cat Philosopher's Path by c1t1zen1, under the MIT licence (cat/LICENSE)
+import { Cat, catRimUniforms } from './cat/cat.js';
 
 /* ================= random & noise ================= */
 let SEED = 7;
@@ -111,6 +116,7 @@ const PAL={
 };
 const C_={}; for (const k in PAL) C_[k]=Array.isArray(PAL[k])?PAL[k].map(hex):hex(PAL[k]);
 const shade=(c,R,a=0.05)=>c.clone().multiplyScalar(1+(R()-0.5)*2*a);
+const GREY_ROCK=hex('#9a948a');
 const SP=1, SR=2, SS=3, SW=4, SB=7; // surface patterns: plaster, roof tiles, stone, wood, brick
 
 /* ================= geometry builder ================= */
@@ -130,6 +136,7 @@ const T={
   bowl:tpl(new THREE.CylinderGeometry(.5,.28,1,16).translate(0,.5,0),true),
   pyr:tpl(new THREE.ConeGeometry(Math.SQRT1_2,1,4,1).rotateY(Math.PI/4).translate(0,.5,0),false),
   cone:tpl(new THREE.ConeGeometry(.5,1,14).translate(0,.5,0),true),
+  taper:tpl(new THREE.CylinderGeometry(.36,.5,1,28,1,true).translate(0,.5,0),true),   // a lighthouse tower, narrowing to 72 per cent
   sph:tpl(new THREE.IcosahedronGeometry(.5,2),true),
   sphLo:tpl(new THREE.IcosahedronGeometry(.5,1),true),
   quad:tpl(new THREE.PlaneGeometry(1,1).rotateX(-Math.PI/2),false),
@@ -242,6 +249,7 @@ function baseH(x,z){
   else h=Math.min(landProfile(sS,x,z,1),landProfile(sN,x,z,-1));
   if (h>0) h+=peakAdd(x,z)*clamp(Math.min(sS,sN)/120,0,1);
   if (sS<-150) h=Math.max(h,islandH(1,x,z)); else if (sN<-150) h=Math.max(h,islandH(-1,x,z));
+  if (sS<-120) h=Math.max(h,seaRockH(1,x,z)); else if (sN<-120) h=Math.max(h,seaRockH(-1,x,z));
   return h;
 }
 /* ---------- small rocky islands off both coasts, clear of the ferry lane ---------- */
@@ -303,6 +311,99 @@ function seaDist(x,z){ return Math.min(z-coastZ(1,x),coastZ(-1,x)-z); }
 function islandNear(x,z){ const sd=(z-coastZ(1,x))<(coastZ(-1,x)-z)?1:-1, m=Math.floor(x/ISL);
   for (let k=m-1;k<=m+1;k++){ const I=islandInfo(sd,k); if (I && Math.hypot(x-I.x,z-I.z)<I.ext+20) return I; } return null; }
 function shoreSide(x,z){ return (z-coastZ(1,x))<(coastZ(-1,x)-z)?1:-1; }
+/* ---------- lighthouses: on the most prominent headland of some stretches of the coast, and on the seaward
+   point of some islands. Each record gives the tower's foot, the lantern height, the beams and, on the mainland,
+   the bearing of the open sea, since the landward side of the lantern is screened ---------- */
+const LH_SP=4200, lhCache=new Map();
+/* rocks out at sea, each carrying a lighthouse: beyond the sailing boats and clear of the ferry crossings */
+const RK_SP=5200, rkCache=new Map();
+function segDist(x,z,ax,az,bx,bz){ const dx=bx-ax, dz=bz-az, t=clamp(((x-ax)*dx+(z-az)*dz)/(dx*dx+dz*dz||1),0,1); return Math.hypot(x-ax-dx*t,z-az-dz*t); }
+function seaRockInfo(sd,n){
+  const k=sd+':'+n; if (rkCache.has(k)) return rkCache.get(k);
+  const o=sd>0?0:30, hh=q=>hash(n,q,1801+o); let K=null;
+  if (hh(0)<0.55){
+    const x=n*RK_SP+RK_SP*(0.15+0.7*hh(1)), z=coastZ(sd,x)-sd*(200+hh(2)*140), m0=Math.floor(x/ISL); let ok=true;
+    for (let m=m0-1;m<=m0+1 && ok;m++){ const I=islandInfo(sd,m); if (!I) continue;
+      if (Math.hypot(x-I.x,z-I.z)<I.ext+150) ok=false;
+      for (let q=Math.floor(I.x/FP)-1;q<=Math.floor(I.x/FP)+1;q++){ const P=ferryPortInfo(sd,q); if (P && segDist(x,z,P.x,P.z,I.x,I.z)<170) ok=false; } }
+    if (ok) K={sd,n,x,z,r:10+hh(3)*5,h:3+hh(4)*2.5,seed:1810+n*5+o};
+  }
+  if (rkCache.size>2000) rkCache.clear(); rkCache.set(k,K); return K;
+}
+// an irregular round rock with steep sides and a rough, roughly level top
+function seaRockH(sd,x,z){ const n=Math.floor(x/RK_SP); let best=-1e9;
+  for (let q=n-1;q<=n+1;q++){ const K=seaRockInfo(sd,q); if (!K) continue; const dx=x-K.x, dz=z-K.z; if (Math.abs(dx)>K.r*2||Math.abs(dz)>K.r*2) continue;
+    const e=K.r*(0.82+0.36*vnoise(x*0.11,z*0.11,K.seed))-Math.hypot(dx,dz);
+    best=Math.max(best, e<0?Math.max(-20,0.06+e*1.6):0.06+Math.min(K.h,e*1.4)+(fbm(x*0.3,z*0.3,K.seed+1,2)-0.5)*1.4*Math.min(1,e/3)); }
+  return best; }
+function lhMake(id,sd,x,z,ix,iz,kind,R){
+  // the keeper's cottage stands beside the tower on whichever side the ground is higher
+  const tx=-iz, tz=ix, side=heightAtExact(x+tx*7,z+tz*7)>=heightAtExact(x-tx*7,z-tz*7)?1:-1;
+  let g=1e9; for (let a=0;a<6.28;a+=0.785) g=Math.min(g,heightAtExact(x+Math.cos(a)*3,z+Math.sin(a)*3));
+  const H=kind==='head'?16:kind==='rock'?17:13;
+  return {id,sd,x,z,g,ix,iz,kind,H,y:g+H+1.6,foot:10.5,hx:x+tx*side*7.8,hz:z+tz*side*7.8,hrot:Math.atan2(tx,tz),
+    beams:R(0)<0.5?2:1,period:9+R(1)*8,phase:R(2)*6.283,spin:R(3)<0.8?1:-1,sea:kind==='head'?Math.atan2(sd,0):null};
+}
+function headlandLight(sd,n){
+  const k='h'+sd+':'+n; if (lhCache.has(k)) return lhCache.get(k);
+  const o=sd>0?0:40, R=q=>hash(n,q,1711+o); let L=null;
+  if (hash(n,0,1701+o)<0.45){
+    // the point where the shore stands furthest out to sea against the coast for 250 m either side
+    let best=null;
+    for (let x=n*LH_SP+300; x<=(n+1)*LH_SP-300; x+=20){
+      let m=0; for (const d of [-250,-170,-90,90,170,250]) m+=-sd*coastZ(sd,x+d);
+      const p=-sd*coastZ(sd,x)-m/6; if (!best||p>best.p) best={x,p}; }
+    if (best && best.p>10){ const x=best.x, hb=Math.floor(x/HARB);
+      let clear=true; for (let q=hb-1;q<=hb+1;q++){ const H=harbourInfo(sd,q); if (H && Math.abs(H.x-x)<H.W/2+90) clear=false; }
+      for (const s of [6,8,10]){ const z=coastZ(sd,x)+sd*s;
+        if (clear && baseH(x,z)>1.4 && railPerp(x,z)>16 && !stationNear(x,120)){ L=lhMake(k,sd,x,z,0,sd,'head',R); break; } } } }
+  lhCache.set(k,L); return L;
+}
+function islandLight(sd,m){
+  const k='i'+sd+':'+m; if (lhCache.has(k)) return lhCache.get(k);
+  const o=sd>0?0:40, R=q=>hash(m,q,1761+o), I=islandInfo(sd,m); let L=null;
+  if (I && hash(m,0,1751+o)<0.22){
+    // the point of the shore that stands furthest out towards the mainland, a few metres back from the edge and
+    // well clear of the ferry jetty, so the light is seen from the coast
+    const a0=Math.atan2(sd,0), IR=islandRoute(sd,m), J=IR&&IR.jetty; let best=null;
+    for (let q=-10;q<=10;q++){ const a=a0+q*0.12, ca=Math.cos(a), sa=Math.sin(a); let last=null;
+      for (let r=0;r<I.ext+80;r+=3){ const x=I.x+ca*r, z=I.z+sa*r; if (islandH(sd,x,z)>1.5) last={x,z,ca,sa}; }
+      if (!last || (J && Math.hypot(last.x-J.sx,last.z-J.sz)<90)) continue;
+      if (!best || sd*last.z>sd*best.z) best=last; }
+    if (best){ const x=best.x-best.ca*7, z=best.z-best.sa*7;
+      if (islandH(sd,x,z)>1.5) L=lhMake(k,sd,x,z,-best.ca,-best.sa,'isle',R); } }
+  lhCache.set(k,L); return L;
+}
+function rockLight(sd,n){
+  const k='r'+sd+':'+n; if (lhCache.has(k)) return lhCache.get(k);
+  const K=seaRockInfo(sd,n), L=K?lhMake(k,sd,K.x,K.z,0,sd,'rock',q=>hash(n,q,1821+(sd>0?0:30))):null;
+  lhCache.set(k,L); return L;
+}
+/* ---------- ancient ruins: a temple or a round tholos on open hillsides and on some islands ---------- */
+const RUIN=650, ruCache=new Map();
+// the site whose centre lies in a block: mainland sites on a 650 m grid, island sites one per island at most
+function ruinIn(cx,cz){
+  const k=cx+','+cz; if (ruCache.has(k)) return ruCache.get(k);
+  let S=null; const xc=cx*C+C/2, zc=cz*C+C/2;
+  const i=Math.floor(xc/RUIN), j=Math.floor(zc/RUIN);
+  if (hash(i,j,1901)<0.35){
+    const x=(i+0.15+0.7*hash(i,j,1902))*RUIN, z=(j+0.15+0.7*hash(i,j,1903))*RUIN;
+    if (Math.floor(x/C)===cx && Math.floor(z/C)===cz && seaDist(xc,zc)>60 && baseH(xc,zc)>18 && !peakNear(xc,zc,1.4)) S={x:xc,z:zc,seed:i*7919+j,isle:false}; }
+  if (!S && seaDist(xc,zc)<-150){ const sd=shoreSide(xc,zc), m=Math.floor(xc/ISL);
+    for (let q=m-1;q<=m+1 && !S;q++){ const I=islandInfo(sd,q); if (!I || hash(q,sd>0?1:2,1911)>=0.4) continue;
+      const a=hash(q,3,1912)*6.283, r=I.R*(0.25+0.3*hash(q,4,1913)), x=I.x+Math.cos(a)*r, z=I.z+Math.sin(a)*r;
+      if (Math.floor(x/C)===cx && Math.floor(z/C)===cz && islandH(sd,xc,zc)>6) S={x:xc,z:zc,seed:q*31+(sd>0?1:2),isle:true}; } }
+  if (S){ S.tholos=hash(S.seed,0,1921)<0.3; S.rot=hash(S.seed,1,1922)*Math.PI; }
+  if (ruCache.size>20000) ruCache.clear(); ruCache.set(k,S); return S;
+}
+function lightsNear(x,z,r){
+  const out=[];
+  for (const sd of SIDES){
+    for (let n=Math.floor((x-r)/RK_SP); n<=Math.floor((x+r)/RK_SP); n++){ const L=rockLight(sd,n); if (L && Math.hypot(L.x-x,L.z-z)<r) out.push(L); }
+    for (let n=Math.floor((x-r)/LH_SP); n<=Math.floor((x+r)/LH_SP); n++){ const L=headlandLight(sd,n); if (L && Math.hypot(L.x-x,L.z-z)<r) out.push(L); }
+    for (let m=Math.floor((x-r)/ISL)-1; m<=Math.floor((x+r)/ISL)+1; m++){ const L=islandLight(sd,m); if (L && Math.hypot(L.x-x,L.z-z)<r) out.push(L); } }
+  return out;
+}
 
 /* ================= street network ================= */
 const C=40;
@@ -791,7 +892,7 @@ function addHouse(gb,ch,R,o){
   if (o.tower && o.belfry){ const y=h-1.5;
     for (let s=0;s<4;s++){ const HR=mm(H,mat(0,0,0,1,1,1,s*Math.PI/2)), off=(s%2?w:d)/2+0.01;
       for (const xx of (w>3.3?[-0.55,0.55]:[0])){ gb.add(T.boxC, mm(HR,mat(xx,y,off,0.55,1.3,0.12)), C_.win, null);
-        gb.add(T.cylC, mm(HR,mat(xx,y+0.65,off,0.55,0.12,0.55,0,Math.PI/2)), C_.win, null); } } }
+        gb.add(T.cylC, mm(HR,mat(xx,y+0.65,off,0.55,0.1,0.55,0,Math.PI/2)), C_.win, null); } } }   // the arch a little thinner than the opening, so their faces never share a plane
   if (roof==='front' && w>3.8 && R()<0.6) addWin(gb,H,0,h+w*0.13,fz,0,0.38,0.45);
   if (roof!=='flat' && roof!=='spire' && R()<0.3) gb.add(T.box, mm(H,mat(w*0.22,h,-d*0.18,0.55,Math.min(w,d)*0.4+1.0,0.55)), wall, null, SP);
   const ob={x:o.x,z:o.z,hw:w/2,hd:d/2,rot:o.rot,top:Infinity};
@@ -1186,6 +1287,89 @@ function buildHarbour(gb,ch,R,H){
   for (let q=0;q<2;q++){ const x=H.x+(R()-0.5)*H.W*0.5, z=coastZ(S,H.x)-S*H.L*0.55+(R()-0.5)*6; placeBoat(ch,Math.floor(R()*BOATS.length),x,0,z,R()*6.28,true); }
 }
 
+function buildLighthouse(gb,ch,R,L){
+  const {x,z,g,H}=L, stone=shade(C_.stone,R,0.03), dark=hex('#34312f'), white=C_.white, lamp=hex('#ffe9a8');
+  let gmin=g; for (let a=0;a<6.28;a+=0.5) gmin=Math.min(gmin,heightAt(x+Math.cos(a)*3.6,z+Math.sin(a)*3.6));
+  // a stone plinth, then a tower that narrows as it rises
+  gb.add(T.cyl, mat(x,gmin-1.2,z,7.2,g+1.6-(gmin-1.2),7.2), stone, gmin, SS);
+  gb.add(T.cyl, mat(x,g+1.6,z,7.5,0.14,7.5), C_.trim, null, SS);
+  gb.add(T.taper, mat(x,g+1.6,z,5,H,5), white, g+1.6, SP);
+  const top=g+1.6+H, ry=Math.atan2(L.ix,L.iz);
+  gb.add(T.boxC, mat(x+L.ix*2.45,g+2.75,z+L.iz*2.45,1.0,2.1,0.12,ry), C_.door, null, SW);
+  for (const [h,s] of [[0.3,1],[0.55,-1],[0.8,1]]){ const r=lerp(2.5,1.8,h)+0.02;
+    gb.add(T.boxC, mat(x+L.ix*s*r,g+1.6+h*H,z+L.iz*s*r,0.5,0.9,0.1,ry), C_.win, null); }
+  // the gallery with its railing, the glazed lantern and the dome
+  gb.add(T.cyl, mat(x,top-0.5,z,4.6,0.5,4.6), dark, null);
+  for (let a=0;a<12;a++){ const c=Math.cos(a/12*6.283), s=Math.sin(a/12*6.283); gb.add(T.cyl8, mat(x+c*2.2,top,z+s*2.2,0.07,1.0,0.07), dark, null); }
+  gb.add(T.cyl, mat(x,top,z,2.6,0.4,2.6), dark, null);
+  gb.add(T.cyl, mat(x,top+0.4,z,2.2,1.9,2.2), lamp, null, 6);
+  for (let a=0;a<8;a++){ const c=Math.cos(a/8*6.283), s=Math.sin(a/8*6.283); gb.add(T.cyl8, mat(x+c*1.12,top+0.4,z+s*1.12,0.08,1.9,0.08), dark, null); }
+  gb.add(T.cyl, mat(x,top+2.3,z,2.7,0.16,2.7), dark, null);
+  gb.add(T.cone, mat(x,top+2.46,z,2.4,1.3,2.4), hex('#a33b32'), null);
+  gb.add(T.sph, mat(x,top+3.8,z,0.4,0.4,0.4), dark, null);
+  gb.add(T.cyl8, mat(x,top+3.9,z,0.06,1.0,0.06), dark, null);
+  ch.circles.push({x,z,r:2.6,top:Infinity});
+  if (L.kind==='rock') for (let a=0;a<18;a++){ const an=a/18*6.283+R()*0.3, ca=Math.cos(an), sa=Math.sin(an); let r=4;
+    while (r<30 && heightAtExact(x+ca*r,z+sa*r)>0.4) r+=0.7;
+    const s=1.2+R()*1.8, bx=x+ca*(r+R()*1.5), bz=z+sa*(r+R()*1.5);
+    gb.add(T.sphLo, mat(bx,-0.5+R()*0.4,bz,s*1.6,s*1.1,s*1.4,R()*6), shade(GREY_ROCK,R,0.1), null, SS); }
+  // the keeper's cottage, on its own footing where the ground falls away; a rock at sea has no room for one
+  if (L.kind!=='rock'){ const hx=L.hx, hz=L.hz, rot=L.hrot, w=5.2, d=7, h=3.4; let hg=1e9;
+    for (const [u,v] of [[-1,-1],[1,-1],[-1,1],[1,1],[0,0]]){ const [px,pz]=localToWorld({x:hx,z:hz,rot},u*w/2,v*d/2); hg=Math.min(hg,heightAt(px,pz)); }
+    const base=Math.max(hg,g-1.5), wallC=shade(C_.walls[2],R,0.03);
+    if (base>hg+0.05) gb.add(T.box, mat(hx,hg-0.6,hz,w+0.4,base-hg+0.6,d+0.4,rot), stone, hg, SS);
+    gb.add(T.box, mat(hx,base,hz,w,h,d,rot), wallC, base, SP);
+    gb.add(T.pyr, mat(hx,base+h,hz,w+0.7,1.7,d+0.7,rot), shade(C_.roofs[1],R,0.04), null, SR);
+    gb.add(T.box, mat(hx,base+h+0.6,hz,0.6,1.6,0.6,rot), wallC, null, SP);
+    for (const v of [-1.6,1.6]){ const [px,pz]=localToWorld({x:hx,z:hz,rot},w/2+0.04,v); gb.add(T.boxC, mat(px,base+1.9,pz,0.1,0.95,0.7,rot), C_.win, null, 5); }
+    { const [px,pz]=localToWorld({x:hx,z:hz,rot},-w/2-0.04,0); gb.add(T.boxC, mat(px,base+1.05,pz,0.1,2.1,1.0,rot), C_.door, null, SW); }
+    ch.obbs.push({x:hx,z:hz,hw:w/2,hd:d/2,rot,top:Infinity}); }
+}
+
+function buildRuin(gb,ch,R,S){
+  const {x,z,rot}=S, marble=hex('#e6dece'), worn=hex('#cfc4ae'), c=Math.cos(rot), sn=Math.sin(rot);
+  const W=(u,v)=>[x+u*c+v*sn, z-u*sn+v*c];
+  const w=S.tholos?9:9.6, d=S.tholos?9:15;
+  let gmin=1e9, gmax=-1e9; for (const [u,v] of [[-1,-1],[1,-1],[-1,1],[1,1],[0,0],[0,-1],[0,1]]){ const [px,pz]=W(u*w/2,v*d/2), h=heightAt(px,pz); gmin=Math.min(gmin,h); gmax=Math.max(gmax,h); }
+  // a stylobate of three steps, built up from the lowest ground
+  const top=gmax+0.75;
+  for (let k=0;k<3;k++){ const g=k*0.6, y0=k===0?gmin-0.8:top-0.75+k*0.25, y1=top-0.5+k*0.25;
+    if (S.tholos) gb.add(T.cyl, mat(x,y0,z,w+1.2-g*2,y1-y0,w+1.2-g*2), shade(worn,R,0.04), gmin, SS);
+    else gb.add(T.box, mat(x,y0,z,w+1.2-g*2,y1-y0,d+1.2-g*2,rot), shade(worn,R,0.04), gmin, SS); }
+  if (S.tholos) ch.circles.push({x,z,r:w/2+0.6,top});
+  else ch.obbs.push({x,z,hw:w/2+0.6,hd:d/2+0.6,rot,top});
+  // the columns: a few stand to full height, most are broken off, and some are only stumps or gone
+  const cols=[];
+  if (S.tholos) for (let k=0;k<12;k++){ const a=k/12*6.283; cols.push([Math.cos(a)*(w/2-0.5),Math.sin(a)*(w/2-0.5)]); }
+  else { for (let i=0;i<4;i++) for (const v of [-1,1]) cols.push([-w/2+0.5+i*(w-1)/3,v*(d/2-0.5)]);
+    for (let j=1;j<6;j++) for (const u of [-1,1]) cols.push([u*(w/2-0.5),-d/2+0.5+j*(d-1)/6]); }
+  const CH=6.2, full=[];
+  for (const [u,v] of cols){ const r=R(), [px,pz]=W(u,v);
+    if (r<0.15) continue;
+    gb.add(T.cyl, mat(px,top,pz,1.15,0.25,1.15), marble, null);
+    const h=r<0.38?CH:r<0.8?0.6+R()*3.6:0.25+R()*0.4;
+    gb.add(T.cyl, mat(px,top+0.25,pz,0.86,h-0.25,0.86,R()*6), shade(marble,R,0.04), top);
+    if (h===CH){ gb.add(T.box, mat(px,top+CH,pz,1.2,0.32,1.2,rot), marble, null); full.push([u,v,px,pz]); }
+    ch.circles.push({x:px,z:pz,r:0.55,top:h<0.7?top+h:Infinity}); }
+  // a length of architrave still spans neighbouring standing columns
+  for (let a=0;a<full.length;a++) for (let b=a+1;b<full.length;b++){ const A=full[a], B=full[b], gap=Math.hypot(A[0]-B[0],A[1]-B[1]);
+    if (gap<3.3 && R()<0.8) segBox(gb,[A[2],top+CH+0.62,A[3]],[B[2],top+CH+0.62,B[3]],0.95,0.6,shade(marble,R,0.03)); }
+  // the walls of the cella, broken down to uneven courses
+  if (!S.tholos) for (const [u0,v0,u1,v1] of [[-2.4,-3.6,2.4,-3.6],[-2.4,-3.6,-2.4,4.8],[2.4,-3.6,2.4,4.8],[-2.4,4.8,-1.0,4.8],[1.0,4.8,2.4,4.8]]){
+    const n=Math.max(1,Math.round(Math.hypot(u1-u0,v1-v0)/1.2));
+    for (let k=0;k<n;k++){ const t=(k+0.5)/n, [px,pz]=W(lerp(u0,u1,t),lerp(v0,v1,t)), h=R()<0.25?0.3:0.5+R()*2.2;
+      gb.add(T.boxC, mat(px,top+h/2,pz,u0===u1?0.7:Math.hypot(u1-u0,v1-v0)/n+0.02,h,u0===u1?Math.hypot(u1-u0,v1-v0)/n+0.02:0.7,rot), shade(worn,R,0.06), top, SS);
+      const [ox,oz]=[px,pz]; ch.obbs.push({x:ox,z:oz,hw:u0===u1?0.35:Math.hypot(u1-u0,v1-v0)/n/2,hd:u0===u1?Math.hypot(u1-u0,v1-v0)/n/2:0.35,rot,top:h<0.7?top+h:Infinity}); } }
+  // fallen drums and blocks lying round about
+  for (let k=0;k<9;k++){ const a=R()*6.283, rr=(S.tholos?w/2:d/2)+1.5+R()*5, px=x+Math.cos(a)*rr, pz=z+Math.sin(a)*rr, g=heightAt(px,pz);
+    if (R()<0.6) gb.add(T.cylC, mat(px,g+0.3,pz,0.86,0.7+R()*0.6,0.86,R()*6,Math.PI/2), shade(marble,R,0.05), g);
+    else gb.add(T.box, mat(px,g-0.15,pz,0.8+R()*0.8,0.5+R()*0.3,1.0+R()*1.0,R()*6), shade(worn,R,0.06), g, SS);
+    ch.circles.push({x:px,z:pz,r:0.5,top:g+0.6}); }
+  ch.ruin={x,z,r:(S.tholos?w/2:d/2)+7};
+  ch.name=S.tholos?'Tholos':'Tempio antico'; ch.label='Ruins';
+  ch.desc=S.tholos?'The ring of columns of a round temple, most of them broken, on its stepped platform.':'The platform of an ancient temple, with a few columns standing, the rest broken, and the low walls of its cella.';
+}
+
 /* ================= chunk generation ================= */
 let GEN_LOD=0;
 function genChunk(cx,cz,lod=0){
@@ -1224,6 +1408,10 @@ function genChunk(cx,cz,lod=0){
   const P=piazzaInfo(cx,cz);
   if ((ch.kind==='piazza'||ch.kind==='church') && !P) ch.kind='quarter';
   if (P) ch.piazza=P;
+  /* --- lighthouses: their ground is kept clear in every block they reach, and each is built in the block that holds its tower --- */
+  ch.lights=lightsNear(xc,zc,C*0.71+11);
+  for (const L of ch.lights){ ch.place.push({x:L.x,z:L.z,hw:L.foot,hd:L.foot,rot:0}); ch.placeCircles.push({x:L.x,z:L.z,r:L.foot});
+    if (Math.floor(L.x/C)===cx && Math.floor(L.z/C)===cz) buildLighthouse(gb,ch,R,L); }
 
   ch.alleys=alleyInfo(cx,cz).slice();
   /* --- archways over the main streets (shared with the neighbouring block) and over alleys --- */
@@ -1278,7 +1466,9 @@ function genChunk(cx,cz,lod=0){
         gb.add(T.cylC, mm(H,mat(0,h-0.6,fz+0.04,1.3,0.14,1.3,0,Math.PI/2)), C_.win, null, 5);
         for (const s of [1,-1]) gb.add(T.box, mm(H,mat(s*(W/2-0.2),0,fz,0.5,h,0.2)), C_.trim, null, SS);
         for (let z=-L/2+2.5; z<L/2-2; z+=3.2) for (const s of [1,-1]){ gb.add(T.boxC, mm(H,mat(s*(W/2+0.01),h-2.2,z,0.12,1.6,0.6)), C_.win, null, 5);
-          gb.add(T.cylC, mm(H,mat(s*(W/2+0.01),h-1.4,z,0.6,0.12,0.6,Math.PI/2,Math.PI/2)), C_.win, null); }
+          // the round head of the window: lit like the window, and a little thinner so that its face stays behind the
+          // window's own and the two never share a plane
+          gb.add(T.cylC, mm(H,mat(s*(W/2+0.01),h-1.4,z,0.6,0.1,0.6,Math.PI/2,Math.PI/2)), C_.win, null, 5); }
         ch.obbs.push({x:cxp,z:czp,hw:W/2,hd:L/2,rot,top:Infinity}); ch.place.push(ob);
         ch.circles.push({x:cxp-dx*(L/2),z:czp-dz*(L/2),r:W*0.35,top:Infinity});
         if (tower){ const th=17+R()*6, top=R(); (ch.snd||(ch.snd=[])).push({id:'church_bell',x:tower.x,y:heightAt(tower.x,tower.z)+th-2,z:tower.z});
@@ -1447,7 +1637,7 @@ function genChunk(cx,cz,lod=0){
   if (ch.kind==='olives'){ ch.name='Uliveto di '+saint; ch.label='Olive grove'; ch.desc='Terraced olive grove held up by dry-stone walls, between the villages.'; }
   if (ch.kind==='rocky'){ ch.name='Pietraia di '+saint; ch.label='Open country'; ch.desc='Limestone outcrops, maquis scrub and umbrella pines between the villages.'; }
   if (ch.kind==='farm'){ ch.name='Podere '+pick(R,['Le Fonti','Il Poggio','La Croce','Il Casale','Le Vigne','San Martino','La Torre','Il Pozzo']); ch.label='Farm'; ch.desc='Stone farmhouse with a barn, a vegetable plot and fruit trees.'; }
-  if (ch.kind==='isle'){ const I=islandNear(xc,zc); ch.name=I?I.name:'Mare aperto'; ch.label=I?'Island':'Sea'; ch.desc=I?'Small rocky island off the coast with scrub, pines and cypress. The ferry passes on the landward side.':'Open sea off the coast.'; }
+  if (ch.kind==='isle'){ const I=islandNear(xc,zc), F=!I&&ch.lights.find(L=>L.kind==='rock'); ch.name=I?I.name:F?'Scoglio del Faro':'Mare aperto'; ch.label=I?'Island':F?'Rock':'Sea'; ch.desc=I?'Small rocky island off the coast with scrub, pines and cypress. The ferry passes on the landward side.':F?'Bare rock at sea with a lighthouse.':'Open sea off the coast.'; }
   if (ch.kind==='coast'){ ch.name='Spiaggia di '+saint; ch.label='Shore'; ch.desc='Open beach and rocks between the villages.'; }
   if (ch.kind==='wild'){ ch.name='Monte '+saint.replace(/^Sant[oa’]* ?/,'').replace(/^San /,''); ch.label='Hillside'; ch.desc='Steep slopes above the village with cypress, olive and bare rock.'; }
 
@@ -1564,6 +1754,15 @@ function genChunk(cx,cz,lod=0){
   }
 
   /* --- infill --- */
+  /* --- ancient ruins, given their ground before the trees and rocks of open country --- */
+  { const S=COUNTRY.has(ch.kind)&&ch.kind!=='coast'&&ch.kind!=='farm'?ruinIn(cx,cz):null;
+    if (S){ const w=S.tholos?11:12, d=S.tholos?11:18; let best=null;
+      // the spot in the block where the ground varies least, with the long side along the contour
+      for (const [ox,oz] of [[0,0],[7,0],[-7,0],[0,7],[0,-7]]){ const x=S.x+ox, z=S.z+oz;
+        const gx=heightAt(x+3,z)-heightAt(x-3,z), gz=heightAt(x,z+3)-heightAt(x,z-3), rot=S.tholos?S.rot:Math.atan2(-gz,gx), o={x,z,hw:w/2,hd:d/2,rot};
+        let mn=1e9, mx=-1e9; for (const [px,pz] of obbSamples(o)){ const h=heightAt(px,pz); mn=Math.min(mn,h); mx=Math.max(mx,h); }
+        if (mx-mn<8 && (!best||mx-mn<best.r) && canPlace(o,0.1,{maxRange:8,ignorePiazza:true})) best={o,r:mx-mn}; }
+      if (best){ ch.place.push({...best.o,hw:w/2+3,hd:d/2+3}); buildRuin(gb,ch,R,{...S,x:best.o.x,z:best.o.z,rot:best.o.rot}); } } }
   /* --- open country --- */
   if (COUNTRY.has(ch.kind) && ch.kind!=='wild'){
     const okPt=(x,z,m=1.6)=>cellOk(x,z,-0.5) && roadDist(x,z)>m && heightAt(x,z)>1;
@@ -1601,7 +1800,9 @@ function genChunk(cx,cz,lod=0){
     if (ch.kind==='rocky'||ch.kind==='coast'||ch.kind==='isle'){
       const lime=hex('#d9d1c2');
       for (let t=0;t<(ch.kind==='coast'?40:ch.kind==='isle'?90:110);t++){
-        const x=x0+R()*C, z=z0+R()*C; if (!okPt(x,z,1)) continue; const g=heightAt(x,z), r=R();
+        const x=x0+R()*C, z=z0+R()*C; if (!okPt(x,z,1)) continue; const g=heightAt(x,z); let r=R();
+        if (ch.ruin && Math.hypot(x-ch.ruin.x,z-ch.ruin.z)<ch.ruin.r) continue;
+        if (ch.kind==='isle' && !islandNear(x,z)){ if (r>0.25 || ch.lights.some(L=>Math.hypot(x-L.x,z-L.z)<5.5)) continue; r=0; }
         if (r<0.4){ const n=1+Math.floor(R()*3); for (let q=0;q<n;q++){ const s=0.7+R()*1.8, bx=x+(R()-0.5)*2.5, bz=z+(R()-0.5)*2.5;
             const bh=heightAt(bx,bz); gb.add(T.sphLo, mat(bx,bh-s*0.3,bz,s*1.7,s*0.9,s*1.3,R()*6), shade(lime,R,0.08), null, SS); ch.circles.push({x:bx,z:bz,r:s*0.55,top:bh+s*0.15}); } }
         else if (r<0.82){ const s=0.6+R()*0.9; gb.add(T.sphLo, mat(x,g-0.15,z,s*2.2,s*1.1,s*1.9,R()*6), shade(hex('#4f6631'),R,0.12), null); }
@@ -1620,7 +1821,7 @@ function genChunk(cx,cz,lod=0){
     const x=x0+R()*C, z=z0+R()*C, rot=R()*6.28, r=R();
     if (ch.kind==='wild'){
       if (r<0.55){ if (canPlace({x,z,hw:0.7,hd:0.7,rot:0},0,{maxRange:9})){ addTree(gb,ch,x,z,R,0.7+R()*0.5,undefined,R()<0.45?'cypress':(R()<0.6?'olive':'round')); ch.place.push({x,z,hw:1.2,hd:1.2,rot:0}); } }
-      else if (r<0.85){ const s=0.8+R()*1.8, h=heightAt(x,z); if (h>1){ gb.add(T.sphLo, mat(x,h-s*0.25,z,s*1.6,s,s*1.3,rot), shade(C_.rock,R,0.08), null, SS); ch.circles.push({x,z,r:s*0.6,top:h+s*0.25}); } }
+      else if (r<0.85){ const s=0.8+R()*1.8, h=heightAt(x,z); if (h>1 && !(ch.ruin && Math.hypot(x-ch.ruin.x,z-ch.ruin.z)<ch.ruin.r)){ gb.add(T.sphLo, mat(x,h-s*0.25,z,s*1.6,s,s*1.3,rot), shade(C_.rock,R,0.08), null, SS); ch.circles.push({x,z,r:s*0.6,top:h+s*0.25}); } }
       else if (r<0.88){ const w=3.6, d=5.5; if (canPlace({x,z,hw:w/2,hd:d/2,rot},0.04,{maxRange:5})) house({x,z,rot,w,d,h:4.2,roof:'front',stoneWalls:R()<0.6}); }
       continue;
     }
@@ -1731,7 +1932,7 @@ function genChunk(cx,cz,lod=0){
 
   /* --- island jetties whose head lies in this block --- */
   for (const sd of SIDES) for (let m=Math.floor(x0/ISL)-1;m<=Math.floor(x0/ISL)+1;m++){ const IR=islandRoute(sd,m);
-    if (IR && Math.floor(IR.jetty.hx/C)===cx && Math.floor(IR.jetty.hz/C)===cz) buildJetty(gb,ch,R,IR.jetty); }
+    if (IR && Math.floor(IR.jetty.hx/C)===cx && Math.floor(IR.jetty.hz/C)===cz)buildJetty(gb,ch,R,IR.jetty); }
   /* --- harbours whose centre lies in this block --- */
   for (const sd of SIDES) for (let n=Math.floor(x0/HARB)-1; n<=Math.floor((x0+C)/HARB)+1; n++){
     const H=harbourInfo(sd,n); if (!H) continue;
@@ -1810,7 +2011,9 @@ function genChunk(cx,cz,lod=0){
     for (const sd of SIDES){ const HB=harbourAt(sd,x); if (HB){ const sh=hbS(HB,x,z); if (sh>=-0.3 && sh<9.5 && Math.abs(x-HB.x)<HB.W/2+3){ const t=clamp((9.5-sh)/1.5,0,1); cA.lerp(C_.piazza,t); flag=Math.max(flag,t); cob=0; } } }
     if (ch.garden){ const [lu,lv]=obbLocal(ch.garden,x,z); if (Math.abs(lu)<ch.garden.hw-0.4 && Math.abs(lv)<ch.garden.hd-0.4){ cA.copy(C_.grass).lerp(C_.grass2,n1); cob=0; } }
     if (slope>0.75){ const t=clamp((slope-0.75)*1.6,0,0.85)*(1-cob); cA.lerp(C_.rock,t); }
-    if (h<1.6){ const t=clamp((1.6-h)/1.2,0,1)*(1-cob*0.7); cA.lerp(C_.beach,t); }
+    const seaRock=ch.kind==='isle' && h>-1 && !islandNear(x,z);
+    if (seaRock) cA.copy(C_.rock).lerp(GREY_ROCK,0.5+0.5*n1).multiplyScalar(0.92+n2*0.14);
+    else if (h<1.6){ const t=clamp((1.6-h)/1.2,0,1)*(1-cob*0.7); cA.lerp(C_.beach,t); }
     if (h<0){ cA.lerp(C_.seabed,clamp(-h/2.2,0,1)); cob=0; flag=0; }
     if (h>-0.45 && h<0.12) cA.lerp(C_.foam,0.55*(1-Math.abs(h+0.15)/0.3));
     gpos.push(x,h,z); gnor.push(-dx/nl,1/nl,-dz/nl); gcol.push(cA.r,cA.g,cA.b); gpav.push(cob,flag);
@@ -2119,6 +2322,200 @@ const glowMat=new THREE.ShaderMaterial({uniforms:glowU,transparent:true,depthWri
       #endif
       gl_FragColor=vec4(vCol*a*uNight*(1.0-ff*0.85),1.0); }`});
 
+/* ---------- lighthouse beams: shafts of light turning about each lantern at night, seen from several kilometres,
+   with the lantern itself as a steady glow. A mainland lantern is screened on its landward side ---------- */
+const BEAM_L=560, BEAM_R=44, LH_RANGE=4000;
+const beamGeo=new THREE.CylinderGeometry(BEAM_R,0.5,BEAM_L,32,1,true).translate(0,BEAM_L/2,0).rotateZ(-Math.PI/2);
+const beamMat=new THREE.ShaderMaterial({uniforms:THREE.UniformsUtils.merge([THREE.UniformsLib.fog,{uK:{value:0}}]),
+  transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,side:THREE.DoubleSide,fog:true,
+  vertexShader:`#include <fog_pars_vertex>
+    varying float vT; varying vec3 vN; varying vec3 vV;
+    void main(){ vT=position.x/${BEAM_L.toFixed(1)}; vec4 wp=modelMatrix*vec4(position,1.0);
+      vN=normalize(mat3(modelMatrix)*normal); vV=normalize(cameraPosition-wp.xyz);
+      vec4 mvPosition=viewMatrix*wp; gl_Position=projectionMatrix*mvPosition;
+      #include <fog_vertex>
+    }`,
+  fragmentShader:`#include <common>
+    #include <fog_pars_fragment>
+    uniform float uK; varying float vT; varying vec3 vN; varying vec3 vV;
+    void main(){ float core=pow(abs(dot(normalize(vN),normalize(vV))),2.0);
+      float a=uK*core*pow(1.0-vT,2.2)*smoothstep(0.0,0.015,vT);
+      float ff=0.0;
+      #ifdef USE_FOG
+        ff=smoothstep(fogNear,fogFar*2.2,vFogDepth);
+      #endif
+      gl_FragColor=vec4(vec3(1.0,0.93,0.76)*a*0.5*(1.0-ff*0.8),1.0); }`});
+const lanternGeo=new THREE.BufferGeometry();
+const lanternPts=new THREE.Points(lanternGeo,glowMat); lanternPts.frustumCulled=false; lanternPts.renderOrder=4; scene.add(lanternPts);
+const beams={list:[], byId:new Map(), t:0};
+function updateBeams(dt){
+  const cp=camera.position, night=nightU.value;
+  beams.t-=dt;
+  if (beams.t<=0){ beams.t=1;
+    const want=lightsNear(cp.x,cp.z,LH_RANGE), ids=new Set(want.map(L=>L.id));
+    for (const [id,b] of beams.byId) if (!ids.has(id)){ for (const m of b.m) scene.remove(m); b.m.forEach(m=>m.material.dispose()); beams.byId.delete(id); }
+    for (const L of want) if (!beams.byId.has(L.id)){ const m=[];
+      for (let i=0;i<L.beams;i++){ const mesh=new THREE.Mesh(beamGeo,beamMat.clone()); mesh.position.set(L.x,L.y,L.z); mesh.frustumCulled=false; mesh.renderOrder=4; scene.add(mesh); m.push(mesh); }
+      beams.byId.set(L.id,{L,m}); }
+    beams.list=[...beams.byId.values()];
+    const n=beams.list.length;
+    lanternGeo.setAttribute('position',new THREE.Float32BufferAttribute(beams.list.flatMap(b=>[b.L.x,b.L.y,b.L.z]),3));
+    lanternGeo.setAttribute('size',new THREE.Float32BufferAttribute(new Array(n).fill(6),1));
+    lanternGeo.setAttribute('gcol',new THREE.Float32BufferAttribute(new Array(n).fill([0.8,0.74,0.6]).flat(),3)); }
+  for (const b of beams.list){ const L=b.L;
+    b.m.forEach((mesh,i)=>{ const th=L.phase+L.spin*time*6.283/L.period+i*Math.PI*2/L.beams;
+      mesh.rotation.y=th; mesh.visible=night>0.01;
+      mesh.material.uniforms.uK.value=night*(L.sea===null?1:smooth((Math.cos(th-L.sea)+0.3)/0.45)); }); }
+}
+
+/* ---------- cats: Michi-Neko's sculpted, skinned cats (cat/), living in the villages. Some blocks of town have a cat
+   with a home spot; a small pool of cats is given the homes nearest the player, and each wanders a few metres
+   from its home in short strolls with pauses, watches the player when close, and curls up asleep at night ---------- */
+const CAT_COATS=[
+  {build:'michi'},
+  {build:'luna',fur:0x7f8796,belly:0xdadce2,accent:0x474e5f,eyeColor:0xdec056,ribbonColor:0x2b3d63,stripeAmount:0.3},
+  {build:'mochi',fur:0xd8893e,belly:0xf3e2c4,accent:0xa4521f,eyeColor:0x9cbf4a,ribbonColor:0x2f6f9e},
+  {build:'kuro',fur:0x232326,belly:0x2c2c30,accent:0x151517,eyeColor:0xe2c23a,ribbonColor:0xc8402a,stripeAmount:0},
+  {build:'luna',fur:0xece5d8,belly:0xf8f4ec,accent:0xc4b49c,eyeColor:0x6fa8d8,ribbonColor:0x3f8f5f,stripeAmount:0.25},
+];
+const CAT_SCALE=0.62;   // Michi-Neko's cat is drawn about twice life size; this brings it to a real cat's 0.75 m nose to tail
+const CAT_POOL=12, CAT_ACTIVE=6, CAT_SHOW=150, CAT_KINDS=new Set(['quarter','piazza','church','shore']);
+const cats={list:[], states:new Map(), t:0};
+// the surfaces a cat can stand on at a point: the ground and the tops of walls, steps, terraces, moles and the like.
+// Anything with no top (a house, a tree) makes the point a wall the cat cannot pass
+function catTops(x,z){
+  const out=[heightAt(x,z)], cx=Math.floor(x/C), cz=Math.floor(z/C); let wall=false;
+  for (let j=-1;j<=1;j++) for (let i=-1;i<=1;i++){ const ch=chunks.get(key(cx+i,cz+j)); if (!ch) continue;
+    for (const o of ch.obbs){ if (Math.abs(o.x-x)>o.hw+o.hd+0.3||Math.abs(o.z-z)>o.hw+o.hd+0.3) continue;
+      const [lu,lv]=obbLocal(o,x,z); if (Math.abs(lu)<=o.hw+0.04&&Math.abs(lv)<=o.hd+0.04){ if (o.top===Infinity) wall=true; else out.push(o.top); } }
+    for (const c of ch.circles){ if (Math.hypot(x-c.x,z-c.z)<=c.r+0.04){ if (c.top===Infinity) wall=true; else out.push(c.top); } } }
+  return wall?null:out; }
+// whether the cat's whole body fits at a point facing (fx,fz): nose, tail end and both flanks. A corner of the body may
+// hang over a lower edge or meet a ledge it is about to leap on to, but none may run into a building, a tree or a wall
+// too high to climb
+function catFits(x,z,fx,fz,y){
+  for (const [a,b] of [[0.3,0],[-0.3,0],[0,0.1],[0,-0.1],[0.18,0.08],[0.18,-0.08],[-0.18,0.08],[-0.18,-0.08]]){
+    const T=catTops(x+fx*a-fz*b,z+fz*a+fx*b); if (!T) return false;
+    for (const t of T) if (t>y+1.9) return false; }
+  return true; }
+const catSurf=(T,lim)=>{ let b=-1e9; for (const t of T) if (t<=lim && t>b) b=t; return b; };
+// a route in short steps from where the cat stands: level or gently sloping ground is walked, a rise of up to 1.9 m is
+// a leap up and a fall of up to 3 m a jump down. The route fails at a building, a tree, deep water or a higher wall
+function catPlan(s,tx,tz){
+  const d=Math.hypot(tx-s.x,tz-s.z), n=Math.max(1,Math.ceil(d/0.35)), pts=[]; let y=s.y;
+  const fx=(tx-s.x)/(d||1), fz=(tz-s.z)/(d||1);
+  for (let i=1;i<=n;i++){ const x=lerp(s.x,tx,i/n), z=lerp(s.z,tz,i/n), T=catTops(x,z); if (!T) return null;
+    const hi=catSurf(T,y+1.9); if (hi<-1e8) return null;
+    let ny=catSurf(T,y+0.45), jump=false;
+    if (hi>y+0.45 && Math.max(...T)<=y+1.9){ ny=hi; jump=true; }        // a ledge within reach: leap up on to it
+    else if (Math.max(...T)>y+1.9) return null;                         // a wall too high to climb
+    if (ny<y-0.45){ if (y-ny>3) return null; jump=true; }               // an edge: jump down
+    if (ny<0.3) return null;                                            // water
+    if (!catFits(x,z,fx,fz,ny)) return null;
+    pts.push({x,z,y:ny,jump}); y=ny; }
+  return pts; }
+function catHome(ch){
+  if (ch.catHome!==undefined) return ch.catHome;
+  ch.catHome=null;
+  if (ch.lod===0 && CAT_KINDS.has(ch.kind) && hash(ch.cx,ch.cz,2101)<0.4){
+    const R=rng(Math.floor(hash(ch.cx,ch.cz,2102)*4294967296)), P=ch.piazza;
+    for (let t=0;t<30;t++){ const x=P?P.x+(R()-0.5)*P.r*1.6:ch.cx*C+R()*C, z=P?P.z+(R()-0.5)*P.r*1.6:ch.cz*C+R()*C, T=catTops(x,z);
+      if (T && T[0]>0.4){ ch.catHome={x,z,y:catSurf(T,T[0]+0.45),id:ch.cx+','+ch.cz,coat:Math.floor(hash(ch.cx,ch.cz,2103)*CAT_COATS.length),owl:hash(ch.cx,ch.cz,2104)<0.4}; break; } } }
+  return ch.catHome; }
+function makeCat(coat){
+  const K=CAT_COATS[coat], c=new Cat({...K,audio:null});
+  c.blob.visible=false;   // the scene's own shadows fall from the cat
+  // no ink outline: the outline shells (back faces drawn in one dark colour) are hidden, and the rest casts shadows
+  c.group.traverse(o=>{ if (!o.isMesh || o===c.blob) return; if (o.material && o.material.side===THREE.BackSide && o.material.isMeshBasicMaterial) o.visible=false; else o.castShadow=true; });
+  c.group.scale.setScalar(CAT_SCALE); c.group.rotation.order='YXZ';
+  scene.add(c.group); return {cat:c, coat, s:null};
+}
+// a destination: often the top of a wall, step or terrace close by, so the cat climbs; otherwise somewhere on the
+// ground a few metres off, drawn back towards home once it has strayed
+function catPickTarget(s){
+  const H=s.home, away=Math.hypot(s.x-H.x,s.z-H.z);
+  if (Math.random()<0.4){ const cx=Math.floor(s.x/C), cz=Math.floor(s.z/C), L=[];
+    for (let j=-1;j<=1;j++) for (let i=-1;i<=1;i++){ const ch=chunks.get(key(cx+i,cz+j)); if (!ch) continue;
+      for (const o of ch.obbs) if (o.top!==Infinity && o.top>heightAt(o.x,o.z)+0.4 && Math.hypot(o.x-s.x,o.z-s.z)<16) L.push(o); }
+    if (L.length){ const o=L[Math.floor(Math.random()*L.length)], [x,z]=localToWorld(o,(Math.random()-0.5)*o.hw*1.6,(Math.random()-0.5)*o.hd*1.6); return [x,z]; } }
+  let a=Math.random()*6.283; const r=4+Math.random()*14;
+  if (away>40) a=Math.atan2(H.z-s.z,H.x-s.x)+(Math.random()-0.5)*1.2;
+  return [s.x+Math.cos(a)*r, s.z+Math.sin(a)*r]; }
+function catStep(s,dt){
+  s.speed=0; s.air=false;
+  if (s.jump){ const J=s.jump; J.t+=dt/J.dur; const t=Math.min(1,J.t);
+    s.x=lerp(J.x0,J.x1,t); s.z=lerp(J.z0,J.z1,t); s.y=lerp(J.y0,J.y1,t)+4*(Math.max(J.y0,J.y1)+J.h-(J.y0+J.y1)/2)*t*(1-t); s.air=t<1;
+    if (t>=1){ s.y=J.y1; s.jump=null; s.landed=true; } return; }
+  if (s.path){
+    let left=1.1*dt;
+    while (left>0 && s.path.length){ const w=s.path[0];
+      if (w.jump){ const dy=w.y-s.y; s.jump={x0:s.x,y0:s.y,z0:s.z,x1:w.x,y1:w.y,z1:w.z,t:0,dur:0.38+0.09*Math.abs(dy),h:dy>0?0.22:0.1};
+        s.yawT=Math.atan2(w.x-s.x,w.z-s.z); s.path.shift(); s.jumped=true; return; }
+      const dx=w.x-s.x, dz=w.z-s.z, d=Math.hypot(dx,dz);
+      if (d<=left){ s.x=w.x; s.z=w.z; s.y=w.y; left-=d; s.path.shift(); }
+      else { const k=left/d; s.x+=dx*k; s.z+=dz*k; s.y+=(w.y-s.y)*k; s.yawT=Math.atan2(dx,dz); left=0; } }
+    s.speed=1.1;
+    if (!s.path.length){ s.path=null; s.wait=2+Math.random()*7; }
+    return; }
+  s.wait-=dt;
+  if (s.wait<=0){ for (let t=0;t<4 && !s.path;t++){ const [x,z]=catPickTarget(s); s.path=catPlan(s,x,z); } if (!s.path) s.wait=1+Math.random()*2; }
+}
+function updateCats(dt){
+  const night=nightU.value;
+  catRimUniforms.uRimDir.value.copy(SUN_DIR); catRimUniforms.uRimStrength.value=0.55*(1-night);
+  const show=mode==='street'||mode==='coach'||(mode==='above'&&dist<CAT_SHOW);
+  cats.t-=dt;
+  if (cats.t<=0){ cats.t=1;
+    // every cat in the blocks round the player lives on; each keeps its place when the player leaves and comes back
+    const pcx=Math.floor(player.x/C), pcz=Math.floor(player.z/C);
+    for (let j=-CAT_ACTIVE;j<=CAT_ACTIVE;j++) for (let i=-CAT_ACTIVE;i<=CAT_ACTIVE;i++){ const ch=chunks.get(key(pcx+i,pcz+j)); if (!ch) continue; const H=catHome(ch);
+      if (H && !cats.states.has(H.id)) cats.states.set(H.id,{id:H.id,home:H,coat:H.coat,owl:H.owl,x:H.x,y:H.y,z:H.z,yaw:Math.random()*6.283,yawT:undefined,path:null,jump:null,wait:Math.random()*5,inst:null}); }
+    // the nearest cats in view are drawn; the pool's models are handed between them
+    const near=[...cats.states.values()].filter(s=>Math.abs(s.x-player.x)<CAT_ACTIVE*C && Math.abs(s.z-player.z)<CAT_ACTIVE*C)
+      .sort((a,b)=>Math.hypot(a.x-camera.position.x,a.z-camera.position.z)-Math.hypot(b.x-camera.position.x,b.z-camera.position.z));
+    const drawn=new Set(show?near.slice(0,CAT_POOL):[]);
+    for (const k of cats.list) if (k.s && !drawn.has(k.s)){ k.s.inst=null; k.s=null; }
+    for (const s of drawn){ if (s.inst) continue;
+      let k=cats.list.find(k=>!k.s&&k.coat===s.coat);
+      if (!k && cats.list.length<CAT_POOL){ k=makeCat(s.coat); cats.list.push(k); }
+      if (!k){ const f=cats.list.findIndex(k=>!k.s); if (f<0) continue; scene.remove(cats.list[f].cat.group); k=cats.list[f]=makeCat(s.coat); }
+      k.s=s; s.inst=k; k.cat.group.rotation.y=s.yaw; }
+    cats.near=near; }
+  // the cats round the player go about their business whether or not they are drawn
+  for (const s of cats.near||[]){
+    const asleep=night>0.75 && !s.owl;
+    if (asleep && !s.jump){ s.path=null; }
+    else catStep(s,dt);
+    if (s.yawT!==undefined){ const df=Math.atan2(Math.sin(s.yawT-s.yaw),Math.cos(s.yawT-s.yaw)); s.turning=Math.abs(df)>0.05; s.yaw+=df*Math.min(1,dt*(s.jump?8:3.5)); }
+    s.asleep=asleep; }
+  for (const k of cats.list){ const g=k.cat.group, s=k.s; g.visible=!!s; if (!s) continue;
+    g.position.set(s.x,s.y,s.z); g.rotation.y=s.yaw;
+    // the body tilts with the slope or the flight of steps under it
+    if (!s.air){ const fx=Math.sin(s.yaw), fz=Math.cos(s.yaw), Tf=catTops(s.x+fx*0.22,s.z+fz*0.22), Tb=catTops(s.x-fx*0.22,s.z-fz*0.22);
+      const hf=Tf?catSurf(Tf,s.y+0.3):s.y, hb=Tb?catSurf(Tb,s.y+0.3):s.y, want=-Math.atan2(clamp(hf-hb,-0.25,0.25),0.44);
+      s.pitch=(s.pitch||0)+(want-(s.pitch||0))*Math.min(1,dt*8); }
+    else s.pitch=(s.pitch||0)*(1-Math.min(1,dt*6));
+    g.rotation.x=s.pitch;
+    if (s.asleep){ if (k.cat.idleAction!=='sleep') k.cat.startIdleAction('sleep',1e6); }
+    else if (k.cat.idleAction==='sleep') k.cat.endIdleAction();
+    if (s.jumped){ k.cat.onJump(); s.jumped=false; } if (s.landed){ k.cat.onLand(); s.landed=false; }
+    // a glance at the player passing close by, without breaking off what the cat is doing
+    const dp=Math.hypot(player.x-s.x,player.z-s.z);
+    k.cat.setLookTarget(dp<3 && mode==='street' && !s.asleep ? _v1.copy(camera.position) : null);
+    // the tail is carried low, and goes up as the player approaches
+    const tailUp=dp<5 && (mode==='street'||mode==='coach') && !s.asleep;
+    const td=Number.isFinite(k.cat.tailDrop)?k.cat.tailDrop:0.85; k.cat.tailDrop=td+((tailUp?0:0.85)-td)*Math.min(1,dt*(tailUp?3:1.2));
+    // a mew now and then, and sometimes to a player who comes close; the mouth opens with it
+    if (!s.asleep && !s.air){ s.mewT=(s.mewT??10+Math.random()*40)-dt;
+      const greet=dp<3 && !s.greeted && mode==='street'; if (dp>6) s.greeted=false;
+      if (greet){ s.greeted=true; if (Math.random()<0.5) s.mewT=0; }
+      // heard only from close by: full within 6 m of the listener, fading to nothing at 14 m
+      if (s.mewT<=0){ s.mewT=25+Math.random()*45; k.cat.triggerMeow();
+        const dl=Math.hypot(camera.position.x-s.x,camera.position.y-s.y,camera.position.z-s.z), near=clamp(1-(dl-6)/8,0,1);
+        if (near>0) sndPlay('cat_mew','world',[s.x,s.y+0.25,s.z],{gain:near,rate:0.92+Math.random()*0.16}); } }
+    k.cat.update(dt,s.speed,!s.air,false,!!s.turning,false,null); }
+}
+
 /* ---------- distant terrain beyond the generated blocks ---------- */
 const FN=170, FS=16;
 const farGeo=new THREE.BufferGeometry();
@@ -2262,7 +2659,7 @@ function updateChunks(px,pz,budgetMs){
     chunks.set(k,ch); addChunkToScene(ch); ch.fade=fadeIn?0:1; setChunkFade(ch); farDirty=true; maskDirty=true;
   }
 }
-function resetWorld(){ for (const ch of chunks.values()) disposeChunk(ch); chunks.clear(); for (const ch of dying) disposeChunk(ch); dying.length=0; pkCache.clear(); pzCache.clear(); alCache.clear(); hbCache.clear(); vgCache.clear(); ryCache.clear(); rzCache.clear(); rrCache.clear(); rsCache.clear(); stCache.clear(); rxCache.clear(); train.init=false; farDirty=true; }
+function resetWorld(){ for (const ch of chunks.values()) disposeChunk(ch); chunks.clear(); for (const ch of dying) disposeChunk(ch); dying.length=0; pkCache.clear(); pzCache.clear(); alCache.clear(); hbCache.clear(); vgCache.clear(); ryCache.clear(); rzCache.clear(); rrCache.clear(); rsCache.clear(); stCache.clear(); rxCache.clear(); lhCache.clear(); rkCache.clear(); ruCache.clear(); beams.t=0; train.init=false; farDirty=true; }
 
 /* ================= boats under sail along the coast ================= */
 const sailers=[];
@@ -2646,11 +3043,9 @@ function buildFerry(){
 const FERRY_GEO=buildFerry();
 // a gangway run out from the opening in the bulwark to the quay while the ferry lies alongside
 function buildGangway(){
-  const gb=new GB(), wood=hex('#8a7457'), rail=hex('#d9d4ca');
+  const gb=new GB(), wood=hex('#8a7457');
   gb.add(T.box, mat(0,-0.08,0,FPL,0.08,FGW*2-0.1), wood, null);
   for (let x=-FPL/2+0.15; x<FPL/2; x+=0.3) gb.add(T.box, mat(x,0,0,0.04,0.02,FGW*2-0.15), hex('#6e5c45'), null);
-  for (const sz of [-1,1]){ segBox(gb,[-FPL/2,0.95,sz*(FGW-0.06)],[FPL/2,0.95,sz*(FGW-0.06)],0.05,0.05,rail);
-    for (const x of [-FPL/2+0.05,0,FPL/2-0.05]) gb.add(T.box, mat(x,0,sz*(FGW-0.06),0.05,0.95,0.05), rail, null); }
   return gb.geometry();
 }
 const GANG_GEO=buildGangway();
@@ -2805,10 +3200,10 @@ let audioCtx=null, muted=false;
 try{ muted=localStorage.getItem('borgo-mute')==='1'; }catch(_){}
 // level (linear gain) and reference distance in metres, at which a positioned sound plays at its full level
 const SOUND_DEF={
-  amb_legacy:{g:11}, amb_day:{g:1}, amb_night:{g:1}, amb_dawn:{g:0.8}, amb_cicadas:{g:0.7}, amb_crickets:{g:0.6},
+  amb_day:{g:1}, amb_night:{g:1}, amb_dawn:{g:0.8}, amb_cicadas:{g:0.7}, amb_crickets:{g:0.6},
   wind_trees:{g:0.6}, wind_open:{g:0.8}, owl:{g:0.8,ref:12}, gulls:{g:0.7,ref:18},
-  water_lap:{g:0.9,ref:6}, surf:{g:1,ref:14}, waves_rocks:{g:1,ref:10}, hull_slap:{g:0.7,ref:3}, boat_creak:{g:0.6,ref:3}, rigging:{g:0.5,ref:3},
-  fountain:{g:0.8,ref:3}, clock_bell:{g:1,ref:30}, church_bell:{g:1,ref:45}, cafe:{g:0.7,ref:5},
+  water_lap:{g:1,ref:14}, surf:{g:1,ref:14}, waves_rocks:{g:1,ref:10}, hull_slap:{g:0.7,ref:3}, boat_creak:{g:0.6,ref:3}, rigging:{g:0.5,ref:3},
+  fountain:{g:0.8,ref:3}, cat_mew:{g:0.8,ref:2.5}, clock_bell:{g:1,ref:30}, church_bell:{g:1,ref:45}, cafe:{g:0.7,ref:5},
   step_pavement:{g:0.5}, step_sand:{g:0.5}, step_soil:{g:0.5}, step_grass:{g:0.5}, step_wood:{g:0.5}, step_metal:{g:0.5}, land:{g:0.7},
   rail_joint:{g:0.8,ref:5}, train_start:{g:1,ref:15}, train_run:{g:1,ref:15}, train_stop:{g:1,ref:15}, train_idle:{g:0.7,ref:8},
   train_rumble:{g:0.9,ref:10}, train_bridge:{g:0.9,ref:12}, train_brakes:{g:0.8,ref:10}, train_horn:{g:1,ref:60},
@@ -2839,7 +3234,6 @@ async function startAudio(){
       const b=ctx.createGain(); b.connect(f); SND.bus[g]={in:b,lp:f}; }
     SND.rev=ctx.createConvolver(); SND.rev.buffer=tunnelIR(ctx); SND.revOut=ctx.createGain(); SND.revOut.gain.value=0; SND.rev.connect(SND.revOut); SND.revOut.connect(SND.master);
     let man={}; try{ const r=await fetch('sounds.json',{cache:'no-cache'}); if (r.ok) man=await r.json(); }catch(_){}
-    if (!man.amb_day && !man.amb_night) man.amb_legacy=['ambience.mp3'];
     await Promise.all(Object.entries(man).map(async([id,v])=>{ const files=(Array.isArray(v)?v:[v]).filter(Boolean);
       SND.buf[id]=(await Promise.all(files.map(async f=>{ try{ return await ctx.decodeAudioData(await (await fetch(f)).arrayBuffer()); }catch(err){ console.warn('Sound file unavailable:',f); return null; } }))).filter(Boolean); }));
     SND.ready=true;
@@ -2951,7 +3345,7 @@ const SNDV={};   // the voices, made the first time each is needed
 const sv=(name,id,group,pos)=>{ if (!(name in SNDV)) SNDV[name]=mkVoice(id,group,pos); return SNDV[name]; };
 const ambLevel={}; const easeTo=(k,v,dt,r=1.5)=>(ambLevel[k]=(ambLevel[k]??v)+(v-(ambLevel[k]??v))*(1-Math.exp(-dt*r)));
 const slots={fountain:[{},{},{}], cafe:[{},{}], hull:[{}]};
-const SNDS={prevX:null,prevZ:null,stride:0,grounded:true,vy:0,flx:null,flz:null,clx:null,clz:null,hour:null,scan:0,trainWait:0,trainV:0,stopPlayed:false,brakePlayed:false,hornT:false,doorWant:0,joints:[],timers:{owl:20,gulls:5,creak:4,rig:3,fender:5}};
+const SNDS={prevX:null,prevZ:null,grounded:true,vy:0,hour:null,scan:0,trainWait:0,trainV:0,stopPlayed:false,brakePlayed:false,hornT:false,doorWant:0,joints:[],timers:{owl:20,gulls:5,creak:4,rig:3,fender:5}};
 const _bv=new THREE.Vector3();
 
 function sndUpdate(dt){
@@ -2976,8 +3370,7 @@ function sndUpdate(dt){
   SNDS.scan-=dt; if (SNDS.scan<=0){ SNDS.scan=0.1; shoreScan(); }
   const atSea=mode==='ferry'||heightAt(player.x,player.z)<-0.5, inland=atSea?0:clamp((shore.dist-25)/90,0,1);
   if (!SNDS.tr || (SNDS.trT=(SNDS.trT??0)-dt)<=0){ SNDS.trT=0.5; SNDS.tr=nearTrees(30); SNDS.src=nearSources(3); SNDS.boats=nearBoats(70); }
-  if (SND.buf.amb_legacy) sndVoice(sv('legacy','amb_legacy','world',false),dt,1,0,0,0);
-  sndVoice(sv('day','amb_day','world',false),dt,easeTo('day',day*(1-0.5*dawn),dt),0,0,0);
+  sndVoice(sv('day','amb_day','world',false),dt,easeTo('day',day*(SND.buf.amb_dawn&&SND.buf.amb_dawn.length?1-0.5*dawn:1),dt),0,0,0);
   sndVoice(sv('night','amb_night','world',false),dt,easeTo('night',night,dt),0,0,0);
   sndVoice(sv('dawn','amb_dawn','world',false),dt,easeTo('dawn',dawn*(1-0.6*night),dt),0,0,0);
   sndVoice(sv('cicadas','amb_cicadas','world',false),dt,easeTo('cic',day*(0.35+0.65*noon)*inland*(1-dawn),dt,0.8),0,0,0);
@@ -2989,7 +3382,9 @@ function sndUpdate(dt){
   const shoreV=(name,id,H,lv)=>{ const v=sv(name,id,'world',true); if (!v) return; if (H&&!atSea){ if (!v.sx){ v.sx=H.x; v.sz=H.z; }
       const k=1-Math.exp(-dt*1.2); v.sx+=(H.x-v.sx)*k; v.sz+=(H.z-v.sz)*k; sndVoice(v,dt,easeTo(name,lv,dt),v.sx,0.5,v.sz); }
     else sndVoice(v,dt,easeTo(name,0,dt),v.sx||_sl.x,0.5,v.sz||_sl.z); };
-  shoreV('lap','water_lap',shore.lap,1); shoreV('surf','surf',shore.beach,1); shoreV('rocks','waves_rocks',shore.rock,1);
+  // the water is heard near the shore only: from far off, muffled by the air, the waves would sound like wind
+  const nearK=H=>H?clamp(1-(H.d-40)/50,0,1):0;
+  shoreV('lap','water_lap',shore.lap,nearK(shore.lap)); shoreV('surf','surf',shore.beach,nearK(shore.beach)); shoreV('rocks','waves_rocks',shore.rock,nearK(shore.rock));
   // fountains and cafés from the nearest sources; cafés are busy from morning until late evening
   slotUpdate(slots.fountain,'fountain',dt,1,SNDS.src.filter(s=>s.id==='fountain'&&s.d<90));
   const cafeK=clamp((hour-7.5)/1.5,0,1)*clamp((23.5-hour)/1.5,0,1)*(0.7+0.3*clamp((hour-18)/2,0,1));
@@ -3009,17 +3404,18 @@ function sndUpdate(dt){
     for (const s of bells.filter(s=>s.id==='clock_bell'&&s.d<700).slice(0,2)) for (let k=0;k<n;k++) sndPlay('clock_bell','world',[s.x,s.y,s.z],{delay:k*2.2});
     for (const s of bells.filter(s=>s.id==='church_bell'&&s.d<900).slice(0,2)) sndPlay('church_bell','world',[s.x,s.y,s.z],{delay:1.5}); }
 
-  /* footsteps */
-  if (mode==='street' || (mode==='above'&&dist<60)){
-    if (SNDS.prevX!==null){ const dd=Math.hypot(player.x-SNDS.prevX,player.z-SNDS.prevZ); if (dd<3 && player.grounded) SNDS.stride+=dd; }
-    const run=keys.ShiftLeft||keys.ShiftRight, lenS=run?1.15:0.72, quiet=mode==='above'?clamp(8/dist,0,0.6):1;
-    if (SNDS.stride>=lenS){ SNDS.stride=0; sndPlay('step_'+surfaceAt(player.x,player.z,player.y),'player',null,{gain:quiet*(run?1.2:1)*(0.85+Math.random()*0.3),rate:0.93+Math.random()*0.14}); }
-    if (player.grounded && !SNDS.grounded && SNDS.vy<-4){ const id=SND.buf.land&&SND.buf.land.length?'land':'step_'+surfaceAt(player.x,player.z,player.y); sndPlay(id,'player',null,{gain:quiet*clamp(-SNDS.vy/8,0.5,1.4)}); SNDS.stride=0; }
-    SNDS.grounded=player.grounded; SNDS.vy=player.vy; SNDS.prevX=player.x; SNDS.prevZ=player.z;
-  } else { SNDS.prevX=null; SNDS.stride=0; }
-  const deckStep=(lx,lz,kx,kz,id,lenS)=>{ if (SNDS[kx]!==null){ const dd=Math.hypot(lx-SNDS[kx],lz-SNDS[kz]); if (dd<2) SNDS.stride+=dd; if (SNDS.stride>=lenS){ SNDS.stride=0; sndPlay(id,'player',null,{gain:0.85+Math.random()*0.3,rate:0.93+Math.random()*0.14}); } } SNDS[kx]=lx; SNDS[kz]=lz; };
-  if (mode==='ferry') deckStep(fe.lx,fe.lz,'flx','flz','step_metal',0.7); else SNDS.flx=null;
-  if (inCoach) deckStep(co.lx,co.lz,'clx','clz','step_wood',0.7); else SNDS.clx=null;
+  /* footsteps: a loop for the surface underfoot, heard while the player walks on the ground, a deck or a coach floor.
+     Grass uses the earth loop, and decks and floors the pavement loop */
+  let fx=null, fz=null, ground=true, quiet=1, surf='pavement';
+  if (mode==='street' || (mode==='above'&&dist<60)){ fx=player.x; fz=player.z; ground=player.grounded; quiet=mode==='above'?clamp(8/dist,0,0.6):1; surf=surfaceAt(player.x,player.z,player.y); }
+  else if (mode==='ferry'){ fx=fe.lx; fz=fe.lz; }
+  else if (inCoach){ fx=co.lx; fz=co.lz; }
+  let spd=0; if (fx!==null && SNDS.prevX!==null && dt>0){ const dd=Math.hypot(fx-SNDS.prevX,fz-SNDS.prevZ); if (dd<3) spd=dd/dt; }
+  SNDS.prevX=fx; SNDS.prevZ=fz; SNDS.spd=(SNDS.spd??0)+(spd-(SNDS.spd??0))*(1-Math.exp(-dt*8));
+  const walking=ground && SNDS.spd>0.6, run=keys.ShiftLeft||keys.ShiftRight, stepId=surf==='sand'?'sand':surf==='pavement'?'pavement':'soil';
+  for (const k of ['pavement','sand','soil']) sndVoice(sv('step_'+k,'step_'+k,'player',false),dt,easeTo('step_'+k,walking&&k===stepId?quiet*(run?1.2:1):0,dt,10),0,0,0,run?1.3:1);
+  if (player.grounded && !SNDS.grounded && SNDS.vy<-4 && fx===player.x) sndPlay('land','player',null,{gain:quiet*clamp(-SNDS.vy/8,0.5,1.4)});
+  SNDS.grounded=player.grounded; SNDS.vy=player.vy;
 
   sndTrain(dt); sndFerries(dt);
 }
@@ -3094,7 +3490,8 @@ addEventListener('keydown',e=>{ keys[e.code]=true;
   if (e.code==='KeyF' && !e.repeat) toggleFerry();
   if (e.code==='KeyB') setTilt(!tiltShift);
   if (e.code==='KeyH' && !e.repeat){ helpEl.hidden=!helpEl.hidden; lastCell=null; }
-  if (e.code==='KeyN' && !e.repeat) newIsland();
+  if (e.code==='KeyI' && !e.repeat) newIsland();
+  if (e.code==='KeyN' && !e.repeat){ hour=nightU.value>0.5?10:22; SNDS.hour=Math.floor(hour); }   // to night, or back to day, without the bells striking the jump
   if (e.code==='KeyM' && !e.repeat) setMuted(!muted);
   if (e.code==='Tab'){ e.preventDefault(); if (!e.repeat) try{ if (document.fullscreenElement) document.exitFullscreen(); else { const q=document.documentElement.requestFullscreen(); if (q&&q.catch) q.catch(()=>{}); } }catch(_){} }
   if ((e.code==='Minus'||e.code==='NumpadSubtract') && mode==='street' && !e.repeat) toggleView();
@@ -3126,6 +3523,28 @@ let dragging=false, lx=0, ly=0;
 function lockPointer(){ try{ const p=canvas.requestPointerLock(); if (p&&p.catch) p.catch(()=>{}); }catch(_){} }
 canvas.addEventListener('mousedown',e=>{ dragging=true; lx=e.clientX; ly=e.clientY; if (mode!=='above'&&started&&document.pointerLockElement!==canvas) lockPointer(); });
 addEventListener('mouseup',()=>dragging=false);
+/* a double click on the ground in the bird's-eye view goes down to street level at that spot, facing the same way */
+function surfaceTopAt(x,z){ let g=heightAt(x,z); const cx=Math.floor(x/C), cz=Math.floor(z/C);
+  for (let j=-1;j<=1;j++) for (let i=-1;i<=1;i++){ const ch=chunks.get(key(cx+i,cz+j)); if (!ch) continue;
+    for (const o of ch.obbs){ if (o.top===Infinity||o.top>g+12) continue; const [lu,lv]=obbLocal(o,x,z); if (Math.abs(lu)<=o.hw&&Math.abs(lv)<=o.hd) g=Math.max(g,o.top); }
+    for (const c of ch.circles){ if (c.top===Infinity||c.top>g+12) continue; if (Math.hypot(x-c.x,z-c.z)<=c.r) g=Math.max(g,c.top); } }
+  return g; }
+const _ray=new THREE.Raycaster(), _rp=new THREE.Vector2(), _dq=new THREE.Quaternion();
+// the camera's flight down to the eye after a double click: from where it was, with its lens and fog, to street level
+const descent={t:-1,dur:1.5,p:new THREE.Vector3(),q:new THREE.Quaternion(),fov:31,far:3600,fogN:160,fogF:1800};
+canvas.addEventListener('dblclick',e=>{ if (mode!=='above') return;
+  const r=canvas.getBoundingClientRect(); _rp.set((e.clientX-r.left)/r.width*2-1,-(e.clientY-r.top)/r.height*2+1); _ray.setFromCamera(_rp,camera);
+  const o=_ray.ray.origin, d=_ray.ray.direction; if (d.y>=0) return;
+  // march along the ray to the ground or the sea, then close in on the crossing
+  const st=Math.max(0.5,dist/300), above=t=>o.y+d.y*t-Math.max(0,heightAt(o.x+d.x*t,o.z+d.z*t));
+  let a=0, b=-1; for (let t=st;t<camera.far;t+=st) if (above(t)<=0){ a=t-st; b=t; break; }
+  if (b<0) return;
+  for (let k=0;k<12;k++){ const m=(a+b)/2; if (above(m)>0) a=m; else b=m; }
+  const x=o.x+d.x*b, z=o.z+d.z*b, top=surfaceTopAt(x,z); if (top<0.1) return;   // open water
+  player.x=x; player.z=z; player.y=top; player.vy=0; player.grounded=true; player.holdT=2; eyeY=null; fpPitch=0;
+  const from={p:camera.position.clone(),q:camera.quaternion.clone(),fov:camera.fov,far:camera.far,fogN:scene.fog.near,fogF:scene.fog.far};
+  toggleView(); Object.assign(descent,{t:0,fov:from.fov,far:from.far,fogN:from.fogN,fogF:from.fogF}); descent.p.copy(from.p); descent.q.copy(from.q);
+  if (started) lockPointer(); });
 addEventListener('mousemove',e=>{
   const locked=document.pointerLockElement===canvas; if (!locked&&!dragging) return;
   const dx=locked?e.movementX:e.clientX-lx, dy=locked?e.movementY:e.clientY-ly; lx=e.clientX; ly=e.clientY; look(dx,dy);
@@ -3299,7 +3718,7 @@ function ride(kind){
     if (document.pointerLockElement&&kind==='chase') document.exitPointerLock(); }
   if (kind==='chase' && mode!=='chase') chase.fresh=true;
   mode=kind; tYaw=0; tPitch=-0.04;
-  for (const c of train.cars) c.m.visible=kind==='chase';
+  for (const c of train.cars) c.m.visible=true;
   if (kind==='chase'){ tunnelK=0; sky.visible=true; scene.fog.near=90; scene.fog.far=1500; }
   camera.fov=kind==='train'?65:60; camera.near=0.3; camera.far=3600; camera.updateProjectionMatrix(); glowScale();
   sea.scale.setScalar(1); islandMesh.visible=false; farMesh.visible=farGlow.visible=true;
@@ -3317,7 +3736,8 @@ function toggleView(){
   if (mode==='coach') return;
   if (riding()){ leaveTrain('street'); return; }
   if (mode==='ferry'){ leaveFerry('street'); return; }
-  mode=mode==='above'?'street':'above';
+  mode=mode==='above'?'street':'above'; descent.t=-1;
+  if (mode==='above') dist=45;   // always rise to a low view over the player, whatever the zoom was before
   scene.fog.near=mode==='above'?160:90; scene.fog.far=mode==='above'?1800:1500;
   camera.fov=mode==='above'?31:70; camera.updateProjectionMatrix(); glowScale();
   if (mode==='above'&&document.pointerLockElement) document.exitPointerLock();
@@ -3462,6 +3882,11 @@ function frame(now){
     // the bird's-eye view widens the near plane with its zoom; street level always restores it, or ground close
     // to the eye on a slope would be clipped away
     if (camera.far!==3600 || camera.near!==0.3){ camera.far=3600; camera.near=0.3; camera.updateProjectionMatrix(); sea.scale.setScalar(1); scene.fog.near=90; scene.fog.far=1500; islandMesh.visible=false; farMesh.visible=farGlow.visible=true; }
+    if (descent.t>=0){ descent.t+=dt; const k=smooth(descent.t/descent.dur);
+      _dq.copy(camera.quaternion); camera.position.lerpVectors(descent.p,camera.position,k); camera.quaternion.slerpQuaternions(descent.q,_dq,k);
+      camera.fov=lerp(descent.fov,70,k); camera.far=lerp(descent.far,3600,k); camera.updateProjectionMatrix(); glowScale();
+      scene.fog.near=lerp(descent.fogN,90,k); scene.fog.far=lerp(descent.fogF,1500,k);
+      if (descent.t>=descent.dur) descent.t=-1; }
   }
   firstCam=false;
   sky.position.copy(camera.position);
@@ -3487,14 +3912,15 @@ function frame(now){
   }
   if (riding()){
     // the eye's height and heading are eased so that it neither pitches with the car nor jerks on curves
-    const xe=train.x-train.dir*1.8, ye=railY(xe), xa=xe+train.dir*14, xb=xe-train.dir*14;
+    // the cab view's eye rides just ahead of the locomotive's nose; the chase view follows the driver's position
+    const xe=mode==='train'?train.x+train.dir*1.2:train.x-train.dir*1.8, ye=railY(xe), xa=xe+train.dir*14, xb=xe-train.dir*14;
     const head=Math.atan2(xa-xb,railZ(xa)-railZ(xb)), kf=1-Math.exp(-dt*3);
     if (cam.y===null){ cam.y=ye+2.9; cam.head=head; }
     cam.y+=(ye+2.9-cam.y)*kf; cam.head+=Math.atan2(Math.sin(head-cam.head),Math.cos(head-cam.head))*kf;
     const rot=cam.head;
     player.x=xe; player.z=railZ(xe); player.y=ye; eyeY=player.y;
     if (mode==='train'){
-      // cab view: the train is not drawn and the eye sits at the driver's position on the track
+      // cab view: the eye rides on the track just in front of the train, which is drawn behind it
       camera.position.set(xe,cam.y,railZ(xe));
       camera.rotation.set(tPitch, rot+Math.PI+tYaw, 0, 'YXZ');
     } else {
@@ -3518,6 +3944,8 @@ function frame(now){
   if (mode==='coach') tunnelLight(dt,true);
   sndUpdate(dt);
   if (window.__freeCam){ camera.position.copy(window.__freeCam.p); camera.lookAt(window.__freeCam.t); sky.position.copy(camera.position); }
+  updateBeams(dt);
+  updateCats(dt);
   updateShadowFrame();
   updateHUD();
   render();
@@ -3532,7 +3960,7 @@ requestAnimationFrame(()=>setTimeout(()=>{
   document.getElementById('loading').remove();
   requestAnimationFrame(frame);
 },30));
-window.__village={ fe, co, get ridden(){ return ridden; },
+window.__village={ fe, co, lightsNear, beams, ruinIn, cats, catHome, get ridden(){ return ridden; },
   findHarbour(){ for (let d=0;d<12;d++) for (const sd of SIDES) for (const n of [Math.floor(player.x/HARB)+d,Math.floor(player.x/HARB)-d]){ const H=harbourInfo(sd,n); if (H) return {x:H.x,z:coastZ(sd,H.x)+sd*7,W:H.W,sd,qz:coastZ(sd,H.x+H.W/2-1)+sd*2.5}; } return null; },
   findBeach(){ for (let x=player.x; x<player.x+3000; x+=10) for (const sd of SIDES){ const z=coastZ(sd,x)+sd*5; if (heightAt(x,z)<0.6 && heightAt(x,z)>0.1 && !harbourAt(sd,x)) return {x,z,sd}; } return null; },
   ridge(x){ return {x,z:ridgeZ(x)}; },

@@ -1,0 +1,23 @@
+{
+  "amb_day": "sounds/day.mp3",
+  "amb_night": "sounds/night.mp3",
+  "water_lap": "sounds/shore-waves.mp3",
+  "fountain": "sounds/fountain.mp3",
+  "church_bell": "sounds/church-bell.mp3",
+  "step_pavement": "sounds/steps-pavement.mp3",
+  "step_sand": "sounds/steps-sand.mp3",
+  "step_soil": "sounds/steps-earth.mp3",
+  "train_run": "sounds/train-run.mp3",
+  "train_start": "sounds/train-start.mp3",
+  "train_doors_open": "sounds/train-door.mp3",
+  "train_doors_close": "sounds/train-door.mp3",
+  "ferry_run": "sounds/ferry-engine.mp3",
+  "ferry_idle": "sounds/ferry-engine.mp3",
+  "ferry_wake": "sounds/ferry-wake.mp3",
+  "cat_mew": [
+    "sounds/cat-mew-1.mp3",
+    "sounds/cat-mew-2.mp3",
+    "sounds/cat-mew-3.mp3",
+    "sounds/cat-mew-4.mp3"
+  ]
+}
