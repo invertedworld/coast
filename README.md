@@ -64,7 +64,7 @@ The user interface follows three rules, which apply to every change.
 - Text is written in plain descriptive sentences. Slogans, taglines and "X, not Y" constructions are not used, in the interface or in commit messages.
 - British spelling is used throughout, in the interface, the comments and the documentation.
 
-The help panel shows the name and kind of the place where the player stands (for example a quarter, a piazza or open country), a short description and the elevation. Piazzas are named from their feature (Piazza dell'Orologio, Piazza della Fontana and so on), and quarters are named after saints and trades.
+The help panel is centred on the screen and spans its width, up to 1,320 px: on the left the place where the player stands, a short account of the island and the credit for the cats; on the right the controls in groups (walking, views, train and ferry, time and island, sound and screen, controller), flowing into as many columns as fit. On a narrow screen it becomes one column. It shows the name and kind of the place where the player stands (for example a quarter, a piazza or open country), a short description and the elevation. Piazzas are named from their feature (Piazza dell'Orologio, Piazza della Fontana and so on), and quarters are named after saints and trades.
 
 ## Architecture
 

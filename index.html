@@ -17,18 +17,26 @@
 html,body{height:100%;margin:0;overflow:hidden;background:var(--sea);color:var(--plaster);font-family:var(--font-body);font-size:16px}
 #scene{position:fixed;inset:0;display:block;width:100%;height:100%;touch-action:none;outline:none}
 .vignette{position:fixed;inset:0;pointer-events:none;background:radial-gradient(ellipse at 50% 45%,transparent 55%,rgba(18,40,70,.32) 100%)}
-.help{position:fixed;z-index:4;top:calc(16px + env(safe-area-inset-top,0px));left:16px;width:min(380px,calc(100vw - 32px));max-height:calc(100% - 32px);overflow:auto;box-sizing:border-box;
-  background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:16px 18px 18px;backdrop-filter:blur(8px);font-size:.92rem;line-height:1.4}
-.help .eyebrow{margin:0 0 10px;font-family:var(--font-display);font-size:1.35rem;color:var(--plaster)}
+.help{position:fixed;z-index:4;top:50%;left:50%;transform:translate(-50%,-50%);width:min(1320px,calc(100vw - 32px));max-height:calc(100% - 32px);overflow:auto;box-sizing:border-box;
+  background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:18px 22px 20px;backdrop-filter:blur(8px);font-size:clamp(.92rem,.62rem + .4vw,1.08rem);line-height:1.4;
+  display:grid;grid-template-columns:minmax(240px,300px) 1fr;gap:0 28px}
+.help .side{border-right:1px solid var(--line);padding-right:24px}
+.help .eyebrow{margin:0 0 10px;font-family:var(--font-display);font-size:1.5rem;color:var(--plaster)}
 .help .here{border-bottom:1px solid var(--line);padding-bottom:12px;margin-bottom:12px}
 .help .kind{font-size:.72rem;letter-spacing:.16em;text-transform:uppercase;color:var(--verdigris)}
 .help h2{font-family:var(--font-display);font-weight:400;font-size:1.3rem;margin:2px 0;line-height:1.15;text-wrap:balance}
 .help p{margin:0;color:var(--plaster-dim)}
 .help .elev{margin-top:6px;font-size:.8rem;letter-spacing:.06em;color:var(--verdigris);font-variant-numeric:tabular-nums}
-.help table{border-collapse:collapse;width:100%}
-.help td{padding:4px 0;vertical-align:top;color:var(--plaster)}
-.help td:first-child{white-space:nowrap;padding-right:12px}
-.help .about{margin-top:12px;font-size:.84rem}
+.help .about{font-size:.84rem}
+.help .credits{margin-top:12px;padding-top:12px;border-top:1px solid var(--line);font-size:.8rem}
+.help a{color:var(--verdigris)}
+.help .controls{columns:280px;column-gap:28px}
+.help .group>p{color:var(--plaster)}
+.help .group{break-inside:avoid;margin:0 0 14px}
+.help h3{margin:0 0 4px;font-size:.72rem;font-weight:500;letter-spacing:.16em;text-transform:uppercase;color:var(--verdigris)}
+.help .row{display:grid;grid-template-columns:auto 1fr;gap:0 10px;padding:3px 0;align-items:baseline}
+.help .row>span:first-child{white-space:nowrap}
+@media (max-width:720px){ .help{grid-template-columns:1fr} .help .side{border-right:0;padding-right:0;border-bottom:1px solid var(--line);padding-bottom:12px;margin-bottom:14px} }
 kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink);border-radius:3px;padding:3px 6px;margin-right:3px;display:inline-block;min-width:1em;text-align:center;box-shadow:0 2px 0 var(--plaster-dim)}
 .joy{position:fixed;width:110px;height:110px;margin:-55px 0 0 -55px;border-radius:50%;border:2px solid rgba(245,233,215,.55);pointer-events:none;z-index:3}
 .joy i{position:absolute;left:50%;top:50%;width:44px;height:44px;margin:-22px 0 0 -22px;border-radius:50%;background:rgba(245,233,215,.7)}
@@ -43,36 +51,51 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
 <div class="joy" id="joy" hidden><i></i></div>
 
 <aside class="help" id="help" hidden aria-label="Help">
-  <p class="eyebrow">Coast</p>
-  <div class="here">
-    <div class="kind" id="placeKind">Quarter</div>
-    <h2 id="placeName">—</h2>
-    <p id="placeDesc"></p>
-    <p class="elev" id="elev"></p>
+  <div class="side">
+    <p class="eyebrow">Coast</p>
+    <div class="here">
+      <div class="kind" id="placeKind">Quarter</div>
+      <h2 id="placeName">—</h2>
+      <p id="placeDesc"></p>
+      <p class="elev" id="elev"></p>
+    </div>
+    <p class="about">An island that never ends to the east or west, between half a kilometre and two kilometres wide. Villages are laid out from the rules of medieval hill towns, with open country, olive groves and a coastal railway between them. Draw distance adjusts itself to hold 60 frames per second: <span id="viewState">—</span>.</p>
+    <p class="credits">The cats are from <a href="https://github.com/c1t1zen1/Michi-Neko-The-Cat-Philosophers-Path" target="_blank" rel="noopener">Michi-Neko: The Cat Philosopher’s Path</a> by c1t1zen1, used under the MIT licence.</p>
   </div>
-  <table class="controls">
-    <tr><td><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></td><td>Walk</td></tr>
-    <tr><td><kbd>Shift</kbd></td><td>Run</td></tr>
-    <tr><td><kbd>Space</kbd></td><td>Jump</td></tr>
-    <tr><td><kbd>Mouse</kbd></td><td>Look. Click to capture the mouse, Esc to release it</td></tr>
-    <tr><td><kbd>Q</kbd><kbd>E</kbd></td><td>Turn</td></tr>
-    <tr><td><kbd>V</kbd></td><td>Switch between street level and the bird’s-eye view</td></tr>
-    <tr><td><kbd>+</kbd><kbd>−</kbd></td><td>Zoom the bird’s-eye view in and out (− also leaves street level). Pinch also zooms</td></tr>
-    <tr><td><kbd>2-finger drag</kbd></td><td>Pan quickly across the island in the bird’s-eye view</td></tr>
-    <tr><td><kbd>B</kbd></td><td>Tilt-shift in the bird’s-eye and chase views: <span id="tiltState">off</span></td></tr>
-    <tr><td><kbd>T</kbd></td><td>Hold to speed up time</td></tr>
-    <tr><td><kbd>R</kbd></td><td>Ride in the train’s cab. R or V again steps off beside the track</td></tr>
-    <tr><td><kbd>F</kbd></td><td>Board the nearest ferry wherever it is. While it lies at a landing it may also be boarded by its gangway. On board, W A S D walk about the decks and the mouse looks round. F or V again steps ashore, or at the next landing while the ferry is under way</td></tr>
-    <tr><td><kbd>C</kbd></td><td>Follow the train from behind. The mouse moves the camera round it and <kbd>+</kbd><kbd>−</kbd> change the distance. C or V again steps off beside the track</td></tr>
-    <tr><td><kbd>N</kbd></td><td>Night or day</td></tr>
-    <tr><td><kbd>I</kbd></td><td>Generate a new island</td></tr>
-    <tr><td><kbd>M</kbd></td><td>Mute or unmute the ambient sound</td></tr>
-    <tr><td>Double click</td><td>Go down to street level at that spot in the bird’s-eye view</td></tr>
-    <tr><td><kbd>Tab</kbd></td><td>Full screen</td></tr>
-    <tr><td><kbd>H</kbd></td><td>Show or hide this panel</td></tr>
-    <tr><td><kbd>Controller</kbd></td><td>The left stick moves and the right stick looks. A jumps, B switches the view, X boards the ferry, Y rides in the train’s cab and LB follows the train. RB sets tilt-shift, the triggers zoom, pressing the left stick switches between running and walking, the D-pad turns and tilts, Back mutes and Start shows this panel</td></tr>
-  </table>
-  <p class="about">An island that never ends to the east or west, between half a kilometre and two kilometres wide. Villages are laid out from the rules of medieval hill towns, with open country, olive groves and a coastal railway between them. Draw distance adjusts itself to hold 60 frames per second: <span id="viewState">—</span>.</p>
+  <div class="controls">
+    <div class="group"><h3>Walking</h3>
+      <div class="row"><span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><span>Walk</span></div>
+      <div class="row"><span><kbd>Shift</kbd></span><span>Run</span></div>
+      <div class="row"><span><kbd>Space</kbd></span><span>Jump</span></div>
+      <div class="row"><span><kbd>Q</kbd><kbd>E</kbd></span><span>Turn</span></div>
+      <div class="row"><span><kbd>Mouse</kbd></span><span>Look. Click to capture the mouse, Esc to release it</span></div>
+    </div>
+    <div class="group"><h3>Views</h3>
+      <div class="row"><span><kbd>V</kbd></span><span>Switch between street level and the bird’s-eye view</span></div>
+      <div class="row"><span><kbd>+</kbd><kbd>−</kbd></span><span>Zoom the bird’s-eye view in and out (− also leaves street level). Pinch also zooms</span></div>
+      <div class="row"><span>Double click</span><span>Go down to street level at that spot in the bird’s-eye view</span></div>
+      <div class="row"><span><kbd>2-finger drag</kbd></span><span>Pan quickly across the island in the bird’s-eye view</span></div>
+      <div class="row"><span><kbd>B</kbd></span><span>Tilt-shift in the bird’s-eye and chase views: <span id="tiltState">off</span></span></div>
+    </div>
+    <div class="group"><h3>Train and ferry</h3>
+      <div class="row"><span><kbd>R</kbd></span><span>Ride in front of the train. R or V again steps off beside the track</span></div>
+      <div class="row"><span><kbd>C</kbd></span><span>Follow the train from behind. The mouse moves the camera round it and <kbd>+</kbd><kbd>−</kbd> change the distance. C or V again steps off beside the track</span></div>
+      <div class="row"><span><kbd>F</kbd></span><span>Board the nearest ferry wherever it is. While it lies at a landing it may also be boarded by its gangway. On board, W A S D walk about the decks and the mouse looks round. F or V again steps ashore, or at the next landing while the ferry is under way</span></div>
+    </div>
+    <div class="group"><h3>Time and island</h3>
+      <div class="row"><span><kbd>N</kbd></span><span>Night or day</span></div>
+      <div class="row"><span><kbd>T</kbd></span><span>Hold to speed up time</span></div>
+      <div class="row"><span><kbd>I</kbd></span><span>Generate a new island</span></div>
+    </div>
+    <div class="group"><h3>Sound and screen</h3>
+      <div class="row"><span><kbd>M</kbd></span><span>Mute or unmute the sound</span></div>
+      <div class="row"><span><kbd>Tab</kbd></span><span>Full screen</span></div>
+      <div class="row"><span><kbd>H</kbd></span><span>Show or hide this panel</span></div>
+    </div>
+    <div class="group"><h3>Controller</h3>
+      <p>The left stick moves and the right stick looks. A jumps, B switches the view, X boards the ferry, Y rides with the train and LB follows it. RB sets tilt-shift, the triggers zoom, pressing the left stick switches between running and walking, the D-pad turns and tilts, Back mutes and Start shows this panel</p>
+    </div>
+  </div>
 </aside>
 
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"}}</script>
