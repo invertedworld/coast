@@ -82,6 +82,9 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
       <div class="row"><span><kbd>C</kbd></span><span>Follow the train from behind. The mouse moves the camera round it and <kbd>+</kbd><kbd>−</kbd> change the distance. C or V again steps off beside the track</span></div>
       <div class="row"><span><kbd>F</kbd></span><span>Board the nearest ferry wherever it is. While it lies at a landing it may also be boarded by its gangway. On board, W A S D walk about the decks and the mouse looks round. F or V again steps ashore, or at the next landing while the ferry is under way</span></div>
     </div>
+    <div class="group"><h3>Buildings</h3>
+      <div class="row"><span>Walk into a door</span><span>Houses, barns, churches, towers, the station, the keeper’s cottage and the ferry’s saloon and wheelhouse may be entered. A door swings open when it is walked into, from either side, and closes again behind</span></div>
+    </div>
     <div class="group"><h3>Time and island</h3>
       <div class="row"><span><kbd>N</kbd></span><span>Night or day</span></div>
       <div class="row"><span><kbd>T</kbd></span><span>Hold to speed up time</span></div>
@@ -3562,6 +3565,7 @@ for (const F of ferries){
 }
 // walking about inside: walls and furniture push the passenger out, and the doors give way to them as house doors
 // do, worked in the deck plan of the ferry
+const _fdv=new THREE.Vector3();
 function ferryInside(dt,ox,oz){
   const F=ridden; if (!F || !F.doors) return; const r=0.3, lv=fe.lv;
   for (const D of F.doors){ if (D.lv!==lv) continue;
@@ -3569,13 +3573,13 @@ function ferryInside(dt,ox,oz){
     if (d<r+0.04){ const t=leafAng(D,D.a), px=ox-D.hx, pz=oz-D.hz, dLx=-Math.sin(t)*D.s, dLz=-Math.cos(t)*D.s;
       const dir=(px*dLx+pz*dLz)>0?-1:1, lim=clamp(D.a+dir*4*dt,-DOOR_MAX,DOOR_MAX); let a=D.a;
       while (d<r+0.04 && (dir>0?a<lim:a>lim)){ a=dir>0?Math.min(lim,a+0.01):Math.max(lim,a-0.01); d=leafDist(D,a,fe.lx,fe.lz); }
-      if (a!==D.a){ D.av=(a-D.a)/dt*0.5; D.a=a; D.idle=0; } } }
+      if (a!==D.a){ if (D.a===0){ D.m.getWorldPosition(_fdv); sndPlay('door_open','ferry',[_fdv.x,_fdv.y+1,_fdv.z]); } D.av=(a-D.a)/dt*0.5; D.a=a; D.idle=0; } } }
   for (const D of F.doors){ D.idle+=dt; const hold=D.lv===lv && Math.hypot(fe.lx-D.hx,fe.lz-D.hz)<D.lw+r+0.15;
     if (D.a===0 && D.av===0) continue;
     if (D.idle>1.2 && !hold) D.av+=(-7*D.a-5.3*D.av)*dt; else D.av*=Math.exp(-dt*5);
     let a=clamp(D.a+D.av*dt,-DOOR_MAX,DOOR_MAX); if (Math.abs(a)===DOOR_MAX) D.av=0;
     if (hold && leafDist(D,a,fe.lx,fe.lz)<r+0.04){ a=D.a; D.av=0; }
-    if (D.a!==0 && (Math.sign(a)!==Math.sign(D.a) || (Math.abs(a)<0.003 && Math.abs(D.av)<0.05))){ a=0; D.av=0; }
+    if (D.a!==0 && (Math.sign(a)!==Math.sign(D.a) || (Math.abs(a)<0.003 && Math.abs(D.av)<0.05))){ a=0; D.av=0; D.m.getWorldPosition(_fdv); sndPlay('door_close','ferry',[_fdv.x,_fdv.y+1,_fdv.z]); }
     D.a=a; D.m.rotation.y=leafAng(D,a); }
   const solid=FERRY_SOLID[lv]; if (!solid) return;
   for (let pass=0;pass<2;pass++){
@@ -3759,8 +3763,11 @@ function leafPush(D){
   if (d<1e-6) return; player.x=cx+dx/d*r; player.z=cz+dz/d*r;
 }
 // near a doorway or indoors the player is slimmer, so that a 1 m doorway can be passed
+let indoors=null;   // the room the player is in, if any, for the sound
 function playerRadius(dt){
-  let want=0.6;
+  let want=0.6; indoors=null;
+  for (const ch of nearbyChunks()) if (ch.rooms) for (const D of ch.rooms){ const A=D.area||D, [lu,lv]=obbLocal(A,player.x,player.z);
+    if (Math.abs(lu)<(A.hw??D.w/2) && Math.abs(lv)<(A.hd??D.d/2) && player.y>D.fl-1.2 && player.y<D.base+D.top){ indoors=D; break; } }
   for (const ch of nearbyChunks()){ if (!ch.doors) continue;
     for (const D of ch.doors){ if (Math.hypot(D.hx-player.x,D.hz-player.z)<3.5){ want=0.3; break; }
       const [lu,lv]=obbLocal(D,player.x,player.z); if (Math.abs(lu)<D.w/2+0.3 && Math.abs(lv)<D.d/2+0.3){ want=0.3; break; } }
@@ -4207,16 +4214,21 @@ const _bv=new THREE.Vector3();
 function sndUpdate(dt){
   if (!SND.ready) return;
   const ctx=audioCtx, inCoach=mode==='coach', inCab=mode==='train', inside=inCoach||inCab;
+  // indoors the world outside is muffled, less so with the door open; a church, like a tunnel, has its reverb.
+  // In the ferry's saloon or wheelhouse the sea and the town ashore are muffled too
+  const room=mode==='street'?indoors:null, cabin=mode==='ferry'&&((fe.lv===0&&Math.abs(fe.lx)<FSW/2&&fe.lz>FSZ0&&fe.lz<FSZ1)||(fe.lv===2&&Math.abs(fe.lx)<FWH/2&&Math.abs(fe.lz-FWZ)<1.4));
+  const open=room&&room.kind!=='church'?Math.min(1,Math.abs(room.a||0)):0;
+  SNDS.inK=(SNDS.inK??0)+(((room||cabin)?1:0)-(SNDS.inK??0))*(1-Math.exp(-dt*4)); const iK=SNDS.inK*(1-0.6*open);
   // the reverb follows whether the listener is inside the bore, eased so it swells and dies away at the portals
-  const inBore=inside&&railState(camera.position.x)==='tunnel'?1:0; SNDS.tun=(SNDS.tun??0)+(inBore-(SNDS.tun??0))*(1-Math.exp(-dt*2.5)); const tK=SNDS.tun;
+  const inBore=(inside&&railState(camera.position.x)==='tunnel')||(room&&room.kind==='church')?1:0; SNDS.tun=(SNDS.tun??0)+(inBore-(SNDS.tun??0))*(1-Math.exp(-dt*2.5)); const tK=SNDS.tun;
   // the listener is the camera
   camera.getWorldPosition(_sl); camera.getWorldDirection(_sf);
   const L=ctx.listener;
   if (L.positionX){ L.positionX.value=_sl.x; L.positionY.value=_sl.y; L.positionZ.value=_sl.z; L.forwardX.value=_sf.x; L.forwardY.value=_sf.y; L.forwardZ.value=_sf.z; L.upX.value=0; L.upY.value=1; L.upZ.value=0; }
   else { L.setPosition(_sl.x,_sl.y,_sl.z); L.setOrientation(_sf.x,_sf.y,_sf.z,0,1,0); }
   // group treatment: inside the train the world outside is muffled and the train's own sound low-passed
-  SND.cut.world=inCoach?900:inCab?1400:20000; SND.cut.train=inCoach?1100:inCab?1800:20000; SND.cut.ferry=20000; SND.cut.player=20000;
-  SND.gmul.world=(inside?0.7:1)*(1-0.92*tK); SND.gmul.train=1; SND.gmul.ferry=1; SND.gmul.player=1;
+  SND.cut.world=inCoach?900:inCab?1400:iK>0.02?20000*Math.pow(1200/20000,iK):20000; SND.cut.train=inCoach?1100:inCab?1800:20000; SND.cut.ferry=cabin?1800:20000; SND.cut.player=20000;
+  SND.gmul.world=(inside?0.7:1-0.45*iK)*(1-0.92*(room?0:tK)); SND.gmul.train=1; SND.gmul.ferry=1; SND.gmul.player=1;
   SND.send.world=0; SND.send.train=0.8*tK; SND.send.ferry=0; SND.send.player=0.8*tK;
   for (const g in SND.bus) sndParam(SND.bus[g].lp.frequency,SND.cut[g],0.15);
   sndParam(SND.revOut.gain,tK>0.01?1:0,0.2);

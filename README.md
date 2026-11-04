@@ -45,6 +45,7 @@ The panel opened with **H** lists the controls. They are reproduced here for ref
 | R | Rides in the train's cab. R or V again steps off beside the track. |
 | C | Follows the train from behind. The mouse orbits the camera and + − change its distance. C or V again steps off beside the track. |
 | F | Boards the nearest ferry wherever it is. F or V again steps ashore, or at the next landing if the ferry is under way. |
+| Walking into a door | Opens it. A door swings away from the side it is pushed from, as far as it is pushed, and closes again about a second after nobody stands in its sweep. |
 | N | Changes to night (22:00), or back to day (10:00) if it is night. The clock runs on from there. |
 | I | Generates a new island from a random seed. |
 | M | Mutes or unmutes the sound. |
@@ -180,6 +181,19 @@ Sailing boats keep a set distance offshore. `sailClear(sd, x)` gives the distanc
 
 The player stands on the highest walkable surface at their position, given by the walkable-surface function (terrain, steps, terraces, moles, platforms and decks). A step up may be at most `STEP = 0.8` m. The player cannot walk into water deeper than 1 m. Buildings and objects are oriented boxes; the collision code pushes the player out along the shortest axis, and treats a position exactly at an obstacle's centre as lying on the positive side, so that the player is never left inside an obstacle.
 
+### Buildings that can be entered
+
+In the blocks at full detail every house, barn and cottage with walls at least 2.4 m wide and 2.62 m high can be entered, as can every church and tower, the station building and the lighthouse keeper's cottage. A house drawn without a door is given one from its own random sequence, so that the layout of the town is unchanged. Further away the buildings remain solid boxes with painted doors.
+
+- **Doorways.** The front wall of an enterable building is built round an arched opening 1 m wide and 2.35 m high, with a reveal through the 30 cm wall and a stone surround. A church has a pair of leaves in an opening 1.7 m wide.
+- **Doors.** Each leaf is one instance of a shared mesh (`doorMeshes`), hinged at a jamb. Pushing is resolved before collision: a leaf in contact with the player turns away from the side the player stood on in the previous frame, at up to 4 rad/s and no further than 1.55 rad, until it no longer touches them. A leaf is then pushed shut by a damped spring once the player has left its sweep. A door whose room has not yet been built does not move. Near a doorway and indoors the player's radius eases from 0.6 m to 0.3 m.
+- **Rooms.** The interior of a building is built only when the player comes within 26 m of it, for at most 15 buildings at once, one per frame, and removed as the player moves away (`roomsUpdate`). It is lit by a uniform that follows the time of day (`roomU`) rather than by the sun. The floor of a room replaces the ground beneath it for walking, and the ground and the town's own geometry are not drawn inside a built room (`roomClip`), which keeps a hillside or a neighbouring structure from showing through.
+- **Windows.** Window panes are drawn without their inner face. From inside, a window is an opening through the wall with a casement frame, and the view out is clear; from outside it remains a dark pane, lit at night.
+- **Storeys.** A house of two or more storeys whose room is at least 3.4 m wide and 4.65 m deep has a floor at every storey, reached by straight flights of 13 risers of 20 cm along the side walls. Upper storeys are furnished as bedrooms. Steps, floors and furniture are colliders with a top and a bottom, so that each storey's furniture is passed under from the storey below.
+- **Towers.** A stair of cantilevered treads winds round the walls of a tower to the floor of its top room. A campanile's top room is the belfry, with its bell and open arches.
+- **Churches.** The nave has pews either side of the aisle, a font and lamps, an open roof on trusses, and an apse behind an arch, with the altar on a step. Only the half of the apse cylinder outside the nave is built at full detail. Each side window carries abstract stained glass drawn by `SG_GLSL` in four of six colours chosen by the church's seed. The coloured light on the church's surfaces is found per fragment by tracing a ray towards the sun to the plane of the glass on the sunlit side and reading the glass where it crosses; it is computed for the most recently built church only.
+- **The ferry.** The saloon has rows of seats and a bar, and the wheelhouse a console, the wheel and a chart table. Their doors and walls are worked in the ferry's deck plan (`ferryInside`).
+
 ### Time of day, lighting and shadows
 
 A full day lasts twelve minutes. The sun rises over the south sea at 06:00 and sets over the north sea at 18:00. One light casts shadows: the sun by day and the moon, opposite the sun, by night. The star field turns about the same axis as the sun and the moon.
@@ -237,10 +251,11 @@ Sounds are routed to four buses: `world`, `train`, `ferry` and `player`. Each bu
 - **Footsteps.** A loop for the surface underfoot plays while the player walks, faster while running. The surface (pavement, sand, soil or grass) is read from the ground mesh. Grass uses the soil loop, and the decks of a ferry and the floor of a coach use the pavement loop. A separate sound plays on landing from a jump.
 - **Train.** Run and idle loops at the locomotive, and a rumble from the point on the train nearest the listener. A bridge loop plays on viaducts and a rail joint every 18 m under each bogie. Separate sounds play for starting, stopping, brakes, the doors opening and closing, and the horn on departure and before a tunnel.
 - **Ferry.** Run and idle loops at the stern, and the wake at the bow. Separate sounds play for the horn, starting, stopping, the gangway, the gates and the fenders.
+- **Buildings.** `door_open` plays when a door begins to open and `door_close` when it shuts. Indoors, and in the ferry's saloon and wheelhouse, the world outside is muffled, less so while the door stands open. A church adds the tunnel's reverb.
 
 ### Recordings
 
-The full list of 46 sound identifiers, with the category, type, channels, placement and conditions under which each plays, is kept in the Google Sheet "Coast – sound list":
+The full list of 48 sound identifiers, with the category, type, channels, placement and conditions under which each plays, is kept in the Google Sheet "Coast – sound list":
 <https://docs.google.com/spreadsheets/d/1I5Z2FXeJlASb57JWM6czgj7tl4D_sDudHbNa3s5yHjk/edit>
 
 `sounds.json`, beside `index.html`, maps identifiers to files in `sounds/`. A value may be a single path or a list of paths; when a list is given, one of the files is chosen at random each time the sound plays. Any identifier missing from `sounds.json` stays silent. The recordings supplied so far, which Mark keeps in `village sounds/`, are assigned as follows.
@@ -289,6 +304,7 @@ node --check /tmp/m.mjs
 | Member | Purpose |
 |---|---|
 | `player`, `mode`, `chunks`, `scene` | The player state, the current view mode, the loaded blocks and the scene. |
+| `rooms`, `doorMesh`, `keys` | The rooms that are built, the instanced house doors and the keyboard state. |
 | `train`, `ferries`, `sailers` | The moving things. |
 | `heightAt(x,z)`, `coastZ`, `railZ`, `railY`, `railState` | Terrain and railway queries. |
 | `findHarbour`, `findBeach`, `findStation`, `findRail`, `harbourAt`, `harbourInfo`, `hbS` | Locating features. |
@@ -313,4 +329,7 @@ Setting `window.__freeCam = {p: Vector3, t: Vector3}` places the camera at `p` l
 - Shadows are occasionally lost in a way that depends on the layout; the cause has not been found.
 - The front coach's leading gangway bellows face the locomotive, which has no matching connection.
 - The debug hooks and `window.__freeCam` remain in the code. They have no effect in normal use.
+- The lighthouse towers and the ticket kiosks cannot yet be entered.
+- In a narrow tower the stair's first pass along the front wall may run close above the door.
+- Beyond about 100 km from the origin, positions lose precision on the GPU: surface patterns degrade and the scene begins to jitter. A floating origin would remove this.
 - Through the window of a shut coach door, the view is mostly of the inside of the opposite door across the vestibule.
