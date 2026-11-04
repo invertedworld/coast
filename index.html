@@ -3407,29 +3407,84 @@ const END_DOOR=(()=>{ const gb=new GB(), body=hex('#3e6a50');
   for (const s of [-1,1]) gb.add(T.box, mat(s*0.29,2.2,0,0.22,0.45,0.04), body, null);
   return gb.geometry(); })();
 
-const LOCO=buildCar(true), COACH=buildCoach();
-const train={cars:[], x:0, dir:1, sp:17, v:17, wait:0, init:false, GAP:0.8};
+// The locomotive: a square-fronted electric for a branch-line service, 13 m long, in the coaches' green with a cream
+// band, a red buffer beam, a flat cab front with two windscreens, a pantograph on the roof and louvred grilles along
+// the machine room. Its other end is flat, with buffers and gangway bellows, and is coupled to the coaches; the
+// train has one at each end. The lamps on the cab front are separate meshes so that they can show white at the
+// front of the train and red at the rear.
+const LOCO_L=13;
+function buildLoco(){
+  const gb=new GB(), L=LOCO_L, W=2.8, H=2.7, y0=0.95, green=hex('#2f5d46'), cream=hex('#efe3c8'), dark=hex('#2a2a2e'), glass=hex('#2c3640'),
+    roofC=hex('#8c8f93'), red=hex('#a8392c'), steel=hex('#6d7176'), F=L/2;
+  // the body, the cream band round its sides and cab front, and a curved roof
+  gb.add(T.box, mat(0,y0,0,W,H,L), green, null);
+  gb.add(T.box, mat(0,1.95,-0.01,W+0.02,0.55,L+0.0), cream, null);
+  gb.add(T.box, mat(0,1.95,F-0.2,W+0.02,0.55,0.42), cream, null);
+  gb.add(T.cylC, mat(0,y0+H-0.05,0,W,L-0.1,0.7,0,Math.PI/2), roofC, null);
+  // the cab front: two windscreens either side of a pillar, a red buffer beam, buffers, coupling and handrails
+  for (const sx of [-1,1]){ gb.add(T.boxC, mat(sx*0.62,2.6,F+0.015,1.0,0.75,0.04), glass, null, 5);
+    gb.add(T.boxC, mat(sx*0.62,2.97,F+0.03,1.05,0.05,0.04), dark, null); }
+  gb.add(T.boxC, mat(0,0.72,F+0.06,W,0.42,0.12), red, null);
+  for (const sx of [-0.9,0.9]){ gb.add(T.cylC, mat(sx,0.75,F+0.3,0.34,0.4,0.34,0,Math.PI/2), dark, null); gb.add(T.cylC, mat(sx,0.75,F+0.49,0.46,0.04,0.46,0,Math.PI/2), dark, null); }
+  gb.add(T.boxC, mat(0,0.75,F+0.25,0.3,0.22,0.3), dark, null);
+  for (const sx of [-1.25,1.25]) gb.add(T.boxC, mat(sx,1.6,F+0.08,0.05,1.0,0.05), steel, null);
+  gb.add(T.boxC, mat(0,3.5,F+0.05,1.6,0.05,0.05), steel, null);
+  // the bogies with their wheels, and the equipment slung between them
+  for (const zb of [-L/2+2.4,L/2-2.4]){ gb.add(T.box, mat(0,0.2,zb,W-0.5,0.6,2.8), dark, null);
+    for (const sx of [-1,1]) for (const dz of [-0.8,0.8]) gb.add(T.cylC, mat(sx*1.05,0.45,zb+dz,0.9,0.12,0.9,0,0,Math.PI/2), steel, null); }
+  gb.add(T.box, mat(0,0.55,0,W-0.4,0.42,L-6.4), dark, null);
+  // along each side: the cab window and door, louvred grilles over the machine room, and a stainless line
+  for (const sx of [-1,1]){ const x=sx*(W/2+0.01);
+    gb.add(T.boxC, mat(x,2.35,F-0.5,0.05,0.7,0.8), glass, null, 5);
+    gb.add(T.boxC, mat(sx*(W/2+0.015),1.55,F-1.5,0.03,1.95,0.8), green.clone().multiplyScalar(0.8), null);
+    gb.add(T.boxC, mat(sx*(W/2+0.03),2.45,F-1.5,0.03,0.5,0.5), glass, null, 5);
+    carSteps(gb,sx,W,F-1.5,dark);
+    for (let k=0;k<4;k++){ const z=-L/2+1.4+k*1.6; gb.add(T.boxC, mat(x,2.85,z,0.04,0.55,1.2), steel, null);
+      for (let j=0;j<5;j++) gb.add(T.boxC, mat(sx*(W/2+0.035),2.62+j*0.11,z,0.02,0.03,1.1), dark, null); }
+    gb.add(T.boxC, mat(sx*(W/2+0.02),1.45,-0.5,0.03,0.06,L-2.4), steel, null); }
+  // the pantograph: insulators, a folding frame and the collector bow
+  { const zr=-L/4, yr=y0+H+0.3;
+    for (const sx of [-0.5,0.5]) for (const dz of [-0.6,0.6]) gb.add(T.cyl8, mat(sx,y0+H-0.05,zr+dz,0.12,0.3,0.12), hex('#c9a77a'), null);
+    gb.add(T.boxC, mat(0,yr,zr,1.2,0.06,1.4), dark, null);
+    const LP=(x,y,z)=>[x,y,z]; for (const sx of [-0.45,0.45]){ segBox(gb,LP(sx,yr,zr-0.5),LP(sx*0.3,yr+0.9,zr+0.3),0.05,0.05,dark); segBox(gb,LP(sx*0.3,yr+0.9,zr+0.3),LP(sx*0.2,yr+1.5,zr-0.1),0.04,0.04,dark); }
+    gb.add(T.boxC, mat(0,yr+1.52,zr-0.1,1.7,0.05,0.12), steel, null); }
+  // the coupled end: buffers, coupling and gangway bellows, as on the coaches
+  for (const sx of [-0.9,0.9]){ gb.add(T.cylC, mat(sx,0.75,-(F+0.2),0.34,0.4,0.34,0,Math.PI/2), dark, null); gb.add(T.cylC, mat(sx,0.75,-(F+0.39),0.46,0.04,0.46,0,Math.PI/2), dark, null); }
+  gb.add(T.boxC, mat(0,0.75,-(F+0.15),0.3,0.22,0.3), dark, null);
+  gb.add(T.box, mat(0,1.05,-(F+0.2),1.5,2.3,0.4), hex('#1e1f22'), null);
+  return {geo:gb.geometry(),L};
+}
+// the lamps on the cab front: two low and one high, white or red
+const LOCO_LAMP_GEO=new THREE.CylinderGeometry(0.15,0.15,0.08,16).rotateX(Math.PI/2);
+const lampWhite=new THREE.MeshBasicMaterial({color:hex('#fff6dc')}), lampRed=new THREE.MeshBasicMaterial({color:hex('#ff2a18')});
+function locoLamps(m){ const out=[];
+  for (const [x,y] of [[-0.95,1.3],[0.95,1.3],[0,3.25]]){ const l=new THREE.Mesh(LOCO_LAMP_GEO,lampWhite); l.position.set(x,y,LOCO_L/2+0.04); m.add(l); out.push(l); }
+  return out; }
+const LOCO=buildLoco(), COACH=buildCoach();
+const train={cars:[], x:0, dir:1, sp:17, v:17, wait:0, init:false, GAP:0.8, lead:0};
 // headlights: a spotlight from the front of the locomotive aimed along the line, and warm light from the
 // coach windows falling on the ground either side; they light the surroundings at dusk, at night and in tunnels
 const headSpot=new THREE.SpotLight(hex('#ffeccc'),0,240,0.5,0.75,1.2); world.add(headSpot,headSpot.target);
 // the coach lamps join the scene only after dusk, since every light adds to the cost of every lit pixel
 // the lamps stay in the scene, dark by day: adding or removing a light would recompile every lit material
-const coachLamps=[1,3,5].map(i=>({l:new THREE.PointLight(hex('#ffbf73'),0,26,1.5),i})); let coachLampsOn=false; for (const c of coachLamps) world.add(c.l);
+const coachLamps=[1,2,4].map(i=>({l:new THREE.PointLight(hex('#ffbf73'),0,26,1.5),i})); let coachLampsOn=false; for (const c of coachLamps) world.add(c.l);
 const _hv=new THREE.Vector3();
 function updateTrainLights(){
-  const loco=train.cars[0].m, dark=Math.max(nightU.value, mode==='train'?tunnelK:0);
+  const loco=leadCar().m, dark=Math.max(nightU.value, mode==='train'?tunnelK:0);
+  for (const c of train.cars) if (c.lamps){ const front=c===leadCar(); for (const l of c.lamps) l.material=front?lampWhite:lampRed; }
   loco.updateMatrixWorld();
-  headSpot.position.copy(_hv.set(0,1.3,LOCO.L/2+0.4).applyMatrix4(loco.matrix));
+  headSpot.position.copy(_hv.set(0,1.3,LOCO.L/2+0.4).applyMatrix4(loco.matrix));   // the lead locomotive's nose is always its +z end
   headSpot.target.position.copy(_hv.set(0,-0.2,LOCO.L/2+60).applyMatrix4(loco.matrix));
   headSpot.intensity=12+900*dark;
   const want=coachLampsOn?nightU.value>0.15:nightU.value>0.25;
   if (want!==coachLampsOn){ coachLampsOn=want; for (const c of coachLamps) c.l.intensity=0; }
   if (coachLampsOn) for (const c of coachLamps){ const m=train.cars[c.i].m; c.l.position.set(m.position.x,m.position.y+2.4,m.position.z); c.l.intensity=60*nightU.value; }
 }
-for (let i=0;i<6;i++){ const spec=i===0?LOCO:COACH, m=new THREE.Mesh(spec.geo,matB); m.castShadow=true; m.receiveShadow=true; m.rotation.order='YXZ'; world.add(m);
-  const doors=[]; if (i>0) for (const sx of [-1,1]) for (const e of [-1,1]){ const d=new THREE.Mesh(CAR_DOOR,matB); d.castShadow=true; d.receiveShadow=true; d.userData={sx,e}; m.add(d); doors.push(d); }
-  train.cars.push({m,L:spec.L,doors}); }
-{ const d=new THREE.Mesh(END_DOOR,matB); d.castShadow=d.receiveShadow=true; d.position.z=-(CL/2-0.04); train.cars[train.cars.length-1].m.add(d); }
+for (let i=0;i<6;i++){ const loco=i===0||i===5, spec=loco?LOCO:COACH, m=new THREE.Mesh(spec.geo,matB); m.castShadow=true; m.receiveShadow=true; m.rotation.order='YXZ'; world.add(m);
+  const doors=[]; if (!loco) for (const sx of [-1,1]) for (const e of [-1,1]){ const d=new THREE.Mesh(CAR_DOOR,matB); d.castShadow=true; d.receiveShadow=true; d.userData={sx,e}; m.add(d); doors.push(d); }
+  train.cars.push({m,L:spec.L,doors,loco,flip:i===5,lamps:loco?locoLamps(m):null}); }
+// the car at the front of the train, and the coaches
+const leadCar=()=>train.cars[train.lead?train.cars.length-1:0], isCoach=i=>!train.cars[i].loco;
 let doorOpen=0;
 // the doors slide open once the train has come to rest at a station, and close again before it leaves
 function updateCarDoors(dt){
@@ -3454,11 +3509,12 @@ function updateTrain(dt){
   if (Math.abs(train.x-player.x)>1600){ train.dir=Math.random()<0.5?1:-1; train.x=player.x-train.dir*1400; train.v=train.sp; train.wait=0; }
   // each car spans the chord between two points on the track a car length apart, and the next car
   // begins one coupling gap behind, so the cars stay coupled on curves and grades alike
+  // from the leading end; a car facing the other way along the train is turned round
   let xf=train.x;
-  for (const c of train.cars){
+  for (const c of (train.lead?[...train.cars].reverse():train.cars)){
     const xr=railBack(xf,c.L,train.dir), fy=railY(xf), fz=railZ(xf), ry=railY(xr), rz=railZ(xr);
-    const dx=xf-xr, dy=fy-ry, dz=fz-rz;
-    c.m.position.set((xf+xr)/2,(fy+ry)/2+0.35,(fz+rz)/2); c.m.rotation.set(-Math.atan2(dy,Math.hypot(dx,dz)),Math.atan2(dx,dz),0);
+    const dx=xf-xr, dy=fy-ry, dz=fz-rz, back=c.flip!==!!train.lead, pt=-Math.atan2(dy,Math.hypot(dx,dz));
+    c.m.position.set((xf+xr)/2,(fy+ry)/2+0.35,(fz+rz)/2); c.m.rotation.set(back?-pt:pt,Math.atan2(dx,dz)+(back?Math.PI:0),0);
     xf=railBack(xr,train.GAP,train.dir);
   }
   updateTrainLights(); updateCarDoors(dt);
@@ -4471,10 +4527,10 @@ function sndUpdate(dt){
    bogie crosses a rail joint, brakes, horn and doors */
 const JOINT=18;
 function sndTrain(dt){
-  const loco=train.cars[0].m, lp=loco.position, vk=clamp(train.v/train.sp,0,1), moving=train.v>0.3;
+  const loco=leadCar().m, lp=loco.position, vk=clamp(train.v/train.sp,0,1), moving=train.v>0.3;
   const inTun=x=>railState(x)==='tunnel', listenerInTun=inTun(_sl.x)&&Math.abs(_sl.z-railZ(_sl.x))<6;
   const occl=x=>(inTun(x)&&!listenerInTun)?1:0;
-  const tail=train.cars[train.cars.length-1].m.position.x, head=lp.x;
+  const tail=train.cars[train.lead?0:train.cars.length-1].m.position.x, head=lp.x;
   // the rumble comes from the point on the train nearest the listener
   const nx=clamp(_sl.x,Math.min(tail,head),Math.max(tail,head)), ny=railY(nx)+1, nz=railZ(nx);
   sndVoice(sv('tRun','train_run','train',true),dt,easeTo('tRun',moving?0.35+0.65*vk:0,dt,2),lp.x,lp.y+2,lp.z,0.75+0.35*vk,occl(lp.x));
@@ -4685,7 +4741,7 @@ function coachEnter(i,lx,lz){ co.car=i; co.lx=lx; co.lz=lz; co.yaw=yaw-train.car
 function coachStep(dt,turnIn){
   if (mode==='street'){
     if (doorOpen<0.85) return;
-    for (let i=1;i<train.cars.length;i++){ const m=train.cars[i].m; m.updateMatrix(); _cm.copy(m.matrix).invert();
+    for (let i=1;i<train.cars.length-1;i++){ const m=train.cars[i].m; m.updateMatrix(); _cm.copy(m.matrix).invert();
       _cvv.set(player.x,player.y+1,player.z).applyMatrix4(_cm); const lx=_cvv.x, lz=_cvv.z;
       if (Math.abs(_cvv.y)>3 || Math.abs(lx)<CW/2-0.3 || Math.abs(lx)>CW/2+0.9) continue;
       if (Math.abs(Math.abs(lz)-CDZ)<CDW/2-0.15){ coachEnter(i,clamp(lx,-(CW/2+0.6),CW/2+0.6),lz); return; } }
@@ -4705,7 +4761,7 @@ function coachStep(dt,turnIn){
   // halfway across the gap between two coaches the walk passes to the next coach; never into the locomotive
   const HG=CL/2+train.GAP/2;
   if (co.lz>(co.car>1?HG:CL/2-0.05)){ if (co.car>1){ co.car--; co.lz=-HG+0.01; } else co.lz=CL/2-0.05; }
-  else if (co.lz<-(co.car<train.cars.length-1?HG:CL/2-0.05)){ if (co.car<train.cars.length-1){ co.car++; co.lz=HG-0.01; } else co.lz=-CL/2+0.05; }
+  else if (co.lz<-(co.car<train.cars.length-2?HG:CL/2-0.05)){ if (co.car<train.cars.length-2){ co.car++; co.lz=HG-0.01; } else co.lz=-CL/2+0.05; }
   const m=train.cars[co.car].m; m.updateMatrixWorld();
   if (Math.abs(co.lx)>CW/2+0.75){
     // out of an open door onto the platform
@@ -4775,7 +4831,7 @@ function leaveTrain(to){
   const x=player.x, zr=railZ(x), s=(railZ(x+1)-railZ(x-1))/2, l=Math.hypot(1,s), nx=-s/l, nz=1/l;
   let best=null; for (const o of [4.5,-4.5,7,-7,10,-10]){ const px=x+nx*o, pz=zr+nz*o, h=heightAt(px,pz); if (h>0.5){ best=[px,pz,h]; break; } }
   if (best){ player.x=best[0]; player.z=best[1]; player.y=best[2]; } player.vy=0; eyeY=null;
-  mode='street'; sky.visible=true; tunnelK=0; for (const c of train.cars) c.m.visible=true; yaw=Math.atan2(-Math.sin(train.cars[0].m.rotation.y),-Math.cos(train.cars[0].m.rotation.y));
+  mode='street'; sky.visible=true; tunnelK=0; for (const c of train.cars) c.m.visible=true; yaw=Math.atan2(-Math.sin(leadCar().m.rotation.y),-Math.cos(leadCar().m.rotation.y));
   scene.fog.near=90; scene.fog.far=1500; camera.fov=70; camera.updateProjectionMatrix(); glowScale();
   if (to==='above') toggleView();
 }
@@ -4993,7 +5049,7 @@ function frame(now){
       // chase view: behind and above the locomotive, orbited with the mouse, kept clear of the ground
       const zk=((keys.Minus||keys.NumpadSubtract)?1:0)-((keys.Equal||keys.NumpadAdd)?1:0);
       if (zk) chase.d=clamp(chase.d*Math.exp(zk*dt*1.5),10,160);
-      const loco=train.cars[0].m, a=rot+chase.yaw, cp=Math.cos(chase.pitch);
+      const loco=leadCar().m, a=rot+chase.yaw, cp=Math.cos(chase.pitch);
       camTarget.set(loco.position.x+Math.sin(rot)*4, cam.y-0.4, loco.position.z+Math.cos(rot)*4);
       // while the train is underground the camera follows the hillside above it
       if (railState(xe)==='tunnel') chase.lift+=(1-chase.lift)*kf; else chase.lift*=1-kf;
