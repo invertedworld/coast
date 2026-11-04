@@ -548,32 +548,34 @@ function stationNear(x,m=55){ const n=Math.floor(x/ST_SP); for (const k of [n,n-
    the coast road and parallel to it, BR_T either side of the harbour's middle. Like the main line it is a curve
    along the island: over its approach, from the junction (u=0) to the start of the terminus (u=1), its course and
    its height ease from the main line's to the terminus's, z=lerp(railZ(x),zt,smooth(u)) and the same for y, so it
-   leaves the main line tangentially. The approach is long enough that the grade stays under 1 in 40 (the eased
-   blend is steepest in its middle, at 1.5 times the average), the ground along it is never more than 6 m above or
-   7 m below the bed, so that cuttings and embankments suffice, and it crosses nothing it should not. About 45% of
-   the harbours where such a line fits have one. */
-const BR_T=58, BR_OFF=CR_HW+6, brCache=new Map(), brBucket=new Map();
+   leaves the main line tangentially. The approach is long enough that the grade stays under 1 in 33 (the eased
+   blend is steepest in its middle, at 1.5 times the average), the ground along it is never more than 9 m above or
+   10 m below the bed, so that cuttings and embankments suffice, and it crosses nothing it should not. Four in five
+   of the harbours where such a line fits have one, which comes to about one every 12 km; where two would overlap,
+   the western one is kept. */
+const BR_T=58, BR_OFF=CR_HW+12, brCache=new Map(), brBucket=new Map();
 function branchInfo(sd,n){
   const key=n*4+sd; if (brCache.has(key)) return brCache.get(key);
   let B=null; const H=harbourInfo(sd,n);
-  if (H && hash(n,sd>0?1:2,951)<0.45){
-    const zt=coastRoadZ(sd,H.x)+sd*BR_OFF; let ys=0, cnt=0, ok=true;
-    for (let x=H.x-BR_T-20; x<=H.x+BR_T+20 && ok; x+=8){ const h=baseH(x,zt);
-      if (Math.abs(zt-coastRoadZ(sd,x))<CR_HW+4.5 || h<1.4 || h>14 || Math.abs(zt-railZ(x))<22) ok=false; ys+=h; cnt++; }
-    const yt=Math.max(2.2,ys/cnt); const ST=window.__brStat||(window.__brStat={h:0,term:0,lb:0,dz:0,st:0,ground:0,side:0,state:0,cross:0});ST.h++; if(!ok)ST.term++;
+  if (H && hash(n,sd>0?1:2,951)<0.8){
+    // the terminus follows the coast road, a little inland of it, smoothed so that it curves gently
+    const zt=x=>{ let a=0; for (let k=-2;k<=2;k++) a+=coastRoadZ(sd,x+k*20); return a/5+sd*BR_OFF; }; let ys=0, cnt=0, ok=true;
+    for (let x=H.x-BR_T-20; x<=H.x+BR_T+20 && ok; x+=8){ const z=zt(x), h=baseH(x,z);
+      if (sd*(z-coastRoadZ(sd,x))<CR_HW+4 || h<1.4 || h>24 || Math.abs(z-railZ(x))<22) ok=false; ys+=h; cnt++; }
+    const yt=Math.max(2.2,ys/cnt);
     if (ok) for (const dirJ of (hash(n,sd>0?1:2,952)<0.5?[1,-1]:[-1,1])){
       const xs=H.x-dirJ*BR_T, xe=H.x+dirJ*BR_T;
-      for (let Lb=320; Lb<=1800 && !B; Lb+=40){ const xj=xs-dirJ*Lb, yj=railY(xj);
-        if (Lb<60*Math.abs(yj-yt)){ST.lb++; continue;} if (Math.abs(railZ(xj)-zt)>Lb*0.55){ST.dz++; continue;}
-        if (stationNear(xj,220) || stationNear(xs-dirJ*Lb*0.5,140)){ST.st++; continue;}
-        let good=true; const side=Math.sign(zt-railZ(xj))||1;
-        for (let t=0; t<=1.0001 && good; t+=8/Lb){ const x=xj+dirJ*t*Lb, e=smooth(t), z=lerp(railZ(x),zt,e), y=lerp(railY(x),yt,e), g=baseH(x,z);
-          if (railState(x)!=='open' && t<0.25){ good=false; ST.state++; }
-          else if (g>y+6 || g<y-7 || g<0.9){ good=false; ST.ground++; }
-          else if (t>0.3 && side*(z-railZ(x))<14){ good=false; ST.side++; } }
+      for (let Lb=320; Lb<=3000 && !B; Lb+=40){ const xj=xs-dirJ*Lb, yj=railY(xj);
+        if (Lb<50*Math.abs(yj-yt) || Math.abs(railZ(xj)-zt(xj))>Lb*0.55) continue;
+        if (stationNear(xj,130)) continue;
+        let good=true; const side=Math.sign(zt(xj)-railZ(xj))||1;
+        for (let t=0; t<=1.0001 && good; t+=8/Lb){ const x=xj+dirJ*t*Lb, e=smooth(t), z=lerp(railZ(x),zt(x),e), y=lerp(railY(x),yt,e), g=baseH(x,z);
+          if ((railState(x)!=='open' && t<0.1) || g>y+9 || g<y-10 || g<0.9 || (t>0.3 && side*(z-railZ(x))<14)) good=false; }
         for (let i=Math.floor(Math.min(xj,xs)/C)-1; good && i<=Math.floor(Math.max(xj,xs)/C)+1; i++){ const X=railCross(i); if (X && (X.x-xj)*dirJ>-30 && (X.x-xj)*dirJ<Lb*0.4) good=false; }
         if (good) B={sd,n,H,dirJ,xj,xs,xe,zt,yt,Lb,x0:Math.min(xj,xe),x1:Math.max(xj,xe),name:H.name.replace('Porto','Stazione Porto')}; } }
   }
+  // where two branches would overlap, the one to the west is kept
+  if (B) for (let k=1;k<=16 && B;k++){ const A=branchInfo(sd,n-k); if (A && A.x1>B.x0-60 && A.x0<B.x1+60) B=null; }
   if (brCache.size>4000) brCache.clear(); brCache.set(key,B); return B;
 }
 // the branches whose span reaches within 40 m of x
@@ -585,7 +587,7 @@ function branchesAt(x){
 }
 // course, height, and the share of the approach run at x (0 at the junction, 1 from the start of the terminus)
 const brU=(B,x)=>clamp((x-B.xj)/(B.xs-B.xj),0,1);
-function brZ(B,x){ const u=brU(B,x); return u>=1?B.zt:lerp(railZ(x),B.zt,smooth(u)); }
+function brZ(B,x){ const u=brU(B,x); return u>=1?B.zt(x):lerp(railZ(x),B.zt(x),smooth(u)); }
 function brY(B,x){ const u=brU(B,x); return u>=1?B.yt:lerp(railY(x),B.yt,smooth(u)); }
 const brIn=(B,x,m=0)=>x>=B.x0-m && x<=B.x1+m;
 const brTerm=(B,x)=>(x-B.xs)*B.dirJ>=0;

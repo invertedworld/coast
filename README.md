@@ -151,6 +151,10 @@ The line is classified every 2 m as open, viaduct or tunnel: tunnel where the hi
 
 There is one station in each 900 m of line (`ST_SP`), sited on the first level open stretch in its slot and in a town where there is one. Each station has a platform with ramps no steeper than 1 in 7 at both ends, a canopy on iron posts, benches, lamps and a station building.
 
+### Branch lines
+
+Some harbours have a branch line (`branchInfo`), about one every 12 km of coast. The terminus runs parallel to the coast road, 14.8 m inland of it, 58 m either side of the harbour's middle. The approach leaves the main line at a junction and eases its course and height from the main line's to the terminus's, so that it leaves tangentially; it is long enough that the grade stays under 1 in 33. A branch is laid only where the ground along it lies within 9 m above and 10 m below the bed, so that cuttings and embankments suffice, where the junction is clear of stations, tunnels, viaducts and road bridges, and where it does not cross back over the main line. `railPerp` measures the distance to the nearest track, main line or branch, so that streets, squares and houses keep clear of the branches as they do of the main line; the ground is shaped to each branch's bed as it is to the main line's.
+
 ### The train
 
 The train is push-pull: a square-fronted diesel locomotive at each end (`buildLoco`, 13 m long, with a flat cab front, radiator fans on the roof and the coaches' green and cream livery) and four coaches between them. The locomotive at the rear faces outwards, and its lamps show red while those at the front show white; `train.lead` says which end leads, so that the train can reverse without turning. The train consists of its locomotives and coaches, each car spanning the chord between two points on the track one car length apart, with a coupling gap between cars. The cars therefore stay coupled on curves and grades.
