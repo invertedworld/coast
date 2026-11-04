@@ -3580,7 +3580,7 @@ function sndFerries(dt){
   }
 }
 addEventListener('keydown',e=>{ keys[e.code]=true;
-  if (e.code==='KeyV') toggleView();
+  if (e.code==='KeyV' && !e.repeat) toggleView();
   if (e.code==='KeyR' && !e.repeat) toggleTrain();
   if (e.code==='KeyC' && !e.repeat) toggleChase();
   if (e.code==='KeyF' && !e.repeat) toggleFerry();
@@ -3590,7 +3590,7 @@ addEventListener('keydown',e=>{ keys[e.code]=true;
   if (e.code==='KeyN' && !e.repeat){ hour=nightU.value>0.5?10:22; SNDS.hour=Math.floor(hour); }   // to night, or back to day, without the bells striking the jump
   if (e.code==='KeyM' && !e.repeat) setMuted(!muted);
   if (e.code==='Tab'){ e.preventDefault(); if (!e.repeat) try{ if (document.fullscreenElement) document.exitFullscreen(); else { const q=document.documentElement.requestFullscreen(); if (q&&q.catch) q.catch(()=>{}); } }catch(_){} }
-  if ((e.code==='Minus'||e.code==='NumpadSubtract') && mode==='street' && !e.repeat) toggleView();
+  if ((e.code==='Minus'||e.code==='NumpadSubtract') && (mode==='street'||mode==='ferry') && !e.repeat) toggleView();
   if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault(); });
 addEventListener('keyup',e=>{ keys[e.code]=false; });
 /* ---------- game controller (standard mapping): sticks move and look, buttons stand in for keys ---------- */
