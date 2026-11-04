@@ -196,6 +196,7 @@ In the blocks at full detail every house, barn and cottage with walls at least 2
 - **Storeys.** A house of two or more storeys whose room is at least 3.4 m wide and 4.65 m deep has a floor at every storey, reached by straight flights of 13 risers of 20 cm along the side walls. Upper storeys are furnished as bedrooms. Steps, floors and furniture are colliders with a top and a bottom, so that each storey's furniture is passed under from the storey below.
 - **Towers.** A stair of cantilevered treads winds round the walls of a tower to the floor of its top room. A campanile's top room is the belfry, with its bell and open arches.
 - **Churches.** The nave has pews either side of the aisle, a font and lamps, an open roof on trusses, and an apse behind an arch, with the altar on a step. Only the half of the apse cylinder outside the nave is built at full detail. Each side window carries abstract stained glass drawn by `SG_GLSL` in four of six colours chosen by the church's seed. The coloured light on the church's surfaces is found per fragment by tracing a ray towards the sun to the plane of the glass on the sunlit side and reading the glass where it crosses; it is computed for the most recently built church only.
+- **Lighthouses.** A lighthouse on the coast is built at full detail with its doorway cut from the tapering tower (`lhTube`). A stair of stone treads winds round a newel, 20 to the turn, up through the floor of the gallery into the lantern, whose glazed door, turned away from the stairwell, leads out onto the gallery. Lighthouses on rocks at sea cannot be reached and stay closed.
 - **The ferry.** The saloon has rows of seats and a bar, and the wheelhouse a console, the wheel and a chart table. Their doors and walls are worked in the ferry's deck plan (`ferryInside`).
 
 ### Time of day, lighting and shadows
@@ -333,6 +334,6 @@ Setting `window.__freeCam = {p: Vector3, t: Vector3}` places the camera at `p` l
 - Shadows are occasionally lost in a way that depends on the layout; the cause has not been found.
 - The front coach's leading gangway bellows face the locomotive, which has no matching connection.
 - The debug hooks and `window.__freeCam` remain in the code. They have no effect in normal use.
-- The lighthouse towers and the ticket kiosks cannot yet be entered.
+- The ticket kiosks cannot yet be entered.
 - In a narrow tower the stair's first pass along the front wall may run close above the door.
 - Through the window of a shut coach door, the view is mostly of the inside of the opposite door across the vestibule.

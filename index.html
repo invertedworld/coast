@@ -1586,15 +1586,105 @@ function buildHarbour(gb,ch,R,H){
   for (let q=0;q<2;q++){ const x=H.x+(R()-0.5)*H.W*0.5, z=coastZ(S,H.x)-S*H.L*0.55+(R()-0.5)*6; placeBoat(ch,Math.floor(R()*BOATS.length),x,0,z,R()*6.28,true); }
 }
 
+/* ---------- the lighthouse tower, which can be climbed ----------
+   At full detail the tower is built with its doorway cut out of the wall, and inside a stair of stone treads winds
+   round a newel up the tapering tower, through the floor of the gallery into the lantern, from which a glazed door
+   leads out onto the gallery. Heights are relative to the foot of the tower, the top of its plinth. */
+const LH_T=0.3, LH_DH=2.4, LH_DA=0.224, LH_N=28, LH_STEP=Math.PI*2/20;   // wall, doorway height and half-angle, tread angle
+const lhR=(H,y)=>2.5-0.7*clamp(y/H,0,1);   // the outer radius at height y
+// a tapering tube from y=0 to y=H, its radius from r(0) to r(H), with the faces of the doorway left out; inward
+// turns it inside out, for the lining
+function lhTube(H,rOf,inward,y0=0,y1=H,hole=true){
+  const P=[], N=[], rows=hole&&y0<LH_DH?[y0,LH_DH,y1]:[y0,y1], sl=0.7/H;
+  const v=(t,y)=>{ const r=rOf(y); return [r*Math.sin(t),y,r*Math.cos(t)]; }, nrm=t=>{ const l=Math.hypot(1,sl), s=inward?-1:1; return [s*Math.sin(t)/l,s*sl/l,s*Math.cos(t)/l]; };
+  for (let k=0;k+1<rows.length;k++){ const ya=rows[k], yb=rows[k+1];
+    for (let i=0;i<LH_N;i++){ const t0=-Math.PI+2*Math.PI*i/LH_N, t1=t0+2*Math.PI/LH_N, tc=(t0+t1)/2;
+      if (hole && yb<=LH_DH+1e-6 && Math.abs(tc)<LH_DA) continue;
+      const A=v(t0,ya), B=v(t1,ya), Cc=v(t1,yb), D=v(t0,yb), nA=nrm(t0), nB=nrm(t1);
+      const tri=inward?[[A,nA],[Cc,nB],[B,nB],[A,nA],[D,nA],[Cc,nB]]:[[A,nA],[B,nB],[Cc,nB],[A,nA],[Cc,nB],[D,nA]];
+      for (const [p,n] of tri){ P.push(...p); N.push(...n); } } }
+  return {p:new Float32Array(P),n:new Float32Array(N),smooth:true};
+}
+// the treads: tread k turns through LH_STEP and rises 20 cm; the last ones, which pass up into the lantern, are
+// kept within its glazing
+function lhTreads(H){
+  const y0=0.1, yTop=H+0.4, n=Math.round((yTop-y0)/0.2), rise=(yTop-y0)/n, out=[];
+  for (let k=0;k<n;k++){ const top=y0+(k+1)*rise, ta=0.5+k*LH_STEP;   // the first starts beside the door, and the stair passes over it a turn higher
+    const rOut=top>H-2.4?1.0:lhR(H,top)-LH_T-0.04; out.push({k,top,ta,tb:ta+LH_STEP,r0:0.2,r1:rOut}); }
+  return out;
+}
+function lighthouseRoom(ch,L,g,H,top,ry){
+  const D={kind:'lighthouse',x:L.x,z:L.z,rot:ry,base:g+1.6,fl:g+1.7,w:5,d:5,H,top:H+2.2,walls:[],room:null,seed:hash(Math.round(L.x),Math.round(L.z),4441)};
+  D.area={x:L.x,z:L.z,hw:2.6,hd:2.6,rot:ry}; D.clip=[[0,0,0.76,0.76,H+2.2]];
+  const loc=(lx,lz)=>localToWorld(D,lx,lz), B=D.base, adiff=(a,b)=>Math.abs(Math.atan2(Math.sin(a-b),Math.cos(a-b)));
+  // the glazed door faces away from the stairwell left in the lantern's floor by the last treads
+  D.tr=lhTreads(H); { let sx=0, sz=0; for (const t of D.tr.slice(-10)){ sx+=Math.sin((t.ta+t.tb)/2); sz+=Math.cos((t.ta+t.tb)/2); } D.gd=Math.atan2(sx,sz)+Math.PI; }
+  const seg=(r,t,len,th,top,bot)=>{ const [x,z]=loc(r*Math.sin(t),r*Math.cos(t)); return {x,z,hw:len/2,hd:th/2,rot:ry+t,top:top===Infinity?Infinity:B+top,bot:bot===undefined?undefined:B+bot}; };
+  // the wall, in bands three metres high, each as far in as the wall comes at its top; the doorway left open
+  for (let y=0;y<H-0.5;y+=3){ const r=lhR(H,Math.min(H,y+3))-LH_T+0.2, n=24;
+    for (let i=0;i<n;i++){ const t=-Math.PI+2*Math.PI*(i+0.5)/n; if (y<LH_DH && Math.abs(t)<0.32) continue;
+      D.walls.push(seg(r,t,2*Math.PI*r/n+0.08,0.4,y+3,y)); } }
+  D.walls.push({x:L.x,z:L.z,hw:0.2,hd:0.2,rot:ry,top:B+H+0.4});   // the newel
+  for (const t of D.tr){ const tm=(t.ta+t.tb)/2;
+    for (const [a,b] of [[t.r0,(t.r0+t.r1)/2],[(t.r0+t.r1)/2,t.r1]]){ const rm=(a+b)/2; D.walls.push(seg(rm,tm,2*rm*Math.sin(LH_STEP/2)+0.06,b-a,t.top,t.top-0.25)); } }
+  // the lantern's floor, round the stairwell left by the last treads, out to the edge of its base
+  const last=D.tr.slice(-10), hatch=t=>last.some(q=>{ const d=Math.atan2(Math.sin(t-(q.ta+q.tb)/2),Math.cos(t-(q.ta+q.tb)/2)); return Math.abs(d)<LH_STEP; });
+  for (let i=0;i<20;i++){ const t=2*Math.PI*(i+0.5)/20; if (hatch(t)) continue; D.walls.push(seg(0.75,t,0.75*Math.sin(Math.PI/20)*2+1.2*0.25,1.1,H+0.4,H+0.15)); }
+  D.walls.push({x:L.x,z:L.z,hw:0.3,hd:0.3,rot:ry,top:Infinity,bot:B+H+0.45});   // the lamp
+  // the glazing, with its door towards the land, the gallery outside it and the railing round the gallery
+  for (let i=0;i<16;i++){ const t=-Math.PI+2*Math.PI*(i+0.5)/16; if (adiff(t,D.gd)<0.3) continue; D.walls.push(seg(1.15,t,2*Math.PI*1.15/16+0.05,0.12,H+2.3,H+0.45)); }
+  for (let i=0;i<20;i++){ const t=2*Math.PI*(i+0.5)/20; D.walls.push(seg(1.75,t,2*Math.PI*1.75/20+0.1,0.95,H,H-0.5)); D.walls.push(seg(2.25,t,2*Math.PI*2.25/20+0.05,0.1,H+1.3,H+0.05)); }   // the railing, too high to step onto from the lantern
+  { const [hx,hz]=loc(-DR,lhR(H,1)-LH_T/2);
+    (ch.doors||(ch.doors=[])).push({x:L.x,z:L.z,rot:ry,w:5,d:5,hx,hz,y:B+DF,fl:B+DF,s:1,lw:DOOR_W,leaf:'house',owner:D,a:0,av:0,idle:9,col:hex('#2f4d6b'),idx:-1}); }
+  (ch.rooms||(ch.rooms=[])).push(D);
+  ch.obbs.push({x:L.x,z:L.z,hw:2.5,hd:2.5,rot:ry,top:Infinity,room:D});
+  return D;
+}
+function buildLighthouseGeo(D){
+  const gb=new GB(0), H=D.H, M=mat(D.x,D.base,D.z,1,1,1,D.rot), stone=hex('#d9ccb6'), dark=hex('#4a4440'), wood=hex('#6e4e34');
+  const B=(x,y,z,sx,sy,sz,col,surf=0,ry=0)=>gb.add(T.box, mm(M,mat(x,y,z,sx,sy,sz,ry)), col, null, surf);
+  // the lining of the tower, the ceiling under the gallery with the hatch, and the shaft up into the lantern
+  gb.add(lhTube(H,y=>lhR(H,y)-LH_T,true,0,H-0.5), M, hex('#efe9dc'), null, 0);
+  const A=[]; for (let i=0;i<LH_N;i++){ const t0=2*Math.PI*i/LH_N, t1=t0+2*Math.PI/LH_N, ri=1.1, ro=lhR(H,H-0.5)-LH_T, y=H-0.52;
+    q3n(A,[ri*Math.sin(t0),y,ri*Math.cos(t0)],[ro*Math.sin(t0),y,ro*Math.cos(t0)],[ro*Math.sin(t1),y,ro*Math.cos(t1)],[ri*Math.sin(t1),y,ri*Math.cos(t1)],[0,-1,0]); }
+  gb.add(triTpl(A), M, wood, null, SW);
+  gb.add(lhTube(H,()=>1.1,true,H-0.52,H+0.41,false), M, hex('#d8d0c2'), null, 0);
+  // the floor of the tower, and the reveal of the doorway
+  { const F=[]; for (let i=0;i<LH_N;i++){ const t0=2*Math.PI*i/LH_N, t1=t0+2*Math.PI/LH_N, r=lhR(H,0)-LH_T;
+      F.push(0,DF,0, r*Math.sin(t1),DF,r*Math.cos(t1), r*Math.sin(t0),DF,r*Math.cos(t0)); }
+    gb.add(triTpl(F), M, stone, null, SS); }
+  { const R=[], ro=lhR(H,0), ri=ro-LH_T, a=LH_DA;
+    for (const s of [-1,1]) q3n(R,[s*ro*Math.sin(a),0,ro*Math.cos(a)],[s*ri*Math.sin(a),0,ri*Math.cos(a)],[s*ri*Math.sin(a),LH_DH,ri*Math.cos(a)],[s*ro*Math.sin(a),LH_DH,ro*Math.cos(a)],[-s,0,0]);
+    q3n(R,[-ro*Math.sin(a),LH_DH,ro*Math.cos(a)],[ro*Math.sin(a),LH_DH,ro*Math.cos(a)],[ri*Math.sin(a),LH_DH,ri*Math.cos(a)],[-ri*Math.sin(a),LH_DH,ri*Math.cos(a)],[0,-1,0]);
+    q3n(R,[-ro*Math.sin(a),DF,ro*Math.cos(a)],[ro*Math.sin(a),DF,ro*Math.cos(a)],[ri*Math.sin(a),DF,ri*Math.cos(a)],[-ri*Math.sin(a),DF,ri*Math.cos(a)],[0,1,0]);
+    gb.add(triTpl(R), M, stone, null, SS); }
+  // the newel and the treads, each a wedge of stone in two lengths
+  gb.add(T.cyl, mm(M,mat(0,0,0,0.42,H+0.4,0.42)), stone, null, SS);
+  for (const t of D.tr){ const tm=(t.ta+t.tb)/2;
+    for (const [a,b] of [[t.r0,(t.r0+t.r1)/2],[(t.r0+t.r1)/2,t.r1]]){ const rm=(a+b)/2, w=2*b*Math.sin(LH_STEP/2)+0.02;
+      gb.add(T.box, mm(M,mat(rm*Math.sin(tm),t.top-0.16,rm*Math.cos(tm),w,0.16,b-a+0.01,tm)), stone, null, SS); } }
+  // the lantern: its floor round the hatch, the lamp with its lens, and a doorway in the glazing to the gallery
+  const last=D.tr.slice(-10);
+  { const F=[]; for (let i=0;i<20;i++){ const t0=2*Math.PI*i/20, t1=t0+2*Math.PI/20, tm=(t0+t1)/2;
+      if (last.some(q=>Math.abs(Math.atan2(Math.sin(tm-(q.ta+q.tb)/2),Math.cos(tm-(q.ta+q.tb)/2)))<LH_STEP)) continue;
+      F.push(0,H+0.41,0, 1.1*Math.sin(t1),H+0.41,1.1*Math.cos(t1), 1.1*Math.sin(t0),H+0.41,1.1*Math.cos(t0)); }
+    gb.add(triTpl(F), M, wood, null, SW); }
+  gb.add(T.cyl8, mm(M,mat(0,H+0.41,0,0.5,0.7,0.5)), dark, null);
+  gb.add(T.cyl, mm(M,mat(0,H+1.1,0,0.55,0.75,0.55)), hex('#fff4cc'), null);
+  for (const s of [-1,1]){ const t=D.gd+s*0.37; gb.add(T.cyl8, mm(M,mat(1.12*Math.sin(t),H+0.41,1.12*Math.cos(t),0.07,1.85,0.07)), dark, null); }
+  return gb.geometry(D.x,D.z);
+}
 function buildLighthouse(gb,ch,R,L){
   const {x,z,g,H}=L, stone=shade(C_.stone,R,0.03), dark=hex('#34312f'), white=C_.white, lamp=hex('#ffe9a8');
   let gmin=g; for (let a=0;a<6.28;a+=0.5) gmin=Math.min(gmin,heightAt(x+Math.cos(a)*3.6,z+Math.sin(a)*3.6));
   // a stone plinth, then a tower that narrows as it rises
   gb.add(T.cyl, mat(x,gmin-1.2,z,7.2,g+1.6-(gmin-1.2),7.2), stone, gmin, SS);
   gb.add(T.cyl, mat(x,g+1.6,z,7.5,0.14,7.5), C_.trim, null, SS);
-  gb.add(T.taper, mat(x,g+1.6,z,5,H,5), white, g+1.6, SP);
-  const top=g+1.6+H, ry=Math.atan2(L.ix,L.iz);
-  gb.add(T.boxC, mat(x+L.ix*2.45,g+2.75,z+L.iz*2.45,1.0,2.1,0.12,ry), C_.door, null, SW);
+  const top=g+1.6+H, ry=Math.atan2(L.ix,L.iz), LR=gb.lod===0 && L.kind!=='rock'?lighthouseRoom(ch,L,g,H,top,ry):null;
+  if (LR){ gb.add(lhTube(H,y=>lhR(H,y),false), mat(x,g+1.6,z,1,1,1,ry), white, g+1.6, SP);
+    const [lx,lz]=localToWorld(LR,0,lhR(H,LH_DH)+0.02); gb.add(T.boxC, mat(lx,g+1.6+LH_DH+0.08,lz,1.4,0.16,0.14,ry), C_.trim, null, SS); }
+  else { gb.add(T.taper, mat(x,g+1.6,z,5,H,5), white, g+1.6, SP);
+    gb.add(T.boxC, mat(x+L.ix*2.45,g+2.75,z+L.iz*2.45,1.0,2.1,0.12,ry), C_.door, null, SW); }
   for (const [h,s] of [[0.3,1],[0.55,-1],[0.8,1]]){ const r=lerp(2.5,1.8,h)+0.02;
     gb.add(T.boxC, mat(x+L.ix*s*r,g+1.6+h*H,z+L.iz*s*r,0.5,0.9,0.1,ry), C_.win, null); }
   // the gallery with its railing, the glazed lantern and the dome
@@ -1607,7 +1697,7 @@ function buildLighthouse(gb,ch,R,L){
   gb.add(T.cone, mat(x,top+2.46,z,2.4,1.3,2.4), hex('#a33b32'), null);
   gb.add(T.sph, mat(x,top+3.8,z,0.4,0.4,0.4), dark, null);
   gb.add(T.cyl8, mat(x,top+3.9,z,0.06,1.0,0.06), dark, null);
-  ch.circles.push({x,z,r:2.6,top:Infinity});
+  if (!LR) ch.circles.push({x,z,r:2.6,top:Infinity});
   if (L.kind==='rock') for (let a=0;a<18;a++){ const an=a/18*6.283+R()*0.3, ca=Math.cos(an), sa=Math.sin(an); let r=4;
     while (r<30 && heightAtExact(x+ca*r,z+sa*r)>0.4) r+=0.7;
     const s=1.2+R()*1.8, bx=x+ca*(r+R()*1.5), bz=z+sa*(r+R()*1.5);
@@ -3826,6 +3916,7 @@ const ROOM_WALLS=['#f2ece2','#efe6d6','#f4efe6','#ece3d3','#f1e7d8'].map(hex), R
 const ROOM_FLOORS=['#b4694c','#a95f45','#c07a58','#9c8a72'].map(hex), ROOM_WOOD=['#7a5a3e','#6e4e34','#86664a'].map(hex);
 function buildRoomGeo(D){
   if (D.kind==='tower') return buildTowerGeo(D);
+  if (D.kind==='lighthouse') return buildLighthouseGeo(D);
   const R=rng(D.seed), gb=new GB(0), H=mat(D.x,D.base,D.z,1,1,1,D.rot), iw=D.iw, zf=D.zf, zb=D.zb, ao=D.base;
   const wallC=pick(R,ROOM_WALLS).clone(), dadoC=pick(R,ROOM_DADO), floorC=pick(R,ROOM_FLOORS).clone(), wood=pick(R,ROOM_WOOD), dark=wood.clone().multiplyScalar(0.6);
   const boards=wood.clone().multiplyScalar(1.15), stairC=R()<0.6?shade(C_.stone,R,0.03):wood, floorS=R()<0.75?SS:SW, barn=D.kind==='barn';
