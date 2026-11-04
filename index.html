@@ -551,31 +551,42 @@ function stationNear(x,m=55){ const n=Math.floor(x/ST_SP); for (const k of [n,n-
    siding's, z=lerp(railZ(x),zt(x),smooth(u)) and the same for y, so that it leaves the main line tangentially. The
    approach is long enough that the grade stays under 1 in 33 (the eased blend is steepest in its middle, at 1.5
    times the average), the ground along it is never more than 15 m above or 14 m below the bed, so that cuttings
-   and embankments suffice, and it crosses nothing it should not. Four in five of the harbours where such a line fits
-   have one; where two would overlap, the western one is kept. */
-const BR_Q=8.5, BR_Y=1.6, brCache=new Map(), brBucket=new Map();
+   and embankments suffice, and it crosses nothing it should not. Four in five harbours are candidates. */
+const BR_Q=8.5, BR_Y=1.6, BR_ZONE=60000, brCache=new Map(), brBucket=new Map(), brZones=new Map();
+// whether a goods line fits to harbour (sd,n) with its points facing dirJ: the line, or null
+function branchFit(sd,n,dirJ){
+  const H=harbourInfo(sd,n); if (!H || hash(n,sd>0?1:2,951)>=0.8) return null;
+  // the siding follows the shore BR_Q inland of it, smoothed so that it curves gently
+  const T=H.W/2+12, zt=x=>{ let a=0; for (let k=-2;k<=2;k++) a+=coastZ(sd,x+k*8); return a/5+sd*BR_Q; };
+  for (let x=H.x-T-10; x<=H.x+T+10; x+=6){ const z=zt(x), s=sd*(z-coastZ(sd,x));
+    if (s<2.5 || s>15 || sd*(coastRoadZ(sd,x)-z)<CR_HW+1.5 || Math.abs(z-railZ(x))<22) return null; }
+  const yt=BR_Y, xs=H.x-dirJ*T, xe=H.x+dirJ*T;
+  for (let Lb=320; Lb<=3600; Lb+=40){ const xj=xs-dirJ*Lb, yj=railY(xj);
+    if (Lb<45*Math.abs(yj-yt) || Math.abs(railZ(xj)-zt(xj))>Lb*0.55) continue;
+    if (stationNear(xj,130)) continue;
+    let good=true; const side=Math.sign(zt(xj)-railZ(xj))||1;
+    for (let t=0; t<=1.0001 && good; t+=8/Lb){ const x=xj+dirJ*t*Lb, e=smooth(t), z=lerp(railZ(x),zt(x),e), y=lerp(railY(x),yt,e), g=baseH(x,z);
+      if ((railState(x)!=='open' && t<0.04) || g>y+18 || g<y-16 || g<(t>0.8?0.2:0.9) || (t>0.3 && side*(z-railZ(x))<14)) good=false; }
+    for (let i=Math.floor(Math.min(xj,xs)/C)-1; good && i<=Math.floor(Math.max(xj,xs)/C)+1; i++){ const X=railCross(i); if (X && (X.x-xj)*dirJ>-30 && (X.x-xj)*dirJ<Lb*0.4) good=false; }
+    if (good) return {sd,n,H,dirJ,xj,xs,xe,zt,yt,Lb,T,x0:Math.min(xj,xe),x1:Math.max(xj,xe),name:H.name}; }
+  return null;
+}
+// The goods lines of each 60 km stretch of island, taken from west to east, face alternately west and east: the
+// first may face either way, and after it each faces the other way from the one before (dirJ -1 for points facing
+// west-bound trains, 1 for east-bound), a harbour where the line will not fit the way its turn requires being passed
+// over. A goods train leaving a quay along the main line therefore comes, at the next goods line, to points that
+// face it. Lines that would overlap are not laid.
+function branchZone(zi){
+  let Z=brZones.get(zi); if (Z) return Z; Z=new Map();
+  const L=[]; for (let n=Math.floor(zi*BR_ZONE/HARB)-1; n<=Math.floor((zi+1)*BR_ZONE/HARB)+1; n++) for (const sd of SIDES){ const H=harbourInfo(sd,n);
+    if (H && H.x>=zi*BR_ZONE && H.x<(zi+1)*BR_ZONE) L.push([H.x,sd,n]); }
+  L.sort((a,b)=>a[0]-b[0]); let want=-1, prev=null;
+  for (const [,sd,n] of L){ const B=branchFit(sd,n,want)||(prev?null:branchFit(sd,n,-want)); if (!B || (prev && B.x0<prev.x1+60)) continue; Z.set(n*4+sd,B); prev=B; want=-B.dirJ; }
+  if (brZones.size>200) brZones.clear(); brZones.set(zi,Z); return Z;
+}
 function branchInfo(sd,n){
   const key=n*4+sd; if (brCache.has(key)) return brCache.get(key);
-  let B=null; const H=harbourInfo(sd,n);
-  if (H && hash(n,sd>0?1:2,951)<0.8){
-    // the siding follows the shore BR_Q inland of it, smoothed so that it curves gently
-    const T=H.W/2+12, zt=x=>{ let a=0; for (let k=-2;k<=2;k++) a+=coastZ(sd,x+k*8); return a/5+sd*BR_Q; }; let ok=true;
-    for (let x=H.x-T-10; x<=H.x+T+10 && ok; x+=6){ const z=zt(x), s=sd*(z-coastZ(sd,x));
-      if (s<2.5 || s>15 || sd*(coastRoadZ(sd,x)-z)<CR_HW+1.5 || Math.abs(z-railZ(x))<22) ok=false; }
-    const yt=BR_Y;
-    if (ok) for (const dirJ of (hash(n,sd>0?1:2,952)<0.5?[1,-1]:[-1,1])){
-      const xs=H.x-dirJ*T, xe=H.x+dirJ*T;
-      for (let Lb=320; Lb<=3000 && !B; Lb+=40){ const xj=xs-dirJ*Lb, yj=railY(xj);
-        if (Lb<50*Math.abs(yj-yt) || Math.abs(railZ(xj)-zt(xj))>Lb*0.55)continue;
-        if (stationNear(xj,130)) continue;
-        let good=true; const side=Math.sign(zt(xj)-railZ(xj))||1;
-        for (let t=0; t<=1.0001 && good; t+=8/Lb){ const x=xj+dirJ*t*Lb, e=smooth(t), z=lerp(railZ(x),zt(x),e), y=lerp(railY(x),yt,e), g=baseH(x,z);
-          if ((railState(x)!=='open' && t<0.04) || g>y+15 || g<y-14 || g<(t>0.8?0.2:0.9) || (t>0.3 && side*(z-railZ(x))<14)) good=false; }
-        for (let i=Math.floor(Math.min(xj,xs)/C)-1; good && i<=Math.floor(Math.max(xj,xs)/C)+1; i++){ const X=railCross(i); if (X && (X.x-xj)*dirJ>-30 && (X.x-xj)*dirJ<Lb*0.4) good=false; }
-        if (good) B={sd,n,H,dirJ,xj,xs,xe,zt,yt,Lb,T,x0:Math.min(xj,xe),x1:Math.max(xj,xe),name:H.name}; } }
-  }
-  // where two branches would overlap, the one to the west is kept
-  if (B) for (let k=1;k<=16 && B;k++){ const A=branchInfo(sd,n-k); if (A && A.x1>B.x0-60 && A.x0<B.x1+60) B=null; }
+  const H=harbourInfo(sd,n), B=H?branchZone(Math.floor(H.x/BR_ZONE)).get(key)||null:null;
   if (brCache.size>4000) brCache.clear(); brCache.set(key,B); return B;
 }
 // the branches whose span reaches within 40 m of x
@@ -3741,7 +3752,7 @@ function buildWagon(kind){
 }
 const SHUNTER=buildShunter(), WAGON={van:buildWagon('van'),open:buildWagon('open'),tank:buildWagon('tank'),flat:buildWagon('flat')};
 const GOODS_SPEC=[SHUNTER,...['van','open','tank','flat','van','van','open','flat','tank','tank','open','van'].map(k=>WAGON[k]),SHUNTER];
-const goods={cars:[],B:null,x:0,dir:1,lead:0,v:0,wait:0,phase:'quay',check:0};
+const goods={cars:[],R:null,x:0,dir:1,lead:0,v:0,wait:0,toB:false,legs:[],hold:null,check:0};
 GOODS_SPEC.forEach((spec,i)=>{ const loco=i===0||i===GOODS_SPEC.length-1, m=new THREE.Mesh(spec.geo,matB); m.castShadow=true; m.receiveShadow=true; m.rotation.order='YXZ'; m.visible=false; world.add(m);
   goods.cars.push({m,L:spec.L,loco,flip:i===GOODS_SPEC.length-1,lamps:loco?locoLamps(m,SHUNT_L,2.85):null}); });
 // a point a given chord length behind (dir=1) or ahead (dir=-1) of x along a branch
@@ -3749,33 +3760,56 @@ function brBack(B,x,D,dir){ let u=D;
   const z0=brZ(B,x), y0=brY(B,x);
   for (let k=0;k<5;k++){ const x1=x-dir*u, c=Math.hypot(u,brZ(B,x1)-z0,brY(B,x1)-y0); u*=D/c; }
   return x-dir*u; }
-// the goods line nearest the player, within 3 km
-function nearestBranch(){ let best=null, bd=3000;
-  for (const sd of SIDES) for (let n=Math.floor((player.x-4500)/HARB); n<=Math.floor((player.x+4500)/HARB); n++){ const B=branchInfo(sd,n); if (!B) continue;
+// The goods train runs between two quays. Leaving a quay it climbs to the points, waits there for a path, runs
+// along the main line without stopping, and turns off at the next points facing it, down to the other quay; there
+// it waits while it is unloaded and loaded, and goes back the same way, reversing only at the quays. Its course is
+// one curve along x: the first quay's branch on its side of that quay's points, the second's beyond the other
+// points, and the main line between.
+function nearestBranch(){ let best=null, bd=4000;
+  for (const sd of SIDES) for (let n=Math.floor((player.x-5500)/HARB); n<=Math.floor((player.x+5500)/HARB); n++){ const B=branchInfo(sd,n); if (!B) continue;
     const xm=(B.x0+B.x1)/2, d=Math.hypot(player.x-xm,player.z-brZ(B,xm))-(B.x1-B.x0)/2; if (d<bd){ bd=d; best=B; } }
   return best; }
+// the next quay a train leaving A along the main line can turn down to: its points face the train
+function partnerOf(A){ const t=-A.dirJ; let best=null;
+  for (let k=1;k<=90 && !best;k++){ const n=A.n+t*k; for (const sd of SIDES){ const B=branchInfo(sd,n);
+    if (B && B!==A && B.dirJ===t && (B.xj-A.xj)*t>60 && (!best || (B.xj-best.xj)*t<0)) best=B; } }
+  return best; }
+const onA=(R,x)=>(x-R.A.xj)*R.A.dirJ>0, onB=(R,x)=>R.B && (x-R.B.xj)*R.B.dirJ>0;
+function routeZ(R,x){ return onA(R,x)?brZ(R.A,x):onB(R,x)?brZ(R.B,x):railZ(x); }
+function routeY(R,x){ return onA(R,x)?brY(R.A,x):onB(R,x)?brY(R.B,x):railY(x); }
+function routeBack(R,x,D,dir){ let u=D; const z0=routeZ(R,x), y0=routeY(R,x);
+  for (let k=0;k<5;k++){ const x1=x-dir*u, c=Math.hypot(u,routeZ(R,x1)-z0,routeY(R,x1)-y0); u*=D/c; }
+  return x-dir*u; }
+// the stops on the way from one end to the other: the points to be passed, then the quay (or, with no second
+// quay, a point short of the first quay's points)
+function goodsLeg(R,toB){ const A=R.A, B=R.B, t=-A.dirJ;
+  if (!B) return toB?[{x:A.xj+A.dirJ*A.Lb*0.14,wait:18}]:[{x:A.xe-A.dirJ*3,wait:30}];
+  return toB?[{x:A.xj-t*30,wait:8,path:A.xj},{x:B.xe-t*3,wait:30}]:[{x:B.xj+t*30,wait:8,path:B.xj},{x:A.xe+t*3,wait:30}]; }
 function updateGoods(dt){
-  goods.check-=dt;
-  if (goods.check<=0){ goods.check=2; const B=nearestBranch();
-    if (B!==goods.B){ goods.B=B; for (const c of goods.cars) c.m.visible=!!B;
-      // a new line: the train starts at the quay, its leading locomotive towards the buffers, being loaded
-      if (B){ goods.lead=0; goods.dir=B.dirJ; goods.x=B.xe-B.dirJ*3; goods.v=0; goods.wait=10+Math.random()*20; goods.phase='quay'; } } }
-  const B=goods.B; if (!B) return;
-  if (goods.wait>0){ goods.wait-=dt; goods.v=0;
-    if (goods.wait<=0){ // reverse: the other locomotive leads from where the rear of the train stands
-      goods.lead=1-goods.lead; goods.dir=-goods.dir; goods.x=goods.tail; goods.phase=goods.phase==='quay'?'up':'down'; } }
-  else { const target=goods.phase==='up'?B.xj+B.dirJ*B.Lb*0.14:B.xe-B.dirJ*3, d=(target-goods.x)*goods.dir;
-    const want=Math.min(8,Math.sqrt(2*0.5*Math.max(0,d))); goods.v+=clamp(want-goods.v,-1.0*dt,0.4*dt);
-    const step=goods.v*dt; if (d<=step+0.01){ goods.x=target; goods.v=0; goods.wait=goods.phase==='up'?18:30; goods.phase=goods.phase==='up'?'junction':'quay'; }
-    else goods.x+=goods.dir*step; }
-  let xf=goods.x;
-  for (const c of (goods.lead?[...goods.cars].reverse():goods.cars)){
-    const xr=brBack(B,xf,c.L,goods.dir), fy=brY(B,xf), fz=brZ(B,xf), ry=brY(B,xr), rz=brZ(B,xr), dx=xf-xr, dy=fy-ry, dz=fz-rz, back=c.flip!==!!goods.lead, pt=-Math.atan2(dy,Math.hypot(dx,dz));
+  const g=goods; g.check-=dt;
+  if (g.check<=0){ g.check=2; const A=nearestBranch(), R=g.R;
+    if (!(R && A && (A===R.A || A===R.B))){ g.R=A?{A,B:partnerOf(A)}:null; for (const c of g.cars) c.m.visible=!!g.R;
+      // a new route: the train starts at the first quay, its leading shunter towards the buffers, being loaded
+      if (g.R){ g.lead=0; g.dir=A.dirJ; g.x=A.xe-A.dirJ*3; g.v=0; g.wait=10+Math.random()*20; g.toB=false; g.legs=[]; } } }
+  const R=g.R; if (!R) return;
+  if (g.wait>0){ g.wait-=dt; g.v=0;
+    // at a quay it reverses: the other shunter leads from where the rear of the train stands
+    if (g.wait<=0 && !g.legs.length){ g.lead=1-g.lead; g.dir=-g.dir; g.x=g.tail; g.toB=!g.toB; g.legs=goodsLeg(R,g.toB); }
+    // at the points it waits on while the passenger train is near them
+    if (g.wait<=0 && g.hold && Math.abs(train.x-g.hold)<900) g.wait=2; }
+  else if (g.legs.length){ const L=g.legs[0], d=(L.x-g.x)*g.dir, main=!onA(R,g.x) && !onB(R,g.x);
+    const want=Math.min(main?12:8,Math.sqrt(2*0.5*Math.max(0,d))); g.v+=clamp(want-g.v,-1.0*dt,0.4*dt);
+    const step=g.v*dt; if (d<=step+0.01){ g.x=L.x; g.v=0; g.wait=L.wait; g.hold=L.path||null; g.legs.shift(); }
+    else g.x+=g.dir*step; }
+  else g.wait=1;
+  let xf=g.x;
+  for (const c of (g.lead?[...g.cars].reverse():g.cars)){
+    const xr=routeBack(R,xf,c.L,g.dir), fy=routeY(R,xf), fz=routeZ(R,xf), ry=routeY(R,xr), rz=routeZ(R,xr), dx=xf-xr, dy=fy-ry, dz=fz-rz, back=c.flip!==!!g.lead, pt=-Math.atan2(dy,Math.hypot(dx,dz));
     c.m.position.set((xf+xr)/2,(fy+ry)/2+0.35,(fz+rz)/2); c.m.rotation.set(back?-pt:pt,Math.atan2(dx,dz)+(back?Math.PI:0),0);
-    xf=brBack(B,xr,0.8,goods.dir); }
-  goods.tail=brBack(B,xf,-0.8,goods.dir);
-  const lead=goods.cars[goods.lead?goods.cars.length-1:0];
-  for (const c of goods.cars) if (c.lamps) for (const l of c.lamps) l.material=c===lead?lampWhite:lampRed;
+    xf=routeBack(R,xr,0.8,g.dir); }
+  g.tail=routeBack(R,xf,-0.8,g.dir);
+  const lead=g.cars[g.lead?g.cars.length-1:0];
+  for (const c of g.cars) if (c.lamps) for (const l of c.lamps) l.material=c===lead?lampWhite:lampRed;
 }
 
 /* ================= island ferries ================= */
@@ -4835,7 +4869,7 @@ function sndTrain(dt){
 /* the goods train: its engine at the leading shunter, a horn and the clatter of the couplings as it sets off, its
    brakes as it stops, the rail joints under its wheels, and the lever of the points pulled while it waits there */
 function sndGoods(dt){
-  const g=goods, B=g.B, on=!!B && Math.hypot(g.cars[0].m.position.x-_sl.x,g.cars[0].m.position.z-_sl.z)<600;
+  const g=goods, on=!!g.R && Math.hypot(g.cars[0].m.position.x-_sl.x,g.cars[0].m.position.z-_sl.z)<600;
   const lead=g.cars[g.lead?g.cars.length-1:0].m, lp=lead.position, vk=clamp(g.v/8,0,1);
   sndVoice(sv('gRun','goods_run','train',true),dt,easeTo('gRun',on&&g.v>0.3?0.35+0.65*vk:0,dt,2),lp.x,lp.y+2,lp.z,0.7+0.3*vk);
   sndVoice(sv('gIdle','goods_idle','train',true),dt,easeTo('gIdle',on&&g.v<1.2?1:0,dt,1.5),lp.x,lp.y+2,lp.z,0.9);
@@ -4843,7 +4877,7 @@ function sndGoods(dt){
   if ((SNDS.gWait??0)>0 && g.wait<=0){ sndPlay('goods_start','train',[lp.x,lp.y+2,lp.z]); sndPlay('goods_horn','train',[lp.x,lp.y+3,lp.z],{delay:0.4});
     g.cars.forEach((c,i)=>{ if (i) sndPlay('goods_buffer','train',[c.m.position.x,c.m.position.y+0.8,c.m.position.z],{delay:0.6+i*0.35,rate:0.8}); }); SNDS.gStop=false; }
   if (g.wait<=0 && g.v<SNDS.gV-1e-4 && g.v<3 && !SNDS.gStop){ SNDS.gStop=true; sndPlay('goods_stop','train',[lp.x,lp.y+2,lp.z]); }
-  if (g.phase==='junction' && (SNDS.gWait??0)>12 && g.wait<=12){ const xl=B.xj+B.dirJ*12; sndPlay('points_lever','world',[xl,railY(xl)+1,railZ(xl)+(Math.sign(railZ(B.xj)-B.zt(B.xj))||1)*3.2],{rate:0.6}); }
+  if (g.hold && (SNDS.gWait??0)>4 && g.wait<=4){ for (const B of [g.R.A,g.R.B]) if (B && B.xj===g.hold){ const xl=B.xj+B.dirJ*12; sndPlay('points_lever','world',[xl,railY(xl)+1,railZ(xl)+(Math.sign(railZ(B.xj)-B.zt(B.xj))||1)*3.2],{rate:0.6}); } }
   if (g.v>0.3){ let b=0; for (const c of g.cars){ c.m.updateMatrix(); for (const e of [-1,1]){ _bv.set(0,-0.3,e*(c.L/2-2)).applyMatrix4(c.m.matrix); const prev=(SNDS.gJ||(SNDS.gJ=[]))[b];
       if (prev!==undefined && Math.floor(prev/JOINT)!==Math.floor(_bv.x/JOINT) && Math.abs(_bv.x-_sl.x)<200) sndPlay('rail_joint','train',[_bv.x,_bv.y,_bv.z],{gain:0.3+0.5*Math.sqrt(vk),rate:0.95+Math.random()*0.05});
       SNDS.gJ[b++]=_bv.x; } } } else SNDS.gJ=[];
