@@ -80,6 +80,7 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
     <div class="group"><h3>Train and ferry</h3>
       <div class="row"><span><kbd>R</kbd></span><span>Ride in front of the train. R or V again steps off beside the track</span></div>
       <div class="row"><span><kbd>C</kbd></span><span>Follow the train from behind. The mouse moves the camera round it and <kbd>+</kbd><kbd>−</kbd> change the distance. C or V again steps off beside the track</span></div>
+      <div class="row"><span><kbd>G</kbd></span><span>Go to the goods train, beside its leading shunter</span></div>
       <div class="row"><span><kbd>F</kbd></span><span>Board the nearest ferry wherever it is. While it lies at a landing it may also be boarded by its gangway. On board, W A S D walk about the decks and the mouse looks round. F or V again steps ashore, or at the next landing while the ferry is under way</span></div>
     </div>
     <div class="group"><h3>Buildings</h3>
@@ -4912,6 +4913,7 @@ addEventListener('keydown',e=>{ keys[e.code]=true;
   if (e.code==='KeyR' && !e.repeat) toggleTrain();
   if (e.code==='KeyC' && !e.repeat) toggleChase();
   if (e.code==='KeyF' && !e.repeat) toggleFerry();
+  if (e.code==='KeyG' && !e.repeat) jumpToGoods();
   if (e.code==='KeyB') setTilt(!tiltShift);
   if (e.code==='KeyH' && !e.repeat){ helpEl.hidden=!helpEl.hidden; lastCell=null; }
   if (e.code==='KeyI' && !e.repeat) newIsland();
@@ -5007,6 +5009,21 @@ function ferryDeckClamp(){
 }
 const ferryFloor=()=>fe.lv===0?FD0:fe.lv===2?FD1:FD0+clamp((fe.lz-FSTB)/(FUZ0-FSTB),0,1)*(FD1-FD0);
 let prevModeF='street';
+// G: to the goods train, beside its leading shunter; if none works near the player, to the nearest goods line with a
+// partner quay, where its train is being loaded
+function jumpToGoods(){
+  if (mode==='coach') mode='street'; if (riding()) leaveTrain(prevMode); if (mode==='ferry'||ridden) leaveFerry('street');
+  const g=goods, near=g.R && Math.hypot(g.cars[0].m.position.x-player.x,g.cars[0].m.position.z-player.z)<6000;
+  if (!near){ let A=null;
+    for (let k=0;k<460 && !A;k++) for (const sg of (k?[1,-1]:[1])) for (const sd of SIDES){ const n=Math.floor(player.x/HARB)+sg*k, B=branchInfo(sd,n); if (B && partnerOf(B) && !A) A=B; }
+    if (!A) return;
+    g.R={A,B:partnerOf(A)}; g.lead=0; g.dir=A.dirJ; g.x=A.xe-A.dirJ*3; g.v=0; g.wait=15+Math.random()*15; g.toB=false; g.legs=[]; g.check=2;
+    for (const c of g.cars) c.m.visible=true; updateGoods(0); }
+  const m=g.cars[g.lead?g.cars.length-1:0].m, ry=m.rotation.y; let nx=Math.cos(ry), nz=-Math.sin(ry); if (Math.sign(nz)!==g.R.A.sd){ nx=-nx; nz=-nz; }
+  const px=m.position.x+Math.sin(ry)*6+nx*7, pz=m.position.z+Math.cos(ry)*6+nz*7;   // ahead of the shunter and to its landward side
+  player.x=px; player.z=pz; player.y=Math.max(heightAt(px,pz),m.position.y-0.35); player.vy=0; player.holdT=3; eyeY=null;
+  yaw=Math.atan2(px-m.position.x,pz-m.position.z); fpPitch=-0.2;
+}
 function toggleFerry(){ if (mode==='ferry'||ridden) leaveFerry(mode==='above'?'above':prevModeF); else boardFerry(); }
 function enterFerry(F,lx,lz){
   const same=ridden===F; ridden=F; mode='ferry'; fe.lx=lx; fe.lz=lz; fe.lv=0; if (!same) fe.ey=FD0;
@@ -5114,11 +5131,11 @@ canvas.addEventListener('wheel',e=>{ e.preventDefault(); if (mode!=='above') ret
   if (e.ctrlKey){ dist=clamp(dist*Math.exp(clamp(e.deltaY,-60,60)*0.012),7,60000); return; }
   const mouseWheel=e.deltaMode===1 || (e.deltaX===0 && Math.abs(e.deltaY)>=50 && Math.abs(e.deltaY%1)<1e-6 && Math.abs(e.deltaY)%10===0);
   if (mouseWheel){ dist=clamp(dist*Math.exp(clamp(e.deltaY,-150,150)*0.0012),7,60000); return; }
-  panView(e.deltaX,e.deltaY); },{passive:false});
+  panView(e.deltaX,-e.deltaY); },{passive:false});   // the landscape follows the fingers: a swipe down brings the distance nearer
 let pinch=null;
 canvas.addEventListener('touchstart',e=>{ if (e.touches.length===2 && mode==='above'){ const [a,b]=e.touches; pinch={mx:(a.clientX+b.clientX)/2,my:(a.clientY+b.clientY)/2,d:Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY)}; } },{passive:true});
 canvas.addEventListener('touchmove',e=>{ if (pinch && e.touches.length===2){ const [a,b]=e.touches, mx=(a.clientX+b.clientX)/2, my=(a.clientY+b.clientY)/2, d=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY);
-  panView(-(mx-pinch.mx)*1.6,-(my-pinch.my)*1.6); dist=clamp(dist*pinch.d/Math.max(1,d),7,60000); pinch={mx,my,d}; } },{passive:true});
+  panView(-(mx-pinch.mx)*1.6,(my-pinch.my)*1.6); dist=clamp(dist*pinch.d/Math.max(1,d),7,60000); pinch={mx,my,d}; } },{passive:true});
 canvas.addEventListener('touchend',e=>{ if (e.touches.length<2) pinch=null; });
 const joyEl=document.getElementById('joy'); const joy={id:null,x:0,y:0,ox:0,oy:0}; let lookTouch=null;
 canvas.addEventListener('touchstart',e=>{ for (const t of e.changedTouches){
