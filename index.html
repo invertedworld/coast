@@ -3707,8 +3707,8 @@ function updateTrain(dt){
 }
 
 /* ---------- the goods train ----------
-   A short goods train works the goods line nearest the player: a shunter at each end and three wagons, a van, an
-   open wagon loaded with crates and a tank wagon. It waits at the quay while it is loaded, runs up the branch to just
+   A goods train works the goods line nearest the player: a shunter at each end and twelve wagons between them, vans,
+   open wagons loaded with crates, flat wagons loaded with timber and tank wagons. It waits at the quay while it is loaded, runs up the branch to just
    short of the points, waits there for a path, and comes back down; at each end it reverses, the locomotive that was
    at the rear leading. It runs at 8 m/s, accelerating at 0.4 m/s² and braking at 0.5 m/s². */
 const WAG_L=10;
@@ -3727,6 +3727,11 @@ function buildWagon(kind){
     for (const sx of [-1,1]) gb.add(T.box, mat(sx*(W/2-0.05),y0+0.25,0,0.1,0.9,L-0.2), body, null, SW);
     for (const e of [-1,1]) gb.add(T.box, mat(0,y0+0.25,e*(L/2-0.15),W,0.9,0.1), body, null, SW);
     for (let i=0;i<4;i++) for (let j=0;j<2;j++){ const h=0.8+((i+j)%2)*0.35; gb.add(T.box, mat((j-0.5)*1.2,y0+0.25,-L/2+1.4+i*2.4,1.1,h,1.9), crate.clone().multiplyScalar(0.9+0.2*((i*3+j)%3)/2), null, SW); } }
+  else if (kind==='flat'){ const body=hex('#5b4a3a'), log=hex('#8a6a48'), end=hex('#c9a77a');
+    gb.add(T.box, mat(0,y0+0.1,0,W,0.15,L-0.2), body, null, SW);
+    for (const sx of [-1,1]) for (const z of [-L/2+0.6,-1.5,1.5,L/2-0.6]) gb.add(T.boxC, mat(sx*(W/2-0.08),y0+0.9,z,0.1,1.4,0.1), hex('#2a2624'), null);
+    for (let r=0;r<3;r++) for (let k=0;k<4-r;k++){ const x=(k-(3-r)/2)*0.55, y=y0+0.5+r*0.48; gb.add(T.cylC, mat(x,y,0,0.5,L-0.6,0.5,0,Math.PI/2), log, null);
+      for (const e of [-1,1]) gb.add(T.cylC, mat(x,y,e*(L/2-0.29),0.44,0.02,0.44,0,Math.PI/2), end, null); } }
   else { const body=hex('#3a3d42'), stripe=hex('#c9a227');
     gb.add(T.box, mat(0,y0+0.1,0,W-0.4,0.3,L-0.4), dark, null);
     gb.add(T.cyl, mat(0,y0+1.4,0,2.4,L-1.0,2.4,0,Math.PI/2), body, null);
@@ -3734,7 +3739,8 @@ function buildWagon(kind){
     gb.add(T.cyl8, mat(0,y0+2.55,0,0.7,0.35,0.7), body, null); gb.add(T.cyl, mat(0,y0+1.4,0,2.42,1.2,2.42,0,Math.PI/2), stripe, null); }
   return {geo:gb.geometry(),L};
 }
-const SHUNTER=buildShunter(), GOODS_SPEC=[SHUNTER,buildWagon('van'),buildWagon('open'),buildWagon('tank'),SHUNTER];
+const SHUNTER=buildShunter(), WAGON={van:buildWagon('van'),open:buildWagon('open'),tank:buildWagon('tank'),flat:buildWagon('flat')};
+const GOODS_SPEC=[SHUNTER,...['van','open','tank','flat','van','van','open','flat','tank','tank','open','van'].map(k=>WAGON[k]),SHUNTER];
 const goods={cars:[],B:null,x:0,dir:1,lead:0,v:0,wait:0,phase:'quay',check:0};
 GOODS_SPEC.forEach((spec,i)=>{ const loco=i===0||i===GOODS_SPEC.length-1, m=new THREE.Mesh(spec.geo,matB); m.castShadow=true; m.receiveShadow=true; m.rotation.order='YXZ'; m.visible=false; world.add(m);
   goods.cars.push({m,L:spec.L,loco,flip:i===GOODS_SPEC.length-1,lamps:loco?locoLamps(m,SHUNT_L,2.85):null}); });
@@ -4565,13 +4571,16 @@ const SOUND_DEF={
   fountain:{g:0.8,ref:3}, cat_mew:{g:0.8,ref:2.5}, clock_bell:{g:1,ref:30}, church_bell:{g:1,ref:45}, cafe:{g:0.7,ref:5},
   step_pavement:{g:0.5}, step_sand:{g:0.5}, step_soil:{g:0.5}, step_grass:{g:0.5}, step_wood:{g:0.5}, step_metal:{g:0.5}, land:{g:0.7},
   rail_joint:{g:0.8,ref:5}, train_start:{g:1,ref:15}, train_run:{g:1,ref:15}, train_stop:{g:1,ref:15}, train_idle:{g:0.7,ref:8},
+  goods_run:{g:0.75,ref:12}, goods_idle:{g:0.6,ref:8}, goods_start:{g:0.75,ref:12}, goods_stop:{g:0.75,ref:12}, goods_horn:{g:0.8,ref:50}, goods_buffer:{g:0.7,ref:6}, points_lever:{g:0.7,ref:6},
   train_rumble:{g:0.9,ref:10}, train_bridge:{g:0.9,ref:12}, train_brakes:{g:0.8,ref:10}, train_horn:{g:1,ref:60},
   train_doors_open:{g:0.7,ref:3}, train_doors_close:{g:0.7,ref:3},
   ferry_start:{g:1,ref:15}, ferry_run:{g:1,ref:15}, ferry_stop:{g:1,ref:15}, ferry_idle:{g:0.7,ref:8}, ferry_wake:{g:0.9,ref:10},
   ferry_horn:{g:1,ref:80}, ferry_gangway:{g:0.8,ref:5}, ferry_gate:{g:0.6,ref:3}, ferry_fender:{g:0.7,ref:4},
 };
 const SND={asked:{}, ready:false, buf:{}, last:{}, master:null, rev:null, revOut:null, bus:{}, cut:{}, gmul:{}, send:{}, voices:[], t:{}};
-function sndBuf(id){ const L=SND.buf[id]; if (!L||!L.length) return null; if (L.length===1) return L[0];
+// sounds without recordings of their own borrow those of a like sound until they have them
+const SOUND_ALIAS={goods_run:'train_run',goods_idle:'train_idle',goods_start:'train_start',goods_stop:'train_stop',goods_horn:'train_horn',goods_buffer:'rail_joint',points_lever:'rail_joint'};
+function sndBuf(id){ let L=SND.buf[id]; if ((!L||!L.length) && SOUND_ALIAS[id]) L=SND.buf[SOUND_ALIAS[id]]; if (!L||!L.length) return null; if (L.length===1) return L[0];
   let i; do i=Math.floor(Math.random()*L.length); while (i===SND.last[id] && L.length>1); SND.last[id]=i; return L[i]; }
 // a tunnel's reverberation: a few early slaps off the lining, then a dense tail whose highs die away first
 function tunnelIR(ctx){
@@ -4781,7 +4790,7 @@ function sndUpdate(dt){
   if (player.grounded && !SNDS.grounded && SNDS.vy<-4 && fx===player.x) sndPlay('land','player',null,{gain:quiet*clamp(-SNDS.vy/8,0.5,1.4)});
   SNDS.grounded=player.grounded; SNDS.vy=player.vy;
 
-  sndTrain(dt); sndFerries(dt);
+  sndTrain(dt); sndGoods(dt); sndFerries(dt);
 }
 
 /* the train: engine at the locomotive, the rolling rumble at the nearest point on the train, a click as each
@@ -4823,6 +4832,23 @@ function sndTrain(dt){
     for (const c of train.cars) for (const d of c.doors){ d.getWorldPosition(_bv).add(ORIGIN); if (_bv.distanceTo(_sl)<45) sndPlay(want?'train_doors_open':'train_doors_close','train',[_bv.x,_bv.y+1,_bv.z],{delay:Math.random()*0.15}); } }
 }
 
+/* the goods train: its engine at the leading shunter, a horn and the clatter of the couplings as it sets off, its
+   brakes as it stops, the rail joints under its wheels, and the lever of the points pulled while it waits there */
+function sndGoods(dt){
+  const g=goods, B=g.B, on=!!B && Math.hypot(g.cars[0].m.position.x-_sl.x,g.cars[0].m.position.z-_sl.z)<600;
+  const lead=g.cars[g.lead?g.cars.length-1:0].m, lp=lead.position, vk=clamp(g.v/8,0,1);
+  sndVoice(sv('gRun','goods_run','train',true),dt,easeTo('gRun',on&&g.v>0.3?0.35+0.65*vk:0,dt,2),lp.x,lp.y+2,lp.z,0.7+0.3*vk);
+  sndVoice(sv('gIdle','goods_idle','train',true),dt,easeTo('gIdle',on&&g.v<1.2?1:0,dt,1.5),lp.x,lp.y+2,lp.z,0.9);
+  if (!on){ SNDS.gWait=g.wait; return; }
+  if ((SNDS.gWait??0)>0 && g.wait<=0){ sndPlay('goods_start','train',[lp.x,lp.y+2,lp.z]); sndPlay('goods_horn','train',[lp.x,lp.y+3,lp.z],{delay:0.4});
+    g.cars.forEach((c,i)=>{ if (i) sndPlay('goods_buffer','train',[c.m.position.x,c.m.position.y+0.8,c.m.position.z],{delay:0.6+i*0.35,rate:0.8}); }); SNDS.gStop=false; }
+  if (g.wait<=0 && g.v<SNDS.gV-1e-4 && g.v<3 && !SNDS.gStop){ SNDS.gStop=true; sndPlay('goods_stop','train',[lp.x,lp.y+2,lp.z]); }
+  if (g.phase==='junction' && (SNDS.gWait??0)>12 && g.wait<=12){ const xl=B.xj+B.dirJ*12; sndPlay('points_lever','world',[xl,railY(xl)+1,railZ(xl)+(Math.sign(railZ(B.xj)-B.zt(B.xj))||1)*3.2],{rate:0.6}); }
+  if (g.v>0.3){ let b=0; for (const c of g.cars){ c.m.updateMatrix(); for (const e of [-1,1]){ _bv.set(0,-0.3,e*(c.L/2-2)).applyMatrix4(c.m.matrix); const prev=(SNDS.gJ||(SNDS.gJ=[]))[b];
+      if (prev!==undefined && Math.floor(prev/JOINT)!==Math.floor(_bv.x/JOINT) && Math.abs(_bv.x-_sl.x)<200) sndPlay('rail_joint','train',[_bv.x,_bv.y,_bv.z],{gain:0.3+0.5*Math.sqrt(vk),rate:0.95+Math.random()*0.05});
+      SNDS.gJ[b++]=_bv.x; } } } else SNDS.gJ=[];
+  SNDS.gWait=g.wait; SNDS.gV=g.v;
+}
 /* the ferries: engine at the stern, the wake at the bow, horn, gangway, gates and fenders */
 const _sfv=new THREE.Vector3();
 function sndFerries(dt){
