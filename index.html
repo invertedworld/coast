@@ -3747,9 +3747,9 @@ function buildWagon(kind){
       for (const e of [-1,1]) gb.add(T.cylC, mat(x,y,e*(L/2-0.29),0.44,0.02,0.44,0,Math.PI/2), end, null); } }
   else { const body=hex('#3a3d42'), stripe=hex('#c9a227');
     gb.add(T.box, mat(0,y0+0.1,0,W-0.4,0.3,L-0.4), dark, null);
-    gb.add(T.cyl, mat(0,y0+1.4,0,2.4,L-1.0,2.4,0,Math.PI/2), body, null);
+    gb.add(T.cylC, mat(0,y0+1.4,0,2.4,L-1.0,2.4,0,Math.PI/2), body, null);   // centred on the wagon, not running from its middle
     for (const e of [-1,1]) gb.add(T.sph, mat(0,y0+1.4,e*(L/2-0.5),2.4,2.4,0.8), body, null);
-    gb.add(T.cyl8, mat(0,y0+2.55,0,0.7,0.35,0.7), body, null); gb.add(T.cyl, mat(0,y0+1.4,0,2.42,1.2,2.42,0,Math.PI/2), stripe, null); }
+    gb.add(T.cyl8, mat(0,y0+2.55,0,0.7,0.35,0.7), body, null); gb.add(T.cylC, mat(0,y0+1.4,0,2.42,1.2,2.42,0,Math.PI/2), stripe, null); }
   return {geo:gb.geometry(),L};
 }
 const SHUNTER=buildShunter(), WAGON={van:buildWagon('van'),open:buildWagon('open'),tank:buildWagon('tank'),flat:buildWagon('flat')};
