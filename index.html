@@ -495,7 +495,9 @@ function railZ(x){ const i=Math.floor(x/2), t=x/2-i; let a=rzCache.get(i), b=rzC
   if (a===undefined){ a=railZraw(i*2); rzCache.set(i,a); } if (b===undefined){ b=railZraw(i*2+2); rzCache.set(i+1,b); }
   if (rzCache.size>200000) rzCache.clear(); return a+(b-a)*t; }
 // perpendicular distance from the track centreline
-function railPerp(x,z){ const s=(railZ(x+1)-railZ(x-1))/2; return Math.abs(z-railZ(x))/Math.sqrt(1+s*s); }
+function mainPerp(x,z){ const s=(railZ(x+1)-railZ(x-1))/2; return Math.abs(z-railZ(x))/Math.sqrt(1+s*s); }
+// distance from the nearest track, main line or branch
+function railPerp(x,z){ return Math.min(mainPerp(x,z),branchPerp(x,z)); }
 const ryCache=new Map();
 function railYs(i){
   let v=ryCache.get(i); if (v!==undefined) return v;
@@ -541,6 +543,54 @@ function stationInfo(n){
   if (stCache.size>5000) stCache.clear(); stCache.set(n,S); return S;
 }
 function stationNear(x,m=55){ const n=Math.floor(x/ST_SP); for (const k of [n,n-1,n+1]){ const S=stationInfo(k); if (S && Math.abs(x-S.x)<m) return S; } return null; }
+/* ---------- branch lines to some of the harbours ----------
+   A branch leaves the main line at points and runs down to a terminus behind the harbour, on the inland side of
+   the coast road and parallel to it, BR_T either side of the harbour's middle. Like the main line it is a curve
+   along the island: over its approach, from the junction (u=0) to the start of the terminus (u=1), its course and
+   its height ease from the main line's to the terminus's, z=lerp(railZ(x),zt,smooth(u)) and the same for y, so it
+   leaves the main line tangentially. The approach is long enough that the grade stays under 1 in 40 (the eased
+   blend is steepest in its middle, at 1.5 times the average), the ground along it is never more than 6 m above or
+   7 m below the bed, so that cuttings and embankments suffice, and it crosses nothing it should not. About 45% of
+   the harbours where such a line fits have one. */
+const BR_T=58, BR_OFF=CR_HW+6, brCache=new Map(), brBucket=new Map();
+function branchInfo(sd,n){
+  const key=n*4+sd; if (brCache.has(key)) return brCache.get(key);
+  let B=null; const H=harbourInfo(sd,n);
+  if (H && hash(n,sd>0?1:2,951)<0.45){
+    const zt=coastRoadZ(sd,H.x)+sd*BR_OFF; let ys=0, cnt=0, ok=true;
+    for (let x=H.x-BR_T-20; x<=H.x+BR_T+20 && ok; x+=8){ const h=baseH(x,zt);
+      if (Math.abs(zt-coastRoadZ(sd,x))<CR_HW+4.5 || h<1.4 || h>14 || Math.abs(zt-railZ(x))<22) ok=false; ys+=h; cnt++; }
+    const yt=Math.max(2.2,ys/cnt); const ST=window.__brStat||(window.__brStat={h:0,term:0,lb:0,dz:0,st:0,ground:0,side:0,state:0,cross:0});ST.h++; if(!ok)ST.term++;
+    if (ok) for (const dirJ of (hash(n,sd>0?1:2,952)<0.5?[1,-1]:[-1,1])){
+      const xs=H.x-dirJ*BR_T, xe=H.x+dirJ*BR_T;
+      for (let Lb=320; Lb<=1800 && !B; Lb+=40){ const xj=xs-dirJ*Lb, yj=railY(xj);
+        if (Lb<60*Math.abs(yj-yt)){ST.lb++; continue;} if (Math.abs(railZ(xj)-zt)>Lb*0.55){ST.dz++; continue;}
+        if (stationNear(xj,220) || stationNear(xs-dirJ*Lb*0.5,140)){ST.st++; continue;}
+        let good=true; const side=Math.sign(zt-railZ(xj))||1;
+        for (let t=0; t<=1.0001 && good; t+=8/Lb){ const x=xj+dirJ*t*Lb, e=smooth(t), z=lerp(railZ(x),zt,e), y=lerp(railY(x),yt,e), g=baseH(x,z);
+          if (railState(x)!=='open' && t<0.25){ good=false; ST.state++; }
+          else if (g>y+6 || g<y-7 || g<0.9){ good=false; ST.ground++; }
+          else if (t>0.3 && side*(z-railZ(x))<14){ good=false; ST.side++; } }
+        for (let i=Math.floor(Math.min(xj,xs)/C)-1; good && i<=Math.floor(Math.max(xj,xs)/C)+1; i++){ const X=railCross(i); if (X && (X.x-xj)*dirJ>-30 && (X.x-xj)*dirJ<Lb*0.4) good=false; }
+        if (good) B={sd,n,H,dirJ,xj,xs,xe,zt,yt,Lb,x0:Math.min(xj,xe),x1:Math.max(xj,xe),name:H.name.replace('Porto','Stazione Porto')}; } }
+  }
+  if (brCache.size>4000) brCache.clear(); brCache.set(key,B); return B;
+}
+// the branches whose span reaches within 40 m of x
+function branchesAt(x){
+  const b=Math.floor(x/200); let L=brBucket.get(b); if (L) return L; L=[];
+  for (const sd of SIDES) for (let n=Math.floor((b*200-1900)/HARB); n<=Math.floor((b*200+2100)/HARB); n++){ const B=branchInfo(sd,n);
+    if (B && B.x1>b*200-40 && B.x0<b*200+240) L.push(B); }
+  if (brBucket.size>4000) brBucket.clear(); brBucket.set(b,L); return L;
+}
+// course, height, and the share of the approach run at x (0 at the junction, 1 from the start of the terminus)
+const brU=(B,x)=>clamp((x-B.xj)/(B.xs-B.xj),0,1);
+function brZ(B,x){ const u=brU(B,x); return u>=1?B.zt:lerp(railZ(x),B.zt,smooth(u)); }
+function brY(B,x){ const u=brU(B,x); return u>=1?B.yt:lerp(railY(x),B.yt,smooth(u)); }
+const brIn=(B,x,m=0)=>x>=B.x0-m && x<=B.x1+m;
+const brTerm=(B,x)=>(x-B.xs)*B.dirJ>=0;
+function brPerp(B,x,z){ if (!brIn(B,x)) return 1e9; const s=(brZ(B,x+1)-brZ(B,x-1))/2; return Math.abs(z-brZ(B,x))/Math.sqrt(1+s*s); }
+function branchPerp(x,z){ let d=1e9; for (const B of branchesAt(x)) d=Math.min(d,brPerp(B,x,z)); return d; }
 /* ---------- road bridges where north-south streets cross the line ---------- */
 const rxCache=new Map();
 function railCross(i){
@@ -557,7 +607,7 @@ function railCross(i){
     const ramp=gg=>clamp((deck-gg)/0.15,12,40), rN=ramp(gN), rS=ramp(gS);
     let ok=Math.max(gN,gS)>=ry+4.5 && Math.min(gN,gS)>=ry+0.5 && Math.max(gN,gS)<deck+3;
     for (const [sg,rl] of [[-1,rN],[1,rS]]) for (let e=3; ok && e<=rl+12; e+=6){ const zz=z+sg*(flat+e), xx=vRoadX(i,zz);
-      if (!vSegOn(i,vSegAt(xx,zz)) || railPerp(xx,zz)<8.6) ok=false; }
+      if (!vSegOn(i,vSegAt(xx,zz)) || mainPerp(xx,zz)<8.6) ok=false; }
     if (ok) X={i,x,z,ry,rot,sinT,flat,deck,rN,rS}; }
   rxCache.set(i,X); return X;
 }
@@ -655,9 +705,12 @@ function heightAtExact(x,z){
   if (wsum>0) h=lerp(h,tsum/wsum,wmax);
   // the line runs on a level bed 8 m wide, cut into the hill or built up on an embankment;
   // over a tunnel the ground is kept level with the portal parapets so the lined bore is always covered
-  { const S=stationNear(x,40), hwL=S?15:4.0, d=railPerp(x,z); if (d<hwL+4.6){ const sl=(railZ(x+1)-railZ(x-1))/2, xp=x+sl*(z-railZ(x))/(1+sl*sl), st=railState(xp), ry=railY(xp);
+  { const S=stationNear(x,40), hwL=S?15:4.0, d=mainPerp(x,z); if (d<hwL+4.6){ const sl=(railZ(x+1)-railZ(x-1))/2, xp=x+sl*(z-railZ(x))/(1+sl*sl), st=railState(xp), ry=railY(xp);
       if (st==='open'){ const w=1-smooth((d-hwL)/4.5); h=lerp(h,ry-0.2,w); }
       else if (st==='tunnel'){ const w=1-smooth((d-4)/5); h=Math.max(h,lerp(h,ry+8.6,w)); } } }
+  // a branch's bed likewise, wider along the terminus for its platform
+  for (const B of branchesAt(x)){ if (!brIn(B,x,2)) continue; const d=brPerp(B,x,z), hw=brTerm(B,x)?9:4.0;
+    if (d<hw+4.6){ const w=1-smooth((d-hw)/4.5); h=lerp(h,brY(B,x)-0.2,w); } }
   for (const sd of SIDES){ const HB=harbourAt(sd,x); if (HB) h=harbourShape(HB,x,z,h); }
   const P=piazzaInfo(Math.floor(x/C),Math.floor(z/C));
   if (P){ const d=Math.hypot(x-P.x,z-P.z); if (d<P.outer){
@@ -962,9 +1015,16 @@ function buildTowerGeo(D){
   quads(A=>q3n(A,[-iw,DF,zb],[iw,DF,zb],[iw,DF,zf],[-iw,DF,zf],[0,1,0]), stone.clone().multiplyScalar(0.85), SS);
   quads(A=>q3n(A,[-iw,Hc,zb],[iw,Hc,zb],[iw,Hc,zf],[-iw,Hc,zf],[0,-1,0]), hex('#7a5a3e'), SW);
   // the treads, and a rail along their inner edge
-  S.treads.forEach((t,i)=>{ B((t.x0+t.x1)/2,t.top-0.18,(t.z0+t.z1)/2,t.x1-t.x0+0.002,0.18,t.z1-t.z0+0.002,stone,SS);
-    if (t.inner && i<S.treads.length-3 && i%2===0){ const [ax,v]=t.inner, x=ax==='x'?v:(t.x0+t.x1)/2, z=ax==='z'?v:(t.z0+t.z1)/2;
-      B(x,t.top,z,0.035,0.95,0.035,dark); B(x,t.top+0.95,z,ax==='x'?0.05:0.55,0.04,ax==='z'?0.05:0.55,dark,SW); } });
+  // each tread 40 cm deep, so that it overlaps the one below and the flight reads as one stepped stone stair
+  S.treads.forEach(t=>B((t.x0+t.x1)/2,t.top-0.4,(t.z0+t.z1)/2,t.x1-t.x0+0.002,0.4,t.z1-t.z0+0.002,stone,SS));
+  // a continuous handrail along the inner edge, turning at each landing, on posts at every fourth tread
+  { const LP=(x,y,z)=>new THREE.Vector3(x,y,z).applyMatrix4(H).toArray(), pts=[];
+    S.treads.slice(0,-3).forEach(t=>{ let x,z;
+      if (t.inner){ const [ax,v]=t.inner; x=ax==='x'?v:(t.x0+t.x1)/2; z=ax==='z'?v:(t.z0+t.z1)/2; }
+      else { x=Math.abs(t.x0)<Math.abs(t.x1)?t.x0:t.x1; z=Math.abs(t.z0)<Math.abs(t.z1)?t.z0:t.z1; }
+      pts.push([x,t.top,z]); });
+    for (let i=0;i+1<pts.length;i++){ const a=pts[i], b=pts[i+1]; segBox(gb,LP(a[0],a[1]+0.95,a[2]),LP(b[0],b[1]+0.95,b[2]),0.05,0.05,dark,SW); }
+    pts.forEach((p,i)=>{ if (i%4===0 || i===pts.length-1) B(p[0],p[1],p[2],0.035,0.95,0.035,dark); }); }
   // the top room's floor, round the stairwell
   const b=TW_B, yB=S.yB;
   B(0,yB-0.2,(zb+zf)/2,2*(iw-b),0.2,zf-zb-2*b,hex('#7a5a3e'),SW);
@@ -1673,7 +1733,7 @@ function buildLighthouseGeo(D){
   gb.add(T.cyl, mm(M,mat(0,0,0,0.42,H+0.4,0.42)), stone, null, SS);
   for (const t of D.tr){ const tm=(t.ta+t.tb)/2;
     for (const [a,b] of [[t.r0,(t.r0+t.r1)/2],[(t.r0+t.r1)/2,t.r1]]){ const rm=(a+b)/2, w=2*b*Math.sin(LH_STEP/2)+0.02;
-      gb.add(T.box, mm(M,mat(rm*Math.sin(tm),t.top-0.16,rm*Math.cos(tm),w,0.16,b-a+0.01,tm)), stone, null, SS); } }
+      gb.add(T.box, mm(M,mat(rm*Math.sin(tm),t.top-0.4,rm*Math.cos(tm),w,0.4,b-a+0.01,tm)), stone, null, SS); } }
   // the lantern: its floor round the hatch, the lamp with its lens, and a doorway in the glazing to the gallery
   const last=D.tr.slice(-10);
   { const F=[]; for (let i=0;i<20;i++){ const t0=2*Math.PI*i/20, t1=t0+2*Math.PI/20, tm=(t0+t1)/2;
@@ -2286,6 +2346,15 @@ function genChunk(cx,cz,lod=0){
     glow(ch,x,y+3.22,z+sd*0.72,3.0); ch.circles.push({x,z,r:0.18,top:Infinity});
   }
 
+  /* --- branch lines: ballast, sleepers and rails, as on the main line --- */
+  { const ballast=hex('#9b8f7f'), sleeper=hex('#4a3a2c'), steel=hex('#7d8086');
+    for (const B of branchesAt(x0+C/2)) for (let x=Math.max(x0,B.x0); x<Math.min(x0+C,B.x1)-0.01; x+=2){
+      const xm=x+1, zr=brZ(B,xm); if (zr<z0||zr>=z0+C) continue;
+      const xa=x, xb=x+2, za=brZ(B,xa), zb=brZ(B,xb), ya=brY(B,xa), yb=brY(B,xb), len=Math.hypot(2,zb-za), nx=-(zb-za)/len, nz=2/len, rot=Math.atan2(2,zb-za);
+      if (brU(B,xm)<0.06) continue;   // at the junction the main line's track serves both
+      segBox(gb,[xa,ya-0.05,za],[xb,yb-0.05,zb],3.0,0.5,ballast,SS);
+      for (const o of [-0.72,0.72]) segBox(gb,[xa+nx*o,ya+0.3,za+nz*o],[xb+nx*o,yb+0.3,zb+nz*o],0.08,0.13,steel);
+      for (let k=0;k<3;k++){ const t=(k+0.5)/3; gb.add(T.boxC, mat(lerp(xa,xb,t),lerp(ya,yb,t)+0.2,lerp(za,zb,t),2.5,0.12,0.26,rot), sleeper, null, SW); } } }
   /* --- railway: ballast, sleepers and rails; viaducts over valleys; portals where it enters the hill --- */
   { const step=2, ballast=hex('#9b8f7f'), sleeper=hex('#4a3a2c'), steel=hex('#7d8086'), stoneR=shade(C_.stone,R,0.04), lining=hex('#3a332c'), brick=shade(hex('#8a5a42'),R,0.05);
     const PA=2.6, PS=4.6, PT=8.8; // opening half-width, springing height and parapet top of a portal
@@ -5142,7 +5211,7 @@ requestAnimationFrame(()=>setTimeout(()=>{
   document.getElementById('loading').remove();
   requestAnimationFrame(frame);
 },30));
-window.__village={ heightAt, player, chunks, rooms, doorMesh, keys, setYaw:v=>{yaw=v;}, get yaw(){return yaw;}, fe, co, lightsNear, beams, ruinIn, cats, catHome, get ridden(){ return ridden; },
+window.__village={ branchInfo, branchesAt, brZ, brY, heightAt, player, chunks, rooms, doorMesh, keys, setYaw:v=>{yaw=v;}, get yaw(){return yaw;}, fe, co, lightsNear, beams, ruinIn, cats, catHome, get ridden(){ return ridden; },
   findHarbour(){ for (let d=0;d<12;d++) for (const sd of SIDES) for (const n of [Math.floor(player.x/HARB)+d,Math.floor(player.x/HARB)-d]){ const H=harbourInfo(sd,n); if (H) return {x:H.x,z:coastZ(sd,H.x)+sd*7,W:H.W,sd,qz:coastZ(sd,H.x+H.W/2-1)+sd*2.5}; } return null; },
   findBeach(){ for (let x=player.x; x<player.x+3000; x+=10) for (const sd of SIDES){ const z=coastZ(sd,x)+sd*5; if (heightAt(x,z)<0.6 && heightAt(x,z)>0.1 && !harbourAt(sd,x)) return {x,z,sd}; } return null; },
   ridge(x){ return {x,z:ridgeZ(x)}; },
