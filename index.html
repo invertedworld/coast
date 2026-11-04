@@ -757,17 +757,26 @@ function reveal(arr,Z0,Z1,dx){
 T.boxC5={p:T.boxC.p.slice(0,90),n:new Float32Array(90),smooth:false};
 // a wall in a plane given by P(u,y), facing along N, from u0 to u1 and y0 to y1, with rectangular openings
 // [ua,ub,ya,yb] and, if door is a number, the doorway centred at u=door
+// arched openings: {c,r,s,f}, centred at u=c, of radius r, springing at y=s, with their sill at y=f
+const archAt=(a,i)=>{ const t=Math.PI-Math.PI*i/ARCH_N; return [a.c+a.r*Math.cos(t),a.s+a.r*Math.sin(t)]; };
 function faceHoles(arr,P,N,u0,u1,y0,y1,rects,door){
+  const arches=door===null||door===undefined?[]:typeof door==='number'?[{c:door,r:DR,s:DS,f:DF}]:door;
   const q=(ua,ub,ya,yb)=>{ if (ub-ua>1e-4 && yb-ya>1e-4) q3n(arr,P(ua,ya),P(ub,ya),P(ub,yb),P(ua,yb),N); };
-  const us=[u0,u1]; for (const r of rects) us.push(r[0],r[1]); if (door!==null) us.push(door-DR,door+DR);
+  const us=[u0,u1]; for (const r of rects) us.push(r[0],r[1]); for (const a of arches) us.push(a.c-a.r,a.c+a.r);
   const U=[...new Set(us.map(v=>clamp(v,u0,u1)))].sort((a,b)=>a-b);
-  for (let i=0;i+1<U.length;i++){ const ua=U[i], ub=U[i+1], um=(ua+ub)/2;
-    if (door!==null && um>door-DR && um<door+DR){ if (y0<DF) q(ua,ub,y0,DF); else if (y1<=DS) continue;
-      if (y1>DS+DR) for (let k=0;k<ARCH_N;k++){ const a=archPt(door,k), b=archPt(door,k+1); q3n(arr,P(a[0],a[1]),P(b[0],b[1]),P(b[0],y1),P(a[0],y1),N); }
+  for (let i=0;i+1<U.length;i++){ const ua=U[i], ub=U[i+1], um=(ua+ub)/2, a=arches.find(a=>um>a.c-a.r && um<a.c+a.r);
+    if (a){ if (y1<=a.f){ q(ua,ub,y0,y1); continue; } q(ua,ub,y0,a.f);
+      if (y1>a.s+a.r) for (let k=0;k<ARCH_N;k++){ const p=archAt(a,k), b=archAt(a,k+1); q3n(arr,P(p[0],p[1]),P(b[0],b[1]),P(b[0],y1),P(p[0],y1),N); }
       continue; }
     const cov=rects.filter(r=>r[0]<um && r[1]>um).map(r=>[clamp(r[2],y0,y1),clamp(r[3],y0,y1)]).sort((a,b)=>a[0]-b[0]);
     let y=y0; for (const [ya,yb] of cov){ q(ua,ub,y,ya); y=Math.max(y,yb); } q(ua,ub,y,y1);
   }
+}
+// the sides and soffit of an arched opening between two parallel planes, facing into the opening
+function archReveal(arr,P0,P1,a){
+  const pts=[[a.c-a.r,a.f]]; for (let i=0;i<=ARCH_N;i++) pts.push(archAt(a,i)); pts.push([a.c+a.r,a.f]);
+  for (let i=0;i+1<pts.length;i++){ const p=pts[i], b=pts[i+1], mu=(p[0]+b[0])/2, my=(p[1]+b[1])/2, C=P0(a.c,clamp(my,a.f,a.s)), M=P0(mu,my);
+    q3n(arr,P0(...p),P0(...b),P1(...b),P1(...p),[C[0]-M[0],C[1]-M[1],C[2]-M[2]]); }
 }
 // the four sides of a rectangular opening between two parallel planes, facing into the opening
 function rectReveal(arr,P0,P1,r){ const [ua,ub,ya,yb]=r, C=P0((ua+ub)/2,(ya+yb)/2);
@@ -797,9 +806,9 @@ function doorwayFor(ch,o,base,dx,w,h,d,floors){
   const walls=[W(-w/2,-iw,-d/2,d/2), W(iw,w/2,-d/2,d/2), W(-w/2,w/2,-d/2,zb), W(-w/2,dx-DR,zf,d/2), W(dx+DR,w/2,zf,d/2)];
   const [hx,hz]=localToWorld(o,dx-s*DR,d/2-WT/2);
   const D={x:o.x,z:o.z,rot:o.rot,base,fl,w,d,h,dx,iw,zf,zb,floors,hc:floors>1?2.45:h-0.22,seed:Math.floor(R()*4294967296),s,
-    col:pick(R,DOOR_COLS).clone().multiplyScalar(0.9+R()*0.2),hx,hz,y:base+DF,a:0,av:0,idle:9,walls,wins:[],room:null,idx:-1};
+    col:pick(R,DOOR_COLS).clone().multiplyScalar(0.9+R()*0.2),hx,hz,y:base+DF,a:0,av:0,idle:9,walls,wins:[],room:null,idx:-1,lw:DOOR_W,leaf:'house'};
   roomLevels(D);
-  (ch.doors||(ch.doors=[])).push(D);
+  (ch.doors||(ch.doors=[])).push(D); (ch.rooms||(ch.rooms=[])).push(D);
   return D;
 }
 // The storeys of a room. A house of two or more storeys that is wide and deep enough has a floor you can walk on at
@@ -836,6 +845,54 @@ function flight(D,f){
   const xi=side>0?x0:x1, lowZ=up?well[1]:well[0];
   const rails=[[xi-0.03,xi+0.03,well[0],well[1]],[x0,x1,lowZ-0.03,lowZ+0.03]];
   return {side,x0,x1,up,stepZ,well,rails,xi,lowZ};
+}
+/* ---------- churches that can be entered ----------
+   The nave keeps its walls, roof and windows; at full detail its front wall has the doorway, with a pair of leaves,
+   and its back wall an arch into the apse, of which only the half outside the nave is built. */
+const WTC=0.5, CF=0.15, CHURCH_DOOR={c:0,r:0.85,s:2.7,f:CF};
+T.hcyl=tpl(new THREE.CylinderGeometry(.5,.5,1,28,1,false,Math.PI/2,Math.PI).translate(0,.5,0),true);
+T.hcone=tpl(new THREE.ConeGeometry(.5,1,14,1,false,Math.PI/2,Math.PI).translate(0,.5,0),true);
+// one leaf of the church doors, hinged along x=0 and closing against the other leaf at x=r
+const CHURCH_LEAF_GEO=(()=>{ const {r,s,f}=CHURCH_DOOR, sh=new THREE.Shape(), Sy=s-f;
+  sh.moveTo(0,0); sh.lineTo(r,0); sh.lineTo(r,Sy+r); sh.absarc(r,Sy,r,Math.PI/2,Math.PI,false); sh.lineTo(0,0);
+  const g=new THREE.ExtrudeGeometry(sh,{depth:0.09,bevelEnabled:false,curveSegments:12}).translate(0,0,-0.045);
+  const gb=new GB(), I=new THREE.Matrix4(), white=new THREE.Color(1,1,1), iron=hex('#2a2624');
+  gb.add(tpl(g,false), I, white, 0, SW);
+  for (const z of [-1,1]){ for (const y of [0.3,1.3,2.3]) gb.add(T.boxC, mat(r/2,y,z*0.05,r-0.06,0.12,0.02), white.clone().multiplyScalar(0.85), null, SW);
+    gb.add(T.boxC, mat(r-0.12,1.1,z*0.09,0.05,0.24,0.05), iron, null);
+    for (const y of [0.4,2.2]) gb.add(T.boxC, mat(0.3,y,z*0.05,0.6,0.06,0.03), iron, null); }
+  return gb.geometry(); })();
+// the nave's walls and top, with the doorway in the front wall and the apse arch in the back wall
+function churchShell(gb,H,W,L,h,col,C){
+  const A=[], hw=W/2, hl=L/2;
+  for (const sx of [-1,1]) q3n(A,[sx*hw,0,-hl],[sx*hw,0,hl],[sx*hw,h,hl],[sx*hw,h,-hl],[sx,0,0]);
+  q3n(A,[-hw,h,-hl],[hw,h,-hl],[hw,h,hl],[-hw,h,hl],[0,1,0]);
+  faceHoles(A,(u,y)=>[u,y,hl],[0,0,1],-hw,hw,0,h,[],[CHURCH_DOOR]);
+  faceHoles(A,(u,y)=>[u,y,-hl],[0,0,-1],-hw,hw,0,h,[],[C.ar]);
+  archReveal(A,(u,y)=>[u,y,hl],(u,y)=>[u,y,hl-WTC],CHURCH_DOOR);
+  archReveal(A,(u,y)=>[u,y,-hl],(u,y)=>[u,y,-hl+WTC],C.ar);
+  gb.add(triTpl(A),H,col,0,SS);
+  const S=[]; for (const [a,z0,z1] of [[CHURCH_DOOR,hl-WTC,hl],[C.ar,-hl,-hl+WTC]]) q3n(S,[a.c-a.r,a.f,z0],[a.c+a.r,a.f,z0],[a.c+a.r,a.f,z1],[a.c-a.r,a.f,z1],[0,1,0]);
+  gb.add(triTpl(S),H,shade(C_.stone,()=>0.5,0),null,SS);
+}
+// the church as a room: its walls with the doorway and the apse arch, the apse, the leaves of the doors, and
+// where its stained glass lies, for the coloured light it lets in
+function churchRoom(ch,cx,cz,rot,base,W,L,h,wz,seed){
+  const hw=W/2, hl=L/2, iw=hw-WTC, ra=W*0.35, r=ra-WTC, s=Math.min(h*0.45,h*0.78-0.4-r);
+  const C={kind:'church',x:cx,z:cz,rot,base,fl:base+CF,W,L,h,w:W,d:L,iw,zb:-hl+WTC,zf:hl-WTC,ra,ar:{c:0,r,s,f:CF},wz,seed,
+    top:h+W*0.42,walls:[],room:null,dx:0};
+  const Wb=(u0,u1,v0,v1)=>{ const [x,z]=localToWorld(C,(u0+u1)/2,(v0+v1)/2); return {x,z,hw:(u1-u0)/2,hd:(v1-v0)/2,rot,top:Infinity}; };
+  C.walls.push(Wb(-hw,-iw,-hl,hl),Wb(iw,hw,-hl,hl),Wb(-hw,-0.85,hl-WTC,hl),Wb(0.85,hw,hl-WTC,hl),Wb(-hw,-r,-hl,-hl+WTC),Wb(r,hw,-hl,-hl+WTC));
+  // the apse wall, in short straight lengths round the half circle behind the arch
+  const n=12; for (let i=0;i<n;i++){ const t=Math.PI/2+Math.PI*(i+0.5)/n, rr=r+0.25, [x,z]=localToWorld(C,Math.sin(t)*rr,-hl+Math.cos(t)*rr);
+    C.walls.push({x,z,hw:Math.PI*rr/n/2+0.08,hd:0.25,rot:rot+t,top:Infinity}); }
+  { const [x,z]=localToWorld(C,0,-ra/2); C.area={x,z,hw:hw,hd:hl+ra/2,rot}; }
+  // what is cut away inside: the nave below its roof, and the apse below its dome, clear of the walls round them
+  C.clip=[[0,0,iw,hl-WTC,h-0.3],[0,-hl-0.05-r*0.33,r*0.68,r*0.33,s+r+0.05]]; C.top=h-0.3;
+  (ch.rooms||(ch.rooms=[])).push(C);
+  for (const sg of [1,-1]){ const [hx,hz]=localToWorld(C,-sg*CHURCH_DOOR.r,hl-WTC/2);
+    (ch.doors||(ch.doors=[])).push({x:cx,z:cz,rot,w:W,d:L,hx,hz,y:base+CF,fl:base+CF,s:sg,lw:CHURCH_DOOR.r,leaf:'church',owner:C,a:0,av:0,idle:9,col:hex('#5a3a28'),idx:-1}); }
+  return C;
 }
 const DOOR_COLS=['#6a4530','#5a3a28','#3f5f4a','#2f4d6b','#7a3b2a','#4b5a3a','#6b6f72'].map(hex);
 // the leaf, hinged along x=0, in the plane z=0, with its foot at y=0; plank faces come from the building shader
@@ -1621,16 +1678,24 @@ function genChunk(cx,cz,lod=0){
         const H=mat(cxp,0,czp,1,1,1,rot);
         // the plinth and the buried steps stop just below the paving, so that no top face shares its plane
         gb.add(T.box, mm(H,mat(0,fb,0,W+0.3,-fb-0.03,L+0.3)), shade(C_.stoneDark,R,0.03), fb, SS);
-        gb.add(T.box, mm(H,mat(0,0,0,W,h,L)), wall, 0, SS);
+        // at full detail the church can be entered; its own random sequence leaves the town unchanged
+        const ent=gb.lod===0, wzs=[]; for (let z=-L/2+2.5; z<L/2-2; z+=3.2) wzs.push(z);
+        const CR=ent?churchRoom(ch,cxp,czp,rot,P.level,W,L,h,wzs,hash(Math.round(cxp),Math.round(czp),4431)):null;
+        if (CR) churchShell(gb,H,W,L,h,wall,CR); else gb.add(T.box, mm(H,mat(0,0,0,W,h,L)), wall, 0, SS);
         gableRoof(gb,H,W,L,h,W*0.42,wall,roofC);
-        gb.add(T.cyl, mm(H,mat(0,fb,-L/2,W*0.7,h*0.78-fb,W*0.7)), wall, fb, SS);
-        gb.add(T.cone, mm(H,mat(0,h*0.78,-L/2,W*0.78,W*0.3,W*0.78)), roofC, null, SR);
+        gb.add(CR?T.hcyl:T.cyl, mm(H,mat(0,fb,-L/2,W*0.7,h*0.78-fb,W*0.7)), wall, fb, SS);
+        gb.add(CR?T.hcone:T.cone, mm(H,mat(0,h*0.78,-L/2,W*0.78,W*0.3,W*0.78)), roofC, null, SR);
         const fz=L/2+0.02;
         for (let s=0;s<3;s++) gb.add(T.box, mm(H,mat(0,-0.3+s*0.15-0.15-(s<2?0.03:0),fz+1.4-s*0.45,4.2-s*0.6,0.3,0.6)), C_.stone, null, SS);
+        if (CR){ // jambs and an arch of voussoirs round the doorway, standing proud of the facade
+          const {r:dr,s:ds,f:df}=CHURCH_DOOR, rr=dr+0.2, m=13;
+          for (const sx of [-1,1]) gb.add(T.box, mm(H,mat(sx*(dr+0.2),df,L/2,0.39,ds-df,0.16)), C_.trim, null, SS);
+          for (let i=0;i<m;i++){ const a=Math.PI*(i+0.5)/m; gb.add(T.boxC, mm(H,mat(Math.cos(a)*rr,ds+Math.sin(a)*rr,L/2,0.39,Math.PI*rr/m+0.03,0.16,0,0,a)), C_.trim, null, SS); } }
+        else {
         gb.add(T.box, mm(H,mat(0,0,fz,1.7,2.7,0.16)), C_.door, null, SW);
         gb.add(T.cylC, mm(H,mat(0,2.7,fz,1.7,0.16,1.7,0,Math.PI/2)), C_.door, null, SW);
         gb.add(T.box, mm(H,mat(0,0,fz-0.04,2.6,3.6,0.12)), C_.trim, null, SS);
-        gb.add(T.cylC, mm(H,mat(0,3.6,fz-0.04,2.6,0.12,2.6,0,Math.PI/2)), C_.trim, null, SS);
+        gb.add(T.cylC, mm(H,mat(0,3.6,fz-0.04,2.6,0.12,2.6,0,Math.PI/2)), C_.trim, null, SS); }
         gb.add(T.cylC, mm(H,mat(0,h-0.6,fz,1.9,0.14,1.9,0,Math.PI/2)), C_.trim, null);
         gb.add(T.cylC, mm(H,mat(0,h-0.6,fz+0.04,1.3,0.14,1.3,0,Math.PI/2)), C_.win, null, 5);
         for (const s of [1,-1]) gb.add(T.box, mm(H,mat(s*(W/2-0.2),0,fz,0.5,h,0.2)), C_.trim, null, SS);
@@ -1638,8 +1703,8 @@ function genChunk(cx,cz,lod=0){
           // the round head of the window: lit like the window, and a little thinner so that its face stays behind the
           // window's own and the two never share a plane
           gb.add(T.cylC, mm(H,mat(s*(W/2+0.01),h-1.4,z,0.6,0.1,0.6,Math.PI/2,Math.PI/2)), C_.win, null, 5); }
-        ch.obbs.push({x:cxp,z:czp,hw:W/2,hd:L/2,rot,top:Infinity}); ch.place.push(ob);
-        ch.circles.push({x:cxp+dx*(L/2),z:czp+dz*(L/2),r:W*0.35,top:Infinity});   // the apse, behind the altar end
+        ch.obbs.push({x:cxp,z:czp,hw:W/2,hd:L/2,rot,top:Infinity,room:CR||undefined}); ch.place.push(ob); ch.churchOb=ob;
+        if (!CR) ch.circles.push({x:cxp+dx*(L/2),z:czp+dz*(L/2),r:W*0.35,top:Infinity});   // the apse, behind the altar end
         if (tower){ const th=17+R()*6, top=R(); (ch.snd||(ch.snd=[])).push({id:'church_bell',x:tower.x,y:heightAt(tower.x,tower.z)+th-2,z:tower.z});
           house({x:tower.x,z:tower.z,rot,w:S,d:S,h:th,wall:shade(C_.stone,R,0.04),stoneWalls:true,roof:top<0.4?'flat':'spire',crenel:top<0.2,flag:top<0.4,
             spireCol:R()<0.55?C_.teal:roofC,tower:true,belfry:true,noDoor:true}); }
@@ -1708,7 +1773,8 @@ function genChunk(cx,cz,lod=0){
     for (let g=0;g<groups;g++){ const a=R()*6.28, r=2.4+R()*(P.r-3.4), gx=px+Math.cos(a)*r, gz=pz+Math.sin(a)*r, n=1+Math.floor(R()*(P.small?2:4));
       for (let q=0;q<n;q++) addFigure(gb,gx+(R()-0.5)*1.8,0,gz+(R()-0.5)*1.8,R,R()*6.28); }
     // belvedere: where the hill falls away, a retaining wall and balustrade replace the houses
-    const openAt=a=>baseH(P.x+Math.cos(a)*(P.r+2.6),P.z+Math.sin(a)*(P.r+2.6))<P.level-0.8;
+    // the balustrade stops short of the church, which may stand out over the drop with its steps
+    const openAt=a=>baseH(P.x+Math.cos(a)*(P.r+2.6),P.z+Math.sin(a)*(P.r+2.6))<P.level-0.8 && !(ch.churchOb && obbCircleDist(ch.churchOb,P.x+Math.cos(a)*(P.r+1.25),P.z+Math.sin(a)*(P.r+1.25))<0.9);
     const rw=P.r+1.25, nseg=Math.ceil(2*Math.PI*rw/1.1);
     let stairA=null, lowest=1e9;
     for (let i=0;i<nseg;i++){ const a=i/nseg*6.283; if (!openAt(a)) continue;
@@ -2293,6 +2359,7 @@ function updateDaylight(){
   else { LIGHT_DIR.copy(SUN_DIR).multiplyScalar(-1); sun.color.set('#9fb3ff'); sun.intensity=moonUp*1.0; }
   if (LIGHT_DIR.y<0.05) LIGHT_DIR.y=0.05;
   nightU.value=smooth((0.1-e)/0.22); glowU.uNight.value=nightU.value;
+  churchU.uSunL.value.copy(SUN_DIR); churchU.uSunK.value=smooth((e-0.02)/0.15); churchU.uGlass.value=0.12+1.05*Math.max(wd,wk*0.6);
   roomU.value.setRGB(0.97,0.93,0.86).multiplyScalar(0.45+0.5*wd).lerp(_c1.setRGB(0.78,0.58,0.4),nightU.value);
   surfMat.uniforms.uBright.value=0.22+0.78*Math.max(wd,wk*0.75);
   seaMat.specular.set('#121a22').lerp(_c2.set('#9fb0d8'),moonUp);
@@ -2324,7 +2391,7 @@ float ashlar(vec2 uv, float bw, float bh){
   float m=min(min(f.x,1.-f.x)*bw, min(f.y,1.-f.y)*bh);
   return mix(0.7, 0.88+0.2*h21(id)+0.06*vn(uv*7.), smoothstep(0.012,0.04,m)); }
 `;
-function patchBuildings(mat){
+function patchBuildings(mat,clip=false){
   mat.onBeforeCompile=(sh)=>{
     sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nattribute float surf; varying float vSurf; varying vec3 vWP; varying vec3 vWN;')
       .replace('#include <project_vertex>','#include <project_vertex>\nvSurf=surf; vWP=(modelMatrix*vec4(transformed,1.0)).xyz; vWN=normalize(mat3(modelMatrix)*objectNormal);');
@@ -2357,20 +2424,24 @@ function patchBuildings(mat){
         diffuseColor.rgb*=mix(1.,k,amp); }`);
   };
   const prev=mat.onBeforeCompile;
-  mat.onBeforeCompile=(sh)=>{ prev(sh); sh.uniforms.uNight=nightU;
+  mat.onBeforeCompile=(sh)=>{ prev(sh); sh.uniforms.uNight=nightU; if (clip) addRoomClip(sh);
     sh.fragmentShader=sh.fragmentShader.replace('varying float vSurf;','varying float vSurf; uniform float uNight;')
       .replace('#include <emissivemap_fragment>',`#include <emissivemap_fragment>
         if (vSurf>4.5 && vSurf<5.5) totalEmissiveRadiance += vec3(0.95,0.52,0.18)*(0.62+0.2*h21(floor(vWP.xz*0.9)+floor(vWP.y*0.4)))*uNight;
         else if (vSurf>5.5 && vSurf<6.5) totalEmissiveRadiance += diffuseColor.rgb*(0.12+2.4*uNight);`); };
   mat.customProgramCacheKey=()=>'buildings';
 }
-function patchGround(mat){
-  mat.onBeforeCompile=(sh)=>{
-    Object.assign(sh.uniforms,roomClip);
-    sh.fragmentShader=sh.fragmentShader.replace('#include <clipping_planes_fragment>',`#include <clipping_planes_fragment>
+// nothing of the ground or of the town outside a room is drawn inside it
+function addRoomClip(sh){
+  Object.assign(sh.uniforms,roomClip);
+  sh.fragmentShader=sh.fragmentShader.replace('#include <clipping_planes_fragment>',`#include <clipping_planes_fragment>
       for (int i=0;i<${ROOM_MAX};i++){ if (i>=uRoomN) break; vec4 A=uRoomA[i], B=uRoomB[i]; vec2 d=vWP.xz-A.xy;
         if (abs(d.x*A.z-d.y*A.w)<B.x && abs(d.x*A.w+d.y*A.z)<B.y && vWP.y>B.z && vWP.y<B.w) discard; }`)
-      .replace('#include <common>',`#include <common>\nuniform int uRoomN; uniform vec4 uRoomA[${ROOM_MAX}]; uniform vec4 uRoomB[${ROOM_MAX}];`);
+    .replace('#include <common>',`#include <common>\nuniform int uRoomN; uniform vec4 uRoomA[${ROOM_MAX}]; uniform vec4 uRoomB[${ROOM_MAX}];`);
+}
+function patchGround(mat){
+  mat.onBeforeCompile=(sh)=>{
+    addRoomClip(sh);
     sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nattribute vec2 pave; varying vec2 vPave; varying vec3 vWP; varying vec3 vWN;')
       .replace('#include <project_vertex>','#include <project_vertex>\nvPave=pave; vWP=(modelMatrix*vec4(transformed,1.0)).xyz; vWN=objectNormal;');
     sh.fragmentShader=sh.fragmentShader.replace('#include <common>','#include <common>\nvarying vec2 vPave;'+GLSL_LIB)
@@ -2392,7 +2463,7 @@ function patchGround(mat){
   mat.customProgramCacheKey=()=>'ground';
 }
 const nightU={value:0};
-const matB=new THREE.MeshLambertMaterial({vertexColors:true}); patchBuildings(matB);
+const matB=new THREE.MeshLambertMaterial({vertexColors:true}); patchBuildings(matB,true);
 // rooms are lit by their own light, not the sun: daylight from the doors and windows by day, lamplight at night.
 // MeshBasicMaterial is unlit, so the faces are shaded here by the way they face
 const roomU={value:new THREE.Color(1,1,1)};
@@ -2407,6 +2478,36 @@ const matR=new THREE.MeshBasicMaterial({vertexColors:true}); patchBuildings(matR
         if (vSurf>8.5 && vSurf<9.5) outgoingLight=mix(vec3(0.86,0.92,0.96),vec3(0.05,0.07,0.13),uNight); }
 #include <opaque_fragment>`); };
   matR.customProgramCacheKey=()=>'rooms'; }
+// stained glass: irregular pieces of coloured glass between lead cames, a border of one colour round each light.
+// p is in metres across the light (x, from -0.3 to 0.3) and up from its sill (y); seed picks four of six colours
+const SG_GLSL=`
+vec3 sgPal(float k){ k=mod(k,6.); return k<1.?vec3(0.1,0.22,0.78):k<2.?vec3(0.8,0.08,0.1):k<3.?vec3(0.98,0.7,0.1):k<4.?vec3(0.1,0.58,0.25):k<5.?vec3(0.5,0.14,0.68):vec3(0.12,0.62,0.78); }
+vec3 sgCol(vec2 p, float seed){ vec2 q=p*6.5+seed*13.1, i=floor(q), f=fract(q), id=vec2(0.); float F1=8., F2=8.;
+  for (int y=-1;y<=1;y++) for (int x=-1;x<=1;x++){ vec2 g=vec2(float(x),float(y)), o=vec2(h21(i+g),h21(i+g+17.3))*0.8+0.1; float dd=length(g+o-f);
+    if (dd<F1){ F2=F1; F1=dd; id=i+g; } else if (dd<F2) F2=dd; }
+  vec3 c=sgPal(floor(h21(id+seed)*4.)+floor(seed*6.))*(0.8+0.35*h21(id+5.7));
+  float bd=min(min(p.x+0.3,0.3-p.x),p.y); if (bd<0.06) c=sgPal(floor(seed*6.)+2.)*0.9;
+  return c*mix(0.05,1.,smoothstep(0.03,0.08,F2-F1)*smoothstep(0.,0.012,bd)*smoothstep(0.,0.012,abs(bd-0.06))); }`;
+const churchU={uCh:{value:new THREE.Vector4()},uChB:{value:new THREE.Vector4()},uChW:{value:new Array(8).fill(0)},uChN:{value:0},uChSeed:{value:0},
+  uSunL:{value:new THREE.Vector3(0,1,0)},uSunK:{value:0},uGlass:{value:1}};
+// the church's surfaces: lit like a room, and where the sun shines in through a window, coloured by its glass
+const matC=new THREE.MeshBasicMaterial({vertexColors:true}); patchBuildings(matC);
+{ const prev=matC.onBeforeCompile; matC.onBeforeCompile=sh=>{ prev(sh); sh.uniforms.uRoom=roomU; Object.assign(sh.uniforms,churchU);
+    sh.vertexShader=sh.vertexShader.replace('#include <begin_vertex>','vec3 objectNormal=vec3(normal);\n#include <begin_vertex>');
+    sh.fragmentShader=sh.fragmentShader.replace('uniform float uNight;','uniform float uNight; uniform vec3 uRoom; uniform vec4 uCh; uniform vec4 uChB; uniform float uChW[8]; uniform int uChN; uniform float uChSeed; uniform vec3 uSunL; uniform float uSunK;').replace('void main() {',SG_GLSL+'\nvoid main() {')
+      .replace('#include <opaque_fragment>',`{ vec3 n=normalize(vWN); float f=n.y>0.5?0.9:n.y<-0.5?0.66:0.8+0.07*n.x+0.04*n.z; outgoingLight*=uRoom*f*0.85;
+        // the ray from here towards the sun, through the plane of the glass on the side the sun is on
+        vec2 d=vWP.xz-uCh.xy; vec3 p=vec3(d.x*uCh.z-d.y*uCh.w, vWP.y-uChB.x, d.x*uCh.w+d.y*uCh.z);
+        vec3 sd=vec3(uSunL.x*uCh.z-uSunL.z*uCh.w, uSunL.y, uSunL.x*uCh.w+uSunL.z*uCh.z);
+        if (uChN>0 && uSunK>0.01 && sd.y>0.02 && abs(sd.x)>0.02 && abs(p.x)<uChB.y){ float t=(sign(sd.x)*uChB.y-p.x)/sd.x; vec3 hh=p+sd*t;
+          if (abs(hh.z)<uChB.z) for (int i=0;i<8;i++){ if (i>=uChN) break; float u=hh.z-uChW[i], v=hh.y-uChB.w;
+            if (abs(u)<0.3 && v>0. && (v<1.6 || u*u+(v-1.6)*(v-1.6)<0.09)) outgoingLight+=sgCol(vec2(u*sign(sd.x),v),uChSeed)*uSunK*max(0.,dot(n,uSunL))*1.2; } } }
+#include <opaque_fragment>`); };
+  matC.customProgramCacheKey=()=>'church'; }
+// the glass itself, bright by day with the light behind it and dark at night
+const matSG=new THREE.ShaderMaterial({uniforms:churchU,
+  vertexShader:`attribute vec3 sg; varying vec3 vSg; varying vec3 vWP; varying vec3 vWN; void main(){ vSg=sg; vWP=(modelMatrix*vec4(position,1.)).xyz; vWN=vec3(0.,1.,0.); gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.); }`,
+  fragmentShader:`uniform float uGlass;`+GLSL_LIB+SG_GLSL+` varying vec3 vSg; void main(){ gl_FragColor=vec4(sgCol(vSg.xy,vSg.z)*uGlass,1.); }`});
 // the door leaves: lit like the buildings, and at night faintly by the lamps of the rooms they close
 const matD=new THREE.MeshLambertMaterial({vertexColors:true}); patchBuildings(matD);
 { const prev=matD.onBeforeCompile; matD.onBeforeCompile=sh=>{ prev(sh); sh.uniforms.uRoom=roomU;
@@ -2433,7 +2534,7 @@ const fadePool=new Map();
 function fadeMat(kind,level,inv){
   if (level>=FADE_STEPS && !inv) return kind==='B'?matB:matG;
   const k=kind+level+(inv?'i':''); let m=fadePool.get(k); if (m) return m;
-  m=new THREE.MeshLambertMaterial({vertexColors:true}); if (kind==='B') patchBuildings(m); else patchGround(m);
+  m=new THREE.MeshLambertMaterial({vertexColors:true}); if (kind==='B') patchBuildings(m,true); else patchGround(m);
   addFade(m,level/FADE_STEPS,inv?1:0); m.customProgramCacheKey=()=>(kind==='B'?'buildings':'ground')+'-fade'; fadePool.set(k,m); return m;
 }
 matBoat=matB;
@@ -2843,7 +2944,7 @@ function updateFades(dt){
   for (let i=dying.length-1;i>=0;i--){ const ch=dying[i]; ch.fade-=k;
     if (ch.fade<=0){ disposeChunk(ch); dying.splice(i,1); } else setChunkFade(ch); }
 }
-function disposeChunk(ch){ if (ch.prev){ disposeChunk(ch.prev); ch.prev=null; } if (ch.doors){ doorsDirty=true; for (const D of ch.doors){ disposeRoom(D); doorsMoving.delete(D); } } untile(ch); scene.remove(ch.mesh,ch.ground); ch.geo.dispose(); ch.groundGeo.dispose(); if (ch.surf){ scene.remove(ch.surf); ch.surfGeo.dispose(); } if (ch.glowPts){ scene.remove(ch.glowPts); ch.glowGeo.dispose(); } for (const b of ch.boats) scene.remove(b.m);
+function disposeChunk(ch){ if (ch.prev){ disposeChunk(ch.prev); ch.prev=null; } if (ch.doors){ doorsDirty=true; for (const D of ch.doors) doorsMoving.delete(D); } if (ch.rooms) for (const D of ch.rooms) disposeRoom(D); untile(ch); scene.remove(ch.mesh,ch.ground); ch.geo.dispose(); ch.groundGeo.dispose(); if (ch.surf){ scene.remove(ch.surf); ch.surfGeo.dispose(); } if (ch.glowPts){ scene.remove(ch.glowPts); ch.glowGeo.dispose(); } for (const b of ch.boats) scene.remove(b.m);
   if (ch.fount){ scene.remove(ch.fount); ch.fountGeo.dispose(); } if (ch.clockFaces) for (const f of ch.clockFaces) clockFaces.delete(f); }
 /* ---------- outline blocks drawn in tiles ---------- */
 // Each block is several draw calls, and with hundreds of blocks in view the cost of issuing them, not their
@@ -3428,7 +3529,8 @@ function collide(){
   let g=heightAt(player.x,player.z);
   // indoors the floor replaces the ground, which may rise above it under the back of the house
   for (const ch of near) for (const o of ch.obbs){ if (!o.room) continue; const [lu,lv]=obbLocal(o,player.x,player.z);
-    if (Math.abs(lu)<=o.hw && Math.abs(lv)<=o.hd && py>o.room.fl-1.2){ g=o.room.fl;
+    const A=o.room.area||o, [au,av]=A===o?[lu,lv]:obbLocal(A,player.x,player.z);
+    if (Math.abs(au)<=A.hw && Math.abs(av)<=A.hd && py>o.room.fl-1.2){ g=o.room.fl;
       for (const q of o.room.walls){ if (q.top===Infinity||q.top>py+STEP) continue; const [qu,qv]=obbLocal(q,player.x,player.z); if (Math.abs(qu)<=q.hw+0.05&&Math.abs(qv)<=q.hd+0.05) g=Math.max(g,q.top); } } }
   for (const ch of near){
     for (const o of ch.obbs){ if (o.top===Infinity||o.top>py+STEP) continue; const [lu,lv]=obbLocal(o,player.x,player.z); if (Math.abs(lu)<=o.hw+0.05&&Math.abs(lv)<=o.hd+0.05) g=Math.max(g,o.top); }
@@ -3440,20 +3542,21 @@ function collide(){
 // Every door of the blocks at full detail is one instance of a single mesh. A door swings either way, away from
 // whoever pushes it, as far as it is pushed; once nobody is within its sweep it eases shut. A door whose room has
 // not yet been built stays shut.
-const DOOR_CAP=4096, doorMesh=new THREE.InstancedMesh(DOOR_GEO,matD,DOOR_CAP);
-doorMesh.count=0; doorMesh.frustumCulled=false; doorMesh.castShadow=true; doorMesh.receiveShadow=true; scene.add(doorMesh);
+const DOOR_CAP=4096, doorMeshes={house:new THREE.InstancedMesh(DOOR_GEO,matD,DOOR_CAP),church:new THREE.InstancedMesh(CHURCH_LEAF_GEO,matD,256)}, doorMesh=doorMeshes.house;
+for (const m of Object.values(doorMeshes)){ m.count=0; m.frustumCulled=false; m.castShadow=true; m.receiveShadow=true; scene.add(m); }
 let doorsDirty=true; const doorsMoving=new Set();
 const _dm=new THREE.Matrix4(), _dqq=new THREE.Quaternion(), _dp=new THREE.Vector3(), _ds=new THREE.Vector3(1,1,1), _dY=new THREE.Vector3(0,1,0);
 const leafAng=(D,a)=>D.rot+(D.s>0?a:Math.PI-a);
-function leafDist(D,a,x,z){ const t=leafAng(D,a), ux=Math.cos(t), uz=-Math.sin(t), px=x-D.hx, pz=z-D.hz, k=clamp(px*ux+pz*uz,0,DOOR_W);
+function leafDist(D,a,x,z){ const t=leafAng(D,a), ux=Math.cos(t), uz=-Math.sin(t), px=x-D.hx, pz=z-D.hz, k=clamp(px*ux+pz*uz,0,D.lw);
   return Math.hypot(px-ux*k,pz-uz*k); }
-function doorSet(D){ if (D.idx<0) return;
-  _dm.compose(_dp.set(D.hx,D.y,D.hz),_dqq.setFromAxisAngle(_dY,leafAng(D,D.a)),_ds); doorMesh.setMatrixAt(D.idx,_dm); doorMesh.instanceMatrix.needsUpdate=true; }
+function doorSet(D){ if (D.idx<0) return; const M=doorMeshes[D.leaf];
+  _dm.compose(_dp.set(D.hx,D.y,D.hz),_dqq.setFromAxisAngle(_dY,leafAng(D,D.a)),_ds); M.setMatrixAt(D.idx,_dm); M.instanceMatrix.needsUpdate=true; }
 function doorsRebuild(){
-  doorsDirty=false; let n=0;
-  for (const ch of chunks.values()) if (ch.lod===0 && ch.doors) for (const D of ch.doors){
-    if (n>=DOOR_CAP){ D.idx=-1; continue; } D.idx=n++; doorSet(D); doorMesh.setColorAt(D.idx,D.col); }
-  doorMesh.count=n; doorMesh.instanceMatrix.needsUpdate=true; if (doorMesh.instanceColor) doorMesh.instanceColor.needsUpdate=true;
+  doorsDirty=false; const n={};
+  for (const k in doorMeshes) n[k]=0;
+  for (const ch of chunks.values()) if (ch.lod===0 && ch.doors) for (const D of ch.doors){ const M=doorMeshes[D.leaf];
+    if (n[D.leaf]>=M.instanceMatrix.count){ D.idx=-1; continue; } D.idx=n[D.leaf]++; doorSet(D); M.setColorAt(D.idx,D.col); }
+  for (const k in doorMeshes){ const M=doorMeshes[k]; M.count=n[k]; M.instanceMatrix.needsUpdate=true; if (M.instanceColor) M.instanceColor.needsUpdate=true; }
   for (const D of doorsMoving) if (D.idx<0) doorsMoving.delete(D);
 }
 function nearDoors(rad){ const out=[]; for (const ch of nearbyChunks()) if (ch.doors) for (const D of ch.doors)
@@ -3463,7 +3566,7 @@ function nearDoors(rad){ const out=[]; for (const ch of nearbyChunks()) if (ch.d
 function doorsStep(dt){
   const r=player.r+0.04;
   for (const D of nearDoors(3)){
-    if (!D.room || Math.abs(player.y-D.fl)>1.2) continue;
+    if (!(D.owner||D).room || Math.abs(player.y-D.fl)>1.2) continue;
     let d=leafDist(D,D.a,player.x,player.z); if (d>=r) continue;
     const t=leafAng(D,D.a), px=player.ox-D.hx, pz=player.oz-D.hz, dLx=-Math.sin(t)*D.s, dLz=-Math.cos(t)*D.s;
     const dir=(px*dLx+pz*dLz)>0?-1:1, lim=clamp(D.a+dir*4*dt,-DOOR_MAX,DOOR_MAX); let a=D.a;
@@ -3472,7 +3575,7 @@ function doorsStep(dt){
   }
   for (const D of doorsMoving){
     D.idle+=dt;
-    const hold=Math.hypot(player.x-D.hx,player.z-D.hz)<DOOR_W+player.r+0.15;
+    const hold=Math.hypot(player.x-D.hx,player.z-D.hz)<D.lw+player.r+0.15;
     if (D.idle>1.2 && !hold) D.av+=(-7*D.a-5.3*D.av)*dt; else D.av*=Math.exp(-dt*5);
     let a=clamp(D.a+D.av*dt,-DOOR_MAX,DOOR_MAX); if (Math.abs(a)===DOOR_MAX) D.av=0;
     if (hold && leafDist(D,a,player.x,player.z)<r){ a=D.a; D.av=0; }
@@ -3483,10 +3586,10 @@ function doorsStep(dt){
 // the player is kept out of a leaf on the side they came from
 function leafPush(D){
   if (Math.abs(D.hx-player.x)>2 || Math.abs(D.hz-player.z)>2 || Math.abs(player.y-D.fl)>1.9) return;
-  const r=player.r+0.04, t=leafAng(D,D.a), ux=Math.cos(t), uz=-Math.sin(t), px=player.x-D.hx, pz=player.z-D.hz, k=clamp(px*ux+pz*uz,0,DOOR_W);
+  const r=player.r+0.04, t=leafAng(D,D.a), ux=Math.cos(t), uz=-Math.sin(t), px=player.x-D.hx, pz=player.z-D.hz, k=clamp(px*ux+pz*uz,0,D.lw);
   const cx=D.hx+ux*k, cz=D.hz+uz*k; let dx=player.x-cx, dz=player.z-cz; const d=Math.hypot(dx,dz); if (d>=r) return;
   const side=Math.sign((player.ox-D.hx)*(-uz)+(player.oz-D.hz)*ux)||1;
-  if (k>0.02 && k<DOOR_W-0.02 && (d<1e-6 || Math.sign(dx*(-uz)+dz*ux)!==side)){ player.x=cx-uz*side*r; player.z=cz+ux*side*r; return; }
+  if (k>0.02 && k<D.lw-0.02 && (d<1e-6 || Math.sign(dx*(-uz)+dz*ux)!==side)){ player.x=cx-uz*side*r; player.z=cz+ux*side*r; return; }
   if (d<1e-6) return; player.x=cx+dx/d*r; player.z=cz+dz/d*r;
 }
 // near a doorway or indoors the player is slimmer, so that a 1 m doorway can be passed
@@ -3502,19 +3605,19 @@ function playerRadius(dt){
 /* ---------- rooms ---------- */
 // built for the nearest enterable houses, a few at a time, and taken down again as the player moves away
 const rooms=new Set(); let roomScan=0;
-function disposeRoom(D){ if (!D.room) return; scene.remove(D.room); D.room.geometry.dispose(); D.room=null; rooms.delete(D); }
+function disposeRoom(D){ if (!D.room) return; scene.remove(D.room); D.room.geometry.dispose(); for (const c of D.room.children) c.geometry.dispose(); D.room=null; rooms.delete(D); }
 function roomsUpdate(dt){
   if (doorsDirty) doorsRebuild();
   roomScan-=dt; if (roomScan>0) return; roomScan=0.2;
   const cand=[], live=new Set();
-  for (const ch of chunks.values()) if (ch.lod===0 && ch.doors) for (const D of ch.doors){ live.add(D);
+  for (const ch of chunks.values()) if (ch.lod===0 && ch.rooms) for (const D of ch.rooms){ live.add(D);
     const dd=Math.hypot(D.x-player.x,D.z-player.z); if (dd<30) cand.push([dd,D]); }
   cand.sort((a,b)=>a[0]-b[0]); const want=new Set(cand.filter(c=>c[0]<26).slice(0,ROOM_MAX).map(c=>c[1]));
   const short=[...want].some(D=>!D.room);
   for (const D of rooms) if (!live.has(D) || (!want.has(D) && (short || Math.hypot(D.x-player.x,D.z-player.z)>30))) disposeRoom(D);
-  for (const D of want) if (!D.room && rooms.size<ROOM_MAX){ D.room=new THREE.Mesh(buildRoomGeo(D),matR); D.room.matrixAutoUpdate=false; scene.add(D.room); rooms.add(D); break; }
-  let n=0; for (const D of rooms){ const [cx,cz]=localToWorld(D,0,(D.zb+D.zf)/2);
-    roomClip.uRoomA.value[n].set(cx,cz,Math.cos(D.rot),Math.sin(D.rot)); roomClip.uRoomB.value[n].set(D.iw,(D.zf-D.zb)/2,D.fl-40,D.base+D.top+0.05); n++; }
+  for (const D of want) if (!D.room && rooms.size<ROOM_MAX-1){ D.room=D.kind==='church'?buildChurch(D):new THREE.Mesh(buildRoomGeo(D),matR); D.room.matrixAutoUpdate=false; scene.add(D.room); rooms.add(D); break; }
+  let n=0; for (const D of rooms) for (const b of (D.clip||[[0,(D.zb+D.zf)/2,D.iw,(D.zf-D.zb)/2]])){ if (n>=ROOM_MAX) break; const [cx,cz]=localToWorld(D,b[0],b[1]);
+    roomClip.uRoomA.value[n].set(cx,cz,Math.cos(D.rot),Math.sin(D.rot)); roomClip.uRoomB.value[n].set(b[2],b[3],D.fl-40,D.base+(b[4]??D.top+0.05)); n++; }
   roomClip.uRoomN.value=n;
 }
 const ROOM_WALLS=['#f2ece2','#efe6d6','#f4efe6','#ece3d3','#f1e7d8'].map(hex), ROOM_DADO=['#b9a27e','#8fa79a','#9fb0bf','#c39a7a','#a8a08a'].map(hex);
@@ -3544,11 +3647,11 @@ function buildRoomGeo(D){
       {N:[-1,0,0],P:k=>(u,y)=>[hw-k,y,u],u0:zb,u1:zf,door:null,sel:v=>Math.abs(v.ry-Math.PI/2)<0.1,u:v=>v.z},
       {N:[1,0,0],P:k=>(u,y)=>[-hw+k,y,u],u0:zb,u1:zf,door:null,sel:v=>Math.abs(v.ry+Math.PI/2)<0.1,u:v=>v.z}];
     for (const f of faces){ f.rects=wins.filter(f.sel).map(v=>[f.u(v)-v.w/2,f.u(v)+v.w/2,v.y-v.h/2,v.y+v.h/2]); f.k=WT; }
-    quads(A=>{ for (const f of faces) faceHoles(A,f.P(f.k),f.N,f.u0,f.u1,F,Hc,f.rects,f.door); }, wallC, barn?SS:0);
+    quads(A=>{ for (const f of faces) faceHoles(A,f.P(f.k),f.N,f.u0,f.u1,F,Hc,f.rects,f.door); }, wallC, barn?SS:0, null);
     // a painted dado round the walls of the ground floor, standing a centimetre off them
     if (!fi && !barn) quads(A=>{ for (const f of faces) faceHoles(A,f.P(f.k+0.01),f.N,f.u0,f.u1,F,F+0.95,f.rects,f.door); }, dadoC, 0);
     // the windows: the reveal through the wall to the outer face, a casement frame at the outer face and a deep sill
-    quads(A=>{ for (const f of faces) for (const r of f.rects) rectReveal(A,f.P(f.k),f.P(0),r); }, wallC, 0);
+    quads(A=>{ for (const f of faces) for (const r of f.rects) rectReveal(A,f.P(f.k),f.P(0),r); }, wallC, 0, null);
     for (const f of faces) for (const r of f.rects){ const um=(r[0]+r[1])/2, ym=(r[2]+r[3])/2, ry=Math.atan2(-f.N[0],-f.N[2]);
       for (const [sx,sy,u,y] of [[0.04,r[3]-r[2],r[0]+0.02,ym],[0.04,r[3]-r[2],r[1]-0.02,ym],[0.04,r[3]-r[2],um,ym],[r[1]-r[0],0.04,um,r[3]-0.02],[r[1]-r[0],0.04,um,ym+0.08]]){
         const p=f.P(0.1)(u,y); gb.add(T.boxC, mm(H,mat(p[0],p[1],p[2],sx,sy,0.05,ry)), dark, null); }
@@ -3660,6 +3763,78 @@ function buildRoomGeo(D){
   if (!D.furn){ D.furn=true; for (const [x,z,w2,d2,F] of solid){ const [wx,wz]=localToWorld(D,x,z);
     D.walls.push({x:wx,z:wz,hw:w2,hd:d2,rot:D.rot,top:D.base+F+2.0,bot:F>DF+0.01?D.base+F:undefined}); } }
   return gb.geometry();
+}
+/* ---------- the inside of a church ---------- */
+function buildChurch(C){
+  const R=rng(Math.floor(C.seed*4294967296)), gb=new GB(0), H=mat(C.x,C.base,C.z,1,1,1,C.rot), ao=C.base;
+  const {W,L,h,iw,ra}=C, hw=W/2, hl=L/2, zf=hl-WTC, zb=-hl+WTC, F=CF, ar=C.ar, r=ar.r, rise=W*0.42;
+  const plaster=hex('#efe7da'), stone=hex('#d9ccb6'), floorC=pick(R,[hex('#d8ccb8'),hex('#c9b9a0'),hex('#b9a58a')]), wood=hex('#6e4e34'), dark=hex('#4a3424');
+  const apseC=pick(R,[hex('#2c3e6b'),hex('#7a2f2a'),hex('#2f5a4a')]), gold=hex('#d6a640');
+  const quads=(fn,col,surf,aob=ao)=>{ const A=[]; fn(A); gb.add(triTpl(A),H,col,aob,surf); };
+  const B=(x,y,z,sx,sy,sz,col,surf=0,ry=0)=>gb.add(T.box, mm(H,mat(x,y,z,sx,sy,sz,ry)), col, ao, surf);
+  const LP=(x,y,z)=>new THREE.Vector3(x,y,z).applyMatrix4(H).toArray();
+  const yE=h+rise*WTC/hw-0.1, yA=h+rise-0.12, wa=C.wz.map(z=>({c:z,r:0.3,s:h-1.4,f:h-3.0}));
+  // floor: the nave, the passage through the apse arch, and the half circle of the apse
+  quads(A=>{ q3n(A,[-iw,F,zb],[iw,F,zb],[iw,F,zf],[-iw,F,zf],[0,1,0]); q3n(A,[-r,F,-hl],[r,F,-hl],[r,F,zb],[-r,F,zb],[0,1,0]);
+    for (let i=0;i<16;i++){ const t0=Math.PI/2+Math.PI*i/16, t1=Math.PI/2+Math.PI*(i+1)/16;
+      A.push(0,F,-hl, r*Math.sin(t1),F,-hl+r*Math.cos(t1), r*Math.sin(t0),F,-hl+r*Math.cos(t0)); } }, floorC, SS);
+  // walls: the sides with the windows, the front with the doorway and the back with the apse arch, up to the eaves,
+  // and the gables above them under the open roof
+  quads(A=>{ for (const sx of [-1,1]) faceHoles(A,(u,y)=>[sx*iw,y,u],[-sx,0,0],zb,zf,F,yE,[],wa);
+    faceHoles(A,(u,y)=>[u,y,zf],[0,0,-1],-iw,iw,F,yE,[],[CHURCH_DOOR]); faceHoles(A,(u,y)=>[u,y,zb],[0,0,1],-iw,iw,F,yE,[],[ar]);
+    // each gable as a quad folded to a triangle at the apex
+    for (const [z,nz] of [[zf,-1],[zb,1]]) q3n(A,[-iw,yE,z],[iw,yE,z],[0,yA,z],[-0.0001,yA,z],[0,0,nz]);
+    for (const sx of [-1,1]) for (const a of wa) archReveal(A,(u,y)=>[sx*iw,y,u],(u,y)=>[sx*(hw-0.12),y,u],a); }, plaster, 0, null);
+  // a stone dado round the nave
+  quads(A=>{ for (const sx of [-1,1]) faceHoles(A,(u,y)=>[sx*(iw-0.01),y,u],[-sx,0,0],zb,zf,F,F+1.1,[],[]);
+    faceHoles(A,(u,y)=>[u,y,zf-0.01],[0,0,-1],-iw,iw,F,F+1.1,[],[CHURCH_DOOR]); faceHoles(A,(u,y)=>[u,y,zb+0.01],[0,0,1],-iw,iw,F,F+1.1,[],[ar]); }, stone, SS);
+  // the open roof: boarded slopes on trusses of a tie beam, a king post and two principal rafters
+  quads(A=>{ for (const sx of [-1,1]) q3n(A,[sx*iw,yE,zb],[sx*iw,yE,zf],[0,yA,zf],[0,yA,zb],[-sx*rise,-hw,0]); }, wood.clone().multiplyScalar(1.1), SW);
+  for (let z=zb+1.2; z<zf-0.5; z+=3.2){ B(0,h-0.25,z,2*iw,0.26,0.24,dark,SW); B(0,h,z,0.2,yA-h-0.05,0.2,dark,SW);
+    for (const sx of [-1,1]) segBox(gb,LP(sx*iw,h-0.05,z),LP(0,yA-0.1,z),0.2,0.24,dark,SW); }
+  // the apse: a half cylinder up to the springing of the arch and a half dome over it, painted
+  quads(A=>{ const n=16, m=8; for (let i=0;i<n;i++){ const t0=Math.PI/2+Math.PI*i/n, t1=Math.PI/2+Math.PI*(i+1)/n;
+      const p=(t,y,rr=r)=>[rr*Math.sin(t),y,-hl+rr*Math.cos(t)];
+      q3n(A,p(t0,F),p(t1,F),p(t1,ar.s),p(t0,ar.s),[-Math.sin((t0+t1)/2),0,-Math.cos((t0+t1)/2)]);
+      for (let j=0;j<m;j++){ const a0=Math.PI/2*j/m, a1=Math.PI/2*(j+1)/m, P=(t,a)=>[r*Math.cos(a)*Math.sin(t),ar.s+r*Math.sin(a),-hl+r*Math.cos(a)*Math.cos(t)];
+        const c=[0,ar.s,-hl], M=P((t0+t1)/2,(a0+a1)/2); q3n(A,P(t0,a0),P(t1,a0),P(t1,a1),P(t0,a1),[c[0]-M[0],c[1]-M[1],c[2]-M[2]]); } } }, apseC, 0);
+  for (let i=0;i<14;i++){ const t=Math.PI/2+Math.PI*(i+0.5)/14, a=0.25+R()*1.2, rr=r-0.02; gb.add(T.sphLo, mm(H,mat(rr*Math.cos(a)*Math.sin(t),ar.s+rr*Math.sin(a),-hl+rr*Math.cos(a)*Math.cos(t),0.07,0.07,0.07)), gold, null); }
+  // a band of gold where the dome springs
+  quads(A=>{ for (let i=0;i<16;i++){ const t0=Math.PI/2+Math.PI*i/16, t1=Math.PI/2+Math.PI*(i+1)/16, p=(t,y)=>[(r-0.01)*Math.sin(t),y,-hl+(r-0.01)*Math.cos(t)];
+    q3n(A,p(t0,ar.s-0.25),p(t1,ar.s-0.25),p(t1,ar.s),p(t0,ar.s),[-Math.sin(t0),0,-Math.cos(t0)]); } }, gold, 0);
+  // the sanctuary: a step across the apse, the altar with a cloth and candles, and a cross on the apse wall
+  const solid=[];
+  B(0,F,-hl-r*0.45,2*r*0.92,0.15,r*0.9,stone,SS); solid.push([0,-hl-r*0.45,r*0.92,r*0.45,0.15]);
+  B(0,F+0.15,-hl-r*0.55,1.8,0.9,0.75,hex('#efe9dc'),SS); B(0,F+1.05,-hl-r*0.55,1.9,0.03,0.85,hex('#f7f3ec')); solid.push([0,-hl-r*0.55,0.9,0.38,2]);
+  for (const sx of [-0.7,0.7]){ gb.add(T.cyl8, mm(H,mat(sx,F+1.08,-hl-r*0.55,0.08,0.35,0.08)), gold, null); gb.add(T.cyl8, mm(H,mat(sx,F+1.43,-hl-r*0.55,0.04,0.18,0.04)), hex('#f4efe2'), null);
+    gb.add(T.sphLo, mm(H,mat(sx,F+1.64,-hl-r*0.55,0.035,0.06,0.035)), hex('#ffd27a'), null); }
+  B(0,F+1.6,-hl-r+0.08,0.14,1.8,0.08,gold); B(0,F+2.8,-hl-r+0.08,0.9,0.14,0.08,gold);
+  // pews either side of the aisle, from the font by the door to the step of the sanctuary
+  const aisle=0.75, pl=iw-aisle-0.25;
+  for (let z=zf-3.2; z>zb+1.2; z-=1.0) for (const sx of [-1,1]){ const x=sx*(aisle+pl/2);
+    // the seat, with the back behind it on the door side, so that the pew faces the altar
+    B(x,F,z,pl,0.45,0.42,wood,SW); B(x,F,z+0.22,pl,0.95,0.06,wood,SW); for (const e of [-1,1]) B(x+e*pl/2,F,z+0.05,0.06,0.9,0.5,dark,SW);
+    solid.push([x,z+0.05,pl/2,0.27,2]); }
+  // the font and the lectern
+  { const x=-(iw-0.9), z=zf-1.4; gb.add(T.cyl, mm(H,mat(x,F,z,0.5,0.7,0.5)), stone, ao, SS); gb.add(T.bowl, mm(H,mat(x,F+0.7,z,0.85,0.3,0.85)), stone, null, SS); solid.push([x,z,0.42,0.42,2]); }
+  { const x=r*0.75, z=-hl+0.5; B(x,F,z,0.1,1.1,0.1,dark,SW); gb.add(T.boxC, mm(H,mat(x,F+1.15,z,0.55,0.05,0.42,0,-0.35)), dark, null, SW); solid.push([x,z,0.25,0.25,2]); }
+  // lamps hung on chains down the nave
+  for (let z=zf-2.5; z>zb+1; z-=4.2){ gb.add(T.cyl8, mm(H,mat(0,h-1.2,z,0.02,1.0,0.02)), dark, null);
+    gb.add(T.cyl8, mm(H,mat(0,h-1.6,z,0.7,0.05,0.7)), gold, null);
+    for (let k=0;k<6;k++){ const a=k/6*Math.PI*2; gb.add(T.cyl8, mm(H,mat(Math.cos(a)*0.3,h-1.55,z+Math.sin(a)*0.3,0.04,0.12,0.04)), hex('#fff1c8'), null); } }
+  if (!C.furn){ C.furn=true; for (const [x,z,w2,d2,tp] of solid){ const [wx,wz]=localToWorld(C,x,z); C.walls.push({x:wx,z:wz,hw:w2,hd:d2,rot:C.rot,top:C.base+F+tp}); } }
+  const mesh=new THREE.Mesh(gb.geometry(),matC);
+  // the glass, set in the middle of the wall's thickness
+  const P=[], S=[];
+  for (const sx of [-1,1]) for (const z of C.wz){ const x=sx*(hw-0.12), y0=h-3.0, y1=h-1.1;
+    const v=[[z-0.3,y0],[z+0.3,y0],[z+0.3,y1],[z-0.3,y1]].map(([zz,y])=>LP(x,y,zz)), g=[[z-0.3,y0],[z+0.3,y0],[z+0.3,y1],[z-0.3,y1]].map(([zz,y])=>[(zz-z)*sx,y-y0,C.seed]);
+    for (const k of [0,1,2,0,2,3]){ P.push(...v[k]); S.push(...g[k]); } }
+  const gg=new THREE.BufferGeometry(); gg.setAttribute('position',new THREE.Float32BufferAttribute(P,3)); gg.setAttribute('sg',new THREE.Float32BufferAttribute(S,3));
+  const glass=new THREE.Mesh(gg,matSG); glass.material.side=THREE.DoubleSide; mesh.add(glass);
+  // the coloured light is worked out for one church at a time, the one last built
+  const u=churchU; u.uCh.value.set(C.x,C.z,Math.cos(C.rot),Math.sin(C.rot)); u.uChB.value.set(C.base,hw-0.12,zf,h-3.0);
+  for (let i=0;i<8;i++) u.uChW.value[i]=C.wz[i]||0; u.uChN.value=Math.min(8,C.wz.length); u.uChSeed.value=C.seed;
+  return mesh;
 }
 // the highest surface the player could stand on at (x,z): terrain, steps, terraces, moles
 function standableAt(x,z){
