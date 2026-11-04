@@ -98,9 +98,13 @@ Blocks are kept in three rings of detail round the player:
 |---|---|---|
 | Full detail | `LOD0 = 2` blocks | Every piece of geometry |
 | Simplified | out to `VIEW` blocks | Pieces smaller than 0.55 m are left out and spheres are coarsened. |
-| Outlines | out to `min(20, 2·VIEW+2)` blocks | Only pieces larger than 1.4 m are kept. Small lit windows become glow points. |
+| Outlines | out to `min(36, 4·VIEW)` blocks | Only pieces larger than 1.4 m are kept. Small lit windows become glow points. |
 
-Beyond the rings, a coarse far terrain (`FN = 170` cells) covers the distance, with the lights of distant villages drawn at night.
+Each block costs several draw calls, and with thousands of blocks loaded the number of draw calls, not the number of triangles, sets the frame time. Outline blocks that have finished fading in are therefore merged in tiles of `TILE = 4` × 4 blocks and drawn from one mesh per material. A block leaves its tile and is drawn on its own again as soon as it starts to fade out or change detail. Tiles are rebuilt within a budget of 2 ms per frame.
+
+Each block samples the ground on a grid before it is built: every metre for full detail, every 2 m for simplified blocks and every 4 m for outlines, matching the resolution of each ring's ground mesh.
+
+Beyond the rings, a coarse far terrain (`FN = 200` cells of `FS = 22` m) covers the distance, with the lights of distant villages drawn at night. Its heights, colours and lights are cached per grid point, so moving the grid computes only the new edge.
 
 `VIEW` lies between 2 and 9 and adjusts itself to hold 60 frames per second; the help panel reports the current distances. New blocks fade in over 0.8 s in 16 dithered steps. A block that changes detail dissolves into its replacement, the old and new versions drawing complementary fragments so that they never overlap. Nothing fades during the first load or for blocks that appear right round the player.
 

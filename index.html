@@ -244,7 +244,7 @@ function landProfile(s,x,z,sd){
 // Steep conical hills, each crowned by a hill town with its church on the summit.
 const PEAK=480, pkCache=new Map();
 function peakInfo(i,j){
-  const k=i+','+j; if (pkCache.has(k)) return pkCache.get(k);
+  const k=i*1048576+j; { const v=pkCache.get(k); if (v!==undefined) return v; }
   let P=null;
   if (hash(i,j,1201)<0.4){
     let x=(i+0.5)*PEAK+(hash(i,j,1202)-0.5)*220, z=(j+0.5)*PEAK+(hash(i,j,1203)-0.5)*220;
@@ -282,7 +282,7 @@ const ISL=1300, isCache=new Map();
 // Cliffs face the open sea, so the landward shore, where any jetty stands, keeps its beach.
 const ISLE_KINDS=['hills','ridge','volcano','mesa','cliffs'];
 function islandInfo(sd,m){
-  const k=sd+':'+m; if (isCache.has(k)) return isCache.get(k);
+  const k=m*4+sd; { const v=isCache.get(k); if (v!==undefined) return v; }
   const o=sd>0?0:70; let I=null; const hh=n=>hash(m,n,1501+o);
   if (hh(0)<0.62){
     const R=110+hh(3)*190, asp=1+hh(10)*1.3, th=(hh(11)-0.5)*1.4, A=R*Math.sqrt(asp), B=R/Math.sqrt(asp);
@@ -342,7 +342,7 @@ const LH_SP=4200, lhCache=new Map();
 const RK_SP=5200, rkCache=new Map();
 function segDist(x,z,ax,az,bx,bz){ const dx=bx-ax, dz=bz-az, t=clamp(((x-ax)*dx+(z-az)*dz)/(dx*dx+dz*dz||1),0,1); return Math.hypot(x-ax-dx*t,z-az-dz*t); }
 function seaRockInfo(sd,n){
-  const k=sd+':'+n; if (rkCache.has(k)) return rkCache.get(k);
+  const k=n*4+sd; { const v=rkCache.get(k); if (v!==undefined) return v; }
   const o=sd>0?0:30, hh=q=>hash(n,q,1801+o); let K=null;
   if (hh(0)<0.55){
     const x=n*RK_SP+RK_SP*(0.15+0.7*hh(1)), z=coastZ(sd,x)-sd*(200+hh(2)*140), m0=Math.floor(x/ISL); let ok=true;
@@ -406,7 +406,7 @@ function rockLight(sd,n){
 const RUIN=650, ruCache=new Map();
 // the site whose centre lies in a block: mainland sites on a 650 m grid, island sites one per island at most
 function ruinIn(cx,cz){
-  const k=cx+','+cz; if (ruCache.has(k)) return ruCache.get(k);
+  const k=cx*1048576+cz; { const v=ruCache.get(k); if (v!==undefined) return v; }
   let S=null; const xc=cx*C+C/2, zc=cz*C+C/2;
   const i=Math.floor(xc/RUIN), j=Math.floor(zc/RUIN);
   if (hash(i,j,1901)<0.35){
@@ -446,7 +446,7 @@ function coastRoadH(sd,x){ const a=baseH(x-8,coastRoadZ(sd,x-8)), b=baseH(x,coas
 /* ---------- harbours at intervals along the coast ---------- */
 const HARB=220, hbCache=new Map();
 function harbourInfo(sd,n){
-  const k=sd+':'+n; if (hbCache.has(k)) return hbCache.get(k);
+  const k=n*4+sd; { const v=hbCache.get(k); if (v!==undefined) return v; }
   const o=sd>0?0:50; let H=null;
   const hx0=n*HARB+HARB/2, hz0=coastZ(sd,hx0)+sd*25;
   if (hash(n,0,801+o)<0.75 && isVillage(Math.floor(hx0/C),Math.floor(hz0/C))){
@@ -583,7 +583,7 @@ function chunkKind(cx,cz){
 // squares are levelled into the hillside, so they are part of the height function
 const pzCache=new Map();
 function piazzaInfo(cx,cz){
-  const k=cx+','+cz; if (pzCache.has(k)) return pzCache.get(k);
+  const k=cx*1048576+cz; { const v=pzCache.get(k); if (v!==undefined) return v; }
   const kind=chunkKind(cx,cz), xc=cx*C+C/2, zc=cz*C+C/2, h1=hash(cx,cz,501), h2=hash(cx,cz,502), h3=hash(cx,cz,503);
   let p=null;
   const PK=peakInChunk(cx,cz);
@@ -605,7 +605,7 @@ function piazzaInfo(cx,cz){
 // alleys are decided per block from the seed, so the terrain can level them too
 const alCache=new Map();
 function alleyInfo(cx,cz){
-  const k=cx+','+cz; if (alCache.has(k)) return alCache.get(k);
+  const k=cx*1048576+cz; { const v=alCache.get(k); if (v!==undefined) return v; }
   const kind=chunkKind(cx,cz), xc=cx*C+C/2, zc=cz*C+C/2, list=[];
   const want = kind==='quarter' ? (hash(cx,cz,701)<0.85?(hash(cx,cz,702)<0.45?2:1):0) : (kind==='piazza'||kind==='church'||kind==='shore') ? (hash(cx,cz,703)<0.4?1:0) : 0;
   const dirs = hash(cx,cz,704)<0.5?['h','v']:['v','h'];
@@ -1399,7 +1399,7 @@ function genChunk(cx,cz,lod=0){
   const R=rng(Math.floor(hash(cx,cz,101)*4294967296));
   const x0=cx*C, z0=cz*C, xc=x0+C/2, zc=z0+C/2;
   GEN_LOD=lod;
-  { const d=lod>=2?2:1, n=Math.round((C+28)/d)+1, a=new Float32Array(n*n), gx=x0-14, gz=z0-14;
+  { const d=lod>=2?4:lod>=1?2:1, n=Math.round((C+28)/d)+1, a=new Float32Array(n*n), gx=x0-14, gz=z0-14;
     HG=null; for (let j=0;j<n;j++) for (let i=0;i<n;i++) a[j*n+i]=heightAtExact(gx+i*d,gz+j*d);
     HG={x0:gx,z0:gz,d,n,a}; }
   const k=core(cx,cz), hMul=0.86+0.3*k;
@@ -2540,12 +2540,13 @@ function updateCats(dt){
 }
 
 /* ---------- distant terrain beyond the generated blocks ---------- */
-const FN=170, FS=16;
+const FN=200, FS=22;
 const farGeo=new THREE.BufferGeometry();
 farGeo.setAttribute('position',new THREE.Float32BufferAttribute(new Float32Array((FN+1)*(FN+1)*3),3));
 farGeo.setAttribute('color',new THREE.Float32BufferAttribute(new Float32Array((FN+1)*(FN+1)*3),3));
+farGeo.setAttribute('normal',new THREE.Float32BufferAttribute(new Float32Array((FN+1)*(FN+1)*3),3));
 { const id=[]; for (let j=0;j<FN;j++) for (let i=0;i<FN;i++){ const a=j*(FN+1)+i, b=a+1, c=a+FN+1, d=c+1; id.push(a,c,b,b,c,d); } farGeo.setIndex(id); }
-const MASK=64, maskData=new Uint8Array(MASK*MASK);
+const MASK=128, maskData=new Uint8Array(MASK*MASK);
 const maskTex=new THREE.DataTexture(maskData,MASK,MASK,THREE.RedFormat,THREE.UnsignedByteType); maskTex.magFilter=maskTex.minFilter=THREE.NearestFilter; maskTex.needsUpdate=true;
 const maskU={uMask:{value:maskTex},uMaskO:{value:new THREE.Vector2()}};
 let maskDirty=true;
@@ -2569,29 +2570,42 @@ const farGlowGeo=new THREE.BufferGeometry();
 const farGlow=new THREE.Points(farGlowGeo,glowMat); farGlow.frustumCulled=false; farGlow.renderOrder=3; scene.add(farGlow);
 const key=(x,z)=>x+','+z;
 const chunks=new Map();
+// each grid point's height, colour and distant lights depend only on where it is, so they are worked out once
+// and kept: moving the grid then costs only the new rows along its leading edge
+const farCache=new Map();
+function farPoint(gi,gj){
+  const k=gi*1e6+gj; let F=farCache.get(k); if (F) return F;
+  const x=gi*FS, z=gj*FS, h=baseH(x,z), c=new THREE.Color();
+  if (h<0) c.copy(C_.seabed);
+  else if (h<1.6) c.copy(C_.beach);
+  else if (h<80 && isVillage(Math.floor(x/C),Math.floor(z/C))){ const r=hash(gi,gj,900); c.copy(r<0.42?C_.roofs[0]:r<0.85?C_.walls[1]:C_.leaf[1]).lerp(C_.sand2,0.25); }
+  else if (h<80){ const r=hash(gi,gj,901); c.copy(r<0.5?C_.olive:DRYGRASS).lerp(C_.sand2,0.2); }
+  else { c.copy(C_.scrub).lerp(C_.rock,clamp((h-80)/80,0,0.8)); }
+  let lights=null;
+  if (h>=1.6 && h<=80 && isVillage(Math.floor(x/C),Math.floor(z/C)) && hash(gi,gj,905)<=0.55){ lights=[];
+    for (let q=0;q<3;q++){ const jx=(hash(Math.round(x),q,906)-0.5)*FS, jz=(hash(Math.round(z),q,907)-0.5)*FS; lights.push(x+jx,baseH(x+jx,z+jz)+2.5+q,z+jz); } }
+  if (farCache.size>400000) farCache.clear();
+  F={h,r:c.r,g:c.g,b:c.b,lights}; farCache.set(k,F); return F;
+}
+let farOrigin='', farLit=[];
 function rebuildFar(px,pz){
-  const ox=Math.round(px/FS)*FS, oz=Math.round(pz/FS)*FS, P=farGeo.attributes.position.array, Co=farGeo.attributes.color.array, c=new THREE.Color();
-  const loaded=(x,z)=>chunks.has(key(Math.floor(x/C),Math.floor(z/C)));
-  for (let j=0;j<=FN;j++) for (let i=0;i<=FN;i++){
-    const x=ox+(i-FN/2)*FS, z=oz+(j-FN/2)*FS, h=baseH(x,z), o=(j*(FN+1)+i)*3;
-    P[o]=x; P[o+1]=h-0.35; P[o+2]=z;
-    if (h<0) c.copy(C_.seabed);
-    else if (h<1.6) c.copy(C_.beach);
-    else if (h<80 && isVillage(Math.floor(x/C),Math.floor(z/C))){ const r=hash(Math.round(x/FS),Math.round(z/FS),900); c.copy(r<0.42?C_.roofs[0]:r<0.85?C_.walls[1]:C_.leaf[1]).lerp(C_.sand2,0.25); }
-    else if (h<80){ const r=hash(Math.round(x/FS),Math.round(z/FS),901); c.copy(r<0.5?C_.olive:DRYGRASS).lerp(C_.sand2,0.2); }
-    else { c.copy(C_.scrub).lerp(C_.rock,clamp((h-80)/80,0,0.8)); }
-    Co[o]=c.r; Co[o+1]=c.g; Co[o+2]=c.b;
-  }
-  farGeo.attributes.position.needsUpdate=true; farGeo.attributes.color.needsUpdate=true; farGeo.computeVertexNormals();
-  // lights of the distant village, seen at night
+  const gx=Math.round(px/FS), gz=Math.round(pz/FS), P=farGeo.attributes.position.array, Co=farGeo.attributes.color.array, W=FN+1;
+  if (farOrigin!==gx+','+gz){ farOrigin=gx+','+gz; farLit=[];
+    for (let j=0;j<=FN;j++) for (let i=0;i<=FN;i++){
+      const gi=gx+i-FN/2, gj=gz+j-FN/2, F=farPoint(gi,gj), o=(j*W+i)*3;
+      P[o]=gi*FS; P[o+1]=F.h-0.35; P[o+2]=gj*FS; Co[o]=F.r; Co[o+1]=F.g; Co[o+2]=F.b; if (F.lights) farLit.push(F.lights,gi*FS,gj*FS);
+    }
+    // normals straight from the height grid, by central differences
+    const Nn=farGeo.attributes.normal.array;
+    for (let j=0;j<=FN;j++) for (let i=0;i<=FN;i++){
+      const hx=P[(j*W+Math.min(FN,i+1))*3+1]-P[(j*W+Math.max(0,i-1))*3+1], hz=P[(Math.min(FN,j+1)*W+i)*3+1]-P[(Math.max(0,j-1)*W+i)*3+1];
+      const dx=(Math.min(FN,i+1)-Math.max(0,i-1))*FS, dz=(Math.min(FN,j+1)-Math.max(0,j-1))*FS, nx=-hx/dx, nz=-hz/dz, l=Math.hypot(nx,1,nz), o=(j*W+i)*3;
+      Nn[o]=nx/l; Nn[o+1]=1/l; Nn[o+2]=nz/l; }
+    farGeo.attributes.position.needsUpdate=true; farGeo.attributes.color.needsUpdate=true; farGeo.attributes.normal.needsUpdate=true; }
+  // lights of the distant village, seen at night, where no block has been built yet
   const gp=[], gs=[], gc=[];
-  for (let j=0;j<=FN;j++) for (let i=0;i<=FN;i++){
-    const o=(j*(FN+1)+i)*3, x=P[o], z=P[o+2], h=P[o+1]+0.35;
-    if (h<1.6 || h>80 || loaded(x,z) || !isVillage(Math.floor(x/C),Math.floor(z/C))) continue;
-    const r=hash(Math.round(x/FS),Math.round(z/FS),905); if (r>0.55) continue;
-    for (let q=0;q<3;q++){ const jx=(hash(Math.round(x),q,906)-0.5)*FS, jz=(hash(Math.round(z),q,907)-0.5)*FS;
-      gp.push(x+jx,baseH(x+jx,z+jz)+2.5+q,z+jz); gs.push(2.6+q); gc.push(1,0.74,0.42); }
-  }
+  for (let n=0;n<farLit.length;n+=3){ const L=farLit[n]; if (chunks.has(key(Math.floor(farLit[n+1]/C),Math.floor(farLit[n+2]/C)))) continue;
+    for (let q=0;q<3;q++){ gp.push(L[q*3],L[q*3+1],L[q*3+2]); gs.push(2.6+q); gc.push(1,0.74,0.42); } }
   farGlowGeo.setAttribute('position',new THREE.Float32BufferAttribute(gp,3));
   farGlowGeo.setAttribute('size',new THREE.Float32BufferAttribute(gs,1));
   farGlowGeo.setAttribute('gcol',new THREE.Float32BufferAttribute(gc,3));
@@ -2649,19 +2663,65 @@ const dying=[];
 function updateFades(dt){
   const k=dt/FADE_TIME;
   for (const ch of chunks.values()) if (ch.fade<1){ ch.fade=Math.min(1,ch.fade+k); setChunkFade(ch);
-    if (ch.fade>=1){ if (ch.prev){ disposeChunk(ch.prev); ch.prev=null; } maskDirty=true; } }
+    if (ch.fade>=1){ if (ch.prev){ disposeChunk(ch.prev); ch.prev=null; } maskDirty=true; if (ch.lod>=2) tilesDirty.add(tileKey(ch)); } }
   for (let i=dying.length-1;i>=0;i--){ const ch=dying[i]; ch.fade-=k;
     if (ch.fade<=0){ disposeChunk(ch); dying.splice(i,1); } else setChunkFade(ch); }
 }
-function disposeChunk(ch){ if (ch.prev){ disposeChunk(ch.prev); ch.prev=null; } scene.remove(ch.mesh,ch.ground); ch.geo.dispose(); ch.groundGeo.dispose(); if (ch.surf){ scene.remove(ch.surf); ch.surfGeo.dispose(); } if (ch.glowPts){ scene.remove(ch.glowPts); ch.glowGeo.dispose(); } for (const b of ch.boats) scene.remove(b.m);
+function disposeChunk(ch){ if (ch.prev){ disposeChunk(ch.prev); ch.prev=null; } untile(ch); scene.remove(ch.mesh,ch.ground); ch.geo.dispose(); ch.groundGeo.dispose(); if (ch.surf){ scene.remove(ch.surf); ch.surfGeo.dispose(); } if (ch.glowPts){ scene.remove(ch.glowPts); ch.glowGeo.dispose(); } for (const b of ch.boats) scene.remove(b.m);
   if (ch.fount){ scene.remove(ch.fount); ch.fountGeo.dispose(); } if (ch.clockFaces) for (const f of ch.clockFaces) clockFaces.delete(f); }
-// rings of detail: full detail close by, simplified in the middle distance, outlines further out
+/* ---------- outline blocks drawn in tiles ---------- */
+// Each block is several draw calls, and with hundreds of blocks in view the cost of issuing them, not their
+// triangles, sets the frame time. Outline blocks that have finished fading in are therefore merged in tiles of
+// TILE x TILE blocks and drawn from one mesh per material; a block leaves its tile, and is drawn on its own
+// again, as soon as it starts to fade out or change detail.
+const TILE=4, tiles=new Map(), tilesDirty=new Set(), tilesUrgent=new Set();
+const tileKey=ch=>Math.floor(ch.cx/TILE)+','+Math.floor(ch.cz/TILE);
+function setChunkShown(ch,v){ ch.mesh.visible=v; ch.ground.visible=v; if (ch.surf) ch.surf.visible=v; if (ch.glowPts) ch.glowPts.visible=v; }
+// a block leaving its tile is taken out of the merged mesh first, so that it is not drawn twice for long
+function untile(ch){ if (!ch.tiled) return; ch.tiled=false; setChunkShown(ch,true); tilesUrgent.add(tileKey(ch)); }
+function mergeGeos(list){
+  if (!list.length) return null;
+  const names=Object.keys(list[0].attributes), indexed=!!list[0].index, g=new THREE.BufferGeometry();
+  for (const n of names){ const sz=list[0].attributes[n].itemSize; let len=0; for (const q of list) len+=q.attributes[n].array.length;
+    const a=new Float32Array(len); let o=0; for (const q of list){ a.set(q.attributes[n].array,o); o+=q.attributes[n].array.length; }
+    g.setAttribute(n,new THREE.BufferAttribute(a,sz)); }
+  if (indexed){ let len=0, nv=0; for (const q of list){ len+=q.index.count; nv+=q.attributes.position.count; }
+    const ix=nv>65535?new Uint32Array(len):new Uint16Array(len); let o=0, base=0;
+    for (const q of list){ const s=q.index.array; for (let i=0;i<s.length;i++) ix[o++]=s[i]+base; base+=q.attributes.position.count; }
+    g.setIndex(new THREE.BufferAttribute(ix,1)); }
+  g.computeBoundingSphere(); return g;
+}
+function disposeTile(T){ for (const m of T.objs){ scene.remove(m); m.geometry.dispose(); } T.objs.length=0; }
+// tiles are rebuilt a few at a time, so that a ring of blocks arriving or leaving together costs no long frame
+function updateTiles(budgetMs=2){
+  const t0=performance.now();
+  for (const tk of [...tilesUrgent,...tilesDirty]){
+    if (performance.now()-t0>budgetMs) break;
+    tilesUrgent.delete(tk); tilesDirty.delete(tk);
+    let T=tiles.get(tk); if (T) disposeTile(T); else { T={objs:[]}; tiles.set(tk,T); }
+    const [tx,tz]=tk.split(',').map(Number), B=[], G=[], S=[], L=[];
+    for (let j=0;j<TILE;j++) for (let i=0;i<TILE;i++){ const ch=chunks.get(key(tx*TILE+i,tz*TILE+j));
+      if (!ch || ch.lod<2 || ch.fade<1 || ch.prev) continue;
+      ch.tiled=true; setChunkShown(ch,false); B.push(ch.geo); G.push(ch.groundGeo); if (ch.surfGeo) S.push(ch.surfGeo); if (ch.glowGeo) L.push(ch.glowGeo); }
+    if (!B.length){ tiles.delete(tk); continue; }
+    const add=(geo,make)=>{ if (!geo || !geo.attributes.position.count){ if (geo) geo.dispose(); return; } const m=make(geo); scene.add(m); T.objs.push(m); };
+    add(mergeGeos(B),g=>{ const m=new THREE.Mesh(g,matB); m.receiveShadow=true; return m; });
+    add(mergeGeos(G),g=>{ const m=new THREE.Mesh(g,matG); m.receiveShadow=true; return m; });
+    add(mergeGeos(S),g=>{ const m=new THREE.Mesh(g,surfMat); m.renderOrder=2; return m; });
+    add(mergeGeos(L),g=>{ const m=new THREE.Points(g,glowMat); m.renderOrder=3; return m; });
+  }
+}
+// rings of detail: full detail close by, simplified in the middle distance, outlines further out to the fog
 const LOD0=2;
-const lodRing=()=>Math.min(20,VIEW*2+2);
+const lodRing=()=>Math.min(36,VIEW*4);
 function wantLod(dx,dz){ const d=Math.max(Math.abs(dx),Math.abs(dz)); return d<=LOD0?0:d<=VIEW?1:d<=lodRing()?2:-1; }
+let chunkState='';
 function updateChunks(px,pz,budgetMs){
-  const pcx=Math.floor(px/C), pcz=Math.floor(pz/C), RR=lodRing();
-  for (const [k,ch] of chunks) if (wantLod(ch.cx-pcx,ch.cz-pcz)<0){ chunks.delete(k); farDirty=true; maskDirty=true;
+  const pcx=Math.floor(px/C), pcz=Math.floor(pz/C), RR=lodRing(), st=pcx+','+pcz+','+VIEW;
+  // the rings only change when the player crosses into another block or the draw distance changes
+  if (st===chunkState && !queue.length && budgetMs<1e8) return;
+  chunkState=st;
+  for (const [k,ch] of chunks) if (wantLod(ch.cx-pcx,ch.cz-pcz)<0){ chunks.delete(k); farDirty=true; maskDirty=true; untile(ch);
     if (budgetMs<1e8){ if (ch.prev){ disposeChunk(ch.prev); ch.prev=null; } dying.push(ch); } else disposeChunk(ch); }
   queue=[];
   for (let dz=-RR;dz<=RR;dz++) for (let dx=-RR;dx<=RR;dx++){
@@ -2678,11 +2738,13 @@ function updateChunks(px,pz,budgetMs){
     // blocks fade in as they arrive; one that changes detail dissolves into its replacement
     // nothing fades while the island first loads, nor a block appearing right around the player
     const ch=genChunk(cx,cz,w), fadeIn=budgetMs<1e8 && time>2.5 && (old || d2>2);
+    if (old) untile(old);
     if (old){ if (fadeIn){ if (old.prev){ disposeChunk(old.prev); old.prev=null; } ch.prev=old; } else disposeChunk(old); }
     chunks.set(k,ch); addChunkToScene(ch); ch.fade=fadeIn?0:1; setChunkFade(ch); farDirty=true; maskDirty=true;
+    if (ch.lod>=2 && ch.fade>=1) tilesDirty.add(tileKey(ch));
   }
 }
-function resetWorld(){ for (const ch of chunks.values()) disposeChunk(ch); chunks.clear(); for (const ch of dying) disposeChunk(ch); dying.length=0; pkCache.clear(); pzCache.clear(); alCache.clear(); hbCache.clear(); vgCache.clear(); ryCache.clear(); rzCache.clear(); rrCache.clear(); rsCache.clear(); stCache.clear(); rxCache.clear(); lhCache.clear(); rkCache.clear(); ruCache.clear(); beams.t=0; train.init=false; farDirty=true; }
+function resetWorld(){ chunkState=''; farCache.clear(); farOrigin=''; for (const T of tiles.values()) disposeTile(T); tiles.clear(); tilesDirty.clear(); tilesUrgent.clear(); for (const ch of chunks.values()) disposeChunk(ch); chunks.clear(); for (const ch of dying) disposeChunk(ch); dying.length=0; pkCache.clear(); pzCache.clear(); alCache.clear(); hbCache.clear(); vgCache.clear(); ryCache.clear(); rzCache.clear(); rrCache.clear(); rsCache.clear(); stCache.clear(); rxCache.clear(); lhCache.clear(); rkCache.clear(); ruCache.clear(); beams.t=0; train.init=false; farDirty=true; }
 
 /* ================= boats under sail along the coast ================= */
 const sailers=[];
@@ -3873,7 +3935,7 @@ function frame(now){
   if (player.y<ground) player.y=ground;
   eyeY = (eyeY===null||Math.abs(eyeY-player.y)>3) ? player.y : eyeY+(player.y-eyeY)*(1-Math.exp(-dt*14));
   }
-  updateChunks(player.x,player.z,6); updateFades(dt);
+  updateChunks(player.x,player.z,6); updateFades(dt); updateTiles();
   // dynamic draw distance: frames spent building blocks are ignored; slow frames shrink the view, sustained headroom grows it
   if (!queue.length){ perf.t+=dt; perf.n++; perf.sum+=dt;
     if (perf.t>2){ const avg=perf.sum/perf.n;
@@ -3978,7 +4040,7 @@ function frame(now){
 /* ================= boot ================= */
 requestAnimationFrame(()=>setTimeout(()=>{
   spawnPlayer();
-  updateChunks(player.x,player.z,400);
+  updateChunks(player.x,player.z,400); updateTiles(1e9);
   rebuildFar(player.x,player.z); farDirty=true;
   document.getElementById('loading').remove();
   requestAnimationFrame(frame);
