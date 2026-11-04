@@ -3314,6 +3314,18 @@ function buildCar(loco){
     carSteps(gb,sx,W,z,dark); }
   return {geo:gb.geometry(),L};
 }
+// a bogie: two wheelsets on the rails (the car's origin is at the top of the rail), side frames outside the wheels
+// at axle height with axle boxes and springs, and a bolster across the middle; a locomotive's has three axles
+function addBogie(gb,zb,loco=false){
+  const dark=hex('#26262a'), steel=hex('#5d6066'), wheel=hex('#3a3632'), rim=hex('#9a9c9f'), r=loco?0.5:0.45, axles=loco?[-1.5,0,1.5]:[-1.1,1.1];
+  for (const dz of axles){ for (const sx of [-1,1]){ gb.add(T.cylC, mat(sx*0.72,r,zb+dz,2*r,0.12,2*r,0,0,Math.PI/2), wheel, null);
+      gb.add(T.cylC, mat(sx*0.79,r,zb+dz,2*r-0.12,0.02,2*r-0.12,0,0,Math.PI/2), rim, null); }
+    gb.add(T.cylC, mat(0,r,zb+dz,0.14,1.44,0.14,0,0,Math.PI/2), steel, null); }
+  const len=(axles[axles.length-1]-axles[0])+1.0;
+  for (const sx of [-1,1]){ gb.add(T.boxC, mat(sx*0.95,r+0.05,zb,0.12,0.28,len), dark, null);
+    for (const dz of axles){ gb.add(T.boxC, mat(sx*0.97,r,zb+dz,0.16,0.3,0.32), steel, null); gb.add(T.cyl8, mat(sx*0.95,r+0.19,zb+dz,0.18,0.2,0.18), steel, null); } }
+  gb.add(T.boxC, mat(0,r+0.3,zb,1.9,0.22,0.5), dark, null);
+}
 // two steps hung below a doorway, and grab rails either side of it
 // inset puts the grab rails inside the doorway, clear of a door sliding along the outside of the body
 function carSteps(gb,sx,W,z,dark,inset){
@@ -3335,7 +3347,7 @@ function buildCoach(){
   const gb=new GB(), L=CL, W=CW, body=hex('#3e6a50'), band=hex('#efe3c8'), dark=hex('#2a2a2e'), roofC=hex('#8c8f93');
   const inner=hex('#e4dccb'), seat=hex('#7a3b2e'), floor=hex('#6b5a48'), wt=0.08, xw=W/2-wt/2;
   gb.add(T.box, mat(0,0.55,0,W-0.4,0.45,L-1), dark, null);
-  for (const zb of [-L/2+2.2,L/2-2.2]) gb.add(T.box, mat(0,0.15,zb,W-0.5,0.6,2.6), dark, null);
+  for (const zb of [-L/2+2.2,L/2-2.2]) addBogie(gb,zb);
   gb.add(T.box, mat(0,0.95,0,W,0.3,L), body, null);                          // solebar
   gb.add(T.box, mat(0,1.25,0,W-0.1,0.05,L-0.1), floor, null);                // floor
   gb.add(T.cylC, mat(0,3.6,0,W+0.08,L-0.1,0.7,0,Math.PI/2), roofC, null);   // overhangs the sides so it never meets them flush
@@ -3430,8 +3442,7 @@ function buildLoco(){
   for (const sx of [-1.25,1.25]) gb.add(T.boxC, mat(sx,1.6,F+0.08,0.05,1.0,0.05), steel, null);
   gb.add(T.boxC, mat(0,3.5,F+0.05,1.6,0.05,0.05), steel, null);
   // the bogies with their wheels, and the equipment slung between them
-  for (const zb of [-L/2+2.4,L/2-2.4]){ gb.add(T.box, mat(0,0.2,zb,W-0.5,0.6,2.8), dark, null);
-    for (const sx of [-1,1]) for (const dz of [-0.8,0.8]) gb.add(T.cylC, mat(sx*1.05,0.45,zb+dz,0.9,0.12,0.9,0,0,Math.PI/2), steel, null); }
+  for (const zb of [-L/2+2.4,L/2-2.4]) addBogie(gb,zb,true);
   gb.add(T.box, mat(0,0.55,0,W-0.4,0.42,L-6.4), dark, null);
   // along each side: the cab window and door, louvred grilles over the machine room, and a stainless line
   for (const sx of [-1,1]){ const x=sx*(W/2+0.01);
