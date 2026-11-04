@@ -3605,9 +3605,46 @@ function buildLoco(){
 // the lamps on the cab front: two low and one high, white or red
 const LOCO_LAMP_GEO=new THREE.CylinderGeometry(0.15,0.15,0.08,16).rotateX(Math.PI/2);
 const lampWhite=new THREE.MeshBasicMaterial({color:hex('#fff6dc')}), lampRed=new THREE.MeshBasicMaterial({color:hex('#ff2a18')});
-function locoLamps(m){ const out=[];
-  for (const [x,y] of [[-0.95,1.3],[0.95,1.3],[0,3.25]]){ const l=new THREE.Mesh(LOCO_LAMP_GEO,lampWhite); l.position.set(x,y,LOCO_L/2+0.04); m.add(l); out.push(l); }
+function locoLamps(m,L=LOCO_L,top=3.25){ const out=[];
+  for (const [x,y] of [[-0.95,1.3],[0.95,1.3],[0,top]]){ const l=new THREE.Mesh(LOCO_LAMP_GEO,lampWhite); l.position.set(x,y,L/2+0.04); m.add(l); out.push(l); }
   return out; }
+// The shunter that works the goods lines: 8 m long on three axles, a tall cab at its inner end and a long, narrow
+// bonnet over the engine towards its outer end, with walkways and handrails along it, in blue with yellow and
+// black stripes on its buffer beams.
+const SHUNT_L=8;
+function buildShunter(){
+  const gb=new GB(), L=SHUNT_L, dark=hex('#26262a'), body=hex('#2d5f9e'), glass=hex('#2c3640'), roofC=hex('#5d6066'), yellow=hex('#e2b22c'), steel=hex('#7d8086');
+  // frame, wheels with coupling rods, and buffer beams striped yellow and black at both ends
+  gb.add(T.box, mat(0,0.75,0,2.7,0.3,L), dark, null);
+  for (const dz of [-2.2,0,2.2]) for (const sx of [-1,1]){ gb.add(T.cylC, mat(sx*0.72,0.5,dz,1.0,0.12,1.0,0,0,Math.PI/2), hex('#3a3632'), null);
+    gb.add(T.cylC, mat(sx*0.8,0.5,dz,0.85,0.03,0.85,0,0,Math.PI/2), body, null); }
+  for (const sx of [-1,1]) gb.add(T.boxC, mat(sx*0.86,0.42,0,0.05,0.1,4.6), steel, null);
+  for (const e of [-1,1]){ gb.add(T.boxC, mat(0,0.72,e*(L/2+0.06),2.8,0.42,0.12), yellow, null);
+    for (let k=-3;k<=3;k++) gb.add(T.boxC, mat(k*0.38,0.72,e*(L/2+0.13),0.14,0.42,0.02,0,0,0.6), dark, null);
+    for (const sx of [-0.9,0.9]){ gb.add(T.cylC, mat(sx,0.75,e*(L/2+0.3),0.34,0.4,0.34,0,Math.PI/2), dark, null); gb.add(T.cylC, mat(sx,0.75,e*(L/2+0.49),0.46,0.04,0.46,0,Math.PI/2), dark, null); }
+    gb.add(T.boxC, mat(0,0.75,e*(L/2+0.25),0.3,0.22,0.3), dark, null); }
+  // the cab at the inner (-z) end, windows all round
+  const c0=-L/2+0.2, c1=-L/2+2.6, cz=(c0+c1)/2;
+  gb.add(T.box, mat(0,0.9,cz,2.7,2.7,c1-c0), body, null);
+  gb.add(T.box, mat(0,3.6,cz,2.9,0.12,c1-c0+0.3), roofC, null);
+  for (const sx of [-1,1]) gb.add(T.boxC, mat(sx*1.36,2.75,cz,0.04,0.75,1.6), glass, null, 5);
+  for (const e of [-1,1]) for (const sx of [-0.65,0.65]) gb.add(T.boxC, mat(sx,2.75,e>0?c1+0.01:c0-0.01,0.85,0.75,0.04), glass, null, 5);
+  // the bonnet, narrower, with grilles, a radiator at its nose and an exhaust stack
+  const b0=c1, b1=L/2-0.1, bz=(b0+b1)/2;
+  gb.add(T.box, mat(0,0.9,bz,1.9,1.7,b1-b0), body, null);
+  gb.add(T.cylC, mat(0,2.6,bz,1.9,b1-b0,0.3,0,Math.PI/2), body, null);
+  for (const sx of [-1,1]) for (let k=0;k<3;k++){ const z=b0+0.8+k*1.4; gb.add(T.boxC, mat(sx*0.96,1.8,z,0.03,0.9,1.0), dark, null);
+    for (let j=0;j<6;j++) gb.add(T.boxC, mat(sx*0.975,1.42+j*0.15,z,0.02,0.04,0.9), steel, null); }
+  gb.add(T.boxC, mat(0,1.75,b1+0.02,1.5,1.3,0.04), dark, null);
+  for (let j=0;j<8;j++) gb.add(T.boxC, mat(0,1.2+j*0.15,b1+0.04,1.4,0.04,0.02), steel, null);
+  gb.add(T.cyl8, mat(0,2.7,b0+1.2,0.28,0.55,0.28), dark, null);
+  // walkways along the bonnet with handrails, and steps up to the cab doors
+  for (const sx of [-1,1]){ gb.add(T.boxC, mat(sx*1.2,0.93,bz,0.5,0.04,b1-b0), steel, null);
+    for (const z of [b0+0.2,bz,b1-0.2]) gb.add(T.boxC, mat(sx*1.4,1.45,z,0.04,1.0,0.04), yellow, null);
+    gb.add(T.boxC, mat(sx*1.4,1.95,bz,0.04,0.04,b1-b0), yellow, null);
+    carSteps(gb,sx,2.7,cz+0.2,dark); }
+  return {geo:gb.geometry(),L};
+}
 const LOCO=buildLoco(), COACH=buildCoach();
 const train={cars:[], x:0, dir:1, sp:17, v:17, wait:0, init:false, GAP:0.8, lead:0};
 // headlights: a spotlight from the front of the locomotive aimed along the line, and warm light from the
@@ -3670,7 +3707,7 @@ function updateTrain(dt){
 }
 
 /* ---------- the goods train ----------
-   A short goods train works the goods line nearest the player: a locomotive at each end and three wagons, a van, an
+   A short goods train works the goods line nearest the player: a shunter at each end and three wagons, a van, an
    open wagon loaded with crates and a tank wagon. It waits at the quay while it is loaded, runs up the branch to just
    short of the points, waits there for a path, and comes back down; at each end it reverses, the locomotive that was
    at the rear leading. It runs at 8 m/s, accelerating at 0.4 m/s² and braking at 0.5 m/s². */
@@ -3697,10 +3734,10 @@ function buildWagon(kind){
     gb.add(T.cyl8, mat(0,y0+2.55,0,0.7,0.35,0.7), body, null); gb.add(T.cyl, mat(0,y0+1.4,0,2.42,1.2,2.42,0,Math.PI/2), stripe, null); }
   return {geo:gb.geometry(),L};
 }
-const GOODS_SPEC=[LOCO,buildWagon('van'),buildWagon('open'),buildWagon('tank'),LOCO];
+const SHUNTER=buildShunter(), GOODS_SPEC=[SHUNTER,buildWagon('van'),buildWagon('open'),buildWagon('tank'),SHUNTER];
 const goods={cars:[],B:null,x:0,dir:1,lead:0,v:0,wait:0,phase:'quay',check:0};
 GOODS_SPEC.forEach((spec,i)=>{ const loco=i===0||i===GOODS_SPEC.length-1, m=new THREE.Mesh(spec.geo,matB); m.castShadow=true; m.receiveShadow=true; m.rotation.order='YXZ'; m.visible=false; world.add(m);
-  goods.cars.push({m,L:spec.L,loco,flip:i===GOODS_SPEC.length-1,lamps:loco?locoLamps(m):null}); });
+  goods.cars.push({m,L:spec.L,loco,flip:i===GOODS_SPEC.length-1,lamps:loco?locoLamps(m,SHUNT_L,2.85):null}); });
 // a point a given chord length behind (dir=1) or ahead (dir=-1) of x along a branch
 function brBack(B,x,D,dir){ let u=D;
   const z0=brZ(B,x), y0=brY(B,x);
