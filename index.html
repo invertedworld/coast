@@ -3342,6 +3342,9 @@ const FZS=-FL/2+1, FZE=FL/2-4.5, FSW=FB-2.6, FSZ0=FZS+4.4, FSZ1=FZE-2.2, ferryBW
 const FD0=1.5, FD1=3.94, FUZ0=FSZ0-0.8, FUZ1=FSZ1+0.8, FSTB=FUZ0-2.2, FSTW=0.5;
 // the gangway opening in the bulwark on each side of the after deck, and the width of the wheelhouse
 const FGZ=-9.4, FGW=0.6, FPL=2.7, FWH=FSW-1.6;
+// the saloon's walls and doors (the doorways span FDX0 to FDX1 either side of the centre line, FDH high), its band
+// of windows from FWB0 to FWB1, and the wheelhouse door, FWD either side of the centre line and FWDH high
+const SWT=0.1, FDX0=1.05, FDX1=1.85, FDH=2.0, FWB0=2.45, FWB1=3.35, FWD=0.35, FWDH=1.82;
 function buildFerry(){
 
   const gb=new GB(), white=hex('#f1ede4'), red=hex('#b8392f'), blue=hex('#2d5f9e'), anti=hex('#7a2f26'), dark=hex('#2a2a2e'), glass=hex('#30363c'), deck=hex('#9c8a72'), orange=hex('#e2702e');
@@ -3365,10 +3368,17 @@ function buildFerry(){
   gb.add(T.box, mat(0,1.5,zs+0.06,FB-0.1,0.9,0.12), white, null);
   // saloon with a band of windows, and the upper deck on its roof
   const sz0=FSZ0, sz1=FSZ1, sl=sz1-sz0, sc=(sz0+sz1)/2, SW=FSW;
-  gb.add(T.box, mat(0,1.5,sc,SW,2.3,sl), white, null);
-  for (const sx of [-1,1]) gb.add(T.boxC, mat(sx*(SW/2+0.01),2.75,sc,0.04,0.8,sl-1.2), glass, null, 5);
-  for (const zz of [sz0-0.01,sz1+0.01]) gb.add(T.boxC, mat(0,2.75,zz,SW-1.2,0.8,0.04), glass, null, 5);
-  for (const sx of [-1,1]) for (const zz of [sz0-0.02,sz1+0.02]) gb.add(T.boxC, mat(sx*(SW/2-0.45),2.1,zz,0.8,1.95,0.05), hex('#5a4a3a'), null, 4);  // doors, wood pattern
+  // the saloon's walls, 10 cm thick, with a door near each corner of its ends and a band of windows; the panes
+  // have no inner face, so that the sea can be seen from inside
+  { const wb=(x0,x1,y0,y1,z0,z1)=>gb.add(T.box, mat((x0+x1)/2,y0,(z0+z1)/2,x1-x0,y1-y0,z1-z0), white, null);
+    const h=SW/2, t=SWT, y0=FD0, y1=FD0+2.3, b0=FWB0, b1=FWB1, zb0=sz0+0.6, zb1=sz1-0.6;
+    for (const sx of [-1,1]){ const xa=sx>0?h-t:-h, xb=xa+t;
+      wb(xa,xb,y0,b0,sz0,sz1); wb(xa,xb,b1,y1,sz0,sz1); wb(xa,xb,b0,b1,sz0,zb0); wb(xa,xb,b0,b1,zb1,sz1);
+      gb.add(T.boxC5, mat(sx*h,(b0+b1)/2,sc,zb1-zb0,b1-b0,0.04,sx*Math.PI/2), glass, null, 5); }
+    for (const [za,zz,ry] of [[sz0,sz0+t,Math.PI],[sz1-t,sz1,0]]){
+      for (const sx of [-1,1]){ wb(sx>0?FDX1:-h,sx>0?h:-FDX1,y0,y1,za,zz); wb(sx>0?FDX0:-FDX1,sx>0?FDX1:-FDX0,FD0+FDH,y1,za,zz); wb(sx>0?0.95:-FDX0,sx>0?FDX0:-0.95,b0,b1,za,zz); }
+      wb(-FDX0,FDX0,y0,b0,za,zz); wb(-FDX0,FDX0,b1,y1,za,zz);
+      gb.add(T.boxC5, mat(0,(b0+b1)/2,ry?sz0:sz1,1.9,b1-b0,0.04,ry), glass, null, 5); } }
   gb.add(T.box, mat(0,3.8,sc,SW+0.6,0.14,sl+1.6), hex('#d8d2c6'), null);
   // upper deck rail
   const rz0=sc-sl/2-0.7, rz1=sc+sl/2+0.7;
@@ -3388,9 +3398,15 @@ function buildFerry(){
       gb.add(T.box, mat(x,FD0,FSTB,0.05,0.95,0.05), white, null); } }
   // wheelhouse forward on the upper deck
   const wz=sz1-1.6;
-  gb.add(T.box, mat(0,3.94,wz,FWH,1.9,2.8), white, null);
-  gb.add(T.boxC, mat(0,5.05,wz+1.41,FWH-0.3,0.75,0.04), glass, null, 5);
-  for (const sx of [-1,1]) gb.add(T.boxC, mat(sx*(FWH/2+0.01),5.05,wz,0.04,0.75,2.2), glass, null, 5);
+  // the wheelhouse: walls with a door in the after end, and windows all round the forward part
+  { const wb=(x0,x1,y0,y1,z0,z1)=>gb.add(T.box, mat((x0+x1)/2,y0,(z0+z1)/2,x1-x0,y1-y0,z1-z0), white, null);
+    const h=FWH/2, t=SWT, y0=FD1, y1=FD1+1.9, b0=5.05-0.375, b1=5.05+0.375, z0=wz-1.4, z1=wz+1.4;
+    for (const sx of [-1,1]){ const xa=sx>0?h-t:-h, xb=xa+t;
+      wb(xa,xb,y0,b0,z0,z1); wb(xa,xb,b1,y1,z0,z1); wb(xa,xb,b0,b1,z0,wz-1.1); wb(xa,xb,b0,b1,wz+1.1,z1);
+      gb.add(T.boxC5, mat(sx*h,5.05,wz,2.2,0.75,0.04,sx*Math.PI/2), glass, null, 5); }
+    wb(-h,h,y0,b0,z1-t,z1); wb(-h,h,b1,y1,z1-t,z1); for (const sx of [-1,1]) wb(sx>0?0.95:-h,sx>0?h:-0.95,b0,b1,z1-t,z1);
+    gb.add(T.boxC5, mat(0,5.05,z1,1.9,0.75,0.04,0), glass, null, 5);
+    for (const sx of [-1,1]) wb(sx>0?FWD:-h,sx>0?h:-FWD,y0,y1,z0,z0+t); wb(-FWD,FWD,FD1+FWDH,y1,z0,z0+t); }
   gb.add(T.box, mat(0,5.84,wz,FWH+0.4,0.12,3.3), hex('#d8d2c6'), null);
   gb.add(T.cyl8, mat(0,5.96,wz-0.6,0.08,2.6,0.08), dark, null);
   gb.add(T.cylC, mat(0,8.4,wz-0.6,0.22,0.22,0.22), hex('#fff1c8'), null, 6);
@@ -3424,6 +3440,84 @@ const ferries=[0,1].map(()=>{ const m=new THREE.Mesh(FERRY_GEO,matB); m.castShad
   const g=new THREE.Mesh(GANG_GEO,matB); g.castShadow=true; g.receiveShadow=true; g.visible=false; m.add(g);
   const gates=[-1,1].map(sx=>{ const q=new THREE.Mesh(GATE_GEO,matB); q.castShadow=true; q.position.set(sx*(FB/2-0.06),FD0,FGZ-FGW+0.03); q.userData.sx=sx; q.userData.open=0; m.add(q); return q; });
   return {m,g,gates,R:null,s:0,v:0,wait:0,at:0,next:1,head:0,side:1}; });
+/* ---------- inside the ferry: the saloon and the wheelhouse ---------- */
+const FSC=(FSZ0+FSZ1)/2, FWZ=FSZ1-1.6;
+// furnishings, lit like a room; shared by both ferries
+const FERRY_INT_GEO=(()=>{ const gb=new GB(0), wood=hex('#7a5a3e'), dark=hex('#4a3424'), seat=hex('#2f5d8a'), floor=hex('#9a8a70'), red=hex('#b8392f');
+  const B=(x,y,z,sx,sy,sz,col,surf=0)=>gb.add(T.box, mat(x,y,z,sx,sy,sz), col, null, surf);
+  const h=FSW/2-SWT, z0=FSZ0+SWT, z1=FSZ1-SWT;
+  { const A=[]; q3n(A,[-h,FD0+0.02,z0],[h,FD0+0.02,z0],[h,FD0+0.02,z1],[-h,FD0+0.02,z1],[0,1,0]); gb.add(triTpl(A),new THREE.Matrix4(),floor,null,SW); }
+  { const A=[]; q3n(A,[-h,FD0+2.28,z0],[h,FD0+2.28,z0],[h,FD0+2.28,z1],[-h,FD0+2.28,z1],[0,-1,0]); gb.add(triTpl(A),new THREE.Matrix4(),hex('#efe9dc'),null,0); }
+  // rows of seats facing forward either side of the aisle, a bar across the after end, lamps along the ceiling
+  for (let z=z0+2.6; z<z1-0.9; z+=1.1) for (const sx of [-1,1]){ const x=sx*(0.45+(h-0.45)/2), w=h-0.5;
+    B(x,FD0,z,w,0.45,0.48,seat); B(x,FD0+0.45,z-0.22,w,0.5,0.08,seat); B(x,FD0,z,w+0.04,0.12,0.4,dark); }
+  B(0,FD0,z0+0.95,1.8,1.05,0.5,wood,SW); B(0,FD0+1.05,z0+0.95,1.9,0.05,0.6,dark,SW);
+  B(0,FD0+1.2,z0+0.12,1.6,0.04,0.22,wood,SW); for (let k=0;k<6;k++) gb.add(T.cyl8, mat(-0.6+k*0.24,FD0+1.24,z0+0.12,0.08,0.24,0.08), [hex('#3f7a4a'),hex('#9c3f34'),hex('#d6a640')][k%3], null);
+  for (let z=z0+1.5; z<z1; z+=2.6) B(0,FD0+2.2,z,0.5,0.06,0.5,hex('#fff1c8'));
+  // the wheelhouse: a console under the forward windows, the wheel on its pedestal, a chart table and a stool
+  const wz0=FWZ-1.4+SWT, wz1=FWZ+1.4-SWT, wh=FWH/2-SWT;
+  { const A=[]; q3n(A,[-wh,FD1+0.01,wz0],[wh,FD1+0.01,wz0],[wh,FD1+0.01,wz1],[-wh,FD1+0.01,wz1],[0,1,0]); gb.add(triTpl(A),new THREE.Matrix4(),wood,null,SW); }
+  { const A=[]; q3n(A,[-wh,FD1+1.88,wz0],[wh,FD1+1.88,wz0],[wh,FD1+1.88,wz1],[-wh,FD1+1.88,wz1],[0,-1,0]); gb.add(triTpl(A),new THREE.Matrix4(),hex('#efe9dc'),null,0); }
+  B(0,FD1,wz1-0.3,2*wh,0.95,0.6,hex('#5c6670')); B(0,FD1+0.95,wz1-0.25,2*wh,0.05,0.7,dark);
+  for (let k=0;k<5;k++) gb.add(T.cylC, mat(-0.6+k*0.3,FD1+0.85,wz1-0.6,0.16,0.02,0.16,0,Math.PI/2), [hex('#e8e0c8'),hex('#7ad06a')][k%2], null);
+  B(0,FD1,wz1-1.05,0.16,0.9,0.16,dark); gb.add(T.cylC, mat(0,FD1+1.05,wz1-1.12,0.7,0.05,0.7,0,Math.PI/2), wood, null);
+  for (let k=0;k<8;k++){ const a=k/8*Math.PI*2; gb.add(T.boxC, mat(Math.cos(a)*0.3,FD1+1.05+Math.sin(a)*0.3,wz1-1.12,0.04,0.04,0.12), wood, null); }
+  B(-wh+0.35,FD1,wz0+0.9,0.6,0.85,0.8,wood,SW); B(-wh+0.35,FD1+0.85,wz0+0.9,0.66,0.03,0.86,hex('#e8e0c8'));
+  B(0.55,FD1,wz1-1.3,0.3,0.6,0.3,red);
+  return gb.geometry(); })();
+// the furniture and walls inside, as rectangles in the deck plan [x0,x1,z0,z1], one list per deck
+const FERRY_SOLID={0:[[-0.9,0.9,FSZ0+SWT+0.65,FSZ0+SWT+1.25]],2:[[-FWH/2,FWH/2,FWZ+1.4-SWT-0.6,FWZ+1.4],[-0.15,0.15,FWZ+1.4-SWT-1.2,FWZ+1.4-SWT-0.95],[-FWH/2,-FWH/2+0.75,FWZ-1.4+SWT+0.5,FWZ-1.4+SWT+1.3]]};
+for (let z=FSZ0+SWT+2.6; z<FSZ1-SWT-0.9; z+=1.1) for (const sx of [-1,1]) FERRY_SOLID[0].push(sx>0?[0.45,FSW/2,z-0.3,z+0.24]:[-FSW/2,-0.45,z-0.3,z+0.24]);
+{ const h=FSW/2, t=SWT, W=FERRY_SOLID[0];
+  for (const sx of [-1,1]) W.push(sx>0?[h-t,h,FSZ0,FSZ1]:[-h,-h+t,FSZ0,FSZ1]);
+  for (const [za,zz] of [[FSZ0,FSZ0+t],[FSZ1-t,FSZ1]]){ W.push([-FDX0,FDX0,za,zz],[-h,-FDX1,za,zz],[FDX1,h,za,zz]); }
+  const wh=FWH/2, z0=FWZ-1.4, z1=FWZ+1.4, U=FERRY_SOLID[2];
+  U.push([-wh,-wh+t,z0,z1],[wh-t,wh,z0,z1],[-wh,wh,z1-t,z1],[-wh,-FWD,z0,z0+t],[FWD,wh,z0,z0+t]); }
+// the doors: hinged at the outer side of each saloon doorway and on the left of the wheelhouse door
+const FERRY_LEAF=(w,hgt)=>{ const gb=new GB(), wood=hex('#6a4a32');
+  gb.add(T.boxC, mat(w/2,hgt/2,0,w,hgt,0.05), wood, null, SW);
+  gb.add(T.boxC, mat(w/2,hgt*0.68,0,w*0.6,hgt*0.3,0.06), hex('#30363c'), null, 5);
+  for (const z of [-1,1]) gb.add(T.sph, mat(w-0.08,hgt*0.48,z*0.05,0.06,0.06,0.06), hex('#c8a24a'), null);
+  return gb.geometry(); };
+const FERRY_LEAF_S=FERRY_LEAF(FDX1-FDX0,FDH), FERRY_LEAF_W=FERRY_LEAF(2*FWD,FWDH);
+for (const F of ferries){
+  const inside=new THREE.Mesh(FERRY_INT_GEO,matR); F.m.add(inside);
+  F.doors=[];
+  const add=(hx,hz,s,lw,lv,geo,y)=>{ const m=new THREE.Mesh(geo,matD); m.castShadow=true; m.position.set(hx,y,hz); F.m.add(m);
+    const D={hx,hz,s,lw,lv,rot:0,a:0,av:0,idle:9,y,m}; F.doors.push(D); m.rotation.y=s>0?0:Math.PI; };
+  for (const [z,dz] of [[FSZ0+SWT/2,0],[FSZ1-SWT/2,0]]) for (const sx of [-1,1]) add(sx*FDX1,z,sx>0?-1:1,FDX1-FDX0,0,FERRY_LEAF_S,FD0);
+  add(-FWD,FWZ-1.4+SWT/2,1,2*FWD,2,FERRY_LEAF_W,FD1);
+}
+// walking about inside: walls and furniture push the passenger out, and the doors give way to them as house doors
+// do, worked in the deck plan of the ferry
+function ferryInside(dt,ox,oz){
+  const F=ridden; if (!F || !F.doors) return; const r=0.3, lv=fe.lv;
+  for (const D of F.doors){ if (D.lv!==lv) continue;
+    let d=leafDist(D,D.a,fe.lx,fe.lz);
+    if (d<r+0.04){ const t=leafAng(D,D.a), px=ox-D.hx, pz=oz-D.hz, dLx=-Math.sin(t)*D.s, dLz=-Math.cos(t)*D.s;
+      const dir=(px*dLx+pz*dLz)>0?-1:1, lim=clamp(D.a+dir*4*dt,-DOOR_MAX,DOOR_MAX); let a=D.a;
+      while (d<r+0.04 && (dir>0?a<lim:a>lim)){ a=dir>0?Math.min(lim,a+0.01):Math.max(lim,a-0.01); d=leafDist(D,a,fe.lx,fe.lz); }
+      if (a!==D.a){ D.av=(a-D.a)/dt*0.5; D.a=a; D.idle=0; } } }
+  for (const D of F.doors){ D.idle+=dt; const hold=D.lv===lv && Math.hypot(fe.lx-D.hx,fe.lz-D.hz)<D.lw+r+0.15;
+    if (D.a===0 && D.av===0) continue;
+    if (D.idle>1.2 && !hold) D.av+=(-7*D.a-5.3*D.av)*dt; else D.av*=Math.exp(-dt*5);
+    let a=clamp(D.a+D.av*dt,-DOOR_MAX,DOOR_MAX); if (Math.abs(a)===DOOR_MAX) D.av=0;
+    if (hold && leafDist(D,a,fe.lx,fe.lz)<r+0.04){ a=D.a; D.av=0; }
+    if (D.a!==0 && (Math.sign(a)!==Math.sign(D.a) || (Math.abs(a)<0.003 && Math.abs(D.av)<0.05))){ a=0; D.av=0; }
+    D.a=a; D.m.rotation.y=leafAng(D,a); }
+  const solid=FERRY_SOLID[lv]; if (!solid) return;
+  for (let pass=0;pass<2;pass++){
+    for (const [x0,x1,z0,z1] of solid){ const cx=clamp(fe.lx,x0,x1), cz=clamp(fe.lz,z0,z1), dx=fe.lx-cx, dz=fe.lz-cz, d=Math.hypot(dx,dz);
+      if (d>=r) continue;
+      if (d>1e-6){ fe.lx=cx+dx/d*r; fe.lz=cz+dz/d*r; }
+      else { const e=[fe.lx-x0,x1-fe.lx,fe.lz-z0,z1-fe.lz], m=Math.min(...e); if (m===e[0]) fe.lx=x0-r; else if (m===e[1]) fe.lx=x1+r; else if (m===e[2]) fe.lz=z0-r; else fe.lz=z1+r; } }
+    for (const D of F.doors){ if (D.lv!==lv) continue; const t=leafAng(D,D.a), ux=Math.cos(t), uz=-Math.sin(t), px=fe.lx-D.hx, pz=fe.lz-D.hz, k=clamp(px*ux+pz*uz,0,D.lw);
+      const cx=D.hx+ux*k, cz=D.hz+uz*k, dx=fe.lx-cx, dz=fe.lz-cz, d=Math.hypot(dx,dz); if (d>=r+0.04) continue;
+      const side=Math.sign((ox-D.hx)*(-uz)+(oz-D.hz)*ux)||1;
+      if (k>0.02 && k<D.lw-0.02 && (d<1e-6 || Math.sign(dx*(-uz)+dz*ux)!==side)){ fe.lx=cx-uz*side*(r+0.04); fe.lz=cz+ux*side*(r+0.04); }
+      else if (d>1e-6){ fe.lx=cx+dx/d*(r+0.04); fe.lz=cz+dz/d*(r+0.04); } }
+  }
+}
 let ridden=null, ferryCheck=0;
 // the crossings to the islands nearest a point, one per mainland port
 function nearRoutes(px,pz){
@@ -4242,11 +4336,9 @@ function ferryDeckClamp(){
     const half=(fe.lz<=FZE?FB/2:ferryBW((fe.lz-FZE)/4.5)/2)-0.45, gw=ridden && ridden.g.visible && Math.abs(fe.lz-FGZ)<FGW-0.2;
     fe.lx=clamp(fe.lx,gw&&ridden.side<0?-(FB/2+FPL):-Math.max(0,half),gw&&ridden.side>0?FB/2+FPL:Math.max(0,half));
     if (gw && fe.lx*ridden.side>FB/2) fe.lz=clamp(fe.lz,FGZ-FGW+0.3,FGZ+FGW-0.3);
-    pushOutBox(-FSW/2-m,FSW/2+m,FSZ0-m,FSZ1+m);
     pushOutBox(-FSTW-m,FSTW+m,FSTB+0.3,FSZ0);
   } else if (fe.lv===2){
     const half=FSW/2+0.15-m; fe.lx=clamp(fe.lx,-half,half); fe.lz=clamp(fe.lz,Math.abs(fe.lx)<FSTW-0.1?FUZ0-0.5:FUZ0+m,FUZ1-m);
-    pushOutBox(-FWH/2-m,FWH/2+m,FSZ1-3-m,FSZ1+m);                                             // wheelhouse
     for (const sx of [-1,1]) pushOutBox(sx*(FSW/2-0.6)-0.4-m,sx*(FSW/2-0.6)+0.4+m,(FSZ0+FSZ1)/2-2-m,(FSZ0+FSZ1)/2+1+m);   // lifeboats
     const fx=fe.lx, fz=fe.lz-(FSZ0+1.6), fr=Math.hypot(fx/0.75,fz/1.0);                     // funnel
     if (fr<1+m/0.75 && fr>1e-6){ const k=(1+m/0.75)/fr; fe.lx=fx*k; fe.lz=FSZ0+1.6+fz*k; }
@@ -4259,7 +4351,7 @@ function toggleFerry(){ if (mode==='ferry'||ridden) leaveFerry(mode==='above'?'a
 function enterFerry(F,lx,lz){
   const same=ridden===F; ridden=F; mode='ferry'; fe.lx=lx; fe.lz=lz; fe.lv=0; if (!same) fe.ey=FD0;
   scene.fog.near=90; scene.fog.far=1500; sky.visible=true;
-  camera.fov=68; camera.near=0.3; camera.far=3600; camera.updateProjectionMatrix(); glowScale();
+  camera.fov=68; camera.near=0.1; camera.far=3600; camera.updateProjectionMatrix(); glowScale();
   sea.scale.setScalar(1); islandMesh.visible=false; farMesh.visible=farGlow.visible=true;
 }
 // F puts the passenger aboard the nearest ferry wherever it is, on the foredeck
@@ -4592,7 +4684,8 @@ function frame(now){
     { let wx=(keys.KeyD?1:0)-(keys.KeyA?1:0)+joy.x+pad.x, wz=(keys.KeyW?1:0)-(keys.KeyS?1:0)-joy.y-pad.y; const wl=Math.hypot(wx,wz);
       if (started && wl>0.05){ if (wl>1){ wx/=wl; wz/=wl; } const sp=((keys.ShiftLeft||keys.ShiftRight)?3.4:1.9)*dt, sy=Math.sin(fe.yaw), cy=Math.cos(fe.yaw);
         fe.lx+=(sy*wz-cy*wx)*sp; fe.lz+=(cy*wz+sy*wx)*sp; } }
-    ferryDeckClamp(); fe.ey+=(ferryFloor()-fe.ey)*(1-Math.exp(-dt*12)); FERRY_EYE.set(fe.lx,fe.ey+1.65,fe.lz);
+    const fox=fe.lx, foz=fe.lz;
+    ferryDeckClamp(); ferryInside(dt,fe.px??fox,fe.pz??foz); fe.px=fe.lx; fe.pz=fe.lz; fe.ey+=(ferryFloor()-fe.ey)*(1-Math.exp(-dt*12)); FERRY_EYE.set(fe.lx,fe.ey+1.65,fe.lz);
     const m=ridden.m; m.updateMatrixWorld();
     camera.position.copy(FERRY_EYE).applyMatrix4(m.matrixWorld);
     camera.rotation.set(fe.pitch, ridden.head+Math.PI+fe.yaw, 0, 'YXZ');
