@@ -739,9 +739,10 @@ function heightAtExact(x,z){
   { const S=stationNear(x,40), hwL=S?15:4.0, d=mainPerp(x,z); if (d<hwL+4.6){ const sl=(railZ(x+1)-railZ(x-1))/2, xp=x+sl*(z-railZ(x))/(1+sl*sl), st=railState(xp), ry=railY(xp);
       if (st==='open'){ const w=1-smooth((d-hwL)/4.5); h=lerp(h,ry-0.2,w); }
       else if (st==='tunnel'){ const w=1-smooth((d-4)/5); h=Math.max(h,lerp(h,ry+8.6,w)); } } }
-  // a branch's bed likewise, wider along the terminus for its platform
+  // a goods line's bed likewise, wider along the sidings
+  // but the coast road beside it keeps its own level, the slope between them held up by the road's sea wall
   for (const B of branchesAt(x)){ if (!brIn(B,x,2)) continue; const d=brPerp(B,x,z), hw=brTerm(B,x)?5:4.0;
-    if (d<hw+4.6){ const w=1-smooth((d-hw)/4.5); h=lerp(h,brY(B,x)-0.2,w); } }
+    if (d<hw+4.6){ const dr=Math.abs(z-coastRoadZ(B.sd,x)), w=(1-smooth((d-hw)/4.5))*smooth((dr-CR_HW)/1.6); h=lerp(h,brY(B,x)-0.2,w); } }
   for (const sd of SIDES){ const HB=harbourAt(sd,x); if (HB) h=harbourShape(HB,x,z,h); }
   const P=piazzaInfo(Math.floor(x/C),Math.floor(z/C));
   if (P){ const d=Math.hypot(x-P.x,z-P.z); if (d<P.outer){
@@ -2372,7 +2373,7 @@ function genChunk(cx,cz,lod=0){
   /* --- seaward parapet along the coastal road --- */
   for (const sd of SIDES) for (let x=x0+0.75; x<x0+C; x+=1.5){
     const zr=coastRoadZ(sd,x); if (zr<z0||zr>=z0+C) continue;
-    const rh=coastRoadH(sd,x), zs=zr-sd*(CR_HW+0.35), g=baseH(x,zr-sd*(CR_HW+2.2));
+    const rh=coastRoadH(sd,x), zs=zr-sd*(CR_HW+0.35), g=Math.min(baseH(x,zr-sd*(CR_HW+2.2)),heightAt(x,zr-sd*(CR_HW+0.7)),heightAt(x,zr-sd*(CR_HW+1.8)));   // down to the ground as shaped, a goods line's cutting included
     if (g>rh-0.9) continue;
     const iv=Math.round(x/C); if (vSegOn(iv,vSegAt(x,zs)) && Math.abs(x-vRoadX(iv,zs))<vRoadW(iv,zs)+0.8) continue;
     if (branchPerp(x,zs)<4.2) continue;   // open where a goods line crosses the road
@@ -5500,7 +5501,7 @@ requestAnimationFrame(()=>setTimeout(()=>{
   document.getElementById('loading').remove();
   requestAnimationFrame(frame);
 },30));
-window.__village={ goods, glZone, branchesAt, genChunk, brZ, brY, heightAt, player, chunks, rooms, doorMesh, keys, setYaw:v=>{yaw=v;}, get yaw(){return yaw;}, fe, co, lightsNear, beams, ruinIn, cats, catHome, get ridden(){ return ridden; },
+window.__village={ goods, glZone, branchesAt, genChunk, coastRoadZ, brZ, brY, heightAt, player, chunks, rooms, doorMesh, keys, setYaw:v=>{yaw=v;}, get yaw(){return yaw;}, fe, co, lightsNear, beams, ruinIn, cats, catHome, get ridden(){ return ridden; },
   findHarbour(){ for (let d=0;d<12;d++) for (const sd of SIDES) for (const n of [Math.floor(player.x/HARB)+d,Math.floor(player.x/HARB)-d]){ const H=harbourInfo(sd,n); if (H) return {x:H.x,z:coastZ(sd,H.x)+sd*7,W:H.W,sd,qz:coastZ(sd,H.x+H.W/2-1)+sd*2.5}; } return null; },
   findBeach(){ for (let x=player.x; x<player.x+3000; x+=10) for (const sd of SIDES){ const z=coastZ(sd,x)+sd*5; if (heightAt(x,z)<0.6 && heightAt(x,z)>0.1 && !harbourAt(sd,x)) return {x,z,sd}; } return null; },
   ridge(x){ return {x,z:ridgeZ(x)}; },
