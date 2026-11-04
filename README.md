@@ -153,7 +153,7 @@ There is one station in each 900 m of line (`ST_SP`), sited on the first level o
 
 ### The train
 
-The train is push-pull: a square-fronted electric locomotive at each end (`buildLoco`, 13 m long, with a flat cab front, a pantograph and the coaches' green and cream livery) and four coaches between them. The locomotive at the rear faces outwards, and its lamps show red while those at the front show white; `train.lead` says which end leads, so that the train can reverse without turning. The train consists of its locomotives and coaches, each car spanning the chord between two points on the track one car length apart, with a coupling gap between cars. The cars therefore stay coupled on curves and grades.
+The train is push-pull: a square-fronted diesel locomotive at each end (`buildLoco`, 13 m long, with a flat cab front, radiator fans on the roof and the coaches' green and cream livery) and four coaches between them. The locomotive at the rear faces outwards, and its lamps show red while those at the front show white; `train.lead` says which end leads, so that the train can reverse without turning. The train consists of its locomotives and coaches, each car spanning the chord between two points on the track one car length apart, with a coupling gap between cars. The cars therefore stay coupled on curves and grades.
 
 The train brakes at a constant 0.7 m/s² to come to rest with the locomotive near the far end of each platform. Its doors slide open once it is at rest and close before it leaves. Doors that close on someone standing in the doorway put that person back inside.
 

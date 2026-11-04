@@ -3407,8 +3407,8 @@ const END_DOOR=(()=>{ const gb=new GB(), body=hex('#3e6a50');
   for (const s of [-1,1]) gb.add(T.box, mat(s*0.29,2.2,0,0.22,0.45,0.04), body, null);
   return gb.geometry(); })();
 
-// The locomotive: a square-fronted electric for a branch-line service, 13 m long, in the coaches' green with a cream
-// band, a red buffer beam, a flat cab front with two windscreens, a pantograph on the roof and louvred grilles along
+// The locomotive: a square-fronted diesel for a branch-line service, 13 m long, in the coaches' green with a cream
+// band, a red buffer beam, a flat cab front with two windscreens, radiator fans on the roof and louvred grilles along
 // the machine room. Its other end is flat, with buffers and gangway bellows, and is coupled to the coaches; the
 // train has one at each end. The lamps on the cab front are separate meshes so that they can show white at the
 // front of the train and red at the rear.
@@ -3442,12 +3442,9 @@ function buildLoco(){
     for (let k=0;k<4;k++){ const z=-L/2+1.4+k*1.6; gb.add(T.boxC, mat(x,2.85,z,0.04,0.55,1.2), steel, null);
       for (let j=0;j<5;j++) gb.add(T.boxC, mat(sx*(W/2+0.035),2.62+j*0.11,z,0.02,0.03,1.1), dark, null); }
     gb.add(T.boxC, mat(sx*(W/2+0.02),1.45,-0.5,0.03,0.06,L-2.4), steel, null); }
-  // the pantograph: insulators, a folding frame and the collector bow
-  { const zr=-L/4, yr=y0+H+0.3;
-    for (const sx of [-0.5,0.5]) for (const dz of [-0.6,0.6]) gb.add(T.cyl8, mat(sx,y0+H-0.05,zr+dz,0.12,0.3,0.12), hex('#c9a77a'), null);
-    gb.add(T.boxC, mat(0,yr,zr,1.2,0.06,1.4), dark, null);
-    const LP=(x,y,z)=>[x,y,z]; for (const sx of [-0.45,0.45]){ segBox(gb,LP(sx,yr,zr-0.5),LP(sx*0.3,yr+0.9,zr+0.3),0.05,0.05,dark); segBox(gb,LP(sx*0.3,yr+0.9,zr+0.3),LP(sx*0.2,yr+1.5,zr-0.1),0.04,0.04,dark); }
-    gb.add(T.boxC, mat(0,yr+1.52,zr-0.1,1.7,0.05,0.12), steel, null); }
+  // on the roof, two radiator fans under grilles and an exhaust stack
+  for (const z of [-L/4-1.2,-L/4+1.2]){ gb.add(T.cyl8, mat(0,y0+H+0.22,z,1.3,0.12,1.3), steel, null); gb.add(T.cyl8, mat(0,y0+H+0.3,z,1.1,0.03,1.1), dark, null); }
+  gb.add(T.box, mat(0.6,y0+H+0.2,0.6,0.35,0.3,0.6), dark, null);
   // the coupled end: buffers, coupling and gangway bellows, as on the coaches
   for (const sx of [-0.9,0.9]){ gb.add(T.cylC, mat(sx,0.75,-(F+0.2),0.34,0.4,0.34,0,Math.PI/2), dark, null); gb.add(T.cylC, mat(sx,0.75,-(F+0.39),0.46,0.04,0.46,0,Math.PI/2), dark, null); }
   gb.add(T.boxC, mat(0,0.75,-(F+0.15),0.3,0.22,0.3), dark, null);
