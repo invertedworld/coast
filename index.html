@@ -880,7 +880,7 @@ function churchShell(gb,H,W,L,h,col,C){
   archReveal(A,(u,y)=>[u,y,hl],(u,y)=>[u,y,hl-WTC],CHURCH_DOOR);
   archReveal(A,(u,y)=>[u,y,-hl],(u,y)=>[u,y,-hl+WTC],C.ar);
   gb.add(triTpl(A),H,col,0,SS);
-  const S=[]; for (const [a,z0,z1] of [[CHURCH_DOOR,hl-WTC,hl],[C.ar,-hl,-hl+WTC]]) q3n(S,[a.c-a.r,a.f,z0],[a.c+a.r,a.f,z0],[a.c+a.r,a.f,z1],[a.c-a.r,a.f,z1],[0,1,0]);
+  const S=[]; for (const [a,z0,z1] of [[CHURCH_DOOR,hl-WTC,hl]]) q3n(S,[a.c-a.r,a.f,z0],[a.c+a.r,a.f,z0],[a.c+a.r,a.f,z1],[a.c-a.r,a.f,z1],[0,1,0]);
   gb.add(triTpl(S),H,shade(C_.stone,()=>0.5,0),null,SS);
 }
 // the church as a room: its walls with the doorway and the apse arch, the apse, the leaves of the doors, and
