@@ -543,36 +543,36 @@ function stationInfo(n){
   if (stCache.size>5000) stCache.clear(); stCache.set(n,S); return S;
 }
 function stationNear(x,m=55){ const n=Math.floor(x/ST_SP); for (const k of [n,n-1,n+1]){ const S=stationInfo(k); if (S && Math.abs(x-S.x)<m) return S; } return null; }
-/* ---------- branch lines to some of the harbours ----------
-   A branch leaves the main line at points and runs down to a terminus behind the harbour, on the inland side of
-   the coast road and parallel to it, BR_T either side of the harbour's middle. Like the main line it is a curve
-   along the island: over its approach, from the junction (u=0) to the start of the terminus (u=1), its course and
-   its height ease from the main line's to the terminus's, z=lerp(railZ(x),zt,smooth(u)) and the same for y, so it
-   leaves the main line tangentially. The approach is long enough that the grade stays under 1 in 33 (the eased
-   blend is steepest in its middle, at 1.5 times the average), the ground along it is never more than 9 m above or
-   10 m below the bed, so that cuttings and embankments suffice, and it crosses nothing it should not. Four in five
-   of the harbours where such a line fits have one, which comes to about one every 12 km; where two would overlap,
-   the western one is kept. */
-const BR_T=58, BR_OFF=CR_HW+12, brCache=new Map(), brBucket=new Map();
+/* ---------- goods lines to some of the harbours ----------
+   A branch leaves the main line at points and runs down to a goods siding on the quay, at the level of the dock,
+   between the quay edge and the coast road, which it crosses on the level. The siding runs along the harbour,
+   T either side of its middle. Like the main line the branch is a curve along the island: over its approach, from
+   the junction (u=0) to the start of the siding (u=1), its course and height ease from the main line's to the
+   siding's, z=lerp(railZ(x),zt(x),smooth(u)) and the same for y, so that it leaves the main line tangentially. The
+   approach is long enough that the grade stays under 1 in 33 (the eased blend is steepest in its middle, at 1.5
+   times the average), the ground along it is never more than 15 m above or 14 m below the bed, so that cuttings
+   and embankments suffice, and it crosses nothing it should not. Four in five of the harbours where such a line fits
+   have one; where two would overlap, the western one is kept. */
+const BR_Q=8.5, BR_Y=1.6, brCache=new Map(), brBucket=new Map();
 function branchInfo(sd,n){
   const key=n*4+sd; if (brCache.has(key)) return brCache.get(key);
   let B=null; const H=harbourInfo(sd,n);
   if (H && hash(n,sd>0?1:2,951)<0.8){
-    // the terminus follows the coast road, a little inland of it, smoothed so that it curves gently
-    const zt=x=>{ let a=0; for (let k=-2;k<=2;k++) a+=coastRoadZ(sd,x+k*20); return a/5+sd*BR_OFF; }; let ys=0, cnt=0, ok=true;
-    for (let x=H.x-BR_T-20; x<=H.x+BR_T+20 && ok; x+=8){ const z=zt(x), h=baseH(x,z);
-      if (sd*(z-coastRoadZ(sd,x))<CR_HW+4 || h<1.4 || h>24 || Math.abs(z-railZ(x))<22) ok=false; ys+=h; cnt++; }
-    const yt=Math.max(2.2,ys/cnt);
+    // the siding follows the shore BR_Q inland of it, smoothed so that it curves gently
+    const T=H.W/2+12, zt=x=>{ let a=0; for (let k=-2;k<=2;k++) a+=coastZ(sd,x+k*8); return a/5+sd*BR_Q; }; let ok=true;
+    for (let x=H.x-T-10; x<=H.x+T+10 && ok; x+=6){ const z=zt(x), s=sd*(z-coastZ(sd,x));
+      if (s<2.5 || s>15 || sd*(coastRoadZ(sd,x)-z)<CR_HW+1.5 || Math.abs(z-railZ(x))<22) ok=false; }
+    const yt=BR_Y;
     if (ok) for (const dirJ of (hash(n,sd>0?1:2,952)<0.5?[1,-1]:[-1,1])){
-      const xs=H.x-dirJ*BR_T, xe=H.x+dirJ*BR_T;
+      const xs=H.x-dirJ*T, xe=H.x+dirJ*T;
       for (let Lb=320; Lb<=3000 && !B; Lb+=40){ const xj=xs-dirJ*Lb, yj=railY(xj);
-        if (Lb<50*Math.abs(yj-yt) || Math.abs(railZ(xj)-zt(xj))>Lb*0.55) continue;
+        if (Lb<50*Math.abs(yj-yt) || Math.abs(railZ(xj)-zt(xj))>Lb*0.55)continue;
         if (stationNear(xj,130)) continue;
         let good=true; const side=Math.sign(zt(xj)-railZ(xj))||1;
         for (let t=0; t<=1.0001 && good; t+=8/Lb){ const x=xj+dirJ*t*Lb, e=smooth(t), z=lerp(railZ(x),zt(x),e), y=lerp(railY(x),yt,e), g=baseH(x,z);
-          if ((railState(x)!=='open' && t<0.1) || g>y+9 || g<y-10 || g<0.9 || (t>0.3 && side*(z-railZ(x))<14)) good=false; }
+          if ((railState(x)!=='open' && t<0.04) || g>y+15 || g<y-14 || g<(t>0.8?0.2:0.9) || (t>0.3 && side*(z-railZ(x))<14)) good=false; }
         for (let i=Math.floor(Math.min(xj,xs)/C)-1; good && i<=Math.floor(Math.max(xj,xs)/C)+1; i++){ const X=railCross(i); if (X && (X.x-xj)*dirJ>-30 && (X.x-xj)*dirJ<Lb*0.4) good=false; }
-        if (good) B={sd,n,H,dirJ,xj,xs,xe,zt,yt,Lb,x0:Math.min(xj,xe),x1:Math.max(xj,xe),name:H.name.replace('Porto','Stazione Porto')}; } }
+        if (good) B={sd,n,H,dirJ,xj,xs,xe,zt,yt,Lb,T,x0:Math.min(xj,xe),x1:Math.max(xj,xe),name:H.name}; } }
   }
   // where two branches would overlap, the one to the west is kept
   if (B) for (let k=1;k<=16 && B;k++){ const A=branchInfo(sd,n-k); if (A && A.x1>B.x0-60 && A.x0<B.x1+60) B=null; }
@@ -711,7 +711,7 @@ function heightAtExact(x,z){
       if (st==='open'){ const w=1-smooth((d-hwL)/4.5); h=lerp(h,ry-0.2,w); }
       else if (st==='tunnel'){ const w=1-smooth((d-4)/5); h=Math.max(h,lerp(h,ry+8.6,w)); } } }
   // a branch's bed likewise, wider along the terminus for its platform
-  for (const B of branchesAt(x)){ if (!brIn(B,x,2)) continue; const d=brPerp(B,x,z), hw=brTerm(B,x)?9:4.0;
+  for (const B of branchesAt(x)){ if (!brIn(B,x,2)) continue; const d=brPerp(B,x,z), hw=brTerm(B,x)?5:4.0;
     if (d<hw+4.6){ const w=1-smooth((d-hw)/4.5); h=lerp(h,brY(B,x)-0.2,w); } }
   for (const sd of SIDES){ const HB=harbourAt(sd,x); if (HB) h=harbourShape(HB,x,z,h); }
   const P=piazzaInfo(Math.floor(x/C),Math.floor(z/C));
@@ -2380,10 +2380,39 @@ function genChunk(cx,cz,lod=0){
     for (const B of branchesAt(x0+C/2)) for (let x=Math.max(x0,B.x0); x<Math.min(x0+C,B.x1)-0.01; x+=2){
       const xm=x+1, zr=brZ(B,xm); if (zr<z0||zr>=z0+C) continue;
       const xa=x, xb=x+2, za=brZ(B,xa), zb=brZ(B,xb), ya=brY(B,xa), yb=brY(B,xb), len=Math.hypot(2,zb-za), nx=-(zb-za)/len, nz=2/len, rot=Math.atan2(2,zb-za);
-      if (brU(B,xm)<0.06) continue;   // at the junction the main line's track serves both
-      segBox(gb,[xa,ya-0.05,za],[xb,yb-0.05,zb],3.0,0.5,ballast,SS);
+      // at the points the branch's rails part from the main line's; its sleepers and ballast follow once clear of them
+      const sep=Math.abs(brZ(B,xm)-railZ(xm));
+      if (sep<0.12) continue;
+      if (sep>2.6) segBox(gb,[xa,ya-0.05,za],[xb,yb-0.05,zb],3.0,0.5,ballast,SS);
       for (const o of [-0.72,0.72]) segBox(gb,[xa+nx*o,ya+0.3,za+nz*o],[xb+nx*o,yb+0.3,zb+nz*o],0.08,0.13,steel);
-      for (let k=0;k<3;k++){ const t=(k+0.5)/3; gb.add(T.boxC, mat(lerp(xa,xb,t),lerp(ya,yb,t)+0.2,lerp(za,zb,t),2.5,0.12,0.26,rot), sleeper, null, SW); } } }
+      if (sep>2.6) for (let k=0;k<3;k++){ const t=(k+0.5)/3; gb.add(T.boxC, mat(lerp(xa,xb,t),lerp(ya,yb,t)+0.2,lerp(za,zb,t),2.5,0.12,0.26,rot), sleeper, null, SW); } }
+    // the lever that sets the points, beside the main line at the junction; and at the quay, buffer stops at the end of
+    // the siding, a crane on the quay side of it and goods stacked on the landward side
+    for (const B of branchesAt(x0+C/2)){
+      const at=(x,off)=>{ const z=brZ(B,x), s=(brZ(B,x+1)-brZ(B,x-1))/2, l=Math.hypot(1,s); return [x-(s/l)*off, z+(1/l)*off, Math.atan2(1,s)]; };
+      const inChunk=(x,z)=>x>=x0&&x<x0+C&&z>=z0&&z<z0+C, side=Math.sign(railZ(B.xj)-B.zt(B.xj))||1;
+      { const xl=B.xj+B.dirJ*12, zl=railZ(xl)+side*3.2, yl=railY(xl);
+        if (inChunk(xl,zl)){ gb.add(T.box, mat(xl,yl-0.1,zl,0.7,0.5,0.9), hex('#5a4a3a'), null, SW); segBox(gb,[xl,yl+0.4,zl],[xl+B.dirJ*0.35,yl+1.3,zl],0.06,0.06,hex('#2a2624'));
+          gb.add(T.sphLo, mat(xl+B.dirJ*0.37,yl+1.32,zl,0.12,0.12,0.12), hex('#c8342a'), null); ch.circles.push({x:xl,z:zl,r:0.5,top:Infinity}); } }
+      { const xb=B.xe+B.dirJ*1.5, [bx,bz,rot]=at(xb,0), by=B.yt;
+        if (inChunk(bx,bz)){ for (const o of [-0.72,0.72]){ const [px,pz]=at(xb,o); segBox(gb,[px-B.dirJ*2.5,by+0.3,pz],[px,by+1.2,pz],0.12,0.12,hex('#3a3d42')); }
+          gb.add(T.boxC, mat(bx,by+1.15,bz,2.4,0.35,0.3,rot+Math.PI/2), hex('#b8392f'), null);
+          for (const o of [-0.9,0.9]){ const [px,pz]=at(xb-B.dirJ*0.1,o); gb.add(T.cylC, mat(px,by+1.0,pz,0.34,0.3,0.34,rot+Math.PI/2,Math.PI/2), hex('#2a2624'), null); }
+          ch.obbs.push({x:bx,z:bz,hw:1.3,hd:0.5,rot,top:Infinity}); } }
+      const R2=rng(Math.floor(hash(B.n,B.sd,961)*4294967296));
+      { const xc=B.H.x+(R2()-0.5)*B.T*0.6, [cx,cz]=at(xc,-B.sd*4.2), cy=B.yt-0.2;
+        if (inChunk(cx,cz)){ const iron=hex('#4a5560'), jr=Math.atan2(B.H.x-cx,B.zt(B.H.x)-B.sd*20-cz);
+          gb.add(T.cyl, mat(cx,cy,cz,1.6,0.5,1.6), hex('#7d8086'), null); gb.add(T.cyl8, mat(cx,cy+0.5,cz,0.5,6.5,0.5), iron, null);
+          gb.add(T.box, mat(cx,cy+6.6,cz,1.4,1.2,1.6), iron, null);
+          const tip=[cx+Math.sin(jr)*9,cy+9.5,cz+Math.cos(jr)*9]; segBox(gb,[cx,cy+6.9,cz],tip,0.35,0.35,hex('#c9a227'));
+          segBox(gb,tip,[tip[0],cy+3.5,tip[2]],0.03,0.03,hex('#2a2624')); gb.add(T.boxC, mat(tip[0],cy+3.3,tip[2],0.3,0.4,0.3), hex('#2a2624'), null);
+          ch.circles.push({x:cx,z:cz,r:0.9,top:Infinity}); } }
+      for (let k=0;k<6;k++){ const xc=B.H.x+(k-2.5)*B.T/3.2+(R2()-0.5)*3, [px,pz,rot]=at(xc,B.sd*(3.6+R2()*1.6));
+        if (!inChunk(px,pz)) continue; const py=B.yt-0.2, kind=R2();
+        if (kind<0.5){ const off=B.sd*(3.6+0.0); for (let i=0;i<3;i++) for (let j=0;j<3-i;j++){ const [qx,qz]=at(xc+(j-1+i*0.5)*1.05,(Math.hypot(px-brZ(B,xc)*0,0)*0)+Math.sign(B.sd)*Math.abs(pz-brZ(B,xc))); gb.add(T.box, mat(qx,py+i*0.9,qz,1.0,0.88,1.0,rot), hex('#b48a58').clone().multiplyScalar(0.85+R2()*0.3), null, SW); }
+          ch.obbs.push({x:px,z:pz,hw:0.6,hd:1.7,rot,top:Infinity}); }
+        else { for (let i=0;i<5;i++){ const a=i/5*6.28, r=i?0.7:0; gb.add(T.cyl, mat(px+Math.cos(a)*r*(i?1:0),py,pz+Math.sin(a)*r*(i?1:0),0.6,0.9,0.6), hex('#7a5a3a'), null, SW); }
+          ch.circles.push({x:px,z:pz,r:1.1,top:Infinity}); } } } }
   /* --- railway: ballast, sleepers and rails; viaducts over valleys; portals where it enters the hill --- */
   { const step=2, ballast=hex('#9b8f7f'), sleeper=hex('#4a3a2c'), steel=hex('#7d8086'), stoneR=shade(C_.stone,R,0.04), lining=hex('#3a332c'), brick=shade(hex('#8a5a42'),R,0.05);
     const PA=2.6, PS=4.6, PT=8.8; // opening half-width, springing height and parapet top of a portal
@@ -3638,6 +3667,72 @@ function updateTrain(dt){
   }
   updateTrainLights(); updateCarDoors(dt);
 
+}
+
+/* ---------- the goods train ----------
+   A short goods train works the goods line nearest the player: a locomotive at each end and three wagons, a van, an
+   open wagon loaded with crates and a tank wagon. It waits at the quay while it is loaded, runs up the branch to just
+   short of the points, waits there for a path, and comes back down; at each end it reverses, the locomotive that was
+   at the rear leading. It runs at 8 m/s, accelerating at 0.4 m/s² and braking at 0.5 m/s². */
+const WAG_L=10;
+function buildWagon(kind){
+  const gb=new GB(), L=WAG_L, W=2.7, dark=hex('#26262a'), y0=0.95;
+  for (const zb of [-L/2+2,L/2-2]) addBogie(gb,zb);
+  gb.add(T.box, mat(0,y0-0.2,0,W,0.3,L), dark, null);
+  for (const e of [-1,1]){ for (const sx of [-0.9,0.9]){ gb.add(T.cylC, mat(sx,0.75,e*(L/2+0.2),0.34,0.4,0.34,0,Math.PI/2), dark, null); gb.add(T.cylC, mat(sx,0.75,e*(L/2+0.39),0.46,0.04,0.46,0,Math.PI/2), dark, null); }
+    gb.add(T.boxC, mat(0,0.75,e*(L/2+0.15),0.3,0.22,0.3), dark, null); }
+  if (kind==='van'){ const body=hex('#7a3b2a'), roof=hex('#8c8f93');
+    gb.add(T.box, mat(0,y0+0.1,0,W,2.4,L-0.2), body, null, SW);
+    gb.add(T.cylC, mat(0,y0+2.45,0,W+0.1,L-0.1,0.5,0,Math.PI/2), roof, null);
+    for (const sx of [-1,1]){ gb.add(T.boxC, mat(sx*(W/2+0.02),y0+1.25,0,0.04,2.1,1.8), body.clone().multiplyScalar(0.85), null, SW); gb.add(T.boxC, mat(sx*(W/2+0.05),y0+2.35,0,0.04,0.06,3.2), dark, null); } }
+  else if (kind==='open'){ const body=hex('#5b4a3a'), crate=hex('#b48a58');
+    gb.add(T.box, mat(0,y0+0.1,0,W,0.15,L-0.2), body, null, SW);
+    for (const sx of [-1,1]) gb.add(T.box, mat(sx*(W/2-0.05),y0+0.25,0,0.1,0.9,L-0.2), body, null, SW);
+    for (const e of [-1,1]) gb.add(T.box, mat(0,y0+0.25,e*(L/2-0.15),W,0.9,0.1), body, null, SW);
+    for (let i=0;i<4;i++) for (let j=0;j<2;j++){ const h=0.8+((i+j)%2)*0.35; gb.add(T.box, mat((j-0.5)*1.2,y0+0.25,-L/2+1.4+i*2.4,1.1,h,1.9), crate.clone().multiplyScalar(0.9+0.2*((i*3+j)%3)/2), null, SW); } }
+  else { const body=hex('#3a3d42'), stripe=hex('#c9a227');
+    gb.add(T.box, mat(0,y0+0.1,0,W-0.4,0.3,L-0.4), dark, null);
+    gb.add(T.cyl, mat(0,y0+1.4,0,2.4,L-1.0,2.4,0,Math.PI/2), body, null);
+    for (const e of [-1,1]) gb.add(T.sph, mat(0,y0+1.4,e*(L/2-0.5),2.4,2.4,0.8), body, null);
+    gb.add(T.cyl8, mat(0,y0+2.55,0,0.7,0.35,0.7), body, null); gb.add(T.cyl, mat(0,y0+1.4,0,2.42,1.2,2.42,0,Math.PI/2), stripe, null); }
+  return {geo:gb.geometry(),L};
+}
+const GOODS_SPEC=[LOCO,buildWagon('van'),buildWagon('open'),buildWagon('tank'),LOCO];
+const goods={cars:[],B:null,x:0,dir:1,lead:0,v:0,wait:0,phase:'quay',check:0};
+GOODS_SPEC.forEach((spec,i)=>{ const loco=i===0||i===GOODS_SPEC.length-1, m=new THREE.Mesh(spec.geo,matB); m.castShadow=true; m.receiveShadow=true; m.rotation.order='YXZ'; m.visible=false; world.add(m);
+  goods.cars.push({m,L:spec.L,loco,flip:i===GOODS_SPEC.length-1,lamps:loco?locoLamps(m):null}); });
+// a point a given chord length behind (dir=1) or ahead (dir=-1) of x along a branch
+function brBack(B,x,D,dir){ let u=D;
+  const z0=brZ(B,x), y0=brY(B,x);
+  for (let k=0;k<5;k++){ const x1=x-dir*u, c=Math.hypot(u,brZ(B,x1)-z0,brY(B,x1)-y0); u*=D/c; }
+  return x-dir*u; }
+// the goods line nearest the player, within 3 km
+function nearestBranch(){ let best=null, bd=3000;
+  for (const sd of SIDES) for (let n=Math.floor((player.x-4500)/HARB); n<=Math.floor((player.x+4500)/HARB); n++){ const B=branchInfo(sd,n); if (!B) continue;
+    const xm=(B.x0+B.x1)/2, d=Math.hypot(player.x-xm,player.z-brZ(B,xm))-(B.x1-B.x0)/2; if (d<bd){ bd=d; best=B; } }
+  return best; }
+function updateGoods(dt){
+  goods.check-=dt;
+  if (goods.check<=0){ goods.check=2; const B=nearestBranch();
+    if (B!==goods.B){ goods.B=B; for (const c of goods.cars) c.m.visible=!!B;
+      // a new line: the train starts at the quay, its leading locomotive towards the buffers, being loaded
+      if (B){ goods.lead=0; goods.dir=B.dirJ; goods.x=B.xe-B.dirJ*3; goods.v=0; goods.wait=10+Math.random()*20; goods.phase='quay'; } } }
+  const B=goods.B; if (!B) return;
+  if (goods.wait>0){ goods.wait-=dt; goods.v=0;
+    if (goods.wait<=0){ // reverse: the other locomotive leads from where the rear of the train stands
+      goods.lead=1-goods.lead; goods.dir=-goods.dir; goods.x=goods.tail; goods.phase=goods.phase==='quay'?'up':'down'; } }
+  else { const target=goods.phase==='up'?B.xj+B.dirJ*B.Lb*0.14:B.xe-B.dirJ*3, d=(target-goods.x)*goods.dir;
+    const want=Math.min(8,Math.sqrt(2*0.5*Math.max(0,d))); goods.v+=clamp(want-goods.v,-1.0*dt,0.4*dt);
+    const step=goods.v*dt; if (d<=step+0.01){ goods.x=target; goods.v=0; goods.wait=goods.phase==='up'?18:30; goods.phase=goods.phase==='up'?'junction':'quay'; }
+    else goods.x+=goods.dir*step; }
+  let xf=goods.x;
+  for (const c of (goods.lead?[...goods.cars].reverse():goods.cars)){
+    const xr=brBack(B,xf,c.L,goods.dir), fy=brY(B,xf), fz=brZ(B,xf), ry=brY(B,xr), rz=brZ(B,xr), dx=xf-xr, dy=fy-ry, dz=fz-rz, back=c.flip!==!!goods.lead, pt=-Math.atan2(dy,Math.hypot(dx,dz));
+    c.m.position.set((xf+xr)/2,(fy+ry)/2+0.35,(fz+rz)/2); c.m.rotation.set(back?-pt:pt,Math.atan2(dx,dz)+(back?Math.PI:0),0);
+    xf=brBack(B,xr,0.8,goods.dir); }
+  goods.tail=brBack(B,xf,-0.8,goods.dir);
+  const lead=goods.cars[goods.lead?goods.cars.length-1:0];
+  for (const c of goods.cars) if (c.lamps) for (const l of c.lamps) l.material=c===lead?lampWhite:lampRed;
 }
 
 /* ================= island ferries ================= */
@@ -5144,7 +5239,7 @@ function frame(now){
   seaUniforms.uTime.value=time;
   for (const ch of chunks.values()) for (const b of ch.boats){ if (!b.floating) continue;
     b.m.position.y=b.y+0.07*Math.sin(time*1.4+b.ph); b.m.rotation.z=0.035*Math.sin(time*1.1+b.ph); b.m.rotation.x=0.022*Math.sin(time*0.8+b.ph*1.7); }
-  updateSailers(dt); updateTrain(dt); updateFerries(dt); gangwayStep(); coachStep(dt,turn);
+  updateSailers(dt); updateTrain(dt); updateGoods(dt); updateFerries(dt); gangwayStep(); coachStep(dt,turn);
   const tx=Math.round(player.x/2)*2, tz=Math.round(player.z/2)*2, ty=Math.round(player.y);
   hour=(hour+dt/HOUR_SEC*(keys.KeyT?40:1))%24; updateDaylight(); updateClocks();
   if (mode==='ferry'){
@@ -5263,7 +5358,7 @@ requestAnimationFrame(()=>setTimeout(()=>{
   document.getElementById('loading').remove();
   requestAnimationFrame(frame);
 },30));
-window.__village={ branchInfo, branchesAt, brZ, brY, heightAt, player, chunks, rooms, doorMesh, keys, setYaw:v=>{yaw=v;}, get yaw(){return yaw;}, fe, co, lightsNear, beams, ruinIn, cats, catHome, get ridden(){ return ridden; },
+window.__village={ goods, branchInfo, branchesAt, brZ, brY, heightAt, player, chunks, rooms, doorMesh, keys, setYaw:v=>{yaw=v;}, get yaw(){return yaw;}, fe, co, lightsNear, beams, ruinIn, cats, catHome, get ridden(){ return ridden; },
   findHarbour(){ for (let d=0;d<12;d++) for (const sd of SIDES) for (const n of [Math.floor(player.x/HARB)+d,Math.floor(player.x/HARB)-d]){ const H=harbourInfo(sd,n); if (H) return {x:H.x,z:coastZ(sd,H.x)+sd*7,W:H.W,sd,qz:coastZ(sd,H.x+H.W/2-1)+sd*2.5}; } return null; },
   findBeach(){ for (let x=player.x; x<player.x+3000; x+=10) for (const sd of SIDES){ const z=coastZ(sd,x)+sd*5; if (heightAt(x,z)<0.6 && heightAt(x,z)>0.1 && !harbourAt(sd,x)) return {x,z,sd}; } return null; },
   ridge(x){ return {x,z:ridgeZ(x)}; },
