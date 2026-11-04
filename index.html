@@ -220,9 +220,11 @@ class GB{
       }
     }
   }
-  geometry(){
-    const g=new THREE.BufferGeometry();
-    g.setAttribute('position',new THREE.Float32BufferAttribute(this.p,3));
+  // the positions are stored relative to (ox,0,oz), worked out before they are rounded to single precision
+  geometry(ox=0,oz=0){
+    const g=new THREE.BufferGeometry(), P=this.p, F=new Float32Array(P.length);
+    for (let i=0;i<P.length;i+=3){ F[i]=P[i]-ox; F[i+1]=P[i+1]; F[i+2]=P[i+2]-oz; }
+    g.setAttribute('position',new THREE.BufferAttribute(F,3));
     g.setAttribute('normal',new THREE.Float32BufferAttribute(this.n,3));
     g.setAttribute('color',new THREE.Float32BufferAttribute(this.c,3));
     g.setAttribute('surf',new THREE.Float32BufferAttribute(this.s,1));
@@ -232,6 +234,8 @@ class GB{
 const _q=new THREE.Quaternion(), _e=new THREE.Euler(), _v1=new THREE.Vector3(), _v2=new THREE.Vector3();
 function mat(x,y,z,sx=1,sy=1,sz=1,ry=0,rx=0,rz=0){ _e.set(rx,ry,rz,'YXZ'); _q.setFromEuler(_e); return new THREE.Matrix4().compose(_v1.set(x,y,z),_q,_v2.set(sx,sy,sz)); }
 const mm=(A,B)=>new THREE.Matrix4().multiplyMatrices(A,B);
+// a flat list of world positions as single precision, relative to (ox,0,oz)
+function relPos(P,ox,oz){ const F=new Float32Array(P.length); for (let i=0;i<P.length;i+=3){ F[i]=P[i]-ox; F[i+1]=P[i+1]; F[i+2]=P[i+2]-oz; } return F; }
 
 /* ================= terrain ================= */
 // The land is an endless island running east-west. Its centre line wanders and its width varies;
@@ -963,7 +967,7 @@ function buildTowerGeo(D){
   if (D.belfry){ B(0,Hc-0.3,(zb+zf)/2,2*iw,0.22,0.22,dark,SW);
     gb.add(T.bowl, mm(H,mat(0,Hc-0.25,(zb+zf)/2,0.62,0.58,0.62,0,Math.PI)), bronze, null);
     gb.add(T.sphLo, mm(H,mat(0,Hc-0.8,(zb+zf)/2,0.1,0.1,0.1)), dark, null); }
-  return gb.geometry();
+  return gb.geometry(D.x,D.z);
 }
 const DOOR_COLS=['#6a4530','#5a3a28','#3f5f4a','#2f4d6b','#7a3b2a','#4b5a3a','#6b6f72'].map(hex);
 // the leaf, hinged along x=0, in the plane z=0, with its foot at y=0; plank faces come from the building shader
@@ -1310,13 +1314,13 @@ const hourHands=new THREE.InstancedMesh(handGeo(0.09,0.42),clockMat,MAX_FACES), 
 for (const h of [hourHands,minHands]){ h.count=0; h.frustumCulled=false; }
 let clockKey='';
 function updateClocks(){
-  if (!hourHands.parent) scene.add(hourHands,minHands);
-  const mins=Math.floor(hour*60), key=mins+':'+clockFaces.size; if (key===clockKey) return; clockKey=key;
+  if (!hourHands.parent) world.add(hourHands,minHands);
+  const mins=Math.floor(hour*60), key=mins+':'+clockFaces.size+':'+originMoved; if (key===clockKey) return; clockKey=key; hourHands.position.copy(ORIGIN); minHands.position.copy(ORIGIN);
   const ah=(hour%12)/12*Math.PI*2, am=(hour%1)*Math.PI*2, M=new THREE.Matrix4(), Q=new THREE.Quaternion(), E=new THREE.Euler(0,0,0,'YXZ'), P=new THREE.Vector3(), S=new THREE.Vector3(1,1,1);
   let n=0;
   for (const f of clockFaces){ if (n>=MAX_FACES) break;
     for (const [mesh,ang,dz] of [[hourHands,ah,0.0],[minHands,am,0.025]]){
-      E.set(0,f.rot,-ang); Q.setFromEuler(E); P.set(f.x+Math.sin(f.rot)*dz,f.y,f.z+Math.cos(f.rot)*dz); M.compose(P,Q,S); mesh.setMatrixAt(n,M); }
+      E.set(0,f.rot,-ang); Q.setFromEuler(E); P.set(f.x+Math.sin(f.rot)*dz-ORIGIN.x,f.y,f.z+Math.cos(f.rot)*dz-ORIGIN.z); M.compose(P,Q,S); mesh.setMatrixAt(n,M); }
     n++; }
   for (const h of [hourHands,minHands]){ h.count=n; h.instanceMatrix.needsUpdate=true; }
 }
@@ -1452,7 +1456,7 @@ function placeBoat(ch,idx,x,y,z,rot,floating,roll=0){
   if (floating && nearFerryRoute(x,z,16)) return;
   const B=BOATS[idx], m=new THREE.Mesh(B.geo,matBoat);
   m.rotation.order='YXZ'; m.position.set(x,y,z); m.rotation.set(0,rot,roll); m.castShadow=true; m.receiveShadow=true;
-  scene.add(m); ch.boats.push({m,y,ph:hash(Math.round(x*7),Math.round(z*7),9)*6.28,floating,roll,sail:BOAT_SAIL.includes(idx)});
+  world.add(m); ch.boats.push({m,y,ph:hash(Math.round(x*7),Math.round(z*7),9)*6.28,floating,roll,sail:BOAT_SAIL.includes(idx)});
   if (!floating) ch.obbs.push({x,z,hw:B.B+0.1,hd:B.L/2,rot,top:Infinity});
 }
 
@@ -2295,7 +2299,7 @@ function genChunk(cx,cz,lod=0){
         for (const [an,r] of [[aa,ra],[ab,rb]]) for (const o of OFFS){ spos.push(I.x+Math.cos(an)*(r-o),0,I.z+Math.sin(an)*(r-o)); ssv.push((o+9)/10.5); }
         for (let q=0;q<nr-1;q++){ const a=base+q, b=a+1, d=a+nr, e=d+1; sidx.push(a,b,d,b,e,d); }
       } }
-    if (sidx.length){ const sg=new THREE.BufferGeometry(); sg.setAttribute('position',new THREE.Float32BufferAttribute(spos,3)); sg.setAttribute('sv',new THREE.Float32BufferAttribute(ssv,1)); sg.setIndex(sidx); sg.computeBoundingSphere(); ch.surfGeo=sg; }
+    if (sidx.length){ const sg=new THREE.BufferGeometry(); sg.setAttribute('position',new THREE.BufferAttribute(relPos(spos,x0,z0),3)); sg.setAttribute('sv',new THREE.Float32BufferAttribute(ssv,1)); sg.setIndex(sidx); sg.computeBoundingSphere(); ch.surfGeo=sg; }
   }
 
   /* --- ground --- */
@@ -2337,7 +2341,7 @@ function genChunk(cx,cz,lod=0){
       if (Math.max(h00,h10,h01,h11)-Math.min(h00,h10,h01,h11)>2.5 && inPortal(x0+(i+0.5)*step,z0+(j+0.5)*step)) continue; }
     idx.push(a,c,b,b,c,d); }
   const gg=new THREE.BufferGeometry();
-  gg.setAttribute('position',new THREE.Float32BufferAttribute(gpos,3));
+  gg.setAttribute('position',new THREE.BufferAttribute(relPos(gpos,x0,z0),3));
   gg.setAttribute('normal',new THREE.Float32BufferAttribute(gnor,3));
   gg.setAttribute('color',new THREE.Float32BufferAttribute(gcol,3));
   gg.setAttribute('pave',new THREE.Float32BufferAttribute(gpav,2));
@@ -2351,9 +2355,9 @@ function genChunk(cx,cz,lod=0){
     gb.oy=0; }
 
   HG=null; GEN_LOD=0;
-  ch.groundGeo=gg; ch.geo=gb.geometry();
+  ch.groundGeo=gg; ch.geo=gb.geometry(x0,z0);
   if (ch.glow.length){ const G=ch.glow, n=G.length/7, pos=new Float32Array(n*3), sz=new Float32Array(n), col=new Float32Array(n*3);
-    for (let i=0;i<n;i++){ pos.set([G[i*7],G[i*7+1],G[i*7+2]],i*3); sz[i]=G[i*7+3]; col.set([G[i*7+4],G[i*7+5],G[i*7+6]],i*3); }
+    for (let i=0;i<n;i++){ pos.set([G[i*7]-x0,G[i*7+1],G[i*7+2]-z0],i*3); sz[i]=G[i*7+3]; col.set([G[i*7+4],G[i*7+5],G[i*7+6]],i*3); }
     const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.BufferAttribute(pos,3)); g.setAttribute('size',new THREE.BufferAttribute(sz,1)); g.setAttribute('gcol',new THREE.BufferAttribute(col,3)); g.computeBoundingSphere(); ch.glowGeo=g; }
   // how far this block's colliders reach beyond its own square: a harbour is built whole by the block holding
   // its centre, and its moles may run out over the next block but one
@@ -2373,9 +2377,27 @@ renderer.outputColorSpace=THREE.SRGBColorSpace;
 renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.toneMappingExposure=1.0;
 renderer.shadowMap.enabled=true; renderer.shadowMap.type=THREE.PCFSoftShadowMap;
 const scene=new THREE.Scene();
+/* ---------- floating origin ----------
+   Everything in the world, the camera with it, hangs in one group shifted by -ORIGIN, so that what reaches the GPU
+   is always close to zero, however far the player has travelled; positions in the program stay in world metres.
+   ORIGIN follows the player in steps of OS (a whole number of blocks). Geometry built in world coordinates is
+   stored relative to a nearby point (its block's corner, a room's centre or ORIGIN itself). The building, ground
+   and sea shaders draw their patterns from the world position less a multiple of OP (origU holds the offset from
+   the shifted frame), so the patterns are the same as before within OP/2 of the start, and keep their precision
+   beyond it. */
+const OS=2560, OP=20480, ORIGIN=new THREE.Vector3(), QORIGIN=new THREE.Vector3(), origU={value:new THREE.Vector3()};
+const world=new THREE.Group(); scene.add(world);
+let originMoved=0;
+function updateOrigin(){
+  const ox=Math.round(player.x/OS)*OS, oz=Math.round(player.z/OS)*OS;
+  if (Math.abs(player.x-ORIGIN.x)<OS*0.75 && Math.abs(player.z-ORIGIN.z)<OS*0.75) return false;
+  ORIGIN.set(ox,0,oz); world.position.set(-ox,0,-oz); world.updateMatrixWorld(true);
+  QORIGIN.set(Math.round(ox/OP)*OP,0,Math.round(oz/OP)*OP); origU.value.set(ox-QORIGIN.x,0,oz-QORIGIN.z);
+  originMoved++; return true;
+}
 const FOG=hex('#9fc0dc');
 scene.fog=new THREE.Fog(FOG,90,1500); scene.background=FOG.clone();
-const camera=new THREE.PerspectiveCamera(70,1,0.3,3600);
+const camera=new THREE.PerspectiveCamera(70,1,0.3,3600); world.add(camera);
 const skyU={uTop:{value:new THREE.Color()},uMid:{value:new THREE.Color()},uHor:{value:new THREE.Color()},uSun:{value:new THREE.Vector3(0,1,0)},uSunCol:{value:new THREE.Color()},uNight:{value:0},uDay:{value:1},uRot:{value:0}};
 const sky=new THREE.Mesh(new THREE.SphereGeometry(500,48,24),new THREE.ShaderMaterial({uniforms:skyU,side:THREE.BackSide,depthWrite:false,fog:false,
   vertexShader:`varying vec3 vDir; void main(){ vDir=normalize(position); gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
@@ -2404,8 +2426,8 @@ const sky=new THREE.Mesh(new THREE.SphereGeometry(500,48,24),new THREE.ShaderMat
       #include <tonemapping_fragment>
       #include <colorspace_fragment>
     }`}));
-sky.renderOrder=-1; scene.add(sky);
-const hemi=new THREE.HemisphereLight(hex('#d8cde0'),hex('#f0c49a'),2.3); scene.add(hemi);
+sky.renderOrder=-1; world.add(sky);
+const hemi=new THREE.HemisphereLight(hex('#d8cde0'),hex('#f0c49a'),2.3); world.add(hemi);
 const sun=new THREE.DirectionalLight(hex('#fff1dc'),2.6);
 const SUN_DIR=new THREE.Vector3(-0.35,0.62,-0.7).normalize(), LIGHT_DIR=new THREE.Vector3();
 // clock: a full day lasts 12 minutes; hold T to speed it up
@@ -2451,7 +2473,7 @@ function updateShadowFrame(){
   const D=SHADOW_BIG?200:140; sun.target.position.set(tx,ty,tz); sun.position.set(tx+LIGHT_DIR.x*D,ty+LIGHT_DIR.y*D,tz+LIGHT_DIR.z*D);
 }
 sun.shadow.bias=-0.0004; sun.shadow.normalBias=0.04;
-scene.add(sun,sun.target);
+world.add(sun,sun.target);
 
 /* ---------- surface textures, generated in the shader from world position ---------- */
 const GLSL_LIB=`
@@ -2470,29 +2492,30 @@ function patchBuildings(mat,clip=false){
   mat.onBeforeCompile=(sh)=>{
     sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nattribute float surf; varying float vSurf; varying vec3 vWP; varying vec3 vWN;')
       .replace('#include <project_vertex>','#include <project_vertex>\nvSurf=surf; vWP=(modelMatrix*vec4(transformed,1.0)).xyz; vWN=normalize(mat3(modelMatrix)*objectNormal);');
-    sh.fragmentShader=sh.fragmentShader.replace('#include <common>','#include <common>\nvarying float vSurf;'+GLSL_LIB)
+    sh.uniforms.uOrig=origU;
+    sh.fragmentShader=sh.fragmentShader.replace('#include <common>','#include <common>\nvarying float vSurf; uniform vec3 uOrig;'+GLSL_LIB).replace('void main() {','void main() {\n  vec3 _wp=vWP+uOrig, _cp=cameraPosition+uOrig;')
       .replace('#include <color_fragment>',`#include <color_fragment>
-      { float k=1.; float dist=length(vWP-cameraPosition); float amp=1.-smoothstep(35.,90.,dist);
+      { float k=1.; float dist=length(_wp-_cp); float amp=1.-smoothstep(35.,90.,dist);
         vec3 n=normalize(vWN);
-        if (vSurf>0.5 && vSurf<1.5){ vec2 uv=wallUV(vWP,n);
+        if (vSurf>0.5 && vSurf<1.5){ vec2 uv=wallUV(_wp,n);
           k=0.93+0.1*fb(uv*1.2)+0.05*vn(uv*11.);
           float stain=smoothstep(0.55,0.95,fb(vec2(uv.x*0.7,uv.y*0.12)+3.)); k*=1.-0.07*stain;
           float exposed=smoothstep(0.73,0.77,fb(uv*0.42+7.));
           if (exposed>0.) k=mix(k, ashlar(uv,0.5,0.26)*0.96, exposed);
         } else if (vSurf>1.5 && vSurf<2.5){ vec2 dn=n.xz; float l=length(dn);
-          if (l>0.05){ dn/=l; vec2 pp=vec2(dot(vWP.xz,vec2(-dn.y,dn.x)), dot(vWP.xz,dn));
+          if (l>0.05){ dn/=l; vec2 pp=vec2(dot(_wp.xz,vec2(-dn.y,dn.x)), dot(_wp.xz,dn));
             float a=pp.x/0.3, ridge=0.5+0.5*cos(6.2832*a), row=fract(pp.y/0.38);
             float id=h21(vec2(floor(a),floor(pp.y/0.38)));
             k=(0.8+0.2*ridge)*mix(0.78,1.,smoothstep(0.,0.14,row))*(0.9+0.16*id); }
-        } else if (vSurf>2.5 && vSurf<3.5){ vec2 uv=abs(n.y)>0.7?vWP.xz:wallUV(vWP,n); k=ashlar(uv,0.75,0.38);
-        } else if (vSurf>3.5 && vSurf<4.5){ vec2 uv=abs(n.y)>0.7?vWP.xz:wallUV(vWP,n); float pl=fract(uv.x/0.17);
+        } else if (vSurf>2.5 && vSurf<3.5){ vec2 uv=abs(n.y)>0.7?_wp.xz:wallUV(_wp,n); k=ashlar(uv,0.75,0.38);
+        } else if (vSurf>3.5 && vSurf<4.5){ vec2 uv=abs(n.y)>0.7?_wp.xz:wallUV(_wp,n); float pl=fract(uv.x/0.17);
           k=(0.82+0.18*smoothstep(0.,0.12,pl)*smoothstep(1.,0.88,pl))*(0.9+0.15*vn(uv*vec2(5.,0.5))); }
-        else if (vSurf>7.5 && vSurf<8.5){ vec2 p=wallUV(vWP,n)+n.xz*0.37;
+        else if (vSurf>7.5 && vSurf<8.5){ vec2 p=wallUV(_wp,n)+n.xz*0.37;
           float c1=vn(p*6.5), c2=vn(p*15.+3.1), c3=vn(p*33.+7.7), far=1.-smoothstep(40.,120.,dist);
           float bract=mix(0.8, smoothstep(0.26,0.48,c1*0.55+c2*0.3+c3*0.15), far);
           diffuseColor.rgb=mix(vec3(0.21,0.33,0.12)*(0.8+0.4*c3), diffuseColor.rgb*(0.82+0.36*c3), bract);
           k=mix(1.,0.72+0.36*c2,far); }
-        else if (vSurf>6.5 && vSurf<7.5){ vec2 uv=wallUV(vWP,n); float row=floor(uv.y/0.075);
+        else if (vSurf>6.5 && vSurf<7.5){ vec2 uv=wallUV(_wp,n); float row=floor(uv.y/0.075);
           vec2 q=vec2(uv.x/0.225+0.5*mod(row,2.), uv.y/0.075), f=fract(q), id=floor(q);
           float m=min(min(f.x,1.-f.x)*0.225, min(f.y,1.-f.y)*0.075);
           k=mix(0.55, 0.85+0.3*h21(id)+0.08*vn(uv*9.), smoothstep(0.004,0.011,m)); amp=max(amp,1.-smoothstep(25.,60.,dist)); }
@@ -2502,7 +2525,7 @@ function patchBuildings(mat,clip=false){
   mat.onBeforeCompile=(sh)=>{ prev(sh); sh.uniforms.uNight=nightU; if (clip) addRoomClip(sh);
     sh.fragmentShader=sh.fragmentShader.replace('varying float vSurf;','varying float vSurf; uniform float uNight;')
       .replace('#include <emissivemap_fragment>',`#include <emissivemap_fragment>
-        if (vSurf>4.5 && vSurf<5.5) totalEmissiveRadiance += vec3(0.95,0.52,0.18)*(0.62+0.2*h21(floor(vWP.xz*0.9)+floor(vWP.y*0.4)))*uNight;
+        if (vSurf>4.5 && vSurf<5.5) totalEmissiveRadiance += vec3(0.95,0.52,0.18)*(0.62+0.2*h21(floor(_wp.xz*0.9)+floor(_wp.y*0.4)))*uNight;
         else if (vSurf>5.5 && vSurf<6.5) totalEmissiveRadiance += diffuseColor.rgb*(0.12+2.4*uNight);`); };
   mat.customProgramCacheKey=()=>'buildings';
 }
@@ -2519,12 +2542,13 @@ function patchGround(mat){
     addRoomClip(sh);
     sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nattribute vec2 pave; varying vec2 vPave; varying vec3 vWP; varying vec3 vWN;')
       .replace('#include <project_vertex>','#include <project_vertex>\nvPave=pave; vWP=(modelMatrix*vec4(transformed,1.0)).xyz; vWN=objectNormal;');
-    sh.fragmentShader=sh.fragmentShader.replace('#include <common>','#include <common>\nvarying vec2 vPave;'+GLSL_LIB)
+    sh.uniforms.uOrig=origU;
+    sh.fragmentShader=sh.fragmentShader.replace('#include <common>','#include <common>\nvarying vec2 vPave; uniform vec3 uOrig;'+GLSL_LIB).replace('void main() {','void main() {\n  vec3 _wp=vWP+uOrig, _cp=cameraPosition+uOrig;')
       .replace('#include <color_fragment>',`#include <color_fragment>
-      { float dist=length(vWP-cameraPosition); float amp=1.-smoothstep(30.,85.,dist);
-        float k=0.94+0.1*fb(vWP.xz*1.6)+0.04*vn(vWP.xz*9.);
+      { float dist=length(_wp-_cp); float amp=1.-smoothstep(30.,85.,dist);
+        float k=0.94+0.1*fb(_wp.xz*1.6)+0.04*vn(_wp.xz*9.);
         if (vPave.x>0.02){
-          vec2 p=vWP.xz/0.34; vec2 i=floor(p), f=fract(p); float F1=8., F2=8., idv=0.;
+          vec2 p=_wp.xz/0.34; vec2 i=floor(p), f=fract(p); float F1=8., F2=8., idv=0.;
           for (int y=-1;y<=1;y++) for (int x=-1;x<=1;x++){ vec2 g=vec2(float(x),float(y));
             vec2 o=vec2(h21(i+g),h21(i+g+17.3))*0.75+0.125; float dd=length(g+o-f);
             if (dd<F1){ F2=F1; F1=dd; idv=h21(i+g+3.1); } else if (dd<F2) F2=dd; }
@@ -2532,7 +2556,7 @@ function patchGround(mat){
           float c=mix(0.62,0.9+0.2*idv,edge)*(1.06-0.2*F1*F1);
           k=mix(k,c,smoothstep(0.,0.5,vPave.x));
         }
-        if (vPave.y>0.02){ float c=ashlar(vWP.xz,1.15,0.8)*(0.97+0.06*vn(vWP.xz*3.)); k=mix(k,c,smoothstep(0.,0.6,vPave.y)); }
+        if (vPave.y>0.02){ float c=ashlar(_wp.xz,1.15,0.8)*(0.97+0.06*vn(_wp.xz*3.)); k=mix(k,c,smoothstep(0.,0.6,vPave.y)); }
         diffuseColor.rgb*=mix(0.97,k,amp); }`);
   };
   mat.customProgramCacheKey=()=>'ground';
@@ -2572,7 +2596,7 @@ const matC=new THREE.MeshBasicMaterial({vertexColors:true}); patchBuildings(matC
     sh.fragmentShader=sh.fragmentShader.replace('uniform float uNight;','uniform float uNight; uniform vec3 uRoom; uniform vec4 uCh; uniform vec4 uChB; uniform float uChW[8]; uniform int uChN; uniform float uChSeed; uniform vec3 uSunL; uniform float uSunK;').replace('void main() {',SG_GLSL+'\nvoid main() {')
       .replace('#include <opaque_fragment>',`{ vec3 n=normalize(vWN); float f=n.y>0.5?0.9:n.y<-0.5?0.66:0.8+0.07*n.x+0.04*n.z; outgoingLight*=uRoom*f*0.85;
         // the ray from here towards the sun, through the plane of the glass on the side the sun is on
-        vec2 d=vWP.xz-uCh.xy; vec3 p=vec3(d.x*uCh.z-d.y*uCh.w, vWP.y-uChB.x, d.x*uCh.w+d.y*uCh.z);
+        vec2 d=_wp.xz-uCh.xy; vec3 p=vec3(d.x*uCh.z-d.y*uCh.w, _wp.y-uChB.x, d.x*uCh.w+d.y*uCh.z);
         vec3 sd=vec3(uSunL.x*uCh.z-uSunL.z*uCh.w, uSunL.y, uSunL.x*uCh.w+uSunL.z*uCh.z);
         if (uChN>0 && uSunK>0.01 && sd.y>0.02 && abs(sd.x)>0.02 && abs(p.x)<uChB.y){ float t=(sign(sd.x)*uChB.y-p.x)/sd.x; vec3 hh=p+sd*t;
           if (abs(hh.z)<uChB.z) for (int i=0;i<8;i++){ if (i>=uChN) break; float u=hh.z-uChW[i], v=hh.y-uChB.w;
@@ -2616,9 +2640,9 @@ matBoat=matB;
 const surfMat=new THREE.ShaderMaterial({
   uniforms:THREE.UniformsUtils.merge([THREE.UniformsLib.fog,{uTime:{value:0},uBright:{value:1}}]),
   vertexShader:`#include <fog_pars_vertex>
-    attribute float sv; uniform float uTime; varying float vSv; varying vec2 vXZ;
-    void main(){ vec3 p=position; float sw=0.5+0.5*sin(uTime*0.85+p.x*0.045);
-      p.y+=0.03+0.2*sw*smoothstep(0.35,1.0,sv); vSv=sv; vXZ=p.xz;
+    attribute float sv; uniform float uTime; uniform vec3 uOrig; varying float vSv; varying vec2 vXZ;
+    void main(){ vec3 p=position; vec2 wq=(modelMatrix*vec4(position,1.0)).xz+uOrig.xz; float sw=0.5+0.5*sin(uTime*0.85+wq.x*0.045);
+      p.y+=0.03+0.2*sw*smoothstep(0.35,1.0,sv); vSv=sv; vXZ=wq;
       vec4 mvPosition=modelViewMatrix*vec4(p,1.0); gl_Position=projectionMatrix*mvPosition;
       #include <fog_vertex>
     }`,
@@ -2639,17 +2663,18 @@ const surfMat=new THREE.ShaderMaterial({
       #include <fog_fragment>
     }`,
   transparent:true, depthWrite:false, fog:true,  // every surf triangle faces up, so back faces are culled
-  polygonOffset:true, polygonOffsetFactor:-3, polygonOffsetUnits:-6 });  // and it always draws over the offset sea
+  polygonOffset:true, polygonOffsetFactor:-3, polygonOffsetUnits:-6 });
+surfMat.uniforms.uOrig=origU;  // and it always draws over the offset sea
 surfMat.uniforms.uTime=seaUniforms.uTime; fountMat.uniforms.uTime=seaUniforms.uTime; fountMat.uniforms.uBright=surfMat.uniforms.uBright;
 
 /* ---------- sea ---------- */
 const seaMat=new THREE.MeshPhongMaterial({color:hex('#2c6ead'),specular:hex('#121a22'),shininess:50,transparent:true,opacity:0.93,
   polygonOffset:true,polygonOffsetFactor:-1,polygonOffsetUnits:-2});  // where sea and shore tie in depth, the sea is drawn
 seaMat.onBeforeCompile=(sh)=>{
-  sh.uniforms.uTime=seaUniforms.uTime;
+  sh.uniforms.uTime=seaUniforms.uTime; sh.uniforms.uOrig=origU;
   sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nvarying vec3 vSeaP;').replace('#include <project_vertex>','#include <project_vertex>\nvSeaP=(modelMatrix*vec4(transformed,1.0)).xyz;');
   sh.fragmentShader=sh.fragmentShader.replace('#include <common>',`#include <common>
-    varying vec3 vSeaP; uniform float uTime;
+    varying vec3 vSeaP; uniform float uTime; uniform vec3 uOrig;
     float sh2(vec2 p){ return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453); }
     float sn2(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
       return mix(mix(sh2(i),sh2(i+vec2(1.0,0.0)),f.x),mix(sh2(i+vec2(0.0,1.0)),sh2(i+vec2(1.0,1.0)),f.x),f.y); }
@@ -2662,7 +2687,7 @@ seaMat.onBeforeCompile=(sh)=>{
            + sn2(rot2(2.7)*q*2.3+vec2(-t*0.24,t*0.19))*0.1*(1.0-smoothstep(0.12,0.3,px*2.3)); }`)
     .replace('#include <normal_fragment_maps>',`#include <normal_fragment_maps>
       { // layered value noise drifting in different directions: irregular ripples with no repeating stripes
-        vec2 q=vSeaP.xz; float t=uTime, e=0.4;
+        vec2 q=vSeaP.xz+uOrig.xz; float t=uTime, e=0.4;
         vec2 dq=fwidth(q); float px=max(dq.x,dq.y);
         float k=1.0-smoothstep(80.0,700.0,length(vSeaP-cameraPosition));
         float wx=seaWaves(q+vec2(e,0.0),t,px)-seaWaves(q-vec2(e,0.0),t,px);
@@ -2670,7 +2695,7 @@ seaMat.onBeforeCompile=(sh)=>{
         normal=normalize(normal+(viewMatrix*vec4(-wx*1.5*k,0.0,-wz*1.5*k,0.0)).xyz); }`);
 };
 const sea=new THREE.Mesh(new THREE.PlaneGeometry(9000,9000).rotateX(-Math.PI/2),seaMat);
-sea.receiveShadow=true; sea.renderOrder=1; scene.add(sea);
+sea.receiveShadow=true; sea.renderOrder=1; world.add(sea);
 
 /* ---------- glowing halos around lights at night ---------- */
 const glowU=THREE.UniformsUtils.merge([THREE.UniformsLib.fog,{uNight:{value:0},uScale:{value:600}}]);
@@ -2717,20 +2742,20 @@ const beamMat=new THREE.ShaderMaterial({uniforms:THREE.UniformsUtils.merge([THRE
       #endif
       gl_FragColor=vec4(vec3(1.0,0.93,0.76)*a*0.5*(1.0-ff*0.8),1.0); }`});
 const lanternGeo=new THREE.BufferGeometry();
-const lanternPts=new THREE.Points(lanternGeo,glowMat); lanternPts.frustumCulled=false; lanternPts.renderOrder=4; scene.add(lanternPts);
+const lanternPts=new THREE.Points(lanternGeo,glowMat); lanternPts.frustumCulled=false; lanternPts.renderOrder=4; world.add(lanternPts);
 const beams={list:[], byId:new Map(), t:0};
 function updateBeams(dt){
   const cp=camera.position, night=nightU.value;
   beams.t-=dt;
   if (beams.t<=0){ beams.t=1;
     const want=lightsNear(cp.x,cp.z,LH_RANGE), ids=new Set(want.map(L=>L.id));
-    for (const [id,b] of beams.byId) if (!ids.has(id)){ for (const m of b.m) scene.remove(m); b.m.forEach(m=>m.material.dispose()); beams.byId.delete(id); }
+    for (const [id,b] of beams.byId) if (!ids.has(id)){ for (const m of b.m) world.remove(m); b.m.forEach(m=>m.material.dispose()); beams.byId.delete(id); }
     for (const L of want) if (!beams.byId.has(L.id)){ const m=[];
-      for (let i=0;i<L.beams;i++){ const mesh=new THREE.Mesh(beamGeo,beamMat.clone()); mesh.position.set(L.x,L.y,L.z); mesh.frustumCulled=false; mesh.renderOrder=4; scene.add(mesh); m.push(mesh); }
+      for (let i=0;i<L.beams;i++){ const mesh=new THREE.Mesh(beamGeo,beamMat.clone()); mesh.position.set(L.x,L.y,L.z); mesh.frustumCulled=false; mesh.renderOrder=4; world.add(mesh); m.push(mesh); }
       beams.byId.set(L.id,{L,m}); }
     beams.list=[...beams.byId.values()];
     const n=beams.list.length;
-    lanternGeo.setAttribute('position',new THREE.Float32BufferAttribute(beams.list.flatMap(b=>[b.L.x,b.L.y,b.L.z]),3));
+    lanternGeo.setAttribute('position',new THREE.Float32BufferAttribute(beams.list.flatMap(b=>[b.L.x-ORIGIN.x,b.L.y,b.L.z-ORIGIN.z]),3)); lanternPts.position.copy(ORIGIN);
     lanternGeo.setAttribute('size',new THREE.Float32BufferAttribute(new Array(n).fill(6),1));
     lanternGeo.setAttribute('gcol',new THREE.Float32BufferAttribute(new Array(n).fill([0.8,0.74,0.6]).flat(),3)); }
   for (const b of beams.list){ const L=b.L;
@@ -2802,7 +2827,7 @@ function makeCat(coat){
   // no ink outline: the outline shells (back faces drawn in one dark colour) are hidden, and the rest casts shadows
   c.group.traverse(o=>{ if (!o.isMesh || o===c.blob) return; if (o.material && o.material.side===THREE.BackSide && o.material.isMeshBasicMaterial) o.visible=false; else o.castShadow=true; });
   c.group.scale.setScalar(CAT_SCALE); c.group.rotation.order='YXZ';
-  scene.add(c.group); return {cat:c, coat, s:null};
+  world.add(c.group); return {cat:c, coat, s:null};
 }
 // a destination: often the top of a wall, step or terrace close by, so the cat climbs; otherwise somewhere on the
 // ground a few metres off, drawn back towards home once it has strayed
@@ -2852,7 +2877,7 @@ function updateCats(dt){
     for (const s of drawn){ if (s.inst) continue;
       let k=cats.list.find(k=>!k.s&&k.coat===s.coat);
       if (!k && cats.list.length<CAT_POOL){ k=makeCat(s.coat); cats.list.push(k); }
-      if (!k){ const f=cats.list.findIndex(k=>!k.s); if (f<0) continue; scene.remove(cats.list[f].cat.group); k=cats.list[f]=makeCat(s.coat); }
+      if (!k){ const f=cats.list.findIndex(k=>!k.s); if (f<0) continue; world.remove(cats.list[f].cat.group); k=cats.list[f]=makeCat(s.coat); }
       k.s=s; s.inst=k; k.cat.group.rotation.y=s.yaw; }
     cats.near=near; }
   // the cats round the player go about their business whether or not they are drawn
@@ -2899,26 +2924,26 @@ farGeo.setAttribute('normal',new THREE.Float32BufferAttribute(new Float32Array((
 { const id=[]; for (let j=0;j<FN;j++) for (let i=0;i<FN;i++){ const a=j*(FN+1)+i, b=a+1, c=a+FN+1, d=c+1; id.push(a,c,b,b,c,d); } farGeo.setIndex(id); }
 const MASK=128, maskData=new Uint8Array(MASK*MASK);
 const maskTex=new THREE.DataTexture(maskData,MASK,MASK,THREE.RedFormat,THREE.UnsignedByteType); maskTex.magFilter=maskTex.minFilter=THREE.NearestFilter; maskTex.needsUpdate=true;
-const maskU={uMask:{value:maskTex},uMaskO:{value:new THREE.Vector2()}};
+const maskU={uMask:{value:maskTex},uMaskO:{value:new THREE.Vector2()},uMaskRel:{value:new THREE.Vector2()}};
 let maskDirty=true;
 function updateMask(){
   const ox=Math.floor(player.x/C)-MASK/2, oz=Math.floor(player.z/C)-MASK/2; maskData.fill(0);
   // the coarse far terrain stays under a block until the block has fully faded in
   for (const ch of chunks.values()){ if (ch.fade<1 && !ch.prev) continue; const i=ch.cx-ox, j=ch.cz-oz; if (i>=0&&j>=0&&i<MASK&&j<MASK) maskData[j*MASK+i]=255; }
-  maskTex.needsUpdate=true; maskU.uMaskO.value.set(ox,oz); maskDirty=false;
+  maskTex.needsUpdate=true; maskU.uMaskO.value.set(ox,oz); maskU.uMaskRel.value.set(ox-ORIGIN.x/C,oz-ORIGIN.z/C); maskDirty=false;
 }
 const farMat=new THREE.MeshLambertMaterial({vertexColors:true});
 farMat.onBeforeCompile=(sh)=>{ Object.assign(sh.uniforms,maskU);
   sh.vertexShader=sh.vertexShader.replace('#include <common>',`#include <common>
-    uniform sampler2D uMask; uniform vec2 uMaskO;
-    float loadedAt(vec2 p){ vec2 c=floor(p/${C.toFixed(1)})-uMaskO; if (c.x<0.0||c.y<0.0||c.x>=${MASK.toFixed(1)}||c.y>=${MASK.toFixed(1)}) return 0.0; return texture2D(uMask,(c+0.5)/${MASK.toFixed(1)}).r; }`)
+    uniform sampler2D uMask; uniform vec2 uMaskRel;
+    float loadedAt(vec2 p){ vec2 c=floor(p/${C.toFixed(1)})-uMaskRel; if (c.x<0.0||c.y<0.0||c.x>=${MASK.toFixed(1)}||c.y>=${MASK.toFixed(1)}) return 0.0; return texture2D(uMask,(c+0.5)/${MASK.toFixed(1)}).r; }`)
     .replace('#include <begin_vertex>',`#include <begin_vertex>
     float insideL=loadedAt(transformed.xz+vec2(-2.0,-2.0))*loadedAt(transformed.xz+vec2(2.0,-2.0))*loadedAt(transformed.xz+vec2(-2.0,2.0))*loadedAt(transformed.xz+vec2(2.0,2.0));
     transformed.y-=60.0*step(0.5,insideL);`); };
 farMat.customProgramCacheKey=()=>'farmask';
-const farMesh=new THREE.Mesh(farGeo,farMat); farMesh.frustumCulled=false; scene.add(farMesh);
+const farMesh=new THREE.Mesh(farGeo,farMat); farMesh.frustumCulled=false; world.add(farMesh);
 const farGlowGeo=new THREE.BufferGeometry();
-const farGlow=new THREE.Points(farGlowGeo,glowMat); farGlow.frustumCulled=false; farGlow.renderOrder=3; scene.add(farGlow);
+const farGlow=new THREE.Points(farGlowGeo,glowMat); farGlow.frustumCulled=false; farGlow.renderOrder=3; world.add(farGlow);
 const key=(x,z)=>x+','+z;
 const chunks=new Map();
 // each grid point's height, colour and distant lights depend only on where it is, so they are worked out once
@@ -2941,10 +2966,10 @@ function farPoint(gi,gj){
 let farOrigin='', farLit=[];
 function rebuildFar(px,pz){
   const gx=Math.round(px/FS), gz=Math.round(pz/FS), P=farGeo.attributes.position.array, Co=farGeo.attributes.color.array, W=FN+1;
-  if (farOrigin!==gx+','+gz){ farOrigin=gx+','+gz; farLit=[];
+  if (farOrigin!==gx+','+gz+','+originMoved){ farOrigin=gx+','+gz+','+originMoved; farLit=[]; farMesh.position.copy(ORIGIN); farGlow.position.copy(ORIGIN);
     for (let j=0;j<=FN;j++) for (let i=0;i<=FN;i++){
       const gi=gx+i-FN/2, gj=gz+j-FN/2, F=farPoint(gi,gj), o=(j*W+i)*3;
-      P[o]=gi*FS; P[o+1]=F.h-0.35; P[o+2]=gj*FS; Co[o]=F.r; Co[o+1]=F.g; Co[o+2]=F.b; if (F.lights) farLit.push(F.lights,gi*FS,gj*FS);
+      P[o]=gi*FS-ORIGIN.x; P[o+1]=F.h-0.35; P[o+2]=gj*FS-ORIGIN.z; Co[o]=F.r; Co[o+1]=F.g; Co[o+2]=F.b; if (F.lights) farLit.push(F.lights,gi*FS,gj*FS);
     }
     // normals straight from the height grid, by central differences
     const Nn=farGeo.attributes.normal.array;
@@ -2956,7 +2981,7 @@ function rebuildFar(px,pz){
   // lights of the distant village, seen at night, where no block has been built yet
   const gp=[], gs=[], gc=[];
   for (let n=0;n<farLit.length;n+=3){ const L=farLit[n]; if (chunks.has(key(Math.floor(farLit[n+1]/C),Math.floor(farLit[n+2]/C)))) continue;
-    for (let q=0;q<3;q++){ gp.push(L[q*3],L[q*3+1],L[q*3+2]); gs.push(2.6+q); gc.push(1,0.74,0.42); } }
+    for (let q=0;q<3;q++){ gp.push(L[q*3]-ORIGIN.x,L[q*3+1],L[q*3+2]-ORIGIN.z); gs.push(2.6+q); gc.push(1,0.74,0.42); } }
   farGlowGeo.setAttribute('position',new THREE.Float32BufferAttribute(gp,3));
   farGlowGeo.setAttribute('size',new THREE.Float32BufferAttribute(gs,1));
   farGlowGeo.setAttribute('gcol',new THREE.Float32BufferAttribute(gc,3));
@@ -2968,13 +2993,13 @@ const islandGeo=new THREE.BufferGeometry();
 islandGeo.setAttribute('position',new THREE.Float32BufferAttribute(new Float32Array((INX+1)*(INZ+1)*3),3));
 islandGeo.setAttribute('color',new THREE.Float32BufferAttribute(new Float32Array((INX+1)*(INZ+1)*3),3));
 { const id=[]; for (let j=0;j<INZ;j++) for (let i=0;i<INX;i++){ const a=j*(INX+1)+i, b=a+1, c=a+INX+1, d=c+1; id.push(a,c,b,b,c,d); } islandGeo.setIndex(id); }
-const islandMesh=new THREE.Mesh(islandGeo,new THREE.MeshLambertMaterial({vertexColors:true})); islandMesh.frustumCulled=false; islandMesh.visible=false; scene.add(islandMesh);
+const islandMesh=new THREE.Mesh(islandGeo,new THREE.MeshLambertMaterial({vertexColors:true})); islandMesh.frustumCulled=false; islandMesh.visible=false; world.add(islandMesh);
 let islandKey=null;
 function updateIsland(){
   if (dist<700){ islandMesh.visible=false; return; }
   islandMesh.visible=true;
   const step=Math.max(20,Math.pow(2,Math.ceil(Math.log2(dist/45)))), ox=Math.round(player.x/(step*8))*step*8, k=step+':'+ox;
-  if (k===islandKey) return; islandKey=k;
+  if (k+':'+originMoved===islandKey) return; islandKey=k+':'+originMoved; islandMesh.position.copy(ORIGIN);
   const P=islandGeo.attributes.position.array, Co=islandGeo.attributes.color.array, c=new THREE.Color();
   for (let i=0;i<=INX;i++){
     const x=ox+(i-INX/2)*step, zc=ridgeZ(x), w=halfW(x)+120;
@@ -2982,7 +3007,7 @@ function updateIsland(){
       const z=zc+(j/INZ*2-1)*w*1.25, h=baseH(x,z), o=(j*(INX+1)+i)*3;
       // sit just under the detailed terrain near the player so the two never fight
       const nearPlayer=Math.abs(x-player.x)<1300&&Math.abs(z-player.z)<1300;
-      P[o]=x; P[o+1]=(h<0?Math.max(h,-6):h)-(nearPlayer?6:1.5); P[o+2]=z;
+      P[o]=x-ORIGIN.x; P[o+1]=(h<0?Math.max(h,-6):h)-(nearPlayer?6:1.5); P[o+2]=z-ORIGIN.z;
       if (h<0) c.copy(C_.seabed); else if (h<1.6) c.copy(C_.beach);
       else if (h<80 && isVillage(Math.floor(x/C),Math.floor(z/C))){ const r=hash(Math.round(x/40),Math.round(z/40),900); c.copy(r<0.4?C_.roofs[0]:r<0.8?C_.walls[1]:C_.leaf[1]).lerp(C_.sand2,0.3); }
       else if (h<80) c.copy(C_.olive).lerp(C_.sand2,0.35).multiplyScalar(0.9);
@@ -2998,13 +3023,14 @@ let VIEW=4; const VIEW_MIN=2, VIEW_MAX=9;
 let queue=[], farDirty=true, farTimer=0;
 function addChunkToScene(ch){
   if (ch.doors) doorsDirty=true;
-  ch.mesh=new THREE.Mesh(ch.geo,matB); ch.mesh.castShadow=true; ch.mesh.receiveShadow=true;
-  ch.ground=new THREE.Mesh(ch.groundGeo,matG); ch.ground.receiveShadow=true;
-  scene.add(ch.mesh,ch.ground);
-  if (ch.surfGeo){ ch.surf=new THREE.Mesh(ch.surfGeo,surfMat); ch.surf.renderOrder=2; scene.add(ch.surf); }
-  if (ch.fw && ch.fw.i.length){ const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.Float32BufferAttribute(ch.fw.p,3)); g.setAttribute('wa',new THREE.Float32BufferAttribute(ch.fw.a,3)); g.setIndex(ch.fw.i); g.computeBoundingSphere();
-    ch.fountGeo=g; ch.fount=new THREE.Mesh(g,fountMat); ch.fount.renderOrder=3; scene.add(ch.fount); ch.fw=null; }
-  if (ch.glowGeo){ ch.glowPts=new THREE.Points(ch.glowGeo,glowMat); ch.glowPts.renderOrder=3; scene.add(ch.glowPts); }
+  const x0=ch.cx*C, z0=ch.cz*C, at=m=>{ m.position.set(x0,0,z0); return m; };
+  ch.mesh=at(new THREE.Mesh(ch.geo,matB)); ch.mesh.castShadow=true; ch.mesh.receiveShadow=true;
+  ch.ground=at(new THREE.Mesh(ch.groundGeo,matG)); ch.ground.receiveShadow=true;
+  world.add(ch.mesh,ch.ground);
+  if (ch.surfGeo){ ch.surf=at(new THREE.Mesh(ch.surfGeo,surfMat)); ch.surf.renderOrder=2; world.add(ch.surf); }
+  if (ch.fw && ch.fw.i.length){ const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.BufferAttribute(relPos(ch.fw.p,x0,z0),3)); g.setAttribute('wa',new THREE.Float32BufferAttribute(ch.fw.a,3)); g.setIndex(ch.fw.i); g.computeBoundingSphere();
+    ch.fountGeo=g; ch.fount=at(new THREE.Mesh(g,fountMat)); ch.fount.renderOrder=3; world.add(ch.fount); ch.fw=null; }
+  if (ch.glowGeo){ ch.glowPts=at(new THREE.Points(ch.glowGeo,glowMat)); ch.glowPts.renderOrder=3; world.add(ch.glowPts); }
 }
 function setChunkFade(ch){
   const lv=Math.round(ch.fade*FADE_STEPS);
@@ -3019,8 +3045,8 @@ function updateFades(dt){
   for (let i=dying.length-1;i>=0;i--){ const ch=dying[i]; ch.fade-=k;
     if (ch.fade<=0){ disposeChunk(ch); dying.splice(i,1); } else setChunkFade(ch); }
 }
-function disposeChunk(ch){ if (ch.prev){ disposeChunk(ch.prev); ch.prev=null; } if (ch.doors){ doorsDirty=true; for (const D of ch.doors) doorsMoving.delete(D); } if (ch.rooms) for (const D of ch.rooms) disposeRoom(D); untile(ch); scene.remove(ch.mesh,ch.ground); ch.geo.dispose(); ch.groundGeo.dispose(); if (ch.surf){ scene.remove(ch.surf); ch.surfGeo.dispose(); } if (ch.glowPts){ scene.remove(ch.glowPts); ch.glowGeo.dispose(); } for (const b of ch.boats) scene.remove(b.m);
-  if (ch.fount){ scene.remove(ch.fount); ch.fountGeo.dispose(); } if (ch.clockFaces) for (const f of ch.clockFaces) clockFaces.delete(f); }
+function disposeChunk(ch){ if (ch.prev){ disposeChunk(ch.prev); ch.prev=null; } if (ch.doors){ doorsDirty=true; for (const D of ch.doors) doorsMoving.delete(D); } if (ch.rooms) for (const D of ch.rooms) disposeRoom(D); untile(ch); world.remove(ch.mesh,ch.ground); ch.geo.dispose(); ch.groundGeo.dispose(); if (ch.surf){ world.remove(ch.surf); ch.surfGeo.dispose(); } if (ch.glowPts){ world.remove(ch.glowPts); ch.glowGeo.dispose(); } for (const b of ch.boats) world.remove(b.m);
+  if (ch.fount){ world.remove(ch.fount); ch.fountGeo.dispose(); } if (ch.clockFaces) for (const f of ch.clockFaces) clockFaces.delete(f); }
 /* ---------- outline blocks drawn in tiles ---------- */
 // Each block is several draw calls, and with hundreds of blocks in view the cost of issuing them, not their
 // triangles, sets the frame time. Outline blocks that have finished fading in are therefore merged in tiles of
@@ -3031,11 +3057,13 @@ const tileKey=ch=>Math.floor(ch.cx/TILE)+','+Math.floor(ch.cz/TILE);
 function setChunkShown(ch,v){ ch.mesh.visible=v; ch.ground.visible=v; if (ch.surf) ch.surf.visible=v; if (ch.glowPts) ch.glowPts.visible=v; }
 // a block leaving its tile is taken out of the merged mesh first, so that it is not drawn twice for long
 function untile(ch){ if (!ch.tiled) return; ch.tiled=false; setChunkShown(ch,true); tilesUrgent.add(tileKey(ch)); }
-function mergeGeos(list){
+function mergeGeos(list,offs){
   if (!list.length) return null;
   const names=Object.keys(list[0].attributes), indexed=!!list[0].index, g=new THREE.BufferGeometry();
   for (const n of names){ const sz=list[0].attributes[n].itemSize; let len=0; for (const q of list) len+=q.attributes[n].array.length;
-    const a=new Float32Array(len); let o=0; for (const q of list){ a.set(q.attributes[n].array,o); o+=q.attributes[n].array.length; }
+    const a=new Float32Array(len); let o=0; list.forEach((q,k)=>{ a.set(q.attributes[n].array,o);
+      if (n==='position' && offs){ const [dx,dz]=offs[k]; for (let i=o;i<o+q.attributes[n].array.length;i+=3){ a[i]+=dx; a[i+2]+=dz; } }
+      o+=q.attributes[n].array.length; });
     g.setAttribute(n,new THREE.BufferAttribute(a,sz)); }
   if (indexed){ let len=0, nv=0; for (const q of list){ len+=q.index.count; nv+=q.attributes.position.count; }
     const ix=nv>65535?new Uint32Array(len):new Uint16Array(len); let o=0, base=0;
@@ -3043,7 +3071,7 @@ function mergeGeos(list){
     g.setIndex(new THREE.BufferAttribute(ix,1)); }
   g.computeBoundingSphere(); return g;
 }
-function disposeTile(T){ for (const m of T.objs){ scene.remove(m); m.geometry.dispose(); } T.objs.length=0; }
+function disposeTile(T){ for (const m of T.objs){ world.remove(m); m.geometry.dispose(); } T.objs.length=0; }
 // tiles are rebuilt a few at a time, so that a ring of blocks arriving or leaving together costs no long frame
 function updateTiles(budgetMs=2){
   const t0=performance.now();
@@ -3051,16 +3079,17 @@ function updateTiles(budgetMs=2){
     if (performance.now()-t0>budgetMs) break;
     tilesUrgent.delete(tk); tilesDirty.delete(tk);
     let T=tiles.get(tk); if (T) disposeTile(T); else { T={objs:[]}; tiles.set(tk,T); }
-    const [tx,tz]=tk.split(',').map(Number), B=[], G=[], S=[], L=[];
+    const [tx,tz]=tk.split(',').map(Number), B=[], G=[], S=[], L=[], oB=[], oS=[], oL=[], X0=tx*TILE*C, Z0=tz*TILE*C;
     for (let j=0;j<TILE;j++) for (let i=0;i<TILE;i++){ const ch=chunks.get(key(tx*TILE+i,tz*TILE+j));
       if (!ch || ch.lod<2 || ch.fade<1 || ch.prev) continue;
-      ch.tiled=true; setChunkShown(ch,false); B.push(ch.geo); G.push(ch.groundGeo); if (ch.surfGeo) S.push(ch.surfGeo); if (ch.glowGeo) L.push(ch.glowGeo); }
+      const o=[ch.cx*C-X0,ch.cz*C-Z0];
+      ch.tiled=true; setChunkShown(ch,false); B.push(ch.geo); G.push(ch.groundGeo); oB.push(o); if (ch.surfGeo){ S.push(ch.surfGeo); oS.push(o); } if (ch.glowGeo){ L.push(ch.glowGeo); oL.push(o); } }
     if (!B.length){ tiles.delete(tk); continue; }
-    const add=(geo,make)=>{ if (!geo || !geo.attributes.position.count){ if (geo) geo.dispose(); return; } const m=make(geo); scene.add(m); T.objs.push(m); };
-    add(mergeGeos(B),g=>{ const m=new THREE.Mesh(g,matB); m.receiveShadow=true; return m; });
-    add(mergeGeos(G),g=>{ const m=new THREE.Mesh(g,matG); m.receiveShadow=true; return m; });
-    add(mergeGeos(S),g=>{ const m=new THREE.Mesh(g,surfMat); m.renderOrder=2; return m; });
-    add(mergeGeos(L),g=>{ const m=new THREE.Points(g,glowMat); m.renderOrder=3; return m; });
+    const add=(geo,make)=>{ if (!geo || !geo.attributes.position.count){ if (geo) geo.dispose(); return; } const m=make(geo); m.position.set(X0,0,Z0); world.add(m); T.objs.push(m); };
+    add(mergeGeos(B,oB),g=>{ const m=new THREE.Mesh(g,matB); m.receiveShadow=true; return m; });
+    add(mergeGeos(G,oB),g=>{ const m=new THREE.Mesh(g,matG); m.receiveShadow=true; return m; });
+    add(mergeGeos(S,oS),g=>{ const m=new THREE.Mesh(g,surfMat); m.renderOrder=2; return m; });
+    add(mergeGeos(L,oL),g=>{ const m=new THREE.Points(g,glowMat); m.renderOrder=3; return m; });
   }
 }
 // rings of detail: full detail close by, simplified in the middle distance, outlines further out to the fog
@@ -3104,7 +3133,7 @@ const sailers=[];
 function sailClear(sd,x){ const H=harbourAt(sd,x); if (!H) return 0; const ax=Math.abs(x-H.x);
   if (ax>H.W/2+10) return 0; return H.sd*(coastZ(sd,x)-H.zo)+12; }
 function updateSailers(dt){
-  if (!sailers.length) for (let i=0;i<5;i++){ const m=new THREE.Mesh(BOATS[BOAT_SAIL[i%3]].geo,matB); m.rotation.order='YXZ'; m.castShadow=true; scene.add(m);
+  if (!sailers.length) for (let i=0;i<5;i++){ const m=new THREE.Mesh(BOATS[BOAT_SAIL[i%3]].geo,matB); m.rotation.order='YXZ'; m.castShadow=true; world.add(m);
     sailers.push({m,sd:i%2?1:-1,x:player.x+(Math.random()-0.5)*600,off:40+Math.random()*130,dir:Math.random()<0.5?1:-1,sp:1.8+Math.random()*1.6,ph:Math.random()*6}); }
   for (const s of sailers){
     s.x+=s.dir*s.sp*dt;
@@ -3248,22 +3277,22 @@ const LOCO=buildCar(true), COACH=buildCoach();
 const train={cars:[], x:0, dir:1, sp:17, v:17, wait:0, init:false, GAP:0.8};
 // headlights: a spotlight from the front of the locomotive aimed along the line, and warm light from the
 // coach windows falling on the ground either side; they light the surroundings at dusk, at night and in tunnels
-const headSpot=new THREE.SpotLight(hex('#ffeccc'),0,240,0.5,0.75,1.2); scene.add(headSpot,headSpot.target);
+const headSpot=new THREE.SpotLight(hex('#ffeccc'),0,240,0.5,0.75,1.2); world.add(headSpot,headSpot.target);
 // the coach lamps join the scene only after dusk, since every light adds to the cost of every lit pixel
 // the lamps stay in the scene, dark by day: adding or removing a light would recompile every lit material
-const coachLamps=[1,3,5].map(i=>({l:new THREE.PointLight(hex('#ffbf73'),0,26,1.5),i})); let coachLampsOn=false; for (const c of coachLamps) scene.add(c.l);
+const coachLamps=[1,3,5].map(i=>({l:new THREE.PointLight(hex('#ffbf73'),0,26,1.5),i})); let coachLampsOn=false; for (const c of coachLamps) world.add(c.l);
 const _hv=new THREE.Vector3();
 function updateTrainLights(){
   const loco=train.cars[0].m, dark=Math.max(nightU.value, mode==='train'?tunnelK:0);
   loco.updateMatrixWorld();
-  headSpot.position.copy(_hv.set(0,1.3,LOCO.L/2+0.4).applyMatrix4(loco.matrixWorld));
-  headSpot.target.position.copy(_hv.set(0,-0.2,LOCO.L/2+60).applyMatrix4(loco.matrixWorld));
+  headSpot.position.copy(_hv.set(0,1.3,LOCO.L/2+0.4).applyMatrix4(loco.matrix));
+  headSpot.target.position.copy(_hv.set(0,-0.2,LOCO.L/2+60).applyMatrix4(loco.matrix));
   headSpot.intensity=12+900*dark;
   const want=coachLampsOn?nightU.value>0.15:nightU.value>0.25;
   if (want!==coachLampsOn){ coachLampsOn=want; for (const c of coachLamps) c.l.intensity=0; }
   if (coachLampsOn) for (const c of coachLamps){ const m=train.cars[c.i].m; c.l.position.set(m.position.x,m.position.y+2.4,m.position.z); c.l.intensity=60*nightU.value; }
 }
-for (let i=0;i<6;i++){ const spec=i===0?LOCO:COACH, m=new THREE.Mesh(spec.geo,matB); m.castShadow=true; m.receiveShadow=true; m.rotation.order='YXZ'; scene.add(m);
+for (let i=0;i<6;i++){ const spec=i===0?LOCO:COACH, m=new THREE.Mesh(spec.geo,matB); m.castShadow=true; m.receiveShadow=true; m.rotation.order='YXZ'; world.add(m);
   const doors=[]; if (i>0) for (const sx of [-1,1]) for (const e of [-1,1]){ const d=new THREE.Mesh(CAR_DOOR,matB); d.castShadow=true; d.receiveShadow=true; d.userData={sx,e}; m.add(d); doors.push(d); }
   train.cars.push({m,L:spec.L,doors}); }
 { const d=new THREE.Mesh(END_DOOR,matB); d.castShadow=d.receiveShadow=true; d.position.z=-(CL/2-0.04); train.cars[train.cars.length-1].m.add(d); }
@@ -3511,7 +3540,7 @@ function buildGate(){
   return gb.geometry();
 }
 const GATE_GEO=buildGate();
-const ferries=[0,1].map(()=>{ const m=new THREE.Mesh(FERRY_GEO,matB); m.castShadow=true; m.receiveShadow=true; m.rotation.order='YXZ'; m.visible=false; scene.add(m);
+const ferries=[0,1].map(()=>{ const m=new THREE.Mesh(FERRY_GEO,matB); m.castShadow=true; m.receiveShadow=true; m.rotation.order='YXZ'; m.visible=false; world.add(m);
   const g=new THREE.Mesh(GANG_GEO,matB); g.castShadow=true; g.receiveShadow=true; g.visible=false; m.add(g);
   const gates=[-1,1].map(sx=>{ const q=new THREE.Mesh(GATE_GEO,matB); q.castShadow=true; q.position.set(sx*(FB/2-0.06),FD0,FGZ-FGW+0.03); q.userData.sx=sx; q.userData.open=0; m.add(q); return q; });
   return {m,g,gates,R:null,s:0,v:0,wait:0,at:0,next:1,head:0,side:1}; });
@@ -3573,13 +3602,13 @@ function ferryInside(dt,ox,oz){
     if (d<r+0.04){ const t=leafAng(D,D.a), px=ox-D.hx, pz=oz-D.hz, dLx=-Math.sin(t)*D.s, dLz=-Math.cos(t)*D.s;
       const dir=(px*dLx+pz*dLz)>0?-1:1, lim=clamp(D.a+dir*4*dt,-DOOR_MAX,DOOR_MAX); let a=D.a;
       while (d<r+0.04 && (dir>0?a<lim:a>lim)){ a=dir>0?Math.min(lim,a+0.01):Math.max(lim,a-0.01); d=leafDist(D,a,fe.lx,fe.lz); }
-      if (a!==D.a){ if (D.a===0){ D.m.getWorldPosition(_fdv); sndPlay('door_open','ferry',[_fdv.x,_fdv.y+1,_fdv.z]); } D.av=(a-D.a)/dt*0.5; D.a=a; D.idle=0; } } }
+      if (a!==D.a){ if (D.a===0){ D.m.getWorldPosition(_fdv).add(ORIGIN); sndPlay('door_open','ferry',[_fdv.x,_fdv.y+1,_fdv.z]); } D.av=(a-D.a)/dt*0.5; D.a=a; D.idle=0; } } }
   for (const D of F.doors){ D.idle+=dt; const hold=D.lv===lv && Math.hypot(fe.lx-D.hx,fe.lz-D.hz)<D.lw+r+0.15;
     if (D.a===0 && D.av===0) continue;
     if (D.idle>1.2 && !hold) D.av+=(-7*D.a-5.3*D.av)*dt; else D.av*=Math.exp(-dt*5);
     let a=clamp(D.a+D.av*dt,-DOOR_MAX,DOOR_MAX); if (Math.abs(a)===DOOR_MAX) D.av=0;
     if (hold && leafDist(D,a,fe.lx,fe.lz)<r+0.04){ a=D.a; D.av=0; }
-    if (D.a!==0 && (Math.sign(a)!==Math.sign(D.a) || (Math.abs(a)<0.003 && Math.abs(D.av)<0.05))){ a=0; D.av=0; D.m.getWorldPosition(_fdv); sndPlay('door_close','ferry',[_fdv.x,_fdv.y+1,_fdv.z]); }
+    if (D.a!==0 && (Math.sign(a)!==Math.sign(D.a) || (Math.abs(a)<0.003 && Math.abs(D.av)<0.05))){ a=0; D.av=0; D.m.getWorldPosition(_fdv).add(ORIGIN); sndPlay('door_close','ferry',[_fdv.x,_fdv.y+1,_fdv.z]); }
     D.a=a; D.m.rotation.y=leafAng(D,a); }
   const solid=FERRY_SOLID[lv]; if (!solid) return;
   for (let pass=0;pass<2;pass++){
@@ -3713,16 +3742,16 @@ function collide(){
 // whoever pushes it, as far as it is pushed; once nobody is within its sweep it eases shut. A door whose room has
 // not yet been built stays shut.
 const DOOR_CAP=4096, doorMeshes={house:new THREE.InstancedMesh(DOOR_GEO,matD,DOOR_CAP),church:new THREE.InstancedMesh(CHURCH_LEAF_GEO,matD,256)}, doorMesh=doorMeshes.house;
-for (const m of Object.values(doorMeshes)){ m.count=0; m.frustumCulled=false; m.castShadow=true; m.receiveShadow=true; scene.add(m); }
+for (const m of Object.values(doorMeshes)){ m.count=0; m.frustumCulled=false; m.castShadow=true; m.receiveShadow=true; world.add(m); }
 let doorsDirty=true; const doorsMoving=new Set();
 const _dm=new THREE.Matrix4(), _dqq=new THREE.Quaternion(), _dp=new THREE.Vector3(), _ds=new THREE.Vector3(1,1,1), _dY=new THREE.Vector3(0,1,0);
 const leafAng=(D,a)=>D.rot+(D.s>0?a:Math.PI-a);
 function leafDist(D,a,x,z){ const t=leafAng(D,a), ux=Math.cos(t), uz=-Math.sin(t), px=x-D.hx, pz=z-D.hz, k=clamp(px*ux+pz*uz,0,D.lw);
   return Math.hypot(px-ux*k,pz-uz*k); }
 function doorSet(D){ if (D.idx<0) return; const M=doorMeshes[D.leaf];
-  _dm.compose(_dp.set(D.hx,D.y,D.hz),_dqq.setFromAxisAngle(_dY,leafAng(D,D.a)),_ds); M.setMatrixAt(D.idx,_dm); M.instanceMatrix.needsUpdate=true; }
+  _dm.compose(_dp.set(D.hx-M.position.x,D.y,D.hz-M.position.z),_dqq.setFromAxisAngle(_dY,leafAng(D,D.a)),_ds); M.setMatrixAt(D.idx,_dm); M.instanceMatrix.needsUpdate=true; }
 function doorsRebuild(){
-  doorsDirty=false; const n={};
+  doorsDirty=false; const n={}; for (const k in doorMeshes) doorMeshes[k].position.copy(ORIGIN);
   for (const k in doorMeshes) n[k]=0;
   for (const ch of chunks.values()) if (ch.lod===0 && ch.doors) for (const D of ch.doors){ const M=doorMeshes[D.leaf];
     if (n[D.leaf]>=M.instanceMatrix.count){ D.idx=-1; continue; } D.idx=n[D.leaf]++; doorSet(D); M.setColorAt(D.idx,D.col); }
@@ -3778,7 +3807,7 @@ function playerRadius(dt){
 /* ---------- rooms ---------- */
 // built for the nearest enterable houses, a few at a time, and taken down again as the player moves away
 const rooms=new Set(); let roomScan=0;
-function disposeRoom(D){ if (!D.room) return; scene.remove(D.room); D.room.geometry.dispose(); for (const c of D.room.children) c.geometry.dispose(); D.room=null; rooms.delete(D); }
+function disposeRoom(D){ if (!D.room) return; world.remove(D.room); D.room.geometry.dispose(); for (const c of D.room.children) c.geometry.dispose(); D.room=null; rooms.delete(D); }
 function roomsUpdate(dt){
   if (doorsDirty) doorsRebuild();
   roomScan-=dt; if (roomScan>0) return; roomScan=0.2;
@@ -3788,9 +3817,9 @@ function roomsUpdate(dt){
   cand.sort((a,b)=>a[0]-b[0]); const want=new Set(cand.filter(c=>c[0]<26).slice(0,ROOM_MAX).map(c=>c[1]));
   const short=[...want].some(D=>!D.room);
   for (const D of rooms) if (!live.has(D) || (!want.has(D) && (short || Math.hypot(D.x-player.x,D.z-player.z)>30))) disposeRoom(D);
-  for (const D of want) if (!D.room && rooms.size<ROOM_MAX-1){ D.room=D.kind==='church'?buildChurch(D):new THREE.Mesh(buildRoomGeo(D),matR); D.room.matrixAutoUpdate=false; scene.add(D.room); rooms.add(D); break; }
+  for (const D of want) if (!D.room && rooms.size<ROOM_MAX-1){ D.room=D.kind==='church'?buildChurch(D):new THREE.Mesh(buildRoomGeo(D),matR); D.room.position.set(D.x,0,D.z); D.room.updateMatrix(); D.room.matrixAutoUpdate=false; world.add(D.room); rooms.add(D); break; }
   let n=0; for (const D of rooms) for (const b of (D.clip||[[0,(D.zb+D.zf)/2,D.iw,(D.zf-D.zb)/2]])){ if (n>=ROOM_MAX) break; const [cx,cz]=localToWorld(D,b[0],b[1]);
-    roomClip.uRoomA.value[n].set(cx,cz,Math.cos(D.rot),Math.sin(D.rot)); roomClip.uRoomB.value[n].set(b[2],b[3],D.fl-40,D.base+(b[4]??D.top+0.05)); n++; }
+    roomClip.uRoomA.value[n].set(cx-ORIGIN.x,cz-ORIGIN.z,Math.cos(D.rot),Math.sin(D.rot)); roomClip.uRoomB.value[n].set(b[2],b[3],D.fl-40,D.base+(b[4]??D.top+0.05)); n++; }
   roomClip.uRoomN.value=n;
 }
 const ROOM_WALLS=['#f2ece2','#efe6d6','#f4efe6','#ece3d3','#f1e7d8'].map(hex), ROOM_DADO=['#b9a27e','#8fa79a','#9fb0bf','#c39a7a','#a8a08a'].map(hex);
@@ -3955,9 +3984,11 @@ function buildRoomGeo(D){
   // the furniture's colliders are added to the house's walls once; each stands on its own storey
   if (!D.furn){ D.furn=true; for (const [x,z,w2,d2,F] of solid){ const [wx,wz]=localToWorld(D,x,z);
     D.walls.push({x:wx,z:wz,hw:w2,hd:d2,rot:D.rot,top:D.base+F+2.0,bot:F>DF+0.01?D.base+F:undefined}); } }
-  return gb.geometry();
+  return gb.geometry(D.x,D.z);
 }
 /* ---------- the inside of a church ---------- */
+let churchLit=null;
+const setChurchU=()=>{ const C=churchLit; if (C) churchU.uCh.value.set(C.x-QORIGIN.x,C.z-QORIGIN.z,Math.cos(C.rot),Math.sin(C.rot)); };
 function buildChurch(C){
   const R=rng(Math.floor(C.seed*4294967296)), gb=new GB(0), H=mat(C.x,C.base,C.z,1,1,1,C.rot), ao=C.base;
   const {W,L,h,iw,ra}=C, hw=W/2, hl=L/2, zf=hl-WTC, zb=-hl+WTC, F=CF, ar=C.ar, r=ar.r, rise=W*0.42;
@@ -4016,16 +4047,17 @@ function buildChurch(C){
     gb.add(T.cyl8, mm(H,mat(0,h-1.6,z,0.7,0.05,0.7)), gold, null);
     for (let k=0;k<6;k++){ const a=k/6*Math.PI*2; gb.add(T.cyl8, mm(H,mat(Math.cos(a)*0.3,h-1.55,z+Math.sin(a)*0.3,0.04,0.12,0.04)), hex('#fff1c8'), null); } }
   if (!C.furn){ C.furn=true; for (const [x,z,w2,d2,tp] of solid){ const [wx,wz]=localToWorld(C,x,z); C.walls.push({x:wx,z:wz,hw:w2,hd:d2,rot:C.rot,top:C.base+F+tp}); } }
-  const mesh=new THREE.Mesh(gb.geometry(),matC);
+  const mesh=new THREE.Mesh(gb.geometry(C.x,C.z),matC);
   // the glass, set in the middle of the wall's thickness
   const P=[], S=[];
   for (const sx of [-1,1]) for (const z of C.wz){ const x=sx*(hw-0.12), y0=h-3.0, y1=h-1.1;
     const v=[[z-0.3,y0],[z+0.3,y0],[z+0.3,y1],[z-0.3,y1]].map(([zz,y])=>LP(x,y,zz)), g=[[z-0.3,y0],[z+0.3,y0],[z+0.3,y1],[z-0.3,y1]].map(([zz,y])=>[(zz-z)*sx,y-y0,C.seed]);
-    for (const k of [0,1,2,0,2,3]){ P.push(...v[k]); S.push(...g[k]); } }
+    for (const k of [0,1,2,0,2,3]){ P.push(v[k][0]-C.x,v[k][1],v[k][2]-C.z); S.push(...g[k]); } }
   const gg=new THREE.BufferGeometry(); gg.setAttribute('position',new THREE.Float32BufferAttribute(P,3)); gg.setAttribute('sg',new THREE.Float32BufferAttribute(S,3));
   const glass=new THREE.Mesh(gg,matSG); glass.material.side=THREE.DoubleSide; mesh.add(glass);
   // the coloured light is worked out for one church at a time, the one last built
-  const u=churchU; u.uCh.value.set(C.x,C.z,Math.cos(C.rot),Math.sin(C.rot)); u.uChB.value.set(C.base,hw-0.12,zf,h-3.0);
+  churchLit=C; setChurchU();
+  const u=churchU; u.uChB.value.set(C.base,hw-0.12,zf,h-3.0);
   for (let i=0;i<8;i++) u.uChW.value[i]=C.wz[i]||0; u.uChN.value=Math.min(8,C.wz.length); u.uChSeed.value=C.seed;
   return mesh;
 }
@@ -4222,7 +4254,7 @@ function sndUpdate(dt){
   // the reverb follows whether the listener is inside the bore, eased so it swells and dies away at the portals
   const inBore=(inside&&railState(camera.position.x)==='tunnel')||(room&&room.kind==='church')?1:0; SNDS.tun=(SNDS.tun??0)+(inBore-(SNDS.tun??0))*(1-Math.exp(-dt*2.5)); const tK=SNDS.tun;
   // the listener is the camera
-  camera.getWorldPosition(_sl); camera.getWorldDirection(_sf);
+  _sl.copy(camera.position); camera.getWorldDirection(_sf);
   const L=ctx.listener;
   if (L.positionX){ L.positionX.value=_sl.x; L.positionY.value=_sl.y; L.positionZ.value=_sl.z; L.forwardX.value=_sf.x; L.forwardY.value=_sf.y; L.forwardZ.value=_sf.z; L.upX.value=0; L.upY.value=1; L.upZ.value=0; }
   else { L.setPosition(_sl.x,_sl.y,_sl.z); L.setOrientation(_sf.x,_sf.y,_sf.z,0,1,0); }
@@ -4316,7 +4348,7 @@ function sndTrain(dt){
   // rail joints under each bogie
   if (moving){ let b=0;
     for (const c of train.cars){ c.m.updateMatrixWorld();
-      for (const e of [-1,1]){ _bv.set(0,-0.3,e*(c.L/2-2.2)).applyMatrix4(c.m.matrixWorld); const prev=SNDS.joints[b];
+      for (const e of [-1,1]){ _bv.set(0,-0.3,e*(c.L/2-2.2)).applyMatrix4(c.m.matrix); const prev=SNDS.joints[b];
         if (prev!==undefined && Math.floor(prev/JOINT)!==Math.floor(_bv.x/JOINT) && Math.abs(_bv.x-_sl.x)<300)
           sndPlay('rail_joint','train',[_bv.x,_bv.y,_bv.z],{gain:0.4+0.6*Math.sqrt(vk),rate:0.9+0.2*vk+Math.random()*0.04,vel,occl:occl(_bv.x)});
         SNDS.joints[b++]=_bv.x; } } }
@@ -4324,7 +4356,7 @@ function sndTrain(dt){
   // the doors at each station
   const want=train.wait>2.5?1:0;
   if (want!==SNDS.doorWant){ SNDS.doorWant=want;
-    for (const c of train.cars) for (const d of c.doors){ d.getWorldPosition(_bv); if (_bv.distanceTo(_sl)<45) sndPlay(want?'train_doors_open':'train_doors_close','train',[_bv.x,_bv.y+1,_bv.z],{delay:Math.random()*0.15}); } }
+    for (const c of train.cars) for (const d of c.doors){ d.getWorldPosition(_bv).add(ORIGIN); if (_bv.distanceTo(_sl)<45) sndPlay(want?'train_doors_open':'train_doors_close','train',[_bv.x,_bv.y+1,_bv.z],{delay:Math.random()*0.15}); } }
 }
 
 /* the ferries: engine at the stern, the wake at the bow, horn, gangway, gates and fenders */
@@ -4334,7 +4366,7 @@ function sndFerries(dt){
     const S=F.snd||(F.snd={run:mkVoice('ferry_run','ferry',true),idle:mkVoice('ferry_idle','ferry',true),wake:mkVoice('ferry_wake','ferry',true),wait:F.wait,gang:F.g.visible,gate:F.gates.map(q=>q.userData.open),hornIn:false,stopP:false,v:0});
     if (!F.R||!F.m.visible){ for (const v of [S.run,S.idle,S.wake]) sndVoice(v,dt,0,_sl.x,_sl.y,_sl.z); continue; }
     const m=F.m; m.updateMatrixWorld(); const vk=clamp(F.v/9,0,1);
-    const at=(lx,ly,lz)=>{ _sfv.set(lx,ly,lz).applyMatrix4(m.matrixWorld); return [_sfv.x,_sfv.y,_sfv.z]; };
+    const at=(lx,ly,lz)=>{ _sfv.set(lx,ly,lz).applyMatrix4(m.matrix); return [_sfv.x,_sfv.y,_sfv.z]; };
     const st=at(0,1.5,-10), bow=at(0,0.4,12);
     sndVoice(S.run,dt,F.v>0.2?0.3+0.7*vk:0,...st,0.8+0.3*vk);
     sndVoice(S.idle,dt,F.v<1?1:0,...st,1);
@@ -4346,8 +4378,8 @@ function sndFerries(dt){
       if (d<160 && !S.hornIn){ S.hornIn=true; sndPlay('ferry_horn','ferry',at(0,6,4),{vel}); }
       if (F.v<S.v-1e-4 && F.v<3 && !S.stopP){ S.stopP=true; sndPlay('ferry_stop','ferry',st,{vel}); } }
     S.wait=F.wait; S.v=F.v;
-    if (F.g.visible!==S.gang){ S.gang=F.g.visible; F.g.getWorldPosition(_sfv); sndPlay('ferry_gangway','ferry',[_sfv.x,_sfv.y,_sfv.z]); }
-    F.gates.forEach((q,i)=>{ const o=q.userData.open, p=S.gate[i]; if ((p<=0.02&&o>0.02)||(p>=0.98&&o<0.98)){ q.getWorldPosition(_sfv); sndPlay('ferry_gate','ferry',[_sfv.x,_sfv.y+0.5,_sfv.z]); } S.gate[i]=o; });
+    if (F.g.visible!==S.gang){ S.gang=F.g.visible; F.g.getWorldPosition(_sfv).add(ORIGIN); sndPlay('ferry_gangway','ferry',[_sfv.x,_sfv.y,_sfv.z]); }
+    F.gates.forEach((q,i)=>{ const o=q.userData.open, p=S.gate[i]; if ((p<=0.02&&o>0.02)||(p>=0.98&&o<0.98)){ q.getWorldPosition(_sfv).add(ORIGIN); sndPlay('ferry_gate','ferry',[_sfv.x,_sfv.y+0.5,_sfv.z]); } S.gate[i]=o; });
     if (F.wait>0){ S.fender=(S.fender??3)-dt; if (S.fender<=0){ S.fender=3+Math.random()*6; sndPlay('ferry_fender','ferry',at(F.side*FB/2,0.6,(Math.random()-0.5)*16),{rate:0.9+Math.random()*0.2}); } }
   }
 }
@@ -4401,7 +4433,7 @@ const _ray=new THREE.Raycaster(), _rp=new THREE.Vector2(), _dq=new THREE.Quatern
 // the camera's flight down to the eye after a double click: from where it was, with its lens and fog, to street level
 const descent={t:-1,dur:1.5,p:new THREE.Vector3(),q:new THREE.Quaternion(),fov:31,far:3600,fogN:160,fogF:1800};
 canvas.addEventListener('dblclick',e=>{ if (mode!=='above') return;
-  const r=canvas.getBoundingClientRect(); _rp.set((e.clientX-r.left)/r.width*2-1,-(e.clientY-r.top)/r.height*2+1); _ray.setFromCamera(_rp,camera);
+  const r=canvas.getBoundingClientRect(); _rp.set((e.clientX-r.left)/r.width*2-1,-(e.clientY-r.top)/r.height*2+1); _ray.setFromCamera(_rp,camera); _ray.ray.origin.add(ORIGIN);
   const o=_ray.ray.origin, d=_ray.ray.direction; if (d.y>=0) return;
   // march along the ray to the ground or the sea, then close in on the crossing
   const st=Math.max(0.5,dist/300), above=t=>o.y+d.y*t-Math.max(0,heightAt(o.x+d.x*t,o.z+d.z*t));
@@ -4506,7 +4538,7 @@ function coachEnter(i,lx,lz){ co.car=i; co.lx=lx; co.lz=lz; co.yaw=yaw-train.car
 function coachStep(dt,turnIn){
   if (mode==='street'){
     if (doorOpen<0.85) return;
-    for (let i=1;i<train.cars.length;i++){ const m=train.cars[i].m; m.updateMatrixWorld(); _cm.copy(m.matrixWorld).invert();
+    for (let i=1;i<train.cars.length;i++){ const m=train.cars[i].m; m.updateMatrix(); _cm.copy(m.matrix).invert();
       _cvv.set(player.x,player.y+1,player.z).applyMatrix4(_cm); const lx=_cvv.x, lz=_cvv.z;
       if (Math.abs(_cvv.y)>3 || Math.abs(lx)<CW/2-0.3 || Math.abs(lx)>CW/2+0.9) continue;
       if (Math.abs(Math.abs(lz)-CDZ)<CDW/2-0.15){ coachEnter(i,clamp(lx,-(CW/2+0.6),CW/2+0.6),lz); return; } }
@@ -4530,11 +4562,11 @@ function coachStep(dt,turnIn){
   const m=train.cars[co.car].m; m.updateMatrixWorld();
   if (Math.abs(co.lx)>CW/2+0.75){
     // out of an open door onto the platform
-    _cvv.set(co.lx,0.9,co.lz).applyMatrix4(m.matrixWorld);
+    _cvv.set(co.lx,0.9,co.lz).applyMatrix4(m.matrix);
     player.x=_cvv.x; player.z=_cvv.z; player.y=_cvv.y; player.vy=0; player.holdT=0; eyeY=null;
     yaw=m.rotation.y+Math.PI+co.yaw; fpPitch=co.pitch; mode='street';
     tunnelK=0; sky.visible=true; scene.fog.near=90; scene.fog.far=1500; return; }
-  _cvv.set(co.lx,1.25+1.6,co.lz).applyMatrix4(m.matrixWorld);
+  _cvv.set(co.lx,1.25+1.6,co.lz).applyMatrix4(m.matrix);
   camera.position.copy(_cvv); camera.rotation.set(co.pitch,m.rotation.y+Math.PI+co.yaw,0,'YXZ');
   player.x=_cvv.x; player.z=_cvv.z; player.y=_cvv.y-1.6; eyeY=player.y; sky.position.copy(camera.position);
 }
@@ -4723,6 +4755,7 @@ function frame(now){
   if (player.y<ground) player.y=ground;
   eyeY = (eyeY===null||Math.abs(eyeY-player.y)>3) ? player.y : eyeY+(player.y-eyeY)*(1-Math.exp(-dt*14));
   }
+  if (updateOrigin()){ doorsDirty=true; roomScan=0; setChurchU(); maskDirty=true; beams.t=0; rebuildFar(player.x,player.z); }
   updateChunks(player.x,player.z,6); updateFades(dt); updateTiles(); roomsUpdate(dt);
   // dynamic draw distance: frames spent building blocks are ignored; slow frames shrink the view, sustained headroom grows it
   if (!queue.length){ perf.t+=dt; perf.n++; perf.sum+=dt;
@@ -4735,7 +4768,7 @@ function frame(now){
   farTimer-=dt; if (farDirty&&!queue.length&&farTimer<=0){ rebuildFar(player.x,player.z); farDirty=false; farTimer=0.5; }
   if (mode==='above' && ridden){
     // watched from above, the passenger stays where they stood on deck and is carried along with the ferry
-    const m=ridden.m; m.updateMatrixWorld(); _cvv.set(fe.lx,fe.ey,fe.lz).applyMatrix4(m.matrixWorld);
+    const m=ridden.m; m.updateMatrix(); _cvv.set(fe.lx,fe.ey,fe.lz).applyMatrix4(m.matrix);
     player.x=_cvv.x; player.z=_cvv.z; player.y=_cvv.y; eyeY=player.y; }
   if (mode==='above'){
     // the view keeps its height while the player moves, and settles onto the ground under them once they stop;
@@ -4791,7 +4824,7 @@ function frame(now){
     const fox=fe.lx, foz=fe.lz;
     ferryDeckClamp(); ferryInside(dt,fe.px??fox,fe.pz??foz); fe.px=fe.lx; fe.pz=fe.lz; fe.ey+=(ferryFloor()-fe.ey)*(1-Math.exp(-dt*12)); FERRY_EYE.set(fe.lx,fe.ey+1.65,fe.lz);
     const m=ridden.m; m.updateMatrixWorld();
-    camera.position.copy(FERRY_EYE).applyMatrix4(m.matrixWorld);
+    camera.position.copy(FERRY_EYE).applyMatrix4(m.matrix);
     camera.rotation.set(fe.pitch, ridden.head+Math.PI+fe.yaw, 0, 'YXZ');
     player.x=m.position.x; player.z=m.position.z; player.y=1.5; eyeY=player.y;
     sky.position.copy(camera.position);

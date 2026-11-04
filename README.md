@@ -85,6 +85,10 @@ The program is a single ES module. Its main sections appear in the following ord
 10. Sound.
 11. Input, the riding modes, the camera, tilt-shift and the frame loop.
 
+### Floating origin
+
+Everything in the world, the camera included, is a child of one group, `world`, shifted by `-ORIGIN`. `ORIGIN` follows the player in steps of `OS = 2560` m, a whole number of blocks, so the coordinates that reach the GPU stay small however far the player travels; positions in the program remain in world metres. Geometry is stored relative to a nearby point, rounded to single precision only after that point has been subtracted: a block's geometry relative to the block's corner, a room's relative to its centre, and the far terrain, the island outline, the clock hands, the lighthouse lanterns and the door instances relative to `ORIGIN`, rebuilt when it moves. The building, ground, sea and surf shaders draw their patterns from the world position less a multiple of `OP = 20480` m (the uniform `uOrig` holds the difference from the shifted frame), so the patterns are as they were within 10 km of the start, and keep their precision beyond it. Code that reads an object's world matrix uses its local matrix, or adds `ORIGIN` to a world position.
+
 ### Units and axes
 
 One unit is one metre. The island runs along the x axis. The south shore is on the positive z side (`sd=+1`) and the north shore on the negative z side (`sd=-1`). The sea surface is at y = 0.
@@ -331,5 +335,4 @@ Setting `window.__freeCam = {p: Vector3, t: Vector3}` places the camera at `p` l
 - The debug hooks and `window.__freeCam` remain in the code. They have no effect in normal use.
 - The lighthouse towers and the ticket kiosks cannot yet be entered.
 - In a narrow tower the stair's first pass along the front wall may run close above the door.
-- Beyond about 100 km from the origin, positions lose precision on the GPU: surface patterns degrade and the scene begins to jitter. A floating origin would remove this.
 - Through the window of a shut coach door, the view is mostly of the inside of the opposite door across the vestibule.
