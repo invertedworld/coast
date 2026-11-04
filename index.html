@@ -1484,13 +1484,14 @@ function genChunk(cx,cz,lod=0){
         const fb=Math.min(-0.3,hmin-P.level-0.8);
         const h=8+R()*2.2, wall=shade(C_.stone,R,0.03), roofC=shade(pick(R,C_.roofs),R,0.04);
         const H=mat(cxp,0,czp,1,1,1,rot);
-        gb.add(T.box, mm(H,mat(0,fb,0,W+0.3,-fb,L+0.3)), shade(C_.stoneDark,R,0.03), fb, SS);
+        // the plinth and the buried steps stop just below the paving, so that no top face shares its plane
+        gb.add(T.box, mm(H,mat(0,fb,0,W+0.3,-fb-0.03,L+0.3)), shade(C_.stoneDark,R,0.03), fb, SS);
         gb.add(T.box, mm(H,mat(0,0,0,W,h,L)), wall, 0, SS);
         gableRoof(gb,H,W,L,h,W*0.42,wall,roofC);
         gb.add(T.cyl, mm(H,mat(0,fb,-L/2,W*0.7,h*0.78-fb,W*0.7)), wall, fb, SS);
         gb.add(T.cone, mm(H,mat(0,h*0.78,-L/2,W*0.78,W*0.3,W*0.78)), roofC, null, SR);
         const fz=L/2+0.02;
-        for (let s=0;s<3;s++) gb.add(T.box, mm(H,mat(0,-0.3+s*0.15-0.15,fz+1.4-s*0.45,4.2-s*0.6,0.3,0.6)), C_.stone, null, SS);
+        for (let s=0;s<3;s++) gb.add(T.box, mm(H,mat(0,-0.3+s*0.15-0.15-(s<2?0.03:0),fz+1.4-s*0.45,4.2-s*0.6,0.3,0.6)), C_.stone, null, SS);
         gb.add(T.box, mm(H,mat(0,0,fz,1.7,2.7,0.16)), C_.door, null, SW);
         gb.add(T.cylC, mm(H,mat(0,2.7,fz,1.7,0.16,1.7,0,Math.PI/2)), C_.door, null, SW);
         gb.add(T.box, mm(H,mat(0,0,fz-0.04,2.6,3.6,0.12)), C_.trim, null, SS);
@@ -3642,8 +3643,6 @@ canvas.addEventListener('dblclick',e=>{ if (mode!=='above') return;
   const x=o.x+d.x*b, z=o.z+d.z*b, top=surfaceTopAt(x,z); if (top<0.1) return;   // open water
   ridden=null;
   player.x=x; player.z=z; player.y=top; player.vy=0; player.grounded=true; player.holdT=2; eyeY=null; fpPitch=0;
-  // on a hillside the player lands facing down the slope, out over the view
-  { const gx=heightAt(x+3,z)-heightAt(x-3,z), gz=heightAt(x,z+3)-heightAt(x,z-3); if (Math.hypot(gx,gz)>0.6) yaw=Math.atan2(gx,gz); }
   const from={p:camera.position.clone(),q:camera.quaternion.clone(),fov:camera.fov,far:camera.far,fogN:scene.fog.near,fogF:scene.fog.far};
   toggleView(); Object.assign(descent,{t:0,fov:from.fov,far:from.far,fogN:from.fogN,fogF:from.fogF}); descent.p.copy(from.p); descent.q.copy(from.q);
   if (started) lockPointer(); });
