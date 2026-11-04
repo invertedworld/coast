@@ -806,8 +806,9 @@ function doorwayFor(ch,o,base,dx,w,h,d,floors){
   const walls=[W(-w/2,-iw,-d/2,d/2), W(iw,w/2,-d/2,d/2), W(-w/2,w/2,-d/2,zb), W(-w/2,dx-DR,zf,d/2), W(dx+DR,w/2,zf,d/2)];
   const [hx,hz]=localToWorld(o,dx-s*DR,d/2-WT/2);
   const D={x:o.x,z:o.z,rot:o.rot,base,fl,w,d,h,dx,iw,zf,zb,floors,hc:floors>1?2.45:h-0.22,seed:Math.floor(R()*4294967296),s,
-    col:pick(R,DOOR_COLS).clone().multiplyScalar(0.9+R()*0.2),hx,hz,y:base+DF,a:0,av:0,idle:9,walls,wins:[],room:null,idx:-1,lw:DOOR_W,leaf:'house'};
-  roomLevels(D);
+    col:pick(R,DOOR_COLS).clone().multiplyScalar(0.9+R()*0.2),hx,hz,y:base+DF,a:0,av:0,idle:9,walls,wins:[],room:null,idx:-1,lw:DOOR_W,leaf:'house',
+    kind:o.kind||(o.tower?'tower':'house'),belfry:!!o.belfry};
+  if (D.kind==='tower') towerColliders(D); else roomLevels(D);
   (ch.doors||(ch.doors=[])).push(D); (ch.rooms||(ch.rooms=[])).push(D);
   return D;
 }
@@ -893,6 +894,73 @@ function churchRoom(ch,cx,cz,rot,base,W,L,h,wz,seed){
   for (const sg of [1,-1]){ const [hx,hz]=localToWorld(C,-sg*CHURCH_DOOR.r,hl-WTC/2);
     (ch.doors||(ch.doors=[])).push({x:cx,z:cz,rot,w:W,d:L,hx,hz,y:base+CF,fl:base+CF,s:sg,lw:CHURCH_DOOR.r,leaf:'church',owner:C,a:0,av:0,idle:9,col:hex('#5a3a28'),idx:-1}); }
   return C;
+}
+// A tower's stair winds up round its walls in a band 80 cm wide, from the ground floor to the floor of the top
+// room (the belfry, if it has one), as treads cantilevered from the walls with a rail along their inner edge. It
+// starts along the left wall, clear of the door, and ends at the top room's floor, which covers the middle and the
+// band of the turn below, apart from the stairwell left by the last dozen treads.
+const TW_B=0.8;
+function towerStair(D){
+  const iw=D.iw, zf=D.zf, zb=D.zb, b=TW_B, yB=Math.max(DF+3,D.h-3.05), N=Math.ceil((yB-DF)/0.2), rise=(yB-DF)/N, go=0.25;
+  // the band as a loop of cells: along the left wall to the back, the back wall, the right wall, the front wall,
+  // with a square landing at each corner; the first pass starts 1.3 m in from the front
+  const sides=[{x0:-iw,x1:-iw+b,z0:zf-b,z1:zb+b,ax:'z'},{corner:[-iw,-iw+b,zb,zb+b]},{z0:zb,z1:zb+b,x0:-iw+b,x1:iw-b,ax:'x'},{corner:[iw-b,iw,zb,zb+b]},
+    {x0:iw-b,x1:iw,z0:zb+b,z1:zf-b,ax:'z'},{corner:[iw-b,iw,zf-b,zf]},{z0:zf-b,z1:zf,x0:iw-b,x1:-iw+b,ax:'x'},{corner:[-iw,-iw+b,zf-b,zf]}];
+  const cells=[];
+  for (let turn=0; cells.length<N+80; turn++) for (const sd of sides){
+    if (sd.corner){ const [x0,x1,z0,z1]=sd.corner; cells.push({x0,x1,z0,z1,inner:null}); continue; }
+    if (sd.ax==='z'){ const dir=Math.sign(sd.z1-sd.z0), start=turn===0?zf-1.3:sd.z0, n=Math.floor(Math.abs(sd.z1-start)/go);
+      for (let k=0;k<n;k++){ const a=start+dir*k*go, c=start+dir*(k+1)*go; cells.push({x0:sd.x0,x1:sd.x1,z0:Math.min(a,c),z1:Math.max(a,c),inner:['x',sd.x0<0?sd.x1:sd.x0]}); } }
+    else { const dir=Math.sign(sd.x1-sd.x0), n=Math.floor(Math.abs(sd.x1-sd.x0)/go);
+      for (let k=0;k<n;k++){ const a=sd.x0+dir*k*go, c=sd.x0+dir*(k+1)*go; cells.push({x0:Math.min(a,c),x1:Math.max(a,c),z0:sd.z0,z1:sd.z1,inner:['z',sd.z0<0?sd.z1:sd.z0]}); } } }
+  const treads=cells.slice(0,N).map((c,i)=>({...c,top:DF+(i+1)*rise}));
+  // the cells of the turn below the top, other than the last dozen treads, carry the top room's floor
+  const per=4+2*Math.floor((zf-zb-2*b)/go+1e-6)+2*Math.floor((2*iw-2*b)/go+1e-6);   // cells in a whole turn
+  const last=treads.slice(Math.max(0,N-12)), near=(c,t)=>c.x0<t.x1+0.35 && c.x1>t.x0-0.35 && c.z0<t.z1+0.35 && c.z1>t.z0-0.35;
+  const floorCells=treads.slice(Math.max(0,N-per),Math.max(0,N-12)).filter(c=>!last.some(t=>near(c,t)));
+  return {treads,floorCells,yB,rise};
+}
+function towerColliders(D){
+  const S=D.tw=towerStair(D), b=TW_B, iw=D.iw;
+  const W=(u0,u1,v0,v1,top,bot)=>{ const [x,z]=localToWorld(D,(u0+u1)/2,(v0+v1)/2); return {x,z,hw:(u1-u0)/2,hd:(v1-v0)/2,rot:D.rot,top:D.base+top,bot:bot===undefined?undefined:D.base+bot}; };
+  S.treads.forEach((t,i)=>{ D.walls.push(W(t.x0,t.x1,t.z0,t.z1,t.top,t.top-0.25));
+    if (t.inner && i<S.treads.length-3){ const [ax,v]=t.inner; D.walls.push(ax==='x'?W(v-0.02,v+0.02,t.z0,t.z1,t.top+1.0,t.top+0.05):W(t.x0,t.x1,v-0.02,v+0.02,t.top+1.0,t.top+0.05)); } });
+  D.walls.push(W(-iw+b,iw-b,D.zb+b,D.zf-b,S.yB,S.yB-0.2));
+  for (const c of S.floorCells) D.walls.push(W(c.x0,c.x1,c.z0,c.z1,S.yB,S.yB-0.2));
+  D.levels=[{F:DF,Hc:D.h-0.2}]; D.top=D.h-0.2; D.st=null;
+}
+function buildTowerGeo(D){
+  const R=rng(D.seed), gb=new GB(0), H=mat(D.x,D.base,D.z,1,1,1,D.rot), iw=D.iw, zf=D.zf, zb=D.zb, S=D.tw, h=D.h, Hc=h-0.2;
+  const stone=shade(C_.stone,R,0.04), dark=hex('#4a3424'), bronze=hex('#a8742e');
+  const quads=(fn,col,surf,aob=null)=>{ const A=[]; fn(A); gb.add(triTpl(A),H,col,aob,surf); };
+  const B=(x,y,z,sx,sy,sz,col,surf=0)=>gb.add(T.box, mm(H,mat(x,y,z,sx,sy,sz)), col, null, surf);
+  const hw=D.w/2, hd=D.d/2;
+  // the walls, with the door, the windows and the openings of the belfry
+  const bel=D.belfry?[{y:h-1.5}]:[], wins=D.wins;
+  const faces=[
+    {N:[0,0,-1],P:k=>(u,y)=>[u,y,hd-k],u0:-iw,u1:iw,sel:v=>Math.abs(v.ry)<0.1,u:v=>v.x,door:[{c:D.dx,r:DR,s:DS,f:DF}]},
+    {N:[0,0,1],P:k=>(u,y)=>[u,y,-hd+k],u0:-iw,u1:iw,sel:v=>Math.abs(Math.abs(v.ry)-Math.PI)<0.1,u:v=>v.x,door:[]},
+    {N:[-1,0,0],P:k=>(u,y)=>[hw-k,y,u],u0:zb,u1:zf,sel:v=>Math.abs(v.ry-Math.PI/2)<0.1,u:v=>v.z,door:[]},
+    {N:[1,0,0],P:k=>(u,y)=>[-hw+k,y,u],u0:zb,u1:zf,sel:v=>Math.abs(v.ry+Math.PI/2)<0.1,u:v=>v.z,door:[]}];
+  for (const f of faces){ f.rects=wins.filter(f.sel).map(v=>[f.u(v)-v.w/2,f.u(v)+v.w/2,v.y-v.h/2,v.y+v.h/2]);
+    f.arches=[...f.door]; for (const b of bel) for (const xx of (D.w>3.3?[-0.55,0.55]:[0])) f.arches.push({c:xx,r:0.275,s:b.y+0.65,f:b.y-0.65}); }
+  quads(A=>{ for (const f of faces) faceHoles(A,f.P(WT),f.N,f.u0,f.u1,DF,Hc,f.rects,f.arches); }, stone, SS);
+  quads(A=>{ for (const f of faces){ for (const r of f.rects) rectReveal(A,f.P(WT),f.P(0),r); for (const a of f.arches.slice(f.door.length)) archReveal(A,f.P(WT),f.P(0),a); } }, stone, SS);
+  quads(A=>q3n(A,[-iw,DF,zb],[iw,DF,zb],[iw,DF,zf],[-iw,DF,zf],[0,1,0]), stone.clone().multiplyScalar(0.85), SS);
+  quads(A=>q3n(A,[-iw,Hc,zb],[iw,Hc,zb],[iw,Hc,zf],[-iw,Hc,zf],[0,-1,0]), hex('#7a5a3e'), SW);
+  // the treads, and a rail along their inner edge
+  S.treads.forEach((t,i)=>{ B((t.x0+t.x1)/2,t.top-0.18,(t.z0+t.z1)/2,t.x1-t.x0+0.002,0.18,t.z1-t.z0+0.002,stone,SS);
+    if (t.inner && i<S.treads.length-3 && i%2===0){ const [ax,v]=t.inner, x=ax==='x'?v:(t.x0+t.x1)/2, z=ax==='z'?v:(t.z0+t.z1)/2;
+      B(x,t.top,z,0.035,0.95,0.035,dark); B(x,t.top+0.95,z,ax==='x'?0.05:0.55,0.04,ax==='z'?0.05:0.55,dark,SW); } });
+  // the top room's floor, round the stairwell
+  const b=TW_B, yB=S.yB;
+  B(0,yB-0.2,(zb+zf)/2,2*(iw-b),0.2,zf-zb-2*b,hex('#7a5a3e'),SW);
+  for (const c of S.floorCells) B((c.x0+c.x1)/2,yB-0.2,(c.z0+c.z1)/2,c.x1-c.x0+0.002,0.2,c.z1-c.z0+0.002,hex('#7a5a3e'),SW);
+  // the bell, hung from a beam across the belfry
+  if (D.belfry){ B(0,Hc-0.3,(zb+zf)/2,2*iw,0.22,0.22,dark,SW);
+    gb.add(T.bowl, mm(H,mat(0,Hc-0.25,(zb+zf)/2,0.62,0.58,0.62,0,Math.PI)), bronze, null);
+    gb.add(T.sphLo, mm(H,mat(0,Hc-0.8,(zb+zf)/2,0.1,0.1,0.1)), dark, null); }
+  return gb.geometry();
 }
 const DOOR_COLS=['#6a4530','#5a3a28','#3f5f4a','#2f4d6b','#7a3b2a','#4b5a3a','#6b6f72'].map(hex);
 // the leaf, hinged along x=0, in the plane z=0, with its foot at y=0; plank faces come from the building shader
@@ -1089,7 +1157,6 @@ function addHouse(gb,ch,R,o){
   if (!o.noDoor){ const dx=(R()-0.5)*Math.max(0,w-2.6);
     room=gb.lod===0?doorwayFor(ch,o,base,dx,w,h,d,floors):null;
     if (room) addDoorFrame(gb,H,dx,d/2); else addDoor(gb,H,dx,fz-0.06);
-    if (room) room.kind=o.kind||'house';
     if (R()<0.3){ const lx=dx+(dx>0?-0.9:0.9);
       gb.add(T.boxC, mm(H,mat(lx,2.62,fz+0.15,0.06,0.06,0.32)), WIRE, null);
       gb.add(T.boxC, mm(H,mat(lx,2.42,fz+0.3,0.22,0.3,0.22)), BULB, null, 6);
@@ -1099,9 +1166,9 @@ function addHouse(gb,ch,R,o){
     if (R()<0.35){ const sx=dx+(dx>0?-1.4:1.4); if (Math.abs(sx)<w/2-0.5){ addWin(gb,H,sx,1.15,fz,0,0.5,0.7,shut,room); } }
   }
   // a building drawn without a door is given one, from its own random sequence so that the town is unchanged
-  else if (!o.tower){ const RD=rng(Math.floor(hash(Math.round(o.x*8),Math.round(o.z*8),4421)*4294967296)), dx=(RD()-0.5)*Math.max(0,w-2.6);
+  else { const RD=rng(Math.floor(hash(Math.round(o.x*8),Math.round(o.z*8),4421)*4294967296)), dx=(RD()-0.5)*Math.max(0,w-2.6);
     room=gb.lod===0?doorwayFor(ch,o,base,dx,w,h,d,floors):null;
-    if (room){ room.kind=o.kind||'house'; addDoorFrame(gb,H,dx,d/2); } else addDoor(gb,H,dx,fz-0.06); }
+    if (room) addDoorFrame(gb,H,dx,d/2); else addDoor(gb,H,dx,fz-0.06); }
   addBody();
   // the climber draws on its own random sequence so that it leaves the layout of the town unchanged
   if (!o.tower && !o.noDoor){ const RB=rng(Math.floor(hash(Math.round(o.x*8),Math.round(o.z*8),4401)*4294967296));
@@ -1115,7 +1182,7 @@ function addHouse(gb,ch,R,o){
   }
   if (o.tower && o.belfry){ const y=h-1.5;
     for (let s=0;s<4;s++){ const HR=mm(H,mat(0,0,0,1,1,1,s*Math.PI/2)), off=(s%2?w:d)/2+0.01;
-      for (const xx of (w>3.3?[-0.55,0.55]:[0])){ gb.add(T.boxC, mm(HR,mat(xx,y,off,0.55,1.3,0.12)), C_.win, null);
+      for (const xx of (w>3.3?[-0.55,0.55]:[0])){ gb.add(T.boxC5, mm(HR,mat(xx,y,off,0.55,1.3,0.12)), C_.win, null);
         gb.add(T.cylC, mm(HR,mat(xx,y+0.65,off,0.55,0.1,0.55,0,Math.PI/2)), C_.win, null); } } }   // the arch a little thinner than the opening, so their faces never share a plane
   if (roof==='front' && w>3.8 && R()<0.6) addWin(gb,H,0,h+w*0.13,fz,0,0.38,0.45);
   if (roof!=='flat' && roof!=='spire' && R()<0.3) gb.add(T.box, mm(H,mat(w*0.22,h,-d*0.18,0.55,Math.min(w,d)*0.4+1.0,0.55)), wall, null, SP);
@@ -1432,7 +1499,7 @@ function buildStation(gb,ch,R,S){
     gb.add(T.cyl8, mat(lx,ry+0.95,lz,0.14,3.4,0.14), posts, null); gb.add(T.boxC, mat(lx,ry+4.45,lz,0.32,0.4,0.32), BULB, null, 6); glow(ch,lx,ry+4.45,lz,2.8); }
   // station building facing the track
   const [hx,hz]=at(S.x,sd*(4.9+3.6)), s=(railZ(S.x+1)-railZ(S.x-1))/2, l=Math.hypot(1,s), fx=(s/l)*sd, fz=-(1/l)*sd;
-  const ob=addHouse(gb,ch,R,{x:hx,z:hz,rot:Math.atan2(fx,fz),w:14,d:7,h:7.4,base:S.ry+0.15,roof:'hip',wall:hex('#e2b789')});
+  const ob=addHouse(gb,ch,R,{x:hx,z:hz,rot:Math.atan2(fx,fz),w:14,d:7,h:7.4,base:S.ry+0.15,roof:'hip',wall:hex('#e2b789'),kind:'station'});
   const Hb=mat(hx,S.ry+0.15,hz,1,1,1,Math.atan2(fx,fz));
   gb.add(T.box, mm(Hb,mat(0,5.2,3.52,4.2,0.7,0.12)), C_.white, null);
   gb.add(T.box, mm(Hb,mat(0,5.35,3.6,3.6,0.4,0.06)), hex('#1f3550'), null);
@@ -1543,12 +1610,17 @@ function buildLighthouse(gb,ch,R,L){
     for (const [u,v] of [[-1,-1],[1,-1],[-1,1],[1,1],[0,0]]){ const [px,pz]=localToWorld({x:hx,z:hz,rot},u*w/2,v*d/2); hg=Math.min(hg,heightAt(px,pz)); }
     const base=Math.max(hg,g-1.5), wallC=shade(C_.walls[2],R,0.03);
     if (base>hg+0.05) gb.add(T.box, mat(hx,hg-0.6,hz,w+0.4,base-hg+0.6,d+0.4,rot), stone, hg, SS);
-    gb.add(T.box, mat(hx,base,hz,w,h,d,rot), wallC, base, SP);
+    // at full detail the cottage can be entered: its door is on the side towards the tower, so its room is laid
+    // out turned a quarter so that the door lies in its front wall
+    const o2={x:hx,z:hz,rot:rot-Math.PI/2}, room=gb.lod===0?doorwayFor(ch,o2,base,0,d,h,w,1):null, H2=mat(hx,base,hz,1,1,1,o2.rot);
+    if (room) shellWithDoor(gb,H2,d,h,w,0,wallC,base,SP); else gb.add(T.box, mat(hx,base,hz,w,h,d,rot), wallC, base, SP);
     gb.add(T.pyr, mat(hx,base+h,hz,w+0.7,1.7,d+0.7,rot), shade(C_.roofs[1],R,0.04), null, SR);
     gb.add(T.box, mat(hx,base+h+0.6,hz,0.6,1.6,0.6,rot), wallC, null, SP);
-    for (const v of [-1.6,1.6]){ const [px,pz]=localToWorld({x:hx,z:hz,rot},w/2+0.04,v); gb.add(T.boxC, mat(px,base+1.9,pz,0.1,0.95,0.7,rot), C_.win, null, 5); }
-    { const [px,pz]=localToWorld({x:hx,z:hz,rot},-w/2-0.04,0); gb.add(T.boxC, mat(px,base+1.05,pz,0.1,2.1,1.0,rot), C_.door, null, SW); }
-    ch.obbs.push({x:hx,z:hz,hw:w/2,hd:d/2,rot,top:Infinity}); }
+    for (const v of [-1.6,1.6]){ const [px,pz]=localToWorld({x:hx,z:hz,rot},w/2+0.04,v); gb.add(T.boxC5, mat(px,base+1.9,pz,0.7,0.95,0.1,rot+Math.PI/2), C_.win, null, 5);
+      if (room) room.wins.push({x:v,y:1.9,z:-w/2,ry:Math.PI,w:0.7,h:0.95}); }
+    if (room) addDoorFrame(gb,H2,0,w/2);
+    else { const [px,pz]=localToWorld({x:hx,z:hz,rot},-w/2-0.04,0); gb.add(T.boxC, mat(px,base+1.05,pz,0.1,2.1,1.0,rot), C_.door, null, SW); }
+    ch.obbs.push(room?{x:hx,z:hz,hw:d/2,hd:w/2,rot:o2.rot,top:Infinity,room}:{x:hx,z:hz,hw:w/2,hd:d/2,rot,top:Infinity}); }
 }
 
 function buildRuin(gb,ch,R,S){
@@ -3717,6 +3789,7 @@ function roomsUpdate(dt){
 const ROOM_WALLS=['#f2ece2','#efe6d6','#f4efe6','#ece3d3','#f1e7d8'].map(hex), ROOM_DADO=['#b9a27e','#8fa79a','#9fb0bf','#c39a7a','#a8a08a'].map(hex);
 const ROOM_FLOORS=['#b4694c','#a95f45','#c07a58','#9c8a72'].map(hex), ROOM_WOOD=['#7a5a3e','#6e4e34','#86664a'].map(hex);
 function buildRoomGeo(D){
+  if (D.kind==='tower') return buildTowerGeo(D);
   const R=rng(D.seed), gb=new GB(0), H=mat(D.x,D.base,D.z,1,1,1,D.rot), iw=D.iw, zf=D.zf, zb=D.zb, ao=D.base;
   const wallC=pick(R,ROOM_WALLS).clone(), dadoC=pick(R,ROOM_DADO), floorC=pick(R,ROOM_FLOORS).clone(), wood=pick(R,ROOM_WOOD), dark=wood.clone().multiplyScalar(0.6);
   const boards=wood.clone().multiplyScalar(1.15), stairC=R()<0.6?shade(C_.stone,R,0.03):wood, floorS=R()<0.75?SS:SW, barn=D.kind==='barn';
@@ -3768,7 +3841,7 @@ function buildRoomGeo(D){
     const take=(x,z,w2,d2,pad=0)=>{ free.push([x,z,w2+pad,d2+pad]); solid.push([x,z,w2,d2,F]); };
     for (const L of [here,below]) if (L){ const za=Math.min(D.st.z0,D.st.z1)-1.0, zz=Math.max(D.st.z0,D.st.z1)+1.0; free.push([(L.x0+L.x1)/2,(za+zz)/2,ST_W/2+0.1,(zz-za)/2]); }
     if (hearth && fi>0){ const {x,z}=hearth; if (fits(x,z,0.25,0.75)){ B(x,F,z,0.5,Hc-F,1.5,wallC); take(x,z,0.25,0.75,0.05); } }
-    if (!fi) (barn?furnishBarn:furnishGround)(); else furnishBedroom();
+    if (!fi) (barn?furnishBarn:D.kind==='station'?furnishStation:furnishGround)(); else furnishBedroom();
     function lamp(x,z){ gb.add(T.cyl8, mm(H,mat(x,F+1.9,z,0.015,Hc-F-1.9,0.015)), hex('#2a2624'), null);
       gb.add(T.cone, mm(H,mat(x,F+1.75,z,0.4,0.22,0.4)), pick(R,[hex('#e9e2cf'),hex('#3f5f4a'),hex('#b5654a')]), null);
       gb.add(T.sphLo, mm(H,mat(x,F+1.76,z,0.12,0.12,0.12)), hex('#fff1c8'), null); }
@@ -3806,6 +3879,25 @@ function buildRoomGeo(D){
             gb.add(T.box, mm(H2,mat(0,0.49,0.19,0.42,0.48,0.03)), chairC, ao, SW); }
           lamp(x,z); take(x,z,tw+0.4,td+0.4,0); break; } }
       picture();
+    }
+    function furnishStation(){
+      // the booking office in a back corner, behind a counter with a glazed screen, benches along the walls, the clock
+      // and the timetables
+      const side=D.st?-D.st.sideA:(R()<0.5?-1:1), ox=side*(iw-1.3);
+      if (fits(ox,zb+0.9,1.3,0.9)){ B(ox,F,zb+1.55,2.6,1.0,0.3,wood,SW); B(ox,F+1.0,zb+1.55,2.7,0.05,0.4,dark,SW);
+        for (let k=0;k<4;k++) B(ox-1.2+k*0.8,F+1.05,zb+1.6,0.05,1.2,0.05,dark); B(ox,F+2.25,zb+1.6,2.6,0.08,0.08,dark);
+        gb.add(T.boxC, mm(H,mat(ox,F+1.65,zb+1.6,2.5,1.15,0.01)), hex('#cfdde4'), null);
+        B(ox,F,zb+0.3,2.0,0.9,0.5,wood,SW); B(ox,F+0.9,zb+0.25,2.2,1.1,0.25,dark,SW); take(ox,zb+0.9,1.3,0.9,0.05); }
+      for (const sx of [-1,1]) for (let t=0;t<6;t++){ const z=zb+1.0+R()*Math.max(0,zf-zb-2.2), x=sx*(iw-0.3); if (!fits(x,z,0.3,1.0)) continue;
+        B(x,F,z,0.5,0.45,2.0,wood,SW); B(x+sx*0.22,F+0.45,z,0.06,0.5,2.0,wood,SW); for (const e of [-1,1]) B(x,F,z+e*0.95,0.45,0.45,0.06,dark); take(x,z,0.3,1.0,0.05); break; }
+      // and back-to-back benches down the middle of the room
+      for (let t=0;t<8;t++){ const x=(R()-0.5)*(2*iw-4), z=(zb+zf)/2+(R()-0.5)*0.6; if (!fits(x,z,1.1,0.55)) continue;
+        for (const e of [-1,1]){ B(x,F,z+e*0.28,2.0,0.45,0.5,wood,SW); } B(x,F+0.45,z,2.0,0.5,0.06,wood,SW); take(x,z,1.05,0.55,0.4); break; }
+      gb.add(T.cylC, mm(H,mat(-ox*0.2,F+2.0,zb+0.04,0.5,0.06,0.5,0,Math.PI/2)), hex('#f4efe2'), null);
+      for (const k of [0,1]) gb.add(T.boxC, mm(H,mat(-ox*0.2+0.04*(k?1:-1),F+2.0+(k?0.1:0),zb+0.075,0.025,k?0.2:0.14,0.01,0,0,k?0:1.1)), hex('#2a2624'), null);
+      for (const x of [-ox*0.6,-ox*0.6+0.9]) if (Math.abs(x)<iw-0.4){ gb.add(T.boxC, mm(H,mat(x,F+1.5,zb+0.02,0.7,0.95,0.03)), hex('#f4efe2'), null);
+        for (let r=0;r<8;r++) gb.add(T.boxC, mm(H,mat(x,F+1.85-r*0.1,zb+0.04,0.55,0.02,0.01)), hex('#2a2624'), null); }
+      lamp(0,(zb+zf)/2);
     }
     function furnishBarn(){
       // bales of straw stacked against the back wall, a cart, a ladder and tools hung on a side wall
