@@ -899,7 +899,8 @@ function churchRoom(ch,cx,cz,rot,base,W,L,h,wz,seed){
   C.clip=[[0,0,iw,hl-WTC,h-0.3],[0,-hl-0.05-r*0.33,r*0.68,r*0.33,s+r+0.05]]; C.top=h-0.3;
   (ch.rooms||(ch.rooms=[])).push(C);
   for (const sg of [1,-1]){ const [hx,hz]=localToWorld(C,-sg*CHURCH_DOOR.r,hl-WTC/2);
-    (ch.doors||(ch.doors=[])).push({x:cx,z:cz,rot,w:W,d:L,hx,hz,y:base+CF,fl:base+CF,s:sg,lw:CHURCH_DOOR.r,leaf:'church',owner:C,a:0,av:0,idle:9,col:hex('#5a3a28'),idx:-1}); }
+    const lf={x:cx,z:cz,rot,w:W,d:L,hx,hz,y:base+CF,fl:base+CF,s:sg,lw:CHURCH_DOOR.r,leaf:'church',owner:C,a:0,av:0,idle:9,col:hex('#5a3a28'),idx:-1};
+    (ch.doors||(ch.doors=[])).push(lf); (C.leaves||(C.leaves=[])).push(lf); }
   return C;
 }
 // A tower's stair winds up round its walls in a band 80 cm wide, from the ground floor to the floor of the top
@@ -951,6 +952,11 @@ function buildTowerGeo(D){
     {N:[1,0,0],P:k=>(u,y)=>[-hw+k,y,u],u0:zb,u1:zf,sel:v=>Math.abs(v.ry+Math.PI/2)<0.1,u:v=>v.z,door:[]}];
   for (const f of faces){ f.rects=wins.filter(f.sel).map(v=>[f.u(v)-v.w/2,f.u(v)+v.w/2,v.y-v.h/2,v.y+v.h/2]);
     f.arches=[...f.door]; for (const b of bel) for (const xx of (D.w>3.3?[-0.55,0.55]:[0])) f.arches.push({c:xx,r:0.275,s:b.y+0.65,f:b.y-0.65}); }
+  // the tower's light: its windows and belfry openings, the doorway, and lanterns at the foot and the top of the stair
+  D.lights=[]; roomLightAt(D,1,D.dx,DF+1.1,zf,[0,0,-1],2.2,-1,Hc+1);
+  for (const f of faces){ for (const r of f.rects){ const c=f.P(WT)((r[0]+r[1])/2,(r[2]+r[3])/2); roomLightAt(D,0,c[0],c[1],c[2],f.N,(r[1]-r[0])*(r[3]-r[2]),-1,Hc+1); }
+    for (const a of f.arches.slice(f.door.length)){ const c=f.P(WT)(a.c,a.s); roomLightAt(D,0,c[0],c[1],c[2],f.N,0.9,-1,Hc+1); } }
+  roomLightAt(D,2,0,2.3,0,null,4,-1,Hc+1); roomLightAt(D,2,0,S.yB+2,0,null,3.5,-1,Hc+1,0.8);
   quads(A=>{ for (const f of faces) faceHoles(A,f.P(WT),f.N,f.u0,f.u1,DF,Hc,f.rects,f.arches); }, stone, SS);
   quads(A=>{ for (const f of faces){ for (const r of f.rects) rectReveal(A,f.P(WT),f.P(0),r); for (const a of f.arches.slice(f.door.length)) archReveal(A,f.P(WT),f.P(0),a); } }, stone, SS);
   quads(A=>q3n(A,[-iw,DF,zb],[iw,DF,zb],[iw,DF,zf],[-iw,DF,zf],[0,1,0]), stone.clone().multiplyScalar(0.85), SS);
@@ -1635,7 +1641,12 @@ function lighthouseRoom(ch,L,g,H,top,ry){
   for (let i=0;i<16;i++){ const t=-Math.PI+2*Math.PI*(i+0.5)/16; if (adiff(t,D.gd)<0.3) continue; D.walls.push(seg(1.15,t,2*Math.PI*1.15/16+0.05,0.12,H+2.3,H+0.45)); }
   for (let i=0;i<20;i++){ const t=2*Math.PI*(i+0.5)/20; D.walls.push(seg(1.75,t,2*Math.PI*1.75/20+0.1,0.95,H,H-0.5)); D.walls.push(seg(2.25,t,2*Math.PI*2.25/20+0.05,0.1,H+1.3,H+0.05)); }   // the railing, too high to step onto from the lantern
   { const [hx,hz]=loc(-DR,lhR(H,1)-LH_T/2);
-    (ch.doors||(ch.doors=[])).push({x:L.x,z:L.z,rot:ry,w:5,d:5,hx,hz,y:B+DF,fl:B+DF,s:1,lw:DOOR_W,leaf:'house',owner:D,a:0,av:0,idle:9,col:hex('#2f4d6b'),idx:-1}); }
+    const lf={x:L.x,z:L.z,rot:ry,w:5,d:5,hx,hz,y:B+DF,fl:B+DF,s:1,lw:DOOR_W,leaf:'house',owner:D,a:0,av:0,idle:9,col:hex('#2f4d6b'),idx:-1};
+    (ch.doors||(ch.doors=[])).push(lf); D.leaves=[lf]; }
+  // its light: the doorway, the three windows up the tower, lanterns on the wall at the foot and halfway, and the lamp
+  D.lights=[]; roomLightAt(D,1,0,DF+1.1,lhR(H,1)-LH_T,[0,0,-1],2.2,-1,H+3);
+  for (const [h,s] of [[0.3,1],[0.55,-1],[0.8,1]]){ const r=lhR(H,h*H)-LH_T; roomLightAt(D,0,0,h*H,s*r,[0,0,-s],0.45,-1,H+3); }
+  roomLightAt(D,2,0,2.3,0,null,3.5,-1,H+3); roomLightAt(D,2,0,H*0.55,0,null,3.5,-1,H+3,0.8); roomLightAt(D,2,0,H+1.4,0,null,2.5,-1,H+3,1.5);
   (ch.rooms||(ch.rooms=[])).push(D);
   ch.obbs.push({x:L.x,z:L.z,hw:2.5,hd:2.5,rot:ry,top:Infinity,room:D});
   return D;
@@ -2547,6 +2558,9 @@ function updateDaylight(){
   if (LIGHT_DIR.y<0.05) LIGHT_DIR.y=0.05;
   nightU.value=smooth((0.1-e)/0.22); glowU.uNight.value=nightU.value;
   churchU.uSunL.value.copy(SUN_DIR); churchU.uSunK.value=smooth((e-0.02)/0.15); churchU.uGlass.value=0.12+1.05*Math.max(wd,wk*0.6);
+  roomLightU.uDayL.value.setRGB(0.98,0.97,0.95).multiplyScalar(0.04+1.25*wd+0.35*wk);
+  roomLightU.uLampL.value.setRGB(1.0,0.7,0.4).multiplyScalar(0.3+0.9*nightU.value);
+  roomLightU.uAmbL.value.setRGB(0.6,0.62,0.68).multiplyScalar(0.03+0.06*wd);
   roomU.value.setRGB(0.97,0.93,0.86).multiplyScalar(0.45+0.5*wd).lerp(_c1.setRGB(0.78,0.58,0.4),nightU.value);
   surfMat.uniforms.uBright.value=0.22+0.78*Math.max(wd,wk*0.75);
   seaMat.specular.set('#121a22').lerp(_c2.set('#9fb0d8'),moonUp);
@@ -2659,14 +2673,6 @@ const roomU={value:new THREE.Color(1,1,1)};
 // the boxes of the rooms that are built, inside which the ground is not drawn: centre, cosine and sine of the
 // heading in A; half width, half depth and the heights between which the ground is cut away in B
 const ROOM_MAX=16, roomClip={uRoomN:{value:0},uRoomA:{value:Array.from({length:ROOM_MAX},()=>new THREE.Vector4())},uRoomB:{value:Array.from({length:ROOM_MAX},()=>new THREE.Vector4())}};
-const matR=new THREE.MeshBasicMaterial({vertexColors:true}); patchBuildings(matR);
-{ const prev=matR.onBeforeCompile; matR.onBeforeCompile=sh=>{ prev(sh); sh.uniforms.uRoom=roomU;
-    sh.vertexShader=sh.vertexShader.replace('#include <begin_vertex>','vec3 objectNormal=vec3(normal);\n#include <begin_vertex>');
-    sh.fragmentShader=sh.fragmentShader.replace('uniform float uNight;','uniform float uNight; uniform vec3 uRoom;')
-      .replace('#include <opaque_fragment>',`{ vec3 n=normalize(vWN); float f=n.y>0.5?0.9:n.y<-0.5?0.66:0.8+0.07*n.x+0.04*n.z; outgoingLight*=uRoom*f;
-        if (vSurf>8.5 && vSurf<9.5) outgoingLight=mix(vec3(0.86,0.92,0.96),vec3(0.05,0.07,0.13),uNight); }
-#include <opaque_fragment>`); };
-  matR.customProgramCacheKey=()=>'rooms'; }
 // stained glass: irregular pieces of coloured glass between lead cames, a border of one colour round each light.
 // p is in metres across the light (x, from -0.3 to 0.3) and up from its sill (y); seed picks four of six colours
 const SG_GLSL=`
@@ -2679,20 +2685,58 @@ vec3 sgCol(vec2 p, float seed){ vec2 q=p*6.5+seed*13.1, i=floor(q), f=fract(q), 
   return c*mix(0.05,1.,smoothstep(0.03,0.08,F2-F1)*smoothstep(0.,0.012,bd)*smoothstep(0.,0.012,abs(bd-0.06))); }`;
 const churchU={uCh:{value:new THREE.Vector4()},uChB:{value:new THREE.Vector4()},uChW:{value:new Array(8).fill(0)},uChN:{value:0},uChSeed:{value:0},
   uSunL:{value:new THREE.Vector3(0,1,0)},uSunK:{value:0},uGlass:{value:1}};
-// the church's surfaces: lit like a room, and where the sun shines in through a window, coloured by its glass
-const matC=new THREE.MeshBasicMaterial({vertexColors:true}); patchBuildings(matC);
-{ const prev=matC.onBeforeCompile; matC.onBeforeCompile=sh=>{ prev(sh); sh.uniforms.uRoom=roomU; Object.assign(sh.uniforms,churchU);
+/* ---------- the light inside a room ----------
+   A room is lit by its own lights rather than by the sun: daylight through each window and through the doorway
+   while the door stands open, falling off with distance and with the angle to the opening, and its lamps, with a
+   little ambient light besides. Each light belongs to a storey, so that it does not shine through the floors.
+   Every room has its own material, sharing one program, whose uniforms hold its lights (setRoomLights). In
+   uLp the position (in the pattern frame of _wp) and the kind (0 window, 1 doorway, 2 lamp); in uLn a window's
+   inward normal and area, or a lamp's reach; in uLs the storey's floor and ceiling and the light's strength. */
+const ROOM_L=16, roomLightU={uDayL:{value:new THREE.Color()},uLampL:{value:new THREE.Color()},uAmbL:{value:new THREE.Color()}};
+const LIGHT_GLSL=`
+uniform int uLN; uniform vec4 uLp[${ROOM_L}]; uniform vec4 uLn[${ROOM_L}]; uniform vec3 uLs[${ROOM_L}]; uniform vec3 uDayL; uniform vec3 uLampL; uniform vec3 uAmbL;
+vec3 roomLight(vec3 n, vec3 wp){ vec3 L=uAmbL;
+  for (int i=0;i<${ROOM_L};i++){ if (i>=uLN) break; vec4 P=uLp[i]; vec3 S=uLs[i]; if (wp.y<S.x || wp.y>S.y) continue;
+    vec3 d=P.xyz-wp; float r2=max(dot(d,d),0.02); vec3 l=d*inversesqrt(r2); float nl=max(0.,dot(n,l));
+    if (P.w<1.5){ vec4 M=uLn[i]; float fw=max(0.,dot(M.xyz,-l)); L+=uDayL*S.z*M.w*fw*(0.2+0.8*nl)*2.4/(r2+M.w); }
+    else { float R2=uLn[i].w*uLn[i].w, q=R2/(r2+R2); L+=uLampL*S.z*q*q*(0.25+0.75*nl); } }
+  return L; }`;
+function makeRoomMaterial(church){
+  const m=new THREE.MeshBasicMaterial({vertexColors:true}); patchBuildings(m);
+  const U={uLN:{value:0},uLp:{value:Array.from({length:ROOM_L},()=>new THREE.Vector4())},uLn:{value:Array.from({length:ROOM_L},()=>new THREE.Vector4())},uLs:{value:Array.from({length:ROOM_L},()=>new THREE.Vector3())}};
+  const prev=m.onBeforeCompile;
+  m.onBeforeCompile=sh=>{ prev(sh); sh.uniforms.uRoom=roomU; Object.assign(sh.uniforms,U,roomLightU); if (church) Object.assign(sh.uniforms,churchU);
     sh.vertexShader=sh.vertexShader.replace('#include <begin_vertex>','vec3 objectNormal=vec3(normal);\n#include <begin_vertex>');
-    sh.fragmentShader=sh.fragmentShader.replace('uniform float uNight;','uniform float uNight; uniform vec3 uRoom; uniform vec4 uCh; uniform vec4 uChB; uniform float uChW[8]; uniform int uChN; uniform float uChSeed; uniform vec3 uSunL; uniform float uSunK;').replace('void main() {',SG_GLSL+'\nvoid main() {')
-      .replace('#include <opaque_fragment>',`{ vec3 n=normalize(vWN); float f=n.y>0.5?0.9:n.y<-0.5?0.66:0.8+0.07*n.x+0.04*n.z; outgoingLight*=uRoom*f*0.85;
-        // the ray from here towards the sun, through the plane of the glass on the side the sun is on
+    sh.fragmentShader=sh.fragmentShader.replace('uniform float uNight;','uniform float uNight; uniform vec3 uRoom;'+(church?' uniform vec4 uCh; uniform vec4 uChB; uniform float uChW[8]; uniform int uChN; uniform float uChSeed; uniform vec3 uSunL; uniform float uSunK;':''))
+      .replace('void main() {',(church?SG_GLSL:'')+LIGHT_GLSL+'\nvoid main() {')
+      .replace('#include <opaque_fragment>',`{ vec3 n=normalize(vWN); float f=n.y>0.5?0.9:n.y<-0.5?0.66:0.8+0.07*n.x+0.04*n.z;
+        if (uLN>0) outgoingLight*=roomLight(n,_wp); else outgoingLight*=uRoom*f;
+        if (vSurf>8.5 && vSurf<9.5) outgoingLight=mix(vec3(0.86,0.92,0.96),vec3(0.05,0.07,0.13),uNight);
+        `+(church?`// the ray from here towards the sun, through the plane of the glass on the side the sun is on
         vec2 d=_wp.xz-uCh.xy; vec3 p=vec3(d.x*uCh.z-d.y*uCh.w, _wp.y-uChB.x, d.x*uCh.w+d.y*uCh.z);
         vec3 sd=vec3(uSunL.x*uCh.z-uSunL.z*uCh.w, uSunL.y, uSunL.x*uCh.w+uSunL.z*uCh.z);
         if (uChN>0 && uSunK>0.01 && sd.y>0.02 && abs(sd.x)>0.02 && abs(p.x)<uChB.y){ float t=(sign(sd.x)*uChB.y-p.x)/sd.x; vec3 hh=p+sd*t;
           if (abs(hh.z)<uChB.z) for (int i=0;i<8;i++){ if (i>=uChN) break; float u=hh.z-uChW[i], v=hh.y-uChB.w;
-            if (abs(u)<0.3 && v>0. && (v<1.6 || u*u+(v-1.6)*(v-1.6)<0.09)) outgoingLight+=sgCol(vec2(u*sign(sd.x),v),uChSeed)*uSunK*max(0.,dot(n,uSunL))*1.2; } } }
+            if (abs(u)<0.3 && v>0. && (v<1.6 || u*u+(v-1.6)*(v-1.6)<0.09)) outgoingLight+=sgCol(vec2(u*sign(sd.x),v),uChSeed)*uSunK*max(0.,dot(n,uSunL))*1.2; } }`:'')+` }
 #include <opaque_fragment>`); };
-  matC.customProgramCacheKey=()=>'church'; }
+  m.customProgramCacheKey=()=>church?'church-lit':'rooms-lit'; m.userData.U=U; return m;
+}
+// the ferry's cabins keep the even light of before
+const matR=makeRoomMaterial(false);
+// a room's lights, as world positions and directions, into its material's uniforms
+function setRoomLights(D){
+  const M=D.room&&D.room.material, U=M&&M.userData.U; if (!U) return; const L=D.lights||[]; let n=0;
+  for (const l of L){ if (n>=ROOM_L) break;
+    U.uLp.value[n].set(l.p[0]-QORIGIN.x,l.p[1],l.p[2]-QORIGIN.z,l.kind); U.uLn.value[n].set(l.n?l.n[0]:0,l.n?l.n[1]:0,l.n?l.n[2]:0,l.a);
+    U.uLs.value[n].set(l.y0,l.y1,l.k); l.idx=n; n++; }
+  U.uLN.value=n;
+}
+// a light given in a room's own frame: lx,ly,lz from its centre and foot, and for an opening its inward normal
+function roomLightAt(D,kind,lx,ly,lz,nrm,a,y0,y1,k=1){
+  const [x,z]=localToWorld(D,lx,lz), c=Math.cos(D.rot), sn=Math.sin(D.rot);
+  const n=nrm?[nrm[0]*c+nrm[2]*sn,nrm[1],-nrm[0]*sn+nrm[2]*c]:null;
+  (D.lights||(D.lights=[])).push({kind,p:[x,D.base+ly,z],n,a,y0:D.base+y0,y1:D.base+y1,k,k0:k});
+}
 // the glass itself, bright by day with the light behind it and dark at night
 const matSG=new THREE.ShaderMaterial({uniforms:churchU,
   vertexShader:`attribute vec3 sg; varying vec3 vSg; varying vec3 vWP; varying vec3 vWN; void main(){ vSg=sg; vWP=(modelMatrix*vec4(position,1.)).xyz; vWN=vec3(0.,1.,0.); gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.); }`,
@@ -3897,9 +3941,11 @@ function playerRadius(dt){
 /* ---------- rooms ---------- */
 // built for the nearest enterable houses, a few at a time, and taken down again as the player moves away
 const rooms=new Set(); let roomScan=0;
-function disposeRoom(D){ if (!D.room) return; world.remove(D.room); D.room.geometry.dispose(); for (const c of D.room.children) c.geometry.dispose(); D.room=null; rooms.delete(D); }
+function disposeRoom(D){ if (!D.room) return; world.remove(D.room); D.room.geometry.dispose(); if (D.room.material!==matR) D.room.material.dispose(); for (const c of D.room.children) c.geometry.dispose(); D.room=null; rooms.delete(D); }
 function roomsUpdate(dt){
   if (doorsDirty) doorsRebuild();
+  for (const D of rooms){ const U=D.room.material.userData.U; if (!U || !D.lights) continue;
+    for (const l of D.lights) if (l.kind===1 && l.idx!==undefined){ let a=0; for (const q of (D.leaves||[D])) a=Math.max(a,Math.abs(q.a||0)); U.uLs.value[l.idx].z=l.k0*Math.min(1,a/1.2); } }
   roomScan-=dt; if (roomScan>0) return; roomScan=0.2;
   const cand=[], live=new Set();
   for (const ch of chunks.values()) if (ch.lod===0 && ch.rooms) for (const D of ch.rooms){ live.add(D);
@@ -3907,7 +3953,7 @@ function roomsUpdate(dt){
   cand.sort((a,b)=>a[0]-b[0]); const want=new Set(cand.filter(c=>c[0]<26).slice(0,ROOM_MAX).map(c=>c[1]));
   const short=[...want].some(D=>!D.room);
   for (const D of rooms) if (!live.has(D) || (!want.has(D) && (short || Math.hypot(D.x-player.x,D.z-player.z)>30))) disposeRoom(D);
-  for (const D of want) if (!D.room && rooms.size<ROOM_MAX-1){ D.room=D.kind==='church'?buildChurch(D):new THREE.Mesh(buildRoomGeo(D),matR); D.room.position.set(D.x,0,D.z); D.room.updateMatrix(); D.room.matrixAutoUpdate=false; world.add(D.room); rooms.add(D); break; }
+  for (const D of want) if (!D.room && rooms.size<ROOM_MAX-1){ D.room=D.kind==='church'?buildChurch(D):new THREE.Mesh(buildRoomGeo(D),makeRoomMaterial(false)); setRoomLights(D); D.room.position.set(D.x,0,D.z); D.room.updateMatrix(); D.room.matrixAutoUpdate=false; world.add(D.room); rooms.add(D); break; }
   let n=0; for (const D of rooms) for (const b of (D.clip||[[0,(D.zb+D.zf)/2,D.iw,(D.zf-D.zb)/2]])){ if (n>=ROOM_MAX) break; const [cx,cz]=localToWorld(D,b[0],b[1]);
     roomClip.uRoomA.value[n].set(cx-ORIGIN.x,cz-ORIGIN.z,Math.cos(D.rot),Math.sin(D.rot)); roomClip.uRoomB.value[n].set(b[2],b[3],D.fl-40,D.base+(b[4]??D.top+0.05)); n++; }
   roomClip.uRoomN.value=n;
@@ -3925,7 +3971,7 @@ function buildRoomGeo(D){
   const B=(x,y,z,sx,sy,sz,col,surf=0,ry=0)=>gb.add(T.box, mm(H,mat(x,y,z,sx,sy,sz,ry)), col, ao, surf);
   const LP=(x,y,z)=>new THREE.Vector3(x,y,z).applyMatrix4(H).toArray();
   const hw=D.w/2, hd=D.d/2, nf=D.levels.length, solid=[], hingeX=D.dx-D.s*DR;
-  let hearth=null;
+  let hearth=null; D.lights=[];
   for (let fi=0; fi<nf; fi++){
     const {F,Hc}=D.levels[fi], below=fi>0?flight(D,fi-1):null, here=fi<nf-1?flight(D,fi):null;
     const wellBelow=below?[below.x0,below.x1,below.well[0],below.well[1]]:null, wellHere=here?[here.x0,here.x1,here.well[0],here.well[1]]:null;
@@ -3941,6 +3987,9 @@ function buildRoomGeo(D){
       {N:[-1,0,0],P:k=>(u,y)=>[hw-k,y,u],u0:zb,u1:zf,door:null,sel:v=>Math.abs(v.ry-Math.PI/2)<0.1,u:v=>v.z},
       {N:[1,0,0],P:k=>(u,y)=>[-hw+k,y,u],u0:zb,u1:zf,door:null,sel:v=>Math.abs(v.ry+Math.PI/2)<0.1,u:v=>v.z}];
     for (const f of faces){ f.rects=wins.filter(f.sel).map(v=>[f.u(v)-v.w/2,f.u(v)+v.w/2,v.y-v.h/2,v.y+v.h/2]); f.k=WT; }
+    // daylight through each window of this storey, and through the doorway on the ground floor
+    for (const f of faces) for (const r of f.rects){ const c=f.P(f.k)((r[0]+r[1])/2,(r[2]+r[3])/2); roomLightAt(D,0,c[0],c[1],c[2],f.N,(r[1]-r[0])*(r[3]-r[2]),F-0.05,Hc+0.05); }
+    if (!fi) roomLightAt(D,1,D.dx,DF+1.1,zf,[0,0,-1],2.2,F-0.05,Hc+0.05);
     quads(A=>{ for (const f of faces) faceHoles(A,f.P(f.k),f.N,f.u0,f.u1,F,Hc,f.rects,f.door); }, wallC, barn?SS:0, null);
     // a painted dado round the walls of the ground floor, standing a centimetre off them
     if (!fi && !barn) quads(A=>{ for (const f of faces) faceHoles(A,f.P(f.k+0.01),f.N,f.u0,f.u1,F,F+0.95,f.rects,f.door); }, dadoC, 0);
@@ -3969,7 +4018,8 @@ function buildRoomGeo(D){
     for (const L of [here,below]) if (L){ const za=Math.min(D.st.z0,D.st.z1)-1.0, zz=Math.max(D.st.z0,D.st.z1)+1.0; free.push([(L.x0+L.x1)/2,(za+zz)/2,ST_W/2+0.1,(zz-za)/2]); }
     if (hearth && fi>0){ const {x,z}=hearth; if (fits(x,z,0.25,0.75)){ B(x,F,z,0.5,Hc-F,1.5,wallC); take(x,z,0.25,0.75,0.05); } }
     if (!fi) (barn?furnishBarn:D.kind==='station'?furnishStation:furnishGround)(); else furnishBedroom();
-    function lamp(x,z){ gb.add(T.cyl8, mm(H,mat(x,F+1.9,z,0.015,Hc-F-1.9,0.015)), hex('#2a2624'), null);
+    function lamp(x,z){ roomLightAt(D,2,x,F+1.7,z,null,2.8,F-0.05,Hc+0.05);
+      gb.add(T.cyl8, mm(H,mat(x,F+1.9,z,0.015,Hc-F-1.9,0.015)), hex('#2a2624'), null);
       gb.add(T.cone, mm(H,mat(x,F+1.75,z,0.4,0.22,0.4)), pick(R,[hex('#e9e2cf'),hex('#3f5f4a'),hex('#b5654a')]), null);
       gb.add(T.sphLo, mm(H,mat(x,F+1.76,z,0.12,0.12,0.12)), hex('#fff1c8'), null); }
     function picture(){ const side=R()<0.5?-1:1, z=(zb+zf)/2+(R()-0.5)*0.8;
@@ -3990,7 +4040,7 @@ function buildRoomGeo(D){
           B(x,F,z,0.5,Hc-F,1.5,wallC); B(x-side*0.27,F,z,0.06,0.85,0.95,hex('#2a2320'));
           B(x-side*0.42,F,z,0.35,0.06,1.6,hex('#9a8f80'),SS); B(x-side*0.29,F+1.15,z,0.24,0.07,1.7,wood,SW);
           for (const dz of [-0.15,0.05]) gb.add(T.cylC, mm(H,mat(x-side*0.36,F+0.12,z+dz,0.12,0.5,0.12,Math.PI/2,0,0)), hex('#4a3626'), null);
-          gb.add(T.boxC, mm(H,mat(x-side*0.36,F+0.2,z,0.18,0.04,0.32)), hex('#ff8a3a'), null);
+          gb.add(T.boxC, mm(H,mat(x-side*0.36,F+0.2,z,0.18,0.04,0.32)), hex('#ff8a3a'), null); roomLightAt(D,2,x-side*0.5,F+0.35,z,null,1.4,F-0.05,Hc+0.05,0.7);
           for (let k=0;k<3;k++) gb.add(T.cyl8, mm(H,mat(x-side*0.3,F+1.22,z-0.5+k*0.5,0.12,0.18,0.12)), pick(R,[hex('#c9b48a'),hex('#7d9a6a'),hex('#b5654a')]), null);
           take(x,z,0.25,0.75,0.05); hearth={x,z}; break; } }
       // a table with chairs under a hanging lamp, on a rug
@@ -4137,8 +4187,14 @@ function buildChurch(C){
   for (let z=zf-2.5; z>zb+1; z-=4.2){ gb.add(T.cyl8, mm(H,mat(0,h-1.2,z,0.02,1.0,0.02)), dark, null);
     gb.add(T.cyl8, mm(H,mat(0,h-1.6,z,0.7,0.05,0.7)), gold, null);
     for (let k=0;k<6;k++){ const a=k/6*Math.PI*2; gb.add(T.cyl8, mm(H,mat(Math.cos(a)*0.3,h-1.55,z+Math.sin(a)*0.3,0.04,0.12,0.04)), hex('#fff1c8'), null); } }
+  // the church's light: its windows, the doorway, the lamps down the nave and the candles on the altar
+  C.lights=[]; const yl=-1, yh=h+6;
+  roomLightAt(C,1,0,1.6,zf,[0,0,-1],4.5,yl,yh);
+  for (const sx of [-1,1]) for (const z of C.wz) roomLightAt(C,0,sx*iw,h-2.0,z,[-sx,0,0],1.1,yl,yh,0.85);
+  for (let z=zf-2.5; z>zb+1; z-=4.2) roomLightAt(C,2,0,h-1.6,z,null,5.5,yl,yh);
+  roomLightAt(C,2,0,F+1.65,-hl-r*0.55,null,2.2,yl,yh,0.7);
   if (!C.furn){ C.furn=true; for (const [x,z,w2,d2,tp] of solid){ const [wx,wz]=localToWorld(C,x,z); C.walls.push({x:wx,z:wz,hw:w2,hd:d2,rot:C.rot,top:C.base+F+tp}); } }
-  const mesh=new THREE.Mesh(gb.geometry(C.x,C.z),matC);
+  const mesh=new THREE.Mesh(gb.geometry(C.x,C.z),makeRoomMaterial(true));
   // the glass, set in the middle of the wall's thickness
   const P=[], S=[];
   for (const sx of [-1,1]) for (const z of C.wz){ const x=sx*(hw-0.12), y0=h-3.0, y1=h-1.1;
@@ -4846,7 +4902,7 @@ function frame(now){
   if (player.y<ground) player.y=ground;
   eyeY = (eyeY===null||Math.abs(eyeY-player.y)>3) ? player.y : eyeY+(player.y-eyeY)*(1-Math.exp(-dt*14));
   }
-  if (updateOrigin()){ doorsDirty=true; roomScan=0; setChurchU(); maskDirty=true; beams.t=0; rebuildFar(player.x,player.z); }
+  if (updateOrigin()){ doorsDirty=true; roomScan=0; setChurchU(); for (const D of rooms) setRoomLights(D); maskDirty=true; beams.t=0; rebuildFar(player.x,player.z); }
   updateChunks(player.x,player.z,6); updateFades(dt); updateTiles(); roomsUpdate(dt);
   // dynamic draw distance: frames spent building blocks are ignored; slow frames shrink the view, sustained headroom grows it
   if (!queue.length){ perf.t+=dt; perf.n++; perf.sum+=dt;
