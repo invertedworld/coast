@@ -1899,7 +1899,10 @@ function genChunk(cx,cz,lod=0){
   const R=rng(Math.floor(hash(cx,cz,101)*4294967296));
   const x0=cx*C, z0=cz*C, xc=x0+C/2, zc=z0+C/2;
   GEN_LOD=lod;
-  { const d=lod>=2?4:lod>=1?2:1, n=Math.round((C+28)/d)+1, a=new Float32Array(n*n), gx=x0-14, gz=z0-14;
+  // the ground is sampled every metre for full and simplified blocks alike, so that every choice made from its
+  // height (whether a house fits, where a wall runs) comes out the same in both, and a block changing between them
+  // keeps its houses; outline blocks sample it every 4 m
+  { const d=lod>=2?4:1, n=Math.round((C+28)/d)+1, a=new Float32Array(n*n), gx=x0-14, gz=z0-14;
     HG=null; for (let j=0;j<n;j++) for (let i=0;i<n;i++) a[j*n+i]=heightAtExact(gx+i*d,gz+j*d);
     HG={x0:gx,z0:gz,d,n,a}; }
   const k=core(cx,cz), hMul=0.86+0.3*k;
@@ -5497,7 +5500,7 @@ requestAnimationFrame(()=>setTimeout(()=>{
   document.getElementById('loading').remove();
   requestAnimationFrame(frame);
 },30));
-window.__village={ goods, glZone, branchesAt, brZ, brY, heightAt, player, chunks, rooms, doorMesh, keys, setYaw:v=>{yaw=v;}, get yaw(){return yaw;}, fe, co, lightsNear, beams, ruinIn, cats, catHome, get ridden(){ return ridden; },
+window.__village={ goods, glZone, branchesAt, genChunk, brZ, brY, heightAt, player, chunks, rooms, doorMesh, keys, setYaw:v=>{yaw=v;}, get yaw(){return yaw;}, fe, co, lightsNear, beams, ruinIn, cats, catHome, get ridden(){ return ridden; },
   findHarbour(){ for (let d=0;d<12;d++) for (const sd of SIDES) for (const n of [Math.floor(player.x/HARB)+d,Math.floor(player.x/HARB)-d]){ const H=harbourInfo(sd,n); if (H) return {x:H.x,z:coastZ(sd,H.x)+sd*7,W:H.W,sd,qz:coastZ(sd,H.x+H.W/2-1)+sd*2.5}; } return null; },
   findBeach(){ for (let x=player.x; x<player.x+3000; x+=10) for (const sd of SIDES){ const z=coastZ(sd,x)+sd*5; if (heightAt(x,z)<0.6 && heightAt(x,z)>0.1 && !harbourAt(sd,x)) return {x,z,sd}; } return null; },
   ridge(x){ return {x,z:ridgeZ(x)}; },
