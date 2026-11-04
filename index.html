@@ -1006,21 +1006,21 @@ function churchRoom(ch,cx,cz,rot,base,W,L,h,wz,seed){
 // room (the belfry, if it has one), as treads cantilevered from the walls with a rail along their inner edge. It
 // starts along the left wall, clear of the door, and ends at the top room's floor, which covers the middle and the
 // band of the turn below, apart from the stairwell left by the last dozen treads.
-const TW_B=0.8;
+const TW_B=0.8, TW_D=0.48;   // the band's width, and the depth of the stair below a tread's nosing
 function towerStair(D){
   const iw=D.iw, zf=D.zf, zb=D.zb, b=TW_B, yB=Math.max(DF+3,D.h-3.05), N=Math.ceil((yB-DF)/0.2), rise=(yB-DF)/N, go=0.25;
   // the band as a loop of cells: along the left wall to the back, the back wall, the right wall, the front wall,
   // with a square landing at each corner; the first pass starts 1.3 m in from the front
   const sides=[{x0:-iw,x1:-iw+b,z0:zf-b,z1:zb+b,ax:'z'},{corner:[-iw,-iw+b,zb,zb+b]},{z0:zb,z1:zb+b,x0:-iw+b,x1:iw-b,ax:'x'},{corner:[iw-b,iw,zb,zb+b]},
     {x0:iw-b,x1:iw,z0:zb+b,z1:zf-b,ax:'z'},{corner:[iw-b,iw,zf-b,zf]},{z0:zf-b,z1:zf,x0:iw-b,x1:-iw+b,ax:'x'},{corner:[-iw,-iw+b,zf-b,zf]}];
-  const cells=[];
+  const cells=[]; let pass=0;
   for (let turn=0; cells.length<N+80; turn++) for (const sd of sides){
     if (sd.corner){ const [x0,x1,z0,z1]=sd.corner; cells.push({x0,x1,z0,z1,inner:null}); continue; }
     // each pass is divided into whole treads that exactly fill it, so that no gap is left before the landing
-    if (sd.ax==='z'){ const start=turn===0 && sd===sides[0]?zf-1.3:sd.z0, n=Math.max(1,Math.round(Math.abs(sd.z1-start)/go)), g=(sd.z1-start)/n;
-      for (let k=0;k<n;k++){ const a=start+k*g, c=k===n-1?sd.z1:start+(k+1)*g; cells.push({x0:sd.x0,x1:sd.x1,z0:Math.min(a,c),z1:Math.max(a,c),inner:['x',sd.x0<0?sd.x1:sd.x0]}); } }
+    if (sd.ax==='z'){ const start=turn===0 && sd===sides[0]?Math.max(zf-1.3,sd.z1+go):sd.z0, n=Math.max(1,Math.round(Math.abs(sd.z1-start)/go)), g=(sd.z1-start)/n;
+      for (let k=0;k<n;k++){ const a=start+k*g, c=k===n-1?sd.z1:start+(k+1)*g; cells.push({x0:sd.x0,x1:sd.x1,z0:Math.min(a,c),z1:Math.max(a,c),inner:['x',sd.x0<0?sd.x1:sd.x0],pass,dir:[0,Math.sign(g)]}); } pass++; }
     else { const n=Math.max(1,Math.round(Math.abs(sd.x1-sd.x0)/go)), g=(sd.x1-sd.x0)/n;
-      for (let k=0;k<n;k++){ const a=sd.x0+k*g, c=k===n-1?sd.x1:sd.x0+(k+1)*g; cells.push({x0:Math.min(a,c),x1:Math.max(a,c),z0:sd.z0,z1:sd.z1,inner:['z',sd.z0<0?sd.z1:sd.z0]}); } } }
+      for (let k=0;k<n;k++){ const a=sd.x0+k*g, c=k===n-1?sd.x1:sd.x0+(k+1)*g; cells.push({x0:Math.min(a,c),x1:Math.max(a,c),z0:sd.z0,z1:sd.z1,inner:['z',sd.z0<0?sd.z1:sd.z0],pass,dir:[Math.sign(g),0]}); } pass++; } }
   const treads=cells.slice(0,N).map((c,i)=>({...c,top:DF+(i+1)*rise}));
   // the cells of the turn below the top, other than the last dozen treads, carry the top room's floor
   const per=4+2*Math.max(1,Math.round((zf-zb-2*b)/go))+2*Math.max(1,Math.round((2*iw-2*b)/go));   // cells in a whole turn
@@ -1031,7 +1031,7 @@ function towerStair(D){
 function towerColliders(D){
   const S=D.tw=towerStair(D), b=TW_B, iw=D.iw;
   const W=(u0,u1,v0,v1,top,bot)=>{ const [x,z]=localToWorld(D,(u0+u1)/2,(v0+v1)/2); return {x,z,hw:(u1-u0)/2,hd:(v1-v0)/2,rot:D.rot,top:D.base+top,bot:bot===undefined?undefined:D.base+bot}; };
-  S.treads.forEach((t,i)=>{ D.walls.push(W(t.x0,t.x1,t.z0,t.z1,t.top,t.top-0.25));
+  S.treads.forEach((t,i)=>{ D.walls.push(W(t.x0,t.x1,t.z0,t.z1,t.top,t.top-TW_D));
     if (t.inner && i<S.treads.length-3){ const [ax,v]=t.inner; D.walls.push(ax==='x'?W(v-0.02,v+0.02,t.z0,t.z1,t.top+1.0,t.top+0.05):W(t.x0,t.x1,v-0.02,v+0.02,t.top+1.0,t.top+0.05)); } });
   D.walls.push(W(-iw+b,iw-b,D.zb+b,D.zf-b,S.yB,S.yB-0.2));
   for (const c of S.floorCells) D.walls.push(W(c.x0,c.x1,c.z0,c.z1,S.yB,S.yB-0.2));
@@ -1062,11 +1062,21 @@ function buildTowerGeo(D){
   quads(A=>{ for (const f of faces){ for (const r of f.rects) rectReveal(A,f.P(WT),f.P(0),r); for (const a of f.arches.slice(f.door.length)) archReveal(A,f.P(WT),f.P(0),a); } }, stone, SS);
   quads(A=>q3n(A,[-iw,DF,zb],[iw,DF,zb],[iw,DF,zf],[-iw,DF,zf],[0,1,0]), stone.clone().multiplyScalar(0.85), SS);
   quads(A=>q3n(A,[-iw,Hc,zb],[iw,Hc,zb],[iw,Hc,zf],[-iw,Hc,zf],[0,-1,0]), hex('#7a5a3e'), SW);
-  // the treads, and a rail along their inner edge
-  // each tread 40 cm deep, so that it overlaps the one below and the flight reads as one stepped stone stair
-  S.treads.forEach(t=>B((t.x0+t.x1)/2,t.top-0.4,(t.z0+t.z1)/2,t.x1-t.x0+0.002,0.4,t.z1-t.z0+0.002,stone,SS));
+  // the stair as solid stone: each flight is carried on a sloping slab whose upper face runs through the foot of
+  // every riser, so that from below it shows one smooth soffit; each tread is a step resting on the slab, and each
+  // landing is as deep as the slab where it arrives
+  const rise=S.rise, LP=(x,y,z)=>new THREE.Vector3(x,y,z).applyMatrix4(H).toArray();
+  S.treads.forEach(t=>{ const d=t.inner?rise+0.03:TW_D; B((t.x0+t.x1)/2,t.top-d,(t.z0+t.z1)/2,t.x1-t.x0+0.002,d,t.z1-t.z0+0.002,stone,SS); });
+  for (let i=0;i<S.treads.length;){ const F=S.treads[i]; if (!F.inner){ i++; continue; }
+    let j=i; while (j+1<S.treads.length && S.treads[j+1].pass===F.pass) j++;
+    const L=S.treads[j], [ux,uz]=F.dir;
+    const run=(ux?Math.max(L.x1,F.x1)-Math.min(L.x0,F.x0):Math.max(L.z1,F.z1)-Math.min(L.z0,F.z0)), cx=(F.x0+F.x1)/2, cz=(F.z0+F.z1)/2;
+    const sx=ux?(ux>0?F.x0:F.x1):cx, sz=uz?(uz>0?F.z0:F.z1):cz, ex=sx+ux*run, ez=sz+uz*run;
+    const y0=F.top-rise, y1=L.top, cos=run/Math.hypot(run,y1-y0), th=(TW_D-rise)*cos, dn=th/2/cos;
+    segBox(gb,LP(sx,y0-dn,sz),LP(ex,y1-dn,ez),TW_B,th,stone,SS);
+    i=j+1; }
   // a continuous handrail along the inner edge, turning at each landing, on posts at every fourth tread
-  { const LP=(x,y,z)=>new THREE.Vector3(x,y,z).applyMatrix4(H).toArray(), pts=[];
+  { const pts=[];
     S.treads.slice(0,-3).forEach(t=>{ let x,z;
       if (t.inner){ const [ax,v]=t.inner; x=ax==='x'?v:(t.x0+t.x1)/2; z=ax==='z'?v:(t.z0+t.z1)/2; }
       else { x=Math.abs(t.x0)<Math.abs(t.x1)?t.x0:t.x1; z=Math.abs(t.z0)<Math.abs(t.z1)?t.z0:t.z1; }
