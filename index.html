@@ -2419,15 +2419,16 @@ const cats={list:[], states:new Map(), t:0};
 function catTops(x,z){
   const out=[heightAt(x,z)], cx=Math.floor(x/C), cz=Math.floor(z/C); let wall=false;
   for (let j=-1;j<=1;j++) for (let i=-1;i<=1;i++){ const ch=chunks.get(key(cx+i,cz+j)); if (!ch) continue;
-    for (const o of ch.obbs){ if (Math.abs(o.x-x)>o.hw+o.hd+0.3||Math.abs(o.z-z)>o.hw+o.hd+0.3) continue;
-      const [lu,lv]=obbLocal(o,x,z); if (Math.abs(lu)<=o.hw+0.04&&Math.abs(lv)<=o.hd+0.04){ if (o.top===Infinity) wall=true; else out.push(o.top); } }
-    for (const c of ch.circles){ if (Math.hypot(x-c.x,z-c.z)<=c.r+0.04){ if (c.top===Infinity) wall=true; else out.push(c.top); } } }
+    // a wall is kept a hand's breadth off, since plinths and sills stand a little proud of the footprint
+    for (const o of ch.obbs){ if (Math.abs(o.x-x)>o.hw+o.hd+0.5||Math.abs(o.z-z)>o.hw+o.hd+0.5) continue;
+      const [lu,lv]=obbLocal(o,x,z), m=o.top===Infinity?0.25:0.04; if (Math.abs(lu)<=o.hw+m&&Math.abs(lv)<=o.hd+m){ if (o.top===Infinity) wall=true; else out.push(o.top); } }
+    for (const c of ch.circles){ if (Math.hypot(x-c.x,z-c.z)<=c.r+(c.top===Infinity?0.25:0.04)){ if (c.top===Infinity) wall=true; else out.push(c.top); } } }
   return wall?null:out; }
 // whether the cat's whole body fits at a point facing (fx,fz): nose, tail end and both flanks. A corner of the body may
 // hang over a lower edge or meet a ledge it is about to leap on to, but none may run into a building, a tree or a wall
 // too high to climb
 function catFits(x,z,fx,fz,y){
-  for (const [a,b] of [[0.3,0],[-0.3,0],[0,0.1],[0,-0.1],[0.18,0.08],[0.18,-0.08],[-0.18,0.08],[-0.18,-0.08]]){
+  for (const [a,b] of [[0.3,0],[-0.3,0],[0,0.12],[0,-0.12],[0.18,0.1],[0.18,-0.1],[-0.18,0.1],[-0.18,-0.1]]){
     const T=catTops(x+fx*a-fz*b,z+fz*a+fx*b); if (!T) return false;
     for (const t of T) if (t>y+1.9) return false; }
   return true; }
@@ -2449,11 +2450,13 @@ function catPlan(s,tx,tz){
   return pts; }
 function catHome(ch){
   if (ch.catHome!==undefined) return ch.catHome;
+  // walls of the blocks around are needed to keep the cat clear of them, so it waits until they are built
+  for (let j=-1;j<=1;j++) for (let i=-1;i<=1;i++) if (!chunks.has(key(ch.cx+i,ch.cz+j))) return null;
   ch.catHome=null;
   if (ch.lod===0 && CAT_KINDS.has(ch.kind) && hash(ch.cx,ch.cz,2101)<0.4){
     const R=rng(Math.floor(hash(ch.cx,ch.cz,2102)*4294967296)), P=ch.piazza;
     for (let t=0;t<30;t++){ const x=P?P.x+(R()-0.5)*P.r*1.6:ch.cx*C+R()*C, z=P?P.z+(R()-0.5)*P.r*1.6:ch.cz*C+R()*C, T=catTops(x,z);
-      if (T && T[0]>0.4){ ch.catHome={x,z,y:catSurf(T,T[0]+0.45),id:ch.cx+','+ch.cz,coat:Math.floor(hash(ch.cx,ch.cz,2103)*CAT_COATS.length),owl:hash(ch.cx,ch.cz,2104)<0.4}; break; } } }
+      if (T && T[0]>0.4 && [[1,0],[0,1],[0.7,0.7],[0.7,-0.7]].every(([fx,fz])=>catFits(x,z,fx,fz,catSurf(T,T[0]+0.45)))){ ch.catHome={x,z,y:catSurf(T,T[0]+0.45),id:ch.cx+','+ch.cz,coat:Math.floor(hash(ch.cx,ch.cz,2103)*CAT_COATS.length),owl:hash(ch.cx,ch.cz,2104)<0.4}; break; } } }
   return ch.catHome; }
 function makeCat(coat){
   const K=CAT_COATS[coat], c=new Cat({...K,audio:null});
