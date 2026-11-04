@@ -846,9 +846,21 @@ function rectReveal(arr,P0,P1,r){ const [ua,ub,ya,yb]=r, C=P0((ua+ub)/2,(ya+yb)/
     const M=P0((a[0]+b[0])/2,(a[1]+b[1])/2); q3n(arr,P0(...a),P0(...b),P1(...b),P1(...a),[C[0]-M[0],C[1]-M[1],C[2]-M[2]]); } }
 // a box without its front (+z) face
 T.box5=(()=>{ const p=T.box.p; return {p:new Float32Array([...p.slice(0,72),...p.slice(90)]),n:new Float32Array(90),smooth:false}; })();
-function shellWithDoor(gb,H,w,h,d,dx,col,by,surf){
-  gb.add(T.box5, mm(H,mat(0,0,0,w,h,d)), col, by, surf);
-  const A=[]; holeWall(A,d/2,-w/2,w/2,0,h,dx,1); reveal(A,d/2,d/2-WT,dx); gb.add(triTpl(A), H, col, by, surf);
+// the walls and top of an enterable building, with its doorway and an opening behind each of its window panes
+// (the panes are cut away once its room is built, so that the room can be seen through them), and for a tower
+// with a belfry, the belfry's arches
+function shellWithDoor(gb,H,w,h,d,dx,col,by,surf,room=null){
+  const A=[], wins=room?room.wins:[], hw=w/2, hd=d/2;
+  const faces=[{N:[0,0,1],P:(u,y)=>[u,y,hd],u0:-hw,u1:hw,door:dx,sel:v=>Math.abs(v.ry)<0.1,u:v=>v.x},
+    {N:[0,0,-1],P:(u,y)=>[u,y,-hd],u0:-hw,u1:hw,door:null,sel:v=>Math.abs(Math.abs(v.ry)-Math.PI)<0.1,u:v=>v.x},
+    {N:[1,0,0],P:(u,y)=>[hw,y,u],u0:-hd,u1:hd,door:null,sel:v=>Math.abs(v.ry-Math.PI/2)<0.1,u:v=>v.z},
+    {N:[-1,0,0],P:(u,y)=>[-hw,y,u],u0:-hd,u1:hd,door:null,sel:v=>Math.abs(v.ry+Math.PI/2)<0.1,u:v=>v.z}];
+  for (const f of faces){ const rects=wins.filter(f.sel).map(v=>[f.u(v)-v.w/2,f.u(v)+v.w/2,v.y-v.h/2,v.y+v.h/2]);
+    const arches=f.door!==null?[{c:dx,r:DR,s:DS,f:DF}]:[];
+    if (room && room.belfry) for (const xx of (w>3.3?[-0.55,0.55]:[0])) arches.push({c:xx,r:0.275,s:h-1.5+0.65,f:h-1.5-0.65});
+    faceHoles(A,f.P,f.N,f.u0,f.u1,0,h,rects,arches); }
+  q3n(A,[-hw,h,-hd],[hw,h,-hd],[hw,h,hd],[-hw,h,hd],[0,1,0]);
+  reveal(A,d/2,d/2-WT,dx); gb.add(triTpl(A), H, col, by, surf);
   const S=[]; q3n(S,[dx-DR,DF,d/2-WT],[dx+DR,DF,d/2-WT],[dx+DR,DF,d/2],[dx-DR,DF,d/2],[0,1,0]); gb.add(triTpl(S), H, C_.stone, null, SS);
 }
 // a stone step, jambs and an arch of voussoirs round the opening, standing 5 cm proud of the wall
@@ -928,7 +940,7 @@ const CHURCH_LEAF_GEO=(()=>{ const {r,s,f}=CHURCH_DOOR, sh=new THREE.Shape(), Sy
 // the nave's walls and top, with the doorway in the front wall and the apse arch in the back wall
 function churchShell(gb,H,W,L,h,col,C){
   const A=[], hw=W/2, hl=L/2;
-  for (const sx of [-1,1]) q3n(A,[sx*hw,0,-hl],[sx*hw,0,hl],[sx*hw,h,hl],[sx*hw,h,-hl],[sx,0,0]);
+  for (const sx of [-1,1]) faceHoles(A,(u,y)=>[sx*hw,y,u],[sx,0,0],-hl,hl,0,h,[],C.wz.map(z=>({c:z,r:0.3,s:h-1.4,f:h-3.0})));
   q3n(A,[-hw,h,-hl],[hw,h,-hl],[hw,h,hl],[-hw,h,hl],[0,1,0]);
   faceHoles(A,(u,y)=>[u,y,hl],[0,0,1],-hw,hw,0,h,[],[CHURCH_DOOR]);
   faceHoles(A,(u,y)=>[u,y,-hl],[0,0,-1],-hw,hw,0,h,[],[C.ar]);
@@ -1009,7 +1021,8 @@ function buildTowerGeo(D){
     f.arches=[...f.door]; for (const b of bel) for (const xx of (D.w>3.3?[-0.55,0.55]:[0])) f.arches.push({c:xx,r:0.275,s:b.y+0.65,f:b.y-0.65}); }
   // the tower's light: its windows and belfry openings, the doorway, and lanterns at the foot and the top of the stair
   D.lights=[]; roomLightAt(D,1,D.dx,DF+1.1,zf,[0,0,-1],2.2,-1,Hc+1);
-  for (const f of faces){ for (const r of f.rects){ const c=f.P(WT)((r[0]+r[1])/2,(r[2]+r[3])/2); roomLightAt(D,0,c[0],c[1],c[2],f.N,(r[1]-r[0])*(r[3]-r[2]),-1,Hc+1); }
+  for (const f of faces){ for (const r of f.rects){ const c=f.P(WT)((r[0]+r[1])/2,(r[2]+r[3])/2); roomLightAt(D,0,c[0],c[1],c[2],f.N,(r[1]-r[0])*(r[3]-r[2]),-1,Hc+1);
+      const g=f.P(0.04)((r[0]+r[1])/2,(r[2]+r[3])/2); (D.glassGB||(D.glassGB=new GB(0))).add(T.boxC, mm(H,mat(g[0],g[1],g[2],r[1]-r[0],r[3]-r[2],0.01,Math.atan2(-f.N[0],-f.N[2]))), hex('#ffffff'), null); }
     for (const a of f.arches.slice(f.door.length)){ const c=f.P(WT)(a.c,a.s); roomLightAt(D,0,c[0],c[1],c[2],f.N,0.9,-1,Hc+1); } }
   roomLightAt(D,2,0,2.3,0,null,4,-1,Hc+1); roomLightAt(D,2,0,S.yB+2,0,null,3.5,-1,Hc+1,0.8);
   quads(A=>{ for (const f of faces) faceHoles(A,f.P(WT),f.N,f.u0,f.u1,DF,Hc,f.rects,f.arches); }, stone, SS);
@@ -1051,7 +1064,7 @@ const DOOR_GEO=(()=>{ const sh=new THREE.Shape(), Sy=DS-DF;
 // a window pane, drawn without its inner face, so that from inside a room the window can be seen out of but from
 // the street it cannot be seen into; a house that can be entered records its windows for its rooms
 function addWin(gb,H,x,y,z,ry,w=0.5,h=0.78,shut=null,room=null){
-  gb.add(T.boxC5, mm(H,mat(x,y,z,w,h,0.12,ry)), C_.win, null, Math.random()<0.5?5:0);
+  gb.add(T.boxC5, mm(H,mat(x,y,z,w,h,0.12,ry)), C_.win, null, Math.random()<0.5?5:10);
   if (room) room.wins.push({x,y,z,ry,w,h});
   if (shut){ const L=mm(H,mat(x,y,z,1,1,1,ry));
     for (const s of [-1,1]) gb.add(T.boxC, mm(L,mat(s*(w*0.5+0.17),0,0.03,0.32,h+0.06,0.08)), shut, null, SW);
@@ -1213,7 +1226,7 @@ function addHouse(gb,ch,R,o){
   const shut=o.tower?null:(R()<0.4?pick(R,C_.shutters):null);
   // the body is added once the door is placed: a house that can be entered has an opening in its front wall
   let room=null;
-  const addBody=()=>{ if (room) shellWithDoor(gb,H,w,h,d,room.dx,wall,by,o.stoneWalls?SS:SP); else gb.add(T.box, mm(H,mat(0,0,0,w,h,d)), wall, by, o.stoneWalls?SS:SP); };
+  const addBody=()=>{ if (room) shellWithDoor(gb,H,w,h,d,room.dx,wall,by,o.stoneWalls?SS:SP,room); else gb.add(T.box, mm(H,mat(0,0,0,w,h,d)), wall, by, o.stoneWalls?SS:SP); };
   const roof=o.roof||'front', fz=d/2+0.01;
   if (roof==='front') gableRoof(gb,H,w,d,h,w*(0.36+R()*0.12),wall,roofC);
   else if (roof==='side') gableRoof(gb,mm(H,mat(0,0,0,1,1,1,Math.PI/2)),d,w,h,d*(0.32+R()*0.1),wall,roofC);
@@ -1244,7 +1257,6 @@ function addHouse(gb,ch,R,o){
   else { const RD=rng(Math.floor(hash(Math.round(o.x*8),Math.round(o.z*8),4421)*4294967296)), dx=(RD()-0.5)*Math.max(0,w-2.6);
     room=gb.lod===0?doorwayFor(ch,o,base,dx,w,h,d,floors):null;
     if (room) addDoorFrame(gb,H,dx,d/2); else addDoor(gb,H,dx,fz-0.06); }
-  addBody();
   // the climber draws on its own random sequence so that it leaves the layout of the town unchanged
   if (!o.tower && !o.noDoor){ const RB=rng(Math.floor(hash(Math.round(o.x*8),Math.round(o.z*8),4401)*4294967296));
     if (RB()<0.3) addBougainvillea(gb,H,RB,w,fz,Math.min(h-0.4,floors>1?4.4:h-0.3)); }
@@ -1255,10 +1267,11 @@ function addHouse(gb,ch,R,o){
     for (const s of [1,-1]) if (R()<0.42) addWin(gb,H,s*(w/2+0.01),y,(R()-0.5)*(d-1.8),Math.PI/2*s,0.5,0.78,shut,room);
     if (R()<0.3) addWin(gb,H,(R()-0.5)*(w-1.6),y,-fz,Math.PI,0.5,0.78,shut,room);
   }
+  addBody();
   if (o.tower && o.belfry){ const y=h-1.5;
     for (let s=0;s<4;s++){ const HR=mm(H,mat(0,0,0,1,1,1,s*Math.PI/2)), off=(s%2?w:d)/2+0.01;
-      for (const xx of (w>3.3?[-0.55,0.55]:[0])){ gb.add(T.boxC5, mm(HR,mat(xx,y,off,0.55,1.3,0.12)), C_.win, null);
-        gb.add(T.cylC, mm(HR,mat(xx,y+0.65,off,0.55,0.1,0.55,0,Math.PI/2)), C_.win, null); } } }   // the arch a little thinner than the opening, so their faces never share a plane
+      for (const xx of (w>3.3?[-0.55,0.55]:[0])){ gb.add(T.boxC5, mm(HR,mat(xx,y,off,0.55,1.3,0.12)), C_.win, null, 10);
+        gb.add(T.cylC, mm(HR,mat(xx,y+0.65,off,0.55,0.1,0.55,0,Math.PI/2)), C_.win, null, 10); } } }   // the arch a little thinner than the opening, so their faces never share a plane
   if (roof==='front' && w>3.8 && R()<0.6) addWin(gb,H,0,h+w*0.13,fz,0,0.38,0.45);
   if (roof!=='flat' && roof!=='spire' && R()<0.3) gb.add(T.box, mm(H,mat(w*0.22,h,-d*0.18,0.55,Math.min(w,d)*0.4+1.0,0.55)), wall, null, SP);
   const ob={x:o.x,z:o.z,hw:w/2,hd:d/2,rot:o.rot,top:Infinity};
@@ -1662,12 +1675,17 @@ const LH_T=0.3, LH_DH=2.4, LH_DA=0.224, LH_N=28, LH_STEP=Math.PI*2/20;   // wall
 const lhR=(H,y)=>2.5-0.7*clamp(y/H,0,1);   // the outer radius at height y
 // a tapering tube from y=0 to y=H, its radius from r(0) to r(H), with the faces of the doorway left out; inward
 // turns it inside out, for the lining
+// the three windows up the tower, each the width of one face of the tube, on alternate sides
+const LH_WIN=[[0.3,1],[0.55,-1],[0.8,1]], lhWinT=s=>s>0?Math.PI/LH_N:Math.PI-Math.PI/LH_N;
 function lhTube(H,rOf,inward,y0=0,y1=H,hole=true){
-  const P=[], N=[], rows=hole&&y0<LH_DH?[y0,LH_DH,y1]:[y0,y1], sl=0.7/H;
+  const wins=hole?LH_WIN.map(([h,s])=>({t:lhWinT(s),ya:h*H-0.45,yb:h*H+0.45})):[];
+  const P=[], N=[], cuts=[y0,y1]; if (hole && y0<LH_DH) cuts.push(LH_DH); for (const w of wins) cuts.push(w.ya,w.yb);
+  const rows=[...new Set(cuts.filter(y=>y>=y0&&y<=y1))].sort((a,b)=>a-b), sl=0.7/H;
   const v=(t,y)=>{ const r=rOf(y); return [r*Math.sin(t),y,r*Math.cos(t)]; }, nrm=t=>{ const l=Math.hypot(1,sl), s=inward?-1:1; return [s*Math.sin(t)/l,s*sl/l,s*Math.cos(t)/l]; };
   for (let k=0;k+1<rows.length;k++){ const ya=rows[k], yb=rows[k+1];
     for (let i=0;i<LH_N;i++){ const t0=-Math.PI+2*Math.PI*i/LH_N, t1=t0+2*Math.PI/LH_N, tc=(t0+t1)/2;
       if (hole && yb<=LH_DH+1e-6 && Math.abs(tc)<LH_DA) continue;
+      if (wins.some(w=>Math.abs(Math.atan2(Math.sin(tc-w.t),Math.cos(tc-w.t)))<0.05 && ya>=w.ya-1e-6 && yb<=w.yb+1e-6)) continue;
       const A=v(t0,ya), B=v(t1,ya), Cc=v(t1,yb), D=v(t0,yb), nA=nrm(t0), nB=nrm(t1);
       const tri=inward?[[A,nA],[Cc,nB],[B,nB],[A,nA],[D,nA],[Cc,nB]]:[[A,nA],[B,nB],[Cc,nB],[A,nA],[Cc,nB],[D,nA]];
       for (const [p,n] of tri){ P.push(...p); N.push(...n); } } }
@@ -1707,7 +1725,7 @@ function lighthouseRoom(ch,L,g,H,top,ry){
     (ch.doors||(ch.doors=[])).push(lf); D.leaves=[lf]; }
   // its light: the doorway, the three windows up the tower, lanterns on the wall at the foot and halfway, and the lamp
   D.lights=[]; roomLightAt(D,1,0,DF+1.1,lhR(H,1)-LH_T,[0,0,-1],2.2,-1,H+3);
-  for (const [h,s] of [[0.3,1],[0.55,-1],[0.8,1]]){ const r=lhR(H,h*H)-LH_T; roomLightAt(D,0,0,h*H,s*r,[0,0,-s],0.45,-1,H+3); }
+  for (const [h,s] of LH_WIN){ const r=lhR(H,h*H)-LH_T, t=lhWinT(s); roomLightAt(D,0,r*Math.sin(t),h*H,r*Math.cos(t),[-Math.sin(t),0,-Math.cos(t)],0.45,-1,H+3); }
   roomLightAt(D,2,0,2.3,0,null,3.5,-1,H+3); roomLightAt(D,2,0,H*0.55,0,null,3.5,-1,H+3,0.8); roomLightAt(D,2,0,H+1.4,0,null,2.5,-1,H+3,1.5);
   (ch.rooms||(ch.rooms=[])).push(D);
   ch.obbs.push({x:L.x,z:L.z,hw:2.5,hd:2.5,rot:ry,top:Infinity,room:D});
@@ -1722,6 +1740,12 @@ function buildLighthouseGeo(D){
     q3n(A,[ri*Math.sin(t0),y,ri*Math.cos(t0)],[ro*Math.sin(t0),y,ro*Math.cos(t0)],[ro*Math.sin(t1),y,ro*Math.cos(t1)],[ri*Math.sin(t1),y,ri*Math.cos(t1)],[0,-1,0]); }
   gb.add(triTpl(A), M, wood, null, SW);
   gb.add(lhTube(H,()=>1.1,true,H-0.52,H+0.41,false), M, hex('#d8d0c2'), null, 0);
+  // the reveals of the windows, through the wall from the lining to the outer face
+  { const R=[], a=Math.PI/LH_N;
+    for (const [h,s] of LH_WIN){ const t=lhWinT(s), ya=h*H-0.45, yb=h*H+0.45, ri=y=>lhR(H,y)-LH_T, ro=y=>lhR(H,y), pt=(r,tt,y)=>[r*Math.sin(tt),y,r*Math.cos(tt)];
+      for (const sg of [-1,1]){ const tt=t+sg*a; q3n(R,pt(ri(ya),tt,ya),pt(ro(ya),tt,ya),pt(ro(yb),tt,yb),pt(ri(yb),tt,yb),[-sg*Math.cos(tt),0,sg*Math.sin(tt)]); }
+      for (const [y,ny] of [[ya,1],[yb,-1]]) q3n(R,pt(ri(y),t-a,y),pt(ro(y),t-a,y),pt(ro(y),t+a,y),pt(ri(y),t+a,y),[0,ny,0]); }
+    gb.add(triTpl(R), M, hex('#efe9dc'), null, 0); }
   // the floor of the tower, and the reveal of the doorway
   { const F=[]; for (let i=0;i<LH_N;i++){ const t0=2*Math.PI*i/LH_N, t1=t0+2*Math.PI/LH_N, r=lhR(H,0)-LH_T;
       F.push(0,DF,0, r*Math.sin(t1),DF,r*Math.cos(t1), r*Math.sin(t0),DF,r*Math.cos(t0)); }
@@ -1758,8 +1782,10 @@ function buildLighthouse(gb,ch,R,L){
     const [lx,lz]=localToWorld(LR,0,lhR(H,LH_DH)+0.02); gb.add(T.boxC, mat(lx,g+1.6+LH_DH+0.08,lz,1.4,0.16,0.14,ry), C_.trim, null, SS); }
   else { gb.add(T.taper, mat(x,g+1.6,z,5,H,5), white, g+1.6, SP);
     gb.add(T.boxC, mat(x+L.ix*2.45,g+2.75,z+L.iz*2.45,1.0,2.1,0.12,ry), C_.door, null, SW); }
-  for (const [h,s] of [[0.3,1],[0.55,-1],[0.8,1]]){ const r=lerp(2.5,1.8,h)+0.02;
-    gb.add(T.boxC, mat(x+L.ix*s*r,g+1.6+h*H,z+L.iz*s*r,0.5,0.9,0.1,ry), C_.win, null); }
+  for (const [h,s] of LH_WIN){ const r=lerp(2.5,1.8,h)+0.02;
+    if (LR){ const t=lhWinT(s), [px,pz]=localToWorld(LR,r*Math.sin(t),r*Math.cos(t)), w=2*lhR(H,h*H)*Math.sin(Math.PI/LH_N);
+      gb.add(T.boxC5, mat(px,g+1.6+h*H,pz,w+0.04,0.94,0.1,ry+t), C_.win, null, 10); }
+    else gb.add(T.boxC, mat(x+L.ix*s*r,g+1.6+h*H,z+L.iz*s*r,0.5,0.9,0.1,ry), C_.win, null); }
   // the gallery with its railing, the glazed lantern and the dome
   gb.add(T.cyl, mat(x,top-0.5,z,4.6,0.5,4.6), dark, null);
   for (let a=0;a<12;a++){ const c=Math.cos(a/12*6.283), s=Math.sin(a/12*6.283); gb.add(T.cyl8, mat(x+c*2.2,top,z+s*2.2,0.07,1.0,0.07), dark, null); }
@@ -1783,11 +1809,12 @@ function buildLighthouse(gb,ch,R,L){
     // at full detail the cottage can be entered: its door is on the side towards the tower, so its room is laid
     // out turned a quarter so that the door lies in its front wall
     const o2={x:hx,z:hz,rot:rot-Math.PI/2}, room=gb.lod===0?doorwayFor(ch,o2,base,0,d,h,w,1):null, H2=mat(hx,base,hz,1,1,1,o2.rot);
-    if (room) shellWithDoor(gb,H2,d,h,w,0,wallC,base,SP); else gb.add(T.box, mat(hx,base,hz,w,h,d,rot), wallC, base, SP);
+    if (room) for (const v of [-1.6,1.6]) room.wins.push({x:v,y:1.9,z:-w/2,ry:Math.PI,w:0.7,h:0.95});
+    if (room) shellWithDoor(gb,H2,d,h,w,0,wallC,base,SP,room); else gb.add(T.box, mat(hx,base,hz,w,h,d,rot), wallC, base, SP);
     gb.add(T.pyr, mat(hx,base+h,hz,w+0.7,1.7,d+0.7,rot), shade(C_.roofs[1],R,0.04), null, SR);
     gb.add(T.box, mat(hx,base+h+0.6,hz,0.6,1.6,0.6,rot), wallC, null, SP);
     for (const v of [-1.6,1.6]){ const [px,pz]=localToWorld({x:hx,z:hz,rot},w/2+0.04,v); gb.add(T.boxC5, mat(px,base+1.9,pz,0.7,0.95,0.1,rot+Math.PI/2), C_.win, null, 5);
-      if (room) room.wins.push({x:v,y:1.9,z:-w/2,ry:Math.PI,w:0.7,h:0.95}); }
+    }
     if (room) addDoorFrame(gb,H2,0,w/2);
     else { const [px,pz]=localToWorld({x:hx,z:hz,rot},-w/2-0.04,0); gb.add(T.boxC, mat(px,base+1.05,pz,0.1,2.1,1.0,rot), C_.door, null, SW); }
     ch.obbs.push(room?{x:hx,z:hz,hw:d/2,hd:w/2,rot:o2.rot,top:Infinity,room}:{x:hx,z:hz,hw:w/2,hd:d/2,rot,top:Infinity}); }
@@ -1939,7 +1966,7 @@ function genChunk(cx,cz,lod=0){
         gb.add(T.box, mm(H,mat(0,0,fz-0.04,2.6,3.6,0.12)), C_.trim, null, SS);
         gb.add(T.cylC, mm(H,mat(0,3.6,fz-0.04,2.6,0.12,2.6,0,Math.PI/2)), C_.trim, null, SS); }
         gb.add(T.cylC, mm(H,mat(0,h-0.6,fz,1.9,0.14,1.9,0,Math.PI/2)), C_.trim, null);
-        gb.add(T.cylC, mm(H,mat(0,h-0.6,fz+0.04,1.3,0.14,1.3,0,Math.PI/2)), C_.win, null, 5);
+        gb.add(T.cylC, mm(H,mat(0,h-0.6,fz+0.04,1.3,0.14,1.3,0,Math.PI/2)), C_.win, null, 11);
         for (const s of [1,-1]) gb.add(T.box, mm(H,mat(s*(W/2-0.2),0,fz,0.5,h,0.2)), C_.trim, null, SS);
         for (let z=-L/2+2.5; z<L/2-2; z+=3.2) for (const s of [1,-1]){ gb.add(T.boxC, mm(H,mat(s*(W/2+0.01),h-2.2,z,0.12,1.6,0.6)), C_.win, null, 5);
           // the round head of the window: lit like the window, and a little thinner so that its face stays behind the
@@ -2560,6 +2587,8 @@ const scene=new THREE.Scene();
 const OS=2560, OP=20480, ORIGIN=new THREE.Vector3(), QORIGIN=new THREE.Vector3(), origU={value:new THREE.Vector3()};
 const world=new THREE.Group(); scene.add(world);
 let originMoved=0;
+// the camera hangs in the shifted world, while lookAt takes its target in the frame of the scene
+function camLookAt(v){ camera.lookAt(v.x-ORIGIN.x,v.y-ORIGIN.y,v.z-ORIGIN.z); }
 function updateOrigin(){
   const ox=Math.round(player.x/OS)*OS, oz=Math.round(player.z/OS)*OS;
   if (Math.abs(player.x-ORIGIN.x)<OS*0.75 && Math.abs(player.z-ORIGIN.z)<OS*0.75) return false;
@@ -2697,10 +2726,10 @@ function patchBuildings(mat,clip=false){
         diffuseColor.rgb*=mix(1.,k,amp); }`);
   };
   const prev=mat.onBeforeCompile;
-  mat.onBeforeCompile=(sh)=>{ prev(sh); sh.uniforms.uNight=nightU; if (clip) addRoomClip(sh);
+  mat.onBeforeCompile=(sh)=>{ prev(sh); sh.uniforms.uNight=nightU; if (clip){ addRoomClip(sh); addWinClip(sh); }
     sh.fragmentShader=sh.fragmentShader.replace('varying float vSurf;','varying float vSurf; uniform float uNight;')
       .replace('#include <emissivemap_fragment>',`#include <emissivemap_fragment>
-        if (vSurf>4.5 && vSurf<5.5) totalEmissiveRadiance += vec3(0.95,0.52,0.18)*(0.62+0.2*h21(floor(_wp.xz*0.9)+floor(_wp.y*0.4)))*uNight;
+        if ((vSurf>4.5 && vSurf<5.5) || (vSurf>10.5 && vSurf<11.5)) totalEmissiveRadiance += vec3(0.95,0.52,0.18)*(0.62+0.2*h21(floor(_wp.xz*0.9)+floor(_wp.y*0.4)))*uNight;
         else if (vSurf>5.5 && vSurf<6.5) totalEmissiveRadiance += diffuseColor.rgb*(0.12+2.4*uNight);`); };
   mat.customProgramCacheKey=()=>'buildings';
 }
@@ -2712,6 +2741,17 @@ function addRoomClip(sh){
         if (abs(d.x*A.z-d.y*A.w)<B.x && abs(d.x*A.w+d.y*A.z)<B.y && vWP.y>B.z && vWP.y<B.w) discard; }`)
     .replace('#include <common>',`#include <common>\nuniform int uRoomN; uniform vec4 uRoomA[${ROOM_MAX}]; uniform vec4 uRoomB[${ROOM_MAX}];`);
 }
+// the window panes of a room that is built are cut away, so that the room can be seen through them
+const winClip={uWinN:{value:0},uWinA:{value:Array.from({length:16},()=>new THREE.Vector4())},uWinB:{value:Array.from({length:16},()=>new THREE.Vector4())}};
+function addWinClip(sh){
+  Object.assign(sh.uniforms,winClip);
+  sh.fragmentShader=sh.fragmentShader.replace('#include <clipping_planes_fragment>',`#include <clipping_planes_fragment>
+      if ((vSurf>4.5 && vSurf<5.5) || (vSurf>9.5 && vSurf<10.5)) for (int i=0;i<16;i++){ if (i>=uWinN) break; vec4 A=uWinA[i], B=uWinB[i]; vec2 d=vWP.xz-A.xy;
+        if (abs(d.x*A.z-d.y*A.w)<B.x && abs(d.x*A.w+d.y*A.z)<B.y && vWP.y>B.z && vWP.y<B.w) discard; }`)
+    .replace('#include <common>',`#include <common>\nuniform int uWinN; uniform vec4 uWinA[16]; uniform vec4 uWinB[16];`);
+}
+// glass in the windows of a room that is built, and in the ferry's: faintly tinted and catching the light
+const glassMat=new THREE.MeshPhongMaterial({color:hex('#a9c4d4'),specular:hex('#ffffff'),shininess:90,transparent:true,opacity:0.2,depthWrite:false,side:THREE.DoubleSide});
 function patchGround(mat){
   mat.onBeforeCompile=(sh)=>{
     addRoomClip(sh);
@@ -3717,10 +3757,11 @@ const FD0=1.5, FD1=3.94, FUZ0=FSZ0-0.8, FUZ1=FSZ1+0.8, FSTB=FUZ0-2.2, FSTW=0.5;
 const FGZ=-9.4, FGW=0.6, FPL=2.7, FWH=FSW-1.6;
 // the saloon's walls and doors (the doorways span FDX0 to FDX1 either side of the centre line, FDH high), its band
 // of windows from FWB0 to FWB1, and the wheelhouse door, FWD either side of the centre line and FWDH high
+let FERRY_GLASS=null;
 const SWT=0.1, FDX0=1.05, FDX1=1.85, FDH=2.0, FWB0=2.45, FWB1=3.35, FWD=0.35, FWDH=1.82;
 function buildFerry(){
 
-  const gb=new GB(), white=hex('#f1ede4'), red=hex('#b8392f'), blue=hex('#2d5f9e'), anti=hex('#7a2f26'), dark=hex('#2a2a2e'), glass=hex('#30363c'), deck=hex('#9c8a72'), orange=hex('#e2702e');
+  const gb=new GB(), GL=new GB(), white=hex('#f1ede4'), red=hex('#b8392f'), blue=hex('#2d5f9e'), anti=hex('#7a2f26'), dark=hex('#2a2a2e'), glass=hex('#30363c'), deck=hex('#9c8a72'), orange=hex('#e2702e');
   const zs=FZS, ze=FZE, hl=ze-zs, hc=(zs+ze)/2;
   gb.add(T.box, mat(0,-1.1,hc,FB-0.5,0.95,hl-0.4), anti, null);
   gb.add(T.box, mat(0,-0.2,hc,FB,1.7,hl), white, null);
@@ -3747,11 +3788,11 @@ function buildFerry(){
     const h=SW/2, t=SWT, y0=FD0, y1=FD0+2.3, b0=FWB0, b1=FWB1, zb0=sz0+0.6, zb1=sz1-0.6;
     for (const sx of [-1,1]){ const xa=sx>0?h-t:-h, xb=xa+t;
       wb(xa,xb,y0,b0,sz0,sz1); wb(xa,xb,b1,y1,sz0,sz1); wb(xa,xb,b0,b1,sz0,zb0); wb(xa,xb,b0,b1,zb1,sz1);
-      gb.add(T.boxC5, mat(sx*h,(b0+b1)/2,sc,zb1-zb0,b1-b0,0.04,sx*Math.PI/2), glass, null, 5); }
+      GL.add(T.boxC5, mat(sx*h,(b0+b1)/2,sc,zb1-zb0,b1-b0,0.04,sx*Math.PI/2), glass, null, 5); }
     for (const [za,zz,ry] of [[sz0,sz0+t,Math.PI],[sz1-t,sz1,0]]){
       for (const sx of [-1,1]){ wb(sx>0?FDX1:-h,sx>0?h:-FDX1,y0,y1,za,zz); wb(sx>0?FDX0:-FDX1,sx>0?FDX1:-FDX0,FD0+FDH,y1,za,zz); wb(sx>0?0.95:-FDX0,sx>0?FDX0:-0.95,b0,b1,za,zz); }
       wb(-FDX0,FDX0,y0,b0,za,zz); wb(-FDX0,FDX0,b1,y1,za,zz);
-      gb.add(T.boxC5, mat(0,(b0+b1)/2,ry?sz0:sz1,1.9,b1-b0,0.04,ry), glass, null, 5); } }
+      GL.add(T.boxC5, mat(0,(b0+b1)/2,ry?sz0:sz1,1.9,b1-b0,0.04,ry), glass, null, 5); } }
   gb.add(T.box, mat(0,3.8,sc,SW+0.6,0.14,sl+1.6), hex('#d8d2c6'), null);
   // upper deck rail
   const rz0=sc-sl/2-0.7, rz1=sc+sl/2+0.7;
@@ -3776,9 +3817,9 @@ function buildFerry(){
     const h=FWH/2, t=SWT, y0=FD1, y1=FD1+1.9, b0=5.05-0.375, b1=5.05+0.375, z0=wz-1.4, z1=wz+1.4;
     for (const sx of [-1,1]){ const xa=sx>0?h-t:-h, xb=xa+t;
       wb(xa,xb,y0,b0,z0,z1); wb(xa,xb,b1,y1,z0,z1); wb(xa,xb,b0,b1,z0,wz-1.1); wb(xa,xb,b0,b1,wz+1.1,z1);
-      gb.add(T.boxC5, mat(sx*h,5.05,wz,2.2,0.75,0.04,sx*Math.PI/2), glass, null, 5); }
+      GL.add(T.boxC5, mat(sx*h,5.05,wz,2.2,0.75,0.04,sx*Math.PI/2), glass, null, 5); }
     wb(-h,h,y0,b0,z1-t,z1); wb(-h,h,b1,y1,z1-t,z1); for (const sx of [-1,1]) wb(sx>0?0.95:-h,sx>0?h:-0.95,b0,b1,z1-t,z1);
-    gb.add(T.boxC5, mat(0,5.05,z1,1.9,0.75,0.04,0), glass, null, 5);
+    GL.add(T.boxC5, mat(0,5.05,z1,1.9,0.75,0.04,0), glass, null, 5);
     for (const sx of [-1,1]) wb(sx>0?FWD:-h,sx>0?h:-FWD,y0,y1,z0,z0+t); wb(-FWD,FWD,FD1+FWDH,y1,z0,z0+t); }
   gb.add(T.box, mat(0,5.84,wz,FWH+0.4,0.12,3.3), hex('#d8d2c6'), null);
   gb.add(T.cyl8, mat(0,5.96,wz-0.6,0.08,2.6,0.08), dark, null);
@@ -3790,6 +3831,7 @@ function buildFerry(){
   gb.add(T.cyl, mat(0,6.29,fz,1.5,0.5,2.0), dark, null);
   // a lifeboat each side
   for (const sx of [-1,1]){ gb.add(T.sph, mat(sx*(SW/2-0.6),4.35,sc-0.5,0.8,0.55,3.0), orange, null); gb.add(T.box, mat(sx*(SW/2-0.6),3.94,sc-0.5,0.12,0.3,2.2), dark, null); }
+  FERRY_GLASS=GL.geometry();
   return gb.geometry();
 }
 const FERRY_GEO=buildFerry();
@@ -3855,6 +3897,7 @@ const FERRY_LEAF=(w,hgt)=>{ const gb=new GB(), wood=hex('#6a4a32');
 const FERRY_LEAF_S=FERRY_LEAF(FDX1-FDX0,FDH), FERRY_LEAF_W=FERRY_LEAF(2*FWD,FWDH);
 for (const F of ferries){
   const inside=new THREE.Mesh(FERRY_INT_GEO,matR); F.m.add(inside);
+  const gl=new THREE.Mesh(FERRY_GLASS,glassMat); gl.renderOrder=5; F.m.add(gl);
   F.doors=[];
   const add=(hx,hz,s,lw,lv,geo,y)=>{ const m=new THREE.Mesh(geo,matD); m.castShadow=true; m.position.set(hx,y,hz); F.m.add(m);
     const D={hx,hz,s,lw,lv,rot:0,a:0,av:0,idle:9,y,m}; F.doors.push(D); m.rotation.y=s>0?0:Math.PI; };
@@ -4088,10 +4131,16 @@ function roomsUpdate(dt){
   cand.sort((a,b)=>a[0]-b[0]); const want=new Set(cand.filter(c=>c[0]<26).slice(0,ROOM_MAX).map(c=>c[1]));
   const short=[...want].some(D=>!D.room);
   for (const D of rooms) if (!live.has(D) || (!want.has(D) && (short || Math.hypot(D.x-player.x,D.z-player.z)>30))) disposeRoom(D);
-  for (const D of want) if (!D.room && rooms.size<ROOM_MAX-1){ D.room=D.kind==='church'?buildChurch(D):new THREE.Mesh(buildRoomGeo(D),makeRoomMaterial(false)); setRoomLights(D); D.room.position.set(D.x,0,D.z); D.room.updateMatrix(); D.room.matrixAutoUpdate=false; world.add(D.room); rooms.add(D); break; }
+  for (const D of want) if (!D.room && rooms.size<ROOM_MAX-1){ D.room=D.kind==='church'?buildChurch(D):new THREE.Mesh(buildRoomGeo(D),makeRoomMaterial(false)); setRoomLights(D); D.room.position.set(D.x,0,D.z); D.room.updateMatrix(); D.room.matrixAutoUpdate=false;
+    if (D.glassGB && D.glassGB.p.length){ const g=new THREE.Mesh(D.glassGB.geometry(D.x,D.z),glassMat); g.renderOrder=5; D.room.add(g); } D.glassGB=null;
+    world.add(D.room); rooms.add(D); break; }
   let n=0; for (const D of rooms) for (const b of (D.clip||[[0,(D.zb+D.zf)/2,D.iw,(D.zf-D.zb)/2]])){ if (n>=ROOM_MAX) break; const [cx,cz]=localToWorld(D,b[0],b[1]);
     roomClip.uRoomA.value[n].set(cx-ORIGIN.x,cz-ORIGIN.z,Math.cos(D.rot),Math.sin(D.rot)); roomClip.uRoomB.value[n].set(b[2],b[3],D.fl-40,D.base+(b[4]??D.top+0.05)); n++; }
   roomClip.uRoomN.value=n;
+  let m=0; for (const D of rooms){ if (m>=ROOM_MAX) continue; const [cx,cz]=[D.x,D.z];
+    winClip.uWinA.value[m].set(cx-ORIGIN.x,cz-ORIGIN.z,Math.cos(D.rot),Math.sin(D.rot));
+    winClip.uWinB.value[m].set(D.w/2+0.3,D.d/2+0.3,D.base-0.5,D.kind==='church'?D.base+D.h:D.kind==='lighthouse'?D.base+D.H-0.5:D.base+D.top+0.1); m++; }
+  winClip.uWinN.value=m;
 }
 const ROOM_WALLS=['#f2ece2','#efe6d6','#f4efe6','#ece3d3','#f1e7d8'].map(hex), ROOM_DADO=['#b9a27e','#8fa79a','#9fb0bf','#c39a7a','#a8a08a'].map(hex);
 const ROOM_FLOORS=['#b4694c','#a95f45','#c07a58','#9c8a72'].map(hex), ROOM_WOOD=['#7a5a3e','#6e4e34','#86664a'].map(hex);
@@ -4123,7 +4172,8 @@ function buildRoomGeo(D){
       {N:[1,0,0],P:k=>(u,y)=>[-hw+k,y,u],u0:zb,u1:zf,door:null,sel:v=>Math.abs(v.ry+Math.PI/2)<0.1,u:v=>v.z}];
     for (const f of faces){ f.rects=wins.filter(f.sel).map(v=>[f.u(v)-v.w/2,f.u(v)+v.w/2,v.y-v.h/2,v.y+v.h/2]); f.k=WT; }
     // daylight through each window of this storey, and through the doorway on the ground floor
-    for (const f of faces) for (const r of f.rects){ const c=f.P(f.k)((r[0]+r[1])/2,(r[2]+r[3])/2); roomLightAt(D,0,c[0],c[1],c[2],f.N,(r[1]-r[0])*(r[3]-r[2]),F-0.05,Hc+0.05); }
+    for (const f of faces) for (const r of f.rects){ const c=f.P(f.k)((r[0]+r[1])/2,(r[2]+r[3])/2); roomLightAt(D,0,c[0],c[1],c[2],f.N,(r[1]-r[0])*(r[3]-r[2]),F-0.05,Hc+0.05);
+      const g=f.P(0.04)((r[0]+r[1])/2,(r[2]+r[3])/2); (D.glassGB||(D.glassGB=new GB(0))).add(T.boxC, mm(H,mat(g[0],g[1],g[2],r[1]-r[0],r[3]-r[2],0.01,Math.atan2(-f.N[0],-f.N[2]))), hex('#ffffff'), null); }
     if (!fi) roomLightAt(D,1,D.dx,DF+1.1,zf,[0,0,-1],2.2,F-0.05,Hc+0.05);
     quads(A=>{ for (const f of faces) faceHoles(A,f.P(f.k),f.N,f.u0,f.u1,F,Hc,f.rects,f.door); }, wallC, barn?SS:0, null);
     // a painted dado round the walls of the ground floor, standing a centimetre off them
@@ -5066,7 +5116,7 @@ function frame(now){
     if (firstCam) camPos.copy(desired); else camPos.lerp(desired,1-Math.exp(-dt*10));
     // the eased camera can lag behind rising ground, so it is also held clear of the ground where it actually is
     camPos.y=Math.max(camPos.y,heightAt(camPos.x,camPos.z)+2);
-    camera.position.copy(camPos); camera.lookAt(camTarget);
+    camera.position.copy(camPos); camLookAt(camTarget);
     // the view widens with the zoom: fog, far plane and sea grow so nothing is clipped
     const far=Math.max(3600,dist*6), fogFar=Math.max(1800,dist*4), near=Math.max(0.3,dist*0.004);
     if (camera.far!==far||camera.near!==near){ camera.far=far; camera.near=near; camera.updateProjectionMatrix(); }
@@ -5137,14 +5187,14 @@ function frame(now){
       want.y=Math.max(want.y,heightAt(want.x,want.z)+2.5);
       if (chase.fresh){ camPos.copy(want); chase.fresh=false; } else camPos.lerp(want,1-Math.exp(-dt*6));
       camPos.y=Math.max(camPos.y,heightAt(camPos.x,camPos.z)+2);
-      camera.position.copy(camPos); camera.lookAt(camTarget);
+      camera.position.copy(camPos); camLookAt(camTarget);
     }
     sky.position.copy(camera.position);
     tunnelLight(dt,mode==='train');
   }
   if (mode==='coach') tunnelLight(dt,true);
   sndUpdate(dt);
-  if (window.__freeCam){ camera.position.copy(window.__freeCam.p); camera.lookAt(window.__freeCam.t); sky.position.copy(camera.position); }
+  if (window.__freeCam){ camera.position.copy(window.__freeCam.p); camLookAt(window.__freeCam.t); sky.position.copy(camera.position); }
   updateBeams(dt);
   updateCats(dt);
   updateShadowFrame();
