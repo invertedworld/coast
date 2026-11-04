@@ -721,6 +721,7 @@ let HG=null; // {x0,z0,d,n,a}: precomputed heights for the block being generated
 function heightAt(x,z){
   if (HG){ const u=(x-HG.x0)/HG.d, v=(z-HG.z0)/HG.d;
     if (u>=0&&v>=0&&u<HG.n-1&&v<HG.n-1){ const i=Math.floor(u), j=Math.floor(v), fu=u-i, fv=v-j, a=HG.a, n=HG.n, o=j*n+i;
+      for (const q of [o,o+1,o+n,o+n+1]) if (a[q]!==a[q]) a[q]=heightAtExact(HG.x0+(q%n)*HG.d,HG.z0+Math.floor(q/n)*HG.d);
       return (a[o]*(1-fu)+a[o+1]*fu)*(1-fv)+(a[o+n]*(1-fu)+a[o+n+1]*fu)*fv; } }
   return heightAtExact(x,z);
 }
@@ -1901,12 +1902,10 @@ function genChunk(cx,cz,lod=0){
   const R=rng(Math.floor(hash(cx,cz,101)*4294967296));
   const x0=cx*C, z0=cz*C, xc=x0+C/2, zc=z0+C/2;
   GEN_LOD=lod;
-  // the ground is sampled every metre for full and simplified blocks alike, so that every choice made from its
-  // height (whether a house fits, where a wall runs) comes out the same in both, and a block changing between them
-  // keeps its houses; outline blocks sample it every 4 m
-  { const d=lod>=2?4:1, n=Math.round((C+28)/d)+1, a=new Float32Array(n*n), gx=x0-14, gz=z0-14;
-    HG=null; for (let j=0;j<n;j++) for (let i=0;i<n;i++) a[j*n+i]=heightAtExact(gx+i*d,gz+j*d);
-    HG={x0:gx,z0:gz,d,n,a}; }
+  // the ground's height is read from a grid of samples a metre apart at every level of detail, each sample worked
+  // out when first needed, so that every choice made from it (whether a house fits, where a wall runs) comes out the
+  // same at every level, and a block changing detail keeps its houses and lamps
+  { const n=C+29, a=new Float32Array(n*n).fill(NaN); HG={x0:x0-14,z0:z0-14,d:1,n,a}; }
   const k=core(cx,cz), hMul=0.86+0.3*k;
   const ch={lod,field:null,cx,cz,obbs:[],circles:[],place:[],placeCircles:[],kind:chunkKind(cx,cz),piazza:null,alleys:[],garden:null,checker:null,boats:[],glow:[]};
   const gb=new GB(lod), saint=pick(R,SAINTS), MR=peakNear(xc,zc,1.15)?7.5:4.6;
@@ -2423,8 +2422,10 @@ function genChunk(cx,cz,lod=0){
     for (const B of branchesAt(x0+C/2)){
       const at=(x,off)=>{ const z=brZ(B,x), s=(brZ(B,x+1)-brZ(B,x-1))/2, l=Math.hypot(1,s); return [x-(s/l)*off, z+(1/l)*off, Math.atan2(1,s)]; };
       const inChunk=(x,z)=>x>=x0&&x<x0+C&&z>=z0&&z<z0+C;
-      for (const e of [-1,1]){ const xb=(e<0?B.x0:B.x1)-e*1.5, [bx,bz,rot]=at(xb,0), by=brY(B,xb);
-        if (inChunk(bx,bz)){ for (const o of [-0.72,0.72]){ const [px,pz]=at(xb,o); segBox(gb,[px-e*2.5,by+0.3,pz],[px,by+1.2,pz],0.12,0.12,hex('#3a3d42')); }
+      // a buffer stop: a red beam on two posts rising from the rails, with a buffer facing the line at each end of it,
+      // braced from behind by two raking struts down to the rails
+      for (const e of [-1,1]){ const xb=(e<0?B.x0:B.x1)-e*3.5, [bx,bz,rot]=at(xb,0), by=brY(B,xb);
+        if (inChunk(bx,bz)){ for (const o of [-0.72,0.72]){ const [px,pz]=at(xb,o), [qx,qz]=at(xb+e*2.3,o); segBox(gb,[px,by+1.2,pz],[qx,by+0.35,qz],0.12,0.12,hex('#3a3d42')); }
           gb.add(T.boxC, mat(bx,by+1.15,bz,2.4,0.35,0.3,rot), hex('#b8392f'), null);
           for (const o of [-0.72,0.72]){ const [px,pz]=at(xb,o); segBox(gb,[px,by+0.3,pz],[px,by+1.3,pz],0.14,0.14,hex('#3a3d42')); }
           for (const o of [-0.9,0.9]){ const [px,pz]=at(xb-e*0.3,o); gb.add(T.cylC, mat(px,by+1.0,pz,0.34,0.3,0.34,rot,Math.PI/2), hex('#2a2624'), null); }
@@ -3811,7 +3812,7 @@ function routeBack(R,x,D,dir){ let u=D; const z0=routeZ(R,x), y0=routeY(R,x);
   for (let k=0;k<5;k++){ const x1=x-dir*u, c=Math.hypot(u,routeZ(R,x1)-z0,routeY(R,x1)-y0); u*=D/c; }
   return x-dir*u; }
 // the train set down at the west quay, its leading shunter against the buffers, being loaded
-function goodsStart(R,w){ const g=goods; g.R=R; g.lead=0; g.dir=-1; g.x=R.x0+3; g.v=0; g.wait=w; g.toB=false; g.legs=[]; for (const c of g.cars) c.m.visible=!!R; }
+function goodsStart(R,w){ const g=goods; g.R=R; g.lead=0; g.dir=-1; g.x=R.x0+4.8; g.v=0; g.wait=w; g.toB=false; g.legs=[]; for (const c of g.cars) c.m.visible=!!R; }
 function updateGoods(dt){
   const g=goods; g.check-=dt;
   if (g.check<=0){ g.check=2; const A=nearestBranch(), R=g.R;
@@ -3819,7 +3820,7 @@ function updateGoods(dt){
   const R=g.R; if (!R) return;
   if (g.wait>0){ g.wait-=dt; g.v=0;
     // at a quay it reverses: the other shunter leads from where the rear of the train stands
-    if (g.wait<=0 && !g.legs.length){ g.lead=1-g.lead; g.dir=-g.dir; g.x=g.tail; g.toB=!g.toB; g.legs=[{x:g.toB?R.x1-3:R.x0+3,wait:30}]; } }
+    if (g.wait<=0 && !g.legs.length){ g.lead=1-g.lead; g.dir=-g.dir; g.x=g.tail; g.toB=!g.toB; g.legs=[{x:g.toB?R.x1-4.8:R.x0+4.8,wait:30}]; } }
   else if (g.legs.length){ const L=g.legs[0], d=(L.x-g.x)*g.dir;
     const want=Math.min(9,Math.sqrt(2*0.5*Math.max(0,d))); g.v+=clamp(want-g.v,-1.0*dt,0.4*dt);
     const step=g.v*dt; if (d<=step+0.01){ g.x=L.x; g.v=0; g.wait=L.wait; g.legs.shift(); }

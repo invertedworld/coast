@@ -109,7 +109,7 @@ Blocks are kept in three rings of detail round the player:
 
 Each block costs several draw calls, and with thousands of blocks loaded the number of draw calls, not the number of triangles, sets the frame time. Outline blocks that have finished fading in are therefore merged in tiles of `TILE = 4` × 4 blocks and drawn from one mesh per material. A block leaves its tile and is drawn on its own again as soon as it starts to fade out or change detail. Tiles are rebuilt within a budget of 2 ms per frame.
 
-Each block samples the ground on a grid before it is built: every metre for full detail and simplified blocks alike, so that every choice made from the ground's height (whether a house fits, where a wall runs) comes out the same in both and a block that changes between them keeps its houses, and every 4 m for outlines.
+Each block reads the ground's height from a grid of samples a metre apart, at every level of detail, each sample worked out the first time it is needed, so that every choice made from the ground's height (whether a house fits, where a wall runs) comes out the same at every level and a block that changes detail keeps its houses and lamps.
 
 Beyond the rings, a coarse far terrain (`FN = 200` cells of `FS = 22` m) covers the distance, with the lights of distant villages drawn at night. Its heights, colours and lights are cached per grid point, so moving the grid computes only the new edge.
 
