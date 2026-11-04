@@ -40,6 +40,11 @@ html,body{height:100%;margin:0;overflow:hidden;background:var(--sea);color:var(-
 kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink);border-radius:3px;padding:3px 6px;margin-right:3px;display:inline-block;min-width:1em;text-align:center;box-shadow:0 2px 0 var(--plaster-dim)}
 .joy{position:fixed;width:110px;height:110px;margin:-55px 0 0 -55px;border-radius:50%;border:2px solid rgba(245,233,215,.55);pointer-events:none;z-index:3}
 .joy i{position:absolute;left:50%;top:50%;width:44px;height:44px;margin:-22px 0 0 -22px;border-radius:50%;background:rgba(245,233,215,.7)}
+.seeding{position:fixed;left:50%;bottom:40%;transform:translateX(-50%);z-index:20;display:flex;flex-direction:column;align-items:center;gap:10px;
+  padding:16px 22px;border-radius:10px;background:rgba(20,24,30,0.72);font-family:var(--font-display);font-size:1.1rem;color:var(--plaster)}
+.seeding[hidden]{display:none}
+.seeding b{display:block;width:260px;height:4px;border-radius:2px;background:rgba(255,255,255,0.18);overflow:hidden}
+.seeding i{display:block;height:100%;width:0;background:var(--plaster)}
 .loading{position:fixed;left:50%;bottom:40%;transform:translateX(-50%);font-family:var(--font-display);font-size:1.2rem;color:var(--plaster)}
 [hidden]{display:none!important}
 </style>
@@ -47,6 +52,7 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
 <canvas id="scene" tabindex="0" aria-label="Procedurally generated medieval village"></canvas>
 <div class="vignette"></div>
 <div class="loading" id="loading">Laying out the village…</div>
+<div class="seeding" id="seeding" hidden><span></span><b><i></i></b></div>
 
 <div class="joy" id="joy" hidden><i></i></div>
 
@@ -3434,13 +3440,15 @@ const LOD0=2;
 const lodRing=()=>Math.min(36,VIEW*4);
 function wantLod(dx,dz){ const d=Math.max(Math.abs(dx),Math.abs(dz)); return d<=LOD0?0:d<=VIEW?1:d<=lodRing()?2:-1; }
 let chunkState='';
-function updateChunks(px,pz,budgetMs){
+// loading (a whole island at once, as at the start or while a new one is seeded) builds every block outright,
+// without fading, in slices of budgetMs
+function updateChunks(px,pz,budgetMs,loading=budgetMs>=1e8){
   const pcx=Math.floor(px/C), pcz=Math.floor(pz/C), RR=lodRing(), st=pcx+','+pcz+','+VIEW;
   // the rings only change when the player crosses into another block or the draw distance changes
-  if (st===chunkState && !queue.length && budgetMs<1e8) return;
+  if (st===chunkState && !queue.length && !loading) return;
   chunkState=st;
   for (const [k,ch] of chunks) if (wantLod(ch.cx-pcx,ch.cz-pcz)<0){ chunks.delete(k); farDirty=true; maskDirty=true; untile(ch);
-    if (budgetMs<1e8){ if (ch.prev){ disposeChunk(ch.prev); ch.prev=null; } dying.push(ch); } else disposeChunk(ch); }
+    if (!loading){ if (ch.prev){ disposeChunk(ch.prev); ch.prev=null; } dying.push(ch); } else disposeChunk(ch); }
   queue=[];
   for (let dz=-RR;dz<=RR;dz++) for (let dx=-RR;dx<=RR;dx++){
     const w=wantLod(dx,dz); if (w<0) continue;
@@ -3455,14 +3463,19 @@ function updateChunks(px,pz,budgetMs){
     const [cx,cz,d2,w]=queue.shift(), k=key(cx,cz), old=chunks.get(k);
     // blocks fade in as they arrive; one that changes detail dissolves into its replacement
     // nothing fades while the island first loads, nor a block appearing right around the player
-    const ch=genChunk(cx,cz,w), fadeIn=budgetMs<1e8 && time>2.5 && (old || d2>2);
+    const ch=genChunk(cx,cz,w), fadeIn=!loading && time>2.5 && (old || d2>2);
     if (old) untile(old);
     if (old){ if (fadeIn){ if (old.prev){ disposeChunk(old.prev); old.prev=null; } ch.prev=old; } else disposeChunk(old); }
     chunks.set(k,ch); addChunkToScene(ch); ch.fade=fadeIn?0:1; setChunkFade(ch); farDirty=true; maskDirty=true;
     if (ch.lod>=2 && ch.fade>=1) tilesDirty.add(tileKey(ch));
   }
 }
-function resetWorld(){ chunkState=''; farCache.clear(); farOrigin=''; for (const T of tiles.values()) disposeTile(T); tiles.clear(); tilesDirty.clear(); tilesUrgent.clear(); for (const ch of chunks.values()) disposeChunk(ch); chunks.clear(); for (const ch of dying) disposeChunk(ch); dying.length=0; pkCache.clear(); pzCache.clear(); alCache.clear(); hbCache.clear(); vgCache.clear(); ryCache.clear(); rzCache.clear(); rrCache.clear(); rsCache.clear(); stCache.clear(); rxCache.clear(); lhCache.clear(); rkCache.clear(); ruCache.clear(); beams.t=0; train.init=false; farDirty=true; }
+function resetWorld(){ chunkState=''; farCache.clear(); farOrigin=''; for (const T of tiles.values()) disposeTile(T); tiles.clear(); tilesDirty.clear(); tilesUrgent.clear(); for (const ch of chunks.values()) disposeChunk(ch); chunks.clear(); for (const ch of dying) disposeChunk(ch); dying.length=0; pkCache.clear(); pzCache.clear(); alCache.clear(); hbCache.clear(); vgCache.clear(); ryCache.clear(); rzCache.clear(); rrCache.clear(); rsCache.clear(); stCache.clear(); rxCache.clear(); lhCache.clear(); rkCache.clear(); ruCache.clear();
+  // the goods lines, the offshore islands, the ferry ports and the ferries' routes all belong to the old island
+  brZones.clear(); brBucket.clear(); isCache.clear(); fpCache.clear(); irCache.clear();
+  goods.R=null; goods.check=0; for (const c of goods.cars) c.m.visible=false;
+  for (const F of ferries) if (F!==ridden){ F.R=null; F.m.visible=false; }
+  beams.t=0; train.init=false; farDirty=true; }
 
 /* ================= boats under sail along the coast ================= */
 const sailers=[];
@@ -4788,6 +4801,8 @@ const _bv=new THREE.Vector3();
 function sndUpdate(dt){
   if (!SND.ready) return;
   const ctx=audioCtx, inCoach=mode==='coach', inCab=mode==='train', inside=inCoach||inCab;
+  // while the world is paused the trains and the ferries fall silent, engines and all
+  for (const g of ['train','ferry']) sndParam(SND.bus[g].in.gain,paused?0:1,0.12);
   // indoors the world outside is muffled, less so with the door open; a church, like a tunnel, has its reverb.
   // In the ferry's saloon or wheelhouse the sea and the town ashore are muffled too
   const room=mode==='street'?indoors:null, cabin=mode==='ferry'&&((fe.lv===0&&Math.abs(fe.lx)<FSW/2&&fe.lz>FSZ0&&fe.lz<FSZ1)||(fe.lv===2&&Math.abs(fe.lx)<FWH/2&&Math.abs(fe.lz-FWZ)<1.4));
@@ -5235,7 +5250,25 @@ function toggleView(){
   camera.fov=mode==='above'?31:70; camera.updateProjectionMatrix(); glowScale();
   if (mode==='above'&&document.pointerLockElement) document.exitPointerLock();
 }
-function newIsland(){ SEED=(Math.random()*1e6)|0; resetWorld(); spawnPlayer(); lastCell=null; updateChunks(player.x,player.z,1e9); rebuildFar(player.x,player.z);}
+// a new island is seeded a slice at a time, with the share of its blocks built so far shown on the screen; the
+// world stands still until it is complete
+let seeding=false;
+const seedEl=document.getElementById('seeding'), seedBar=seedEl.querySelector('i'), seedTxt=seedEl.querySelector('span');
+const nextPaint=()=>new Promise(r=>requestAnimationFrame(()=>setTimeout(r,0)));
+function seedShow(k,what){ seedEl.hidden=false; seedBar.style.width=(k*100).toFixed(1)+'%'; seedTxt.textContent=`${what} ${Math.round(k*100)}%`; }
+async function newIsland(){ if (seeding) return; seeding=true;
+  try{
+    seedShow(0,'Generating a new island:'); await nextPaint();
+    SEED=(Math.random()*1e6)|0; resetWorld(); spawnPlayer(); lastCell=null;
+    let total=0;
+    for (;;){ updateChunks(player.x,player.z,40,true); total=Math.max(total,queue.length+1);
+      if (!queue.length) break;
+      seedShow(0.92*(1-queue.length/total),'Generating a new island:'); await nextPaint(); }
+    seedShow(0.92,'Generating a new island:'); await nextPaint();
+    updateTiles(1e9); rebuildFar(player.x,player.z); farDirty=true;
+    seedShow(1,'Generating a new island:'); await nextPaint();
+  } finally { seeding=false; seedEl.hidden=true; last=performance.now(); }
+}
 
 /* ================= HUD ================= */
 const pk=document.getElementById('placeKind'), pn=document.getElementById('placeName'), pd=document.getElementById('placeDesc'), elevEl=document.getElementById('elev');
@@ -5311,6 +5344,7 @@ let paused=false, last=performance.now(), time=0, firstCam=true, eyeY=null, abov
 function frame(now){
   // P pauses the world (trains, ferries, boats, the sea, the lighthouses, the cats and the time of day) while the
   // player still walks, flies and looks about; wdt is the world's step
+  if (seeding){ requestAnimationFrame(frame); return; }
   const dt=Math.min(0.05,(now-last)/1000), wdt=paused?0:dt; last=now; time+=wdt;
   pollPad(dt);
   const turn=(keys.KeyQ||keys.ArrowLeft?1:0)-(keys.KeyE||keys.ArrowRight?1:0);
