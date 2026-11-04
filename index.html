@@ -2156,7 +2156,6 @@ function updateDaylight(){
   if (sunUp>0.01){ LIGHT_DIR.copy(SUN_DIR); sun.color.set('#ff9a5a').lerp(_c2.set('#fff1dc'),wd); sun.intensity=sunUp*(1.1+1.5*wd); }
   else { LIGHT_DIR.copy(SUN_DIR).multiplyScalar(-1); sun.color.set('#9fb3ff'); sun.intensity=moonUp*1.0; }
   if (LIGHT_DIR.y<0.05) LIGHT_DIR.y=0.05;
-  sun.castShadow=sun.intensity>0.05;
   nightU.value=smooth((0.1-e)/0.22); glowU.uNight.value=nightU.value;
   surfMat.uniforms.uBright.value=0.22+0.78*Math.max(wd,wk*0.75);
   seaMat.specular.set('#121a22').lerp(_c2.set('#9fb0d8'),moonUp);
@@ -2909,7 +2908,8 @@ const train={cars:[], x:0, dir:1, sp:17, v:17, wait:0, init:false, GAP:0.8};
 // coach windows falling on the ground either side; they light the surroundings at dusk, at night and in tunnels
 const headSpot=new THREE.SpotLight(hex('#ffeccc'),0,240,0.5,0.75,1.2); scene.add(headSpot,headSpot.target);
 // the coach lamps join the scene only after dusk, since every light adds to the cost of every lit pixel
-const coachLamps=[1,3,5].map(i=>({l:new THREE.PointLight(hex('#ffbf73'),0,26,1.5),i})); let coachLampsOn=false;
+// the lamps stay in the scene, dark by day: adding or removing a light would recompile every lit material
+const coachLamps=[1,3,5].map(i=>({l:new THREE.PointLight(hex('#ffbf73'),0,26,1.5),i})); let coachLampsOn=false; for (const c of coachLamps) scene.add(c.l);
 const _hv=new THREE.Vector3();
 function updateTrainLights(){
   const loco=train.cars[0].m, dark=Math.max(nightU.value, mode==='train'?tunnelK:0);
@@ -2918,7 +2918,7 @@ function updateTrainLights(){
   headSpot.target.position.copy(_hv.set(0,-0.2,LOCO.L/2+60).applyMatrix4(loco.matrixWorld));
   headSpot.intensity=12+900*dark;
   const want=coachLampsOn?nightU.value>0.15:nightU.value>0.25;
-  if (want!==coachLampsOn){ coachLampsOn=want; for (const c of coachLamps) if (want) scene.add(c.l); else scene.remove(c.l); }
+  if (want!==coachLampsOn){ coachLampsOn=want; for (const c of coachLamps) c.l.intensity=0; }
   if (coachLampsOn) for (const c of coachLamps){ const m=train.cars[c.i].m; c.l.position.set(m.position.x,m.position.y+2.4,m.position.z); c.l.intensity=60*nightU.value; }
 }
 for (let i=0;i<6;i++){ const spec=i===0?LOCO:COACH, m=new THREE.Mesh(spec.geo,matB); m.castShadow=true; m.receiveShadow=true; m.rotation.order='YXZ'; scene.add(m);
@@ -4062,6 +4062,58 @@ function frame(now){
   updateHUD();
   render();
   requestAnimationFrame(frame);
+}
+
+/* ================= performance overlay (?perf in the address) ================= */
+// a graph of the time between frames, and a list of the slow ones with the parts of the frame that took longest,
+// the shader programs compiled and the long tasks the browser ran between frames
+if (new URLSearchParams(location.search).has('perf')){
+  const P={cur:{},last:0,gaps:new Float32Array(300),gi:0,log:[],tasks:[]}; window.__perfLog=P.log;
+  const W=(n,f)=>function(...a){ const t=performance.now(); try{ return f.apply(this,a); } finally { P.cur[n]=(P.cur[n]||0)+performance.now()-t; } };
+  updateChunks=W('updateChunks',updateChunks);
+  updateTiles=W('updateTiles',updateTiles);
+  updateFades=W('updateFades',updateFades);
+  rebuildFar=W('rebuildFar',rebuildFar);
+  updateMask=W('updateMask',updateMask);
+  updateIsland=W('updateIsland',updateIsland);
+  updateSailers=W('updateSailers',updateSailers);
+  updateTrain=W('updateTrain',updateTrain);
+  updateFerries=W('updateFerries',updateFerries);
+  gangwayStep=W('gangwayStep',gangwayStep);
+  coachStep=W('coachStep',coachStep);
+  updateDaylight=W('updateDaylight',updateDaylight);
+  updateClocks=W('updateClocks',updateClocks);
+  sndUpdate=W('sndUpdate',sndUpdate);
+  updateBeams=W('updateBeams',updateBeams);
+  updateCats=W('updateCats',updateCats);
+  updateShadowFrame=W('updateShadowFrame',updateShadowFrame);
+  updateHUD=W('updateHUD',updateHUD);
+  render=W('render',render);
+  genChunk=W('genChunk',genChunk);
+  collide=W('collide',collide);
+  pollPad=W('pollPad',pollPad);
+  tunnelLight=W('tunnelLight',tunnelLight);
+  try{ new PerformanceObserver(l=>{ for (const e of l.getEntries()) P.tasks.push(e.duration); }).observe({entryTypes:['longtask']}); }catch(e){}
+  const box=document.createElement('div'); box.style.cssText='position:fixed;left:8px;top:8px;z-index:99;background:rgba(0,0,0,0.72);color:#fff;font:11px/1.35 ui-monospace,monospace;padding:6px 8px;border-radius:6px;pointer-events:none;max-width:560px;white-space:pre';
+  const cv=document.createElement('canvas'); cv.width=300; cv.height=60; cv.style.cssText='display:block;margin-bottom:4px'; const txt=document.createElement('div'); box.append(cv,txt); document.body.append(box);
+  const g=cv.getContext('2d'); let shown=0;
+  const fr=frame; frame=function(now){
+    const t0=performance.now(), gap=P.last?t0-P.last:16.7; P.last=t0; P.cur={}; const np=renderer.info.programs.length;
+    fr(now);
+    const js=performance.now()-t0, prog=renderer.info.programs.length-np;
+    P.gaps[P.gi]=gap; P.gi=(P.gi+1)%300;
+    if (gap>50 || js>40){ const top=Object.entries(P.cur).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([k,v])=>k+' '+v.toFixed(0)).join(', ');
+      const lt=P.tasks.length?Math.max(...P.tasks).toFixed(0):'-';
+      const e={t:(t0/1000).toFixed(1),gap:Math.round(gap),js:Math.round(js),top,prog,longtask:lt,mode,queue:queue.length,tiles:tilesDirty.size+tilesUrgent.size,view:VIEW,calls:renderer.info.render.calls,heapMB:performance.memory?Math.round(performance.memory.usedJSHeapSize/1048576):0};
+      P.log.push(e); if (P.log.length>200) P.log.shift(); console.log('[perf]',JSON.stringify(e)); }
+    P.tasks.length=0;
+    if (now-shown>250){ shown=now; g.fillStyle='#222'; g.fillRect(0,0,300,60);
+      for (let i=0;i<300;i++){ const v=P.gaps[(P.gi+i)%300]; g.fillStyle=v>50?'#f44':v>25?'#fc3':'#6c6'; const h=Math.min(60,v); g.fillRect(i,60-h,1,h); }
+      g.fillStyle='#fff8'; g.fillRect(0,60-16.7,300,1); g.fillRect(0,60-50,300,1);
+      let mx=0, sum=0; for (const v of P.gaps){ mx=Math.max(mx,v); sum+=v; }
+      txt.textContent=`avg ${(sum/300).toFixed(1)} ms  worst ${mx.toFixed(0)} ms  view ${VIEW}  queue ${queue.length}  calls ${renderer.info.render.calls}\n`+
+        P.log.slice(-10).reverse().map(e=>`${e.t}s  gap ${e.gap}  js ${e.js}  ${e.top}${e.prog?'  +'+e.prog+' shaders':''}${e.longtask!=='-'?'  task '+e.longtask:''}  q ${e.queue}`).join('\n'); }
+  };
 }
 
 /* ================= boot ================= */
