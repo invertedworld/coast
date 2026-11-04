@@ -42,8 +42,8 @@ The panel opened with **H** lists the controls. They are reproduced here for ref
 | Arrow keys | Turn and tilt the bird's-eye view. |
 | B | Turns tilt-shift on or off in the bird's-eye and chase views. |
 | T | Speeds up time while held. |
-| R | Rides in the train's cab. R or V again steps off beside the track. |
-| C | Follows the train from behind. The mouse orbits the camera and + − change its distance. C or V again steps off beside the track. |
+| R | Rides in the cab of the nearest train, passenger or goods. R or V again steps off beside the track. |
+| C | Follows the nearest train, passenger or goods, from behind. The mouse orbits the camera and + − change its distance. C or V again steps off beside the track. |
 | G | Goes to the goods train, beside its leading shunter. If none is working near the player, it goes to the nearest goods line with a partner quay, where the train is being loaded. |
 | F | Boards the nearest ferry wherever it is. F or V again steps ashore, or at the next landing if the ferry is under way. |
 | Walking into a door | Opens it. A door swings away from the side it is pushed from, as far as it is pushed, and closes again about a second after nobody stands in its sweep. |

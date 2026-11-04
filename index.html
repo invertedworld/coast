@@ -78,8 +78,8 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
       <div class="row"><span><kbd>B</kbd></span><span>Tilt-shift in the bird’s-eye and chase views: <span id="tiltState">off</span></span></div>
     </div>
     <div class="group"><h3>Train and ferry</h3>
-      <div class="row"><span><kbd>R</kbd></span><span>Ride in front of the train. R or V again steps off beside the track</span></div>
-      <div class="row"><span><kbd>C</kbd></span><span>Follow the train from behind. The mouse moves the camera round it and <kbd>+</kbd><kbd>−</kbd> change the distance. C or V again steps off beside the track</span></div>
+      <div class="row"><span><kbd>R</kbd></span><span>Ride in front of the nearest train, passenger or goods. R or V again steps off beside the track</span></div>
+      <div class="row"><span><kbd>C</kbd></span><span>Follow the nearest train from behind. The mouse moves the camera round it and <kbd>+</kbd><kbd>−</kbd> change the distance. C or V again steps off beside the track</span></div>
       <div class="row"><span><kbd>G</kbd></span><span>Go to the goods train, beside its leading shunter</span></div>
       <div class="row"><span><kbd>F</kbd></span><span>Board the nearest ferry wherever it is. While it lies at a landing it may also be boarded by its gangway. On board, W A S D walk about the decks and the mouse looks round. F or V again steps ashore, or at the next landing while the ferry is under way</span></div>
     </div>
@@ -567,7 +567,10 @@ function branchFit(sd,n,dirJ){
     if (stationNear(xj,130)) continue;
     let good=true; const side=Math.sign(zt(xj)-railZ(xj))||1;
     for (let t=0; t<=1.0001 && good; t+=8/Lb){ const x=xj+dirJ*t*Lb, e=smooth(t), z=lerp(railZ(x),zt(x),e), y=lerp(railY(x),yt,e), g=baseH(x,z);
-      if ((railState(x)!=='open' && t<0.04) || g>y+18 || g<y-16 || g<(t>0.8?0.2:0.9) || (t>0.3 && side*(z-railZ(x))<14)) good=false; }
+      // the branch leaves the main line only from open track, and keeps clear of its tunnels: it runs within
+      // 20 m of it only where there is no tunnel within 15 m, so its cutting never bares a bore
+      const near=Math.abs(z-railZ(x))<20 && (railState(x)==="tunnel" || railState(x-15)==="tunnel" || railState(x+15)==="tunnel") || (t<0.04 && railState(x)!=="open");
+      if (near || g>y+18 || g<y-16 || g<(t>0.8?0.2:0.9) || (t>0.3 && side*(z-railZ(x))<14)) good=false; }
     for (let i=Math.floor(Math.min(xj,xs)/C)-1; good && i<=Math.floor(Math.max(xj,xs)/C)+1; i++){ const X=railCross(i); if (X && (X.x-xj)*dirJ>-30 && (X.x-xj)*dirJ<Lb*0.4) good=false; }
     if (good) return {sd,n,H,dirJ,xj,xs,xe,zt,yt,Lb,T,x0:Math.min(xj,xe),x1:Math.max(xj,xe),name:H.name}; }
   return null;
@@ -3749,7 +3752,7 @@ function buildWagon(kind){
     gb.add(T.box, mat(0,y0+0.1,0,W-0.4,0.3,L-0.4), dark, null);
     gb.add(T.cylC, mat(0,y0+1.4,0,2.4,L-1.0,2.4,0,Math.PI/2), body, null);   // centred on the wagon, not running from its middle
     for (const e of [-1,1]) gb.add(T.sph, mat(0,y0+1.4,e*(L/2-0.5),2.4,2.4,0.8), body, null);
-    gb.add(T.cyl8, mat(0,y0+2.55,0,0.7,0.35,0.7), body, null); gb.add(T.cylC, mat(0,y0+1.4,0,2.42,1.2,2.42,0,Math.PI/2), stripe, null); }
+    gb.add(T.cyl8, mat(0,y0+2.55,0,0.7,0.35,0.7), body, null); gb.add(T.cylC, mat(0,y0+1.4,0,2.56,1.2,2.56,0,Math.PI/2), stripe, null); }   // the band stands 7 cm proud of the barrel so the two never fight
   return {geo:gb.geometry(),L};
 }
 const SHUNTER=buildShunter(), WAGON={van:buildWagon('van'),open:buildWagon('open'),tank:buildWagon('tank'),flat:buildWagon('flat')};
@@ -3790,7 +3793,7 @@ function goodsLeg(R,toB){ const A=R.A, B=R.B, t=-A.dirJ;
 function updateGoods(dt){
   const g=goods; g.check-=dt;
   if (g.check<=0){ g.check=2; const A=nearestBranch(), R=g.R;
-    if (!(R && A && (A===R.A || A===R.B))){ g.R=A?{A,B:partnerOf(A)}:null; for (const c of g.cars) c.m.visible=!!g.R;
+    if (!(R && A && (A===R.A || A===R.B)) && !(riding() && rideGoods)){ g.R=A?{A,B:partnerOf(A)}:null; for (const c of g.cars) c.m.visible=!!g.R;
       // a new route: the train starts at the first quay, its leading shunter towards the buffers, being loaded
       if (g.R){ g.lead=0; g.dir=A.dirJ; g.x=A.xe-A.dirJ*3; g.v=0; g.wait=10+Math.random()*20; g.toB=false; g.legs=[]; } } }
   const R=g.R; if (!R) return;
@@ -5116,7 +5119,7 @@ let tYaw=0, tPitch=-0.04, tunnelK=0, prevMode='street';
 // inside a tunnel the world goes dark beyond the headlights, and the darkness lifts as daylight at the far
 // portal comes into view
 function tunnelLight(dt,on){
-  let inT=0; if (on && railState(camera.position.x)==='tunnel'){ const sg=train.dir; let ah=0; while (ah<70 && railState(camera.position.x+sg*(ah+2))==='tunnel') ah+=2; inT=clamp((ah-4)/50,0,1); }
+  const RT=rideTrain(); let inT=0; if (on && RT.st(camera.position.x)==='tunnel'){ const sg=RT.dir; let ah=0; while (ah<70 && RT.st(camera.position.x+sg*(ah+2))==='tunnel') ah+=2; inT=clamp((ah-4)/50,0,1); }
   tunnelK+=(inT-tunnelK)*(1-Math.exp(-dt*4));
   hemi.intensity*=lerp(1,0.1,tunnelK); sun.intensity*=1-tunnelK;
   sky.visible=tunnelK<0.9;
@@ -5154,23 +5157,29 @@ canvas.addEventListener('touchend',endTouch); canvas.addEventListener('touchcanc
 // riding the train: the cab view (R) and the chase view (C); each key again steps off beside the track
 function toggleTrain(){ if (ridden) leaveFerry(prevModeF); if (mode==='train') leaveTrain(prevMode); else ride('train'); }
 function toggleChase(){ if (ridden) leaveFerry(prevModeF); if (mode==='chase') leaveTrain(prevMode); else ride('chase'); }
+// the train the cab and chase views ride with: the passenger train, or the goods train when that is the nearer
+let rideGoods=false;
+function rideTrain(){ if (rideGoods){ const g=goods, R=g.R; return {x:g.x,dir:g.dir,Z:x=>routeZ(R,x),Y:x=>routeY(R,x),st:x=>(!onA(R,x)&&!onB(R,x))?railState(x):'open',lead:g.cars[g.lead?g.cars.length-1:0].m,cars:g.cars}; }
+  return {x:train.x,dir:train.dir,Z:railZ,Y:railY,st:railState,lead:leadCar().m,cars:train.cars}; }
 function ride(kind){
   if (!riding()){ prevMode=mode==='above'?'above':'street'; cam.y=null;
-    if (Math.abs(train.x-player.x)>250){ train.x=player.x; train.v=train.sp*0.6; train.wait=0; }
+    const gl=goods.R&&goods.cars[goods.lead?goods.cars.length-1:0].m.position, pl=leadCar().m.position;
+    rideGoods=!!gl && Math.hypot(gl.x-player.x,gl.z-player.z)<Math.hypot(pl.x-player.x,pl.z-player.z);
+    if (!rideGoods && Math.abs(train.x-player.x)>250){ train.x=player.x; train.v=train.sp*0.6; train.wait=0; }
     if (document.pointerLockElement&&kind==='chase') document.exitPointerLock(); }
   if (kind==='chase' && mode!=='chase') chase.fresh=true;
   mode=kind; tYaw=0; tPitch=-0.04;
-  for (const c of train.cars) c.m.visible=true;
+  for (const c of rideTrain().cars) c.m.visible=true;
   if (kind==='chase'){ tunnelK=0; sky.visible=true; scene.fog.near=90; scene.fog.far=1500; }
   camera.fov=kind==='train'?65:60; camera.near=0.3; camera.far=3600; camera.updateProjectionMatrix(); glowScale();
   sea.scale.setScalar(1); islandMesh.visible=false; farMesh.visible=farGlow.visible=true;
 }
 function leaveTrain(to){
   // step down beside the track, on whichever side is clear
-  const x=player.x, zr=railZ(x), s=(railZ(x+1)-railZ(x-1))/2, l=Math.hypot(1,s), nx=-s/l, nz=1/l;
+  const T=rideTrain(), x=player.x, zr=T.Z(x), s=(T.Z(x+1)-T.Z(x-1))/2, l=Math.hypot(1,s), nx=-s/l, nz=1/l;
   let best=null; for (const o of [4.5,-4.5,7,-7,10,-10]){ const px=x+nx*o, pz=zr+nz*o, h=heightAt(px,pz); if (h>0.5){ best=[px,pz,h]; break; } }
   if (best){ player.x=best[0]; player.z=best[1]; player.y=best[2]; } player.vy=0; eyeY=null;
-  mode='street'; sky.visible=true; tunnelK=0; for (const c of train.cars) c.m.visible=true; yaw=Math.atan2(-Math.sin(leadCar().m.rotation.y),-Math.cos(leadCar().m.rotation.y));
+  mode='street'; sky.visible=true; tunnelK=0; for (const c of T.cars) c.m.visible=true; yaw=Math.atan2(-Math.sin(T.lead.rotation.y),-Math.cos(T.lead.rotation.y));
   scene.fog.near=90; scene.fog.far=1500; camera.fov=70; camera.updateProjectionMatrix(); glowScale();
   if (to==='above') toggleView();
 }
@@ -5374,24 +5383,24 @@ function frame(now){
   if (riding()){
     // the eye's height and heading are eased so that it neither pitches with the car nor jerks on curves
     // the cab view's eye rides just ahead of the locomotive's nose; the chase view follows the driver's position
-    const xe=mode==='train'?train.x+train.dir*1.2:train.x-train.dir*1.8, ye=railY(xe), xa=xe+train.dir*14, xb=xe-train.dir*14;
-    const head=Math.atan2(xa-xb,railZ(xa)-railZ(xb)), kf=1-Math.exp(-dt*3);
+    const RT=rideTrain(), xe=mode==='train'?RT.x+RT.dir*1.2:RT.x-RT.dir*1.8, ye=RT.Y(xe), xa=xe+RT.dir*14, xb=xe-RT.dir*14;
+    const head=Math.atan2(xa-xb,RT.Z(xa)-RT.Z(xb)), kf=1-Math.exp(-dt*3);
     if (cam.y===null){ cam.y=ye+2.9; cam.head=head; }
     cam.y+=(ye+2.9-cam.y)*kf; cam.head+=Math.atan2(Math.sin(head-cam.head),Math.cos(head-cam.head))*kf;
     const rot=cam.head;
-    player.x=xe; player.z=railZ(xe); player.y=ye; eyeY=player.y;
+    player.x=xe; player.z=RT.Z(xe); player.y=ye; eyeY=player.y;
     if (mode==='train'){
       // cab view: the eye rides on the track just in front of the train, which is drawn behind it
-      camera.position.set(xe,cam.y,railZ(xe));
+      camera.position.set(xe,cam.y,RT.Z(xe));
       camera.rotation.set(tPitch, rot+Math.PI+tYaw, 0, 'YXZ');
     } else {
       // chase view: behind and above the locomotive, orbited with the mouse, kept clear of the ground
       const zk=((keys.Minus||keys.NumpadSubtract)?1:0)-((keys.Equal||keys.NumpadAdd)?1:0);
       if (zk) chase.d=clamp(chase.d*Math.exp(zk*dt*1.5),10,160);
-      const loco=leadCar().m, a=rot+chase.yaw, cp=Math.cos(chase.pitch);
+      const loco=RT.lead, a=rot+chase.yaw, cp=Math.cos(chase.pitch);
       camTarget.set(loco.position.x+Math.sin(rot)*4, cam.y-0.4, loco.position.z+Math.cos(rot)*4);
       // while the train is underground the camera follows the hillside above it
-      if (railState(xe)==='tunnel') chase.lift+=(1-chase.lift)*kf; else chase.lift*=1-kf;
+      if (RT.st(xe)==='tunnel') chase.lift+=(1-chase.lift)*kf; else chase.lift*=1-kf;
       camTarget.y=lerp(camTarget.y,Math.max(camTarget.y,heightAt(camTarget.x,camTarget.z)+3),chase.lift);
       const want=_cv.set(camTarget.x-Math.sin(a)*cp*chase.d, camTarget.y+Math.sin(chase.pitch)*chase.d, camTarget.z-Math.cos(a)*cp*chase.d);
       want.y=Math.max(want.y,heightAt(want.x,want.z)+2.5);
