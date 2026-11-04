@@ -1032,6 +1032,7 @@ function addHouse(gb,ch,R,o){
   if (!o.noDoor){ const dx=(R()-0.5)*Math.max(0,w-2.6);
     room=gb.lod===0?doorwayFor(ch,o,base,dx,w,h,d,floors):null;
     if (room) addDoorFrame(gb,H,dx,d/2); else addDoor(gb,H,dx,fz-0.06);
+    if (room) room.kind=o.kind||'house';
     if (R()<0.3){ const lx=dx+(dx>0?-0.9:0.9);
       gb.add(T.boxC, mm(H,mat(lx,2.62,fz+0.15,0.06,0.06,0.32)), WIRE, null);
       gb.add(T.boxC, mm(H,mat(lx,2.42,fz+0.3,0.22,0.3,0.22)), BULB, null, 6);
@@ -1040,6 +1041,10 @@ function addHouse(gb,ch,R,o){
     if (R()<0.12) gb.add(T.boxC, mm(H,mat(dx,2.25,fz+0.45,1.7,0.06,0.95,0,0.32)), R()<0.5?C_.canvasA:C_.white, null);
     if (R()<0.35){ const sx=dx+(dx>0?-1.4:1.4); if (Math.abs(sx)<w/2-0.5){ addWin(gb,H,sx,1.15,fz,0,0.5,0.7,shut,room); } }
   }
+  // a building drawn without a door is given one, from its own random sequence so that the town is unchanged
+  else if (!o.tower){ const RD=rng(Math.floor(hash(Math.round(o.x*8),Math.round(o.z*8),4421)*4294967296)), dx=(RD()-0.5)*Math.max(0,w-2.6);
+    room=gb.lod===0?doorwayFor(ch,o,base,dx,w,h,d,floors):null;
+    if (room){ room.kind=o.kind||'house'; addDoorFrame(gb,H,dx,d/2); } else addDoor(gb,H,dx,fz-0.06); }
   addBody();
   // the climber draws on its own random sequence so that it leaves the layout of the town unchanged
   if (!o.tower && !o.noDoor){ const RB=rng(Math.floor(hash(Math.round(o.x*8),Math.round(o.z*8),4401)*4294967296));
@@ -1933,7 +1938,7 @@ function genChunk(cx,cz,lod=0){
     if (ch.kind==='farm'){
       for (let t=0;t<20;t++){ const x=xc+(R()-0.5)*14, z=zc+(R()-0.5)*14, rot=R()*6.28;
         if (canPlace({x,z,hw:4,hd:5,rot},0.1,{maxRange:5})){ house({x,z,rot,w:7.5,d:9.5,h:5.6,roof:'side',stoneWalls:true});
-          const bx=x+Math.cos(rot)*9.5, bz=z-Math.sin(rot)*9.5; if (canPlace({x:bx,z:bz,hw:3,hd:4,rot},0.1,{maxRange:5})) house({x:bx,z:bz,rot,w:6,d:8,h:4.2,roof:'side',noDoor:true,stoneWalls:R()<0.5});
+          const bx=x+Math.cos(rot)*9.5, bz=z-Math.sin(rot)*9.5; if (canPlace({x:bx,z:bz,hw:3,hd:4,rot},0.1,{maxRange:5})) house({x:bx,z:bz,rot,w:6,d:8,h:4.2,roof:'side',noDoor:true,kind:'barn',stoneWalls:R()<0.5});
           ch.field={x:x-Math.sin(rot)*12,z:z-Math.cos(rot)*12,hw:7,hd:5,rot}; break; } }
       for (let q=0;q<3;q++){ const x=xc+(R()-0.5)*26, z=zc+(R()-0.5)*26; if (!okPt(x,z)||ch.place.some(o=>obbCircleDist(o,x,z)<2.5)) continue;
         const g=heightAt(x,z); gb.add(T.cyl, mat(x,g-0.3,z,2.4,1.9,2.4), hex('#d9b25a'), g, SW); gb.add(T.cone, mat(x,g+1.6,z,2.6,1.2,2.6), hex('#c9a24d'), null); ch.circles.push({x,z,r:1.2,top:Infinity}); }
@@ -3516,8 +3521,9 @@ const ROOM_WALLS=['#f2ece2','#efe6d6','#f4efe6','#ece3d3','#f1e7d8'].map(hex), R
 const ROOM_FLOORS=['#b4694c','#a95f45','#c07a58','#9c8a72'].map(hex), ROOM_WOOD=['#7a5a3e','#6e4e34','#86664a'].map(hex);
 function buildRoomGeo(D){
   const R=rng(D.seed), gb=new GB(0), H=mat(D.x,D.base,D.z,1,1,1,D.rot), iw=D.iw, zf=D.zf, zb=D.zb, ao=D.base;
-  const wallC=pick(R,ROOM_WALLS), dadoC=pick(R,ROOM_DADO), floorC=pick(R,ROOM_FLOORS), wood=pick(R,ROOM_WOOD), dark=wood.clone().multiplyScalar(0.6);
-  const boards=wood.clone().multiplyScalar(1.15), stairC=R()<0.6?shade(C_.stone,R,0.03):wood, floorS=R()<0.75?SS:SW;
+  const wallC=pick(R,ROOM_WALLS).clone(), dadoC=pick(R,ROOM_DADO), floorC=pick(R,ROOM_FLOORS).clone(), wood=pick(R,ROOM_WOOD), dark=wood.clone().multiplyScalar(0.6);
+  const boards=wood.clone().multiplyScalar(1.15), stairC=R()<0.6?shade(C_.stone,R,0.03):wood, floorS=R()<0.75?SS:SW, barn=D.kind==='barn';
+  if (barn){ wallC.set('#cfc2a8'); floorC.set('#8f7a5c'); }
   const quads=(fn,col,surf,aob=ao)=>{ const A=[]; fn(A); gb.add(triTpl(A),H,col,aob,surf); };
   const B=(x,y,z,sx,sy,sz,col,surf=0,ry=0)=>gb.add(T.box, mm(H,mat(x,y,z,sx,sy,sz,ry)), col, ao, surf);
   const LP=(x,y,z)=>new THREE.Vector3(x,y,z).applyMatrix4(H).toArray();
@@ -3538,9 +3544,9 @@ function buildRoomGeo(D){
       {N:[-1,0,0],P:k=>(u,y)=>[hw-k,y,u],u0:zb,u1:zf,door:null,sel:v=>Math.abs(v.ry-Math.PI/2)<0.1,u:v=>v.z},
       {N:[1,0,0],P:k=>(u,y)=>[-hw+k,y,u],u0:zb,u1:zf,door:null,sel:v=>Math.abs(v.ry+Math.PI/2)<0.1,u:v=>v.z}];
     for (const f of faces){ f.rects=wins.filter(f.sel).map(v=>[f.u(v)-v.w/2,f.u(v)+v.w/2,v.y-v.h/2,v.y+v.h/2]); f.k=WT; }
-    quads(A=>{ for (const f of faces) faceHoles(A,f.P(f.k),f.N,f.u0,f.u1,F,Hc,f.rects,f.door); }, wallC, 0);
+    quads(A=>{ for (const f of faces) faceHoles(A,f.P(f.k),f.N,f.u0,f.u1,F,Hc,f.rects,f.door); }, wallC, barn?SS:0);
     // a painted dado round the walls of the ground floor, standing a centimetre off them
-    if (!fi) quads(A=>{ for (const f of faces) faceHoles(A,f.P(f.k+0.01),f.N,f.u0,f.u1,F,F+0.95,f.rects,f.door); }, dadoC, 0);
+    if (!fi && !barn) quads(A=>{ for (const f of faces) faceHoles(A,f.P(f.k+0.01),f.N,f.u0,f.u1,F,F+0.95,f.rects,f.door); }, dadoC, 0);
     // the windows: the reveal through the wall to the outer face, a casement frame at the outer face and a deep sill
     quads(A=>{ for (const f of faces) for (const r of f.rects) rectReveal(A,f.P(f.k),f.P(0),r); }, wallC, 0);
     for (const f of faces) for (const r of f.rects){ const um=(r[0]+r[1])/2, ym=(r[2]+r[3])/2, ry=Math.atan2(-f.N[0],-f.N[2]);
@@ -3565,7 +3571,7 @@ function buildRoomGeo(D){
     const take=(x,z,w2,d2,pad=0)=>{ free.push([x,z,w2+pad,d2+pad]); solid.push([x,z,w2,d2,F]); };
     for (const L of [here,below]) if (L){ const za=Math.min(D.st.z0,D.st.z1)-1.0, zz=Math.max(D.st.z0,D.st.z1)+1.0; free.push([(L.x0+L.x1)/2,(za+zz)/2,ST_W/2+0.1,(zz-za)/2]); }
     if (hearth && fi>0){ const {x,z}=hearth; if (fits(x,z,0.25,0.75)){ B(x,F,z,0.5,Hc-F,1.5,wallC); take(x,z,0.25,0.75,0.05); } }
-    if (!fi) furnishGround(); else furnishBedroom();
+    if (!fi) (barn?furnishBarn:furnishGround)(); else furnishBedroom();
     function lamp(x,z){ gb.add(T.cyl8, mm(H,mat(x,F+1.9,z,0.015,Hc-F-1.9,0.015)), hex('#2a2624'), null);
       gb.add(T.cone, mm(H,mat(x,F+1.75,z,0.4,0.22,0.4)), pick(R,[hex('#e9e2cf'),hex('#3f5f4a'),hex('#b5654a')]), null);
       gb.add(T.sphLo, mm(H,mat(x,F+1.76,z,0.12,0.12,0.12)), hex('#fff1c8'), null); }
@@ -3603,6 +3609,22 @@ function buildRoomGeo(D){
             gb.add(T.box, mm(H2,mat(0,0.49,0.19,0.42,0.48,0.03)), chairC, ao, SW); }
           lamp(x,z); take(x,z,tw+0.4,td+0.4,0); break; } }
       picture();
+    }
+    function furnishBarn(){
+      // bales of straw stacked against the back wall, a cart, a ladder and tools hung on a side wall
+      const straw=hex('#d6bd6e');
+      for (let t=0;t<8;t++){ const x=(R()-0.5)*(2*iw-2.6); if (!fits(x,zb+0.6,1.25,0.6)) continue;
+        for (let row=0;row<3;row++) for (let k=0;k<3-row;k++) for (const dz of [0.3,0.9]) if (row<2||dz<0.5)
+          B(x-0.85+k*0.85+row*0.42,F+row*0.42,zb+dz,0.82,0.4,0.56,shade(straw,R,0.06));
+        take(x,zb+0.6,1.25,0.6,0.1); break; }
+      for (let t=0;t<8;t++){ const x=(R()-0.5)*(2*iw-1.6), z=zb+1.6+R()*Math.max(0,zf-zb-3.2); if (!fits(x,z,0.75,1.1)) continue;
+        B(x,F+0.45,z,1.2,0.35,1.8,wood,SW); for (const sx of [-1,1]) B(x+sx*0.58,F+0.8,z,0.05,0.3,1.8,wood,SW);
+        for (const sx of [-1,1]) gb.add(T.cylC, mm(H,mat(x+sx*0.66,F+0.42,z,0.84,0.07,0.84,0,0,Math.PI/2)), dark, null);
+        for (const sx of [-0.25,0.25]) B(x+sx,F+0.5,z+1.6,0.05,0.05,1.4,dark,SW);
+        take(x,z,0.75,1.1,0.1); break; }
+      { const side=R()<0.5?-1:1, z=(zb+zf)/2;
+        if (fits(side*(iw-0.1),z,0.1,0.8)) for (let k=0;k<4;k++) B(side*(iw-0.04),F+1.0+(k%2)*0.1,z-0.6+k*0.4,0.04,0.9,0.05,k%2?dark:wood,SW); }
+      lamp(0,(zb+zf)/2);
     }
     function furnishBedroom(){
       // a bed with its head against the back or a side wall, a cover and pillows, and a small table beside it
