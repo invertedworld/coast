@@ -2355,6 +2355,7 @@ function genChunk(cx,cz,lod=0){
     const rh=coastRoadH(sd,x), zs=zr-sd*(CR_HW+0.35), g=baseH(x,zr-sd*(CR_HW+2.2));
     if (g>rh-0.9) continue;
     const iv=Math.round(x/C); if (vSegOn(iv,vSegAt(x,zs)) && Math.abs(x-vRoadX(iv,zs))<vRoadW(iv,zs)+0.8) continue;
+    if (branchPerp(x,zs)<4.2) continue;   // open where a goods line crosses the road
     const rot=Math.atan2(-(coastRoadZ(sd,x+0.75)-coastRoadZ(sd,x-0.75)),1.5), bot=g-0.8;
     gb.add(T.box, mat(x,bot,zs,1.56,rh+0.1-bot,0.6,rot), shade(C_.stone,R,0.03), bot, SS);
     gb.add(T.box, mat(x,rh+0.1,zs,1.56,0.78,0.45,rot), shade(C_.terrace,R,0.02), null, SP);
@@ -2379,7 +2380,7 @@ function genChunk(cx,cz,lod=0){
       a[1]=heightAt(a[0],a[2])+5; b[1]=heightAt(b[0],b[2])+5; festoon(gb,ch,a,b,0.7); } }
   if (!COUNTRY.has(ch.kind)) for (const sd of SIDES) for (let x=Math.ceil(x0/22)*22; x<x0+C; x+=22){
     const zr=coastRoadZ(sd,x); if (zr<z0||zr>=z0+C) continue;
-    const z=zr-sd*(CR_HW+0.2), y=coastRoadH(sd,x);
+    const z=zr-sd*(CR_HW+0.2), y=coastRoadH(sd,x); if (branchPerp(x,z)<3.5) continue;
     gb.add(T.cyl8, mat(x,y-0.3,z,0.18,3.9,0.18), WIRE, null);
     gb.add(T.boxC, mat(x,y+3.5,z+sd*0.35,0.07,0.07,0.8), WIRE, null);
     gb.add(T.boxC, mat(x,y+3.22,z+sd*0.72,0.3,0.42,0.3), BULB, null, 6);
