@@ -727,8 +727,96 @@ function addDoor(gb,H,x,z,ry=0){
   gb.add(T.box, mm(L,mat(0,0,-0.02,1.2,1.75,0.12)), C_.stone, null, SS);
   gb.add(T.cylC, mm(L,mat(0,1.75,-0.02,1.2,0.12,1.2,0,Math.PI/2)), C_.stone, null, SS);
 }
-function addWin(gb,H,x,y,z,ry,w=0.5,h=0.78,shut=null){
-  gb.add(T.boxC, mm(H,mat(x,y,z,w,h,0.12,ry)), C_.win, null, Math.random()<0.5?5:0);
+/* ---------- doorways that can be walked through ----------
+   Near the player a house with a door has an arched opening in its front wall instead of a painted door. The leaf
+   is drawn separately so that it can swing (see the doors section), and the room behind is built only when the
+   player comes close. All heights are relative to the foot of the front wall. */
+const WT=0.3, DR=0.5, DOOR_W=2*DR, DF=0.1, DS=1.85, DOOR_MAX=1.55;   // wall thickness, arch radius, floor, springing
+function triTpl(A){ return {p:new Float32Array(A),n:new Float32Array(A.length),smooth:false}; }
+// a quad A B C D, wound so that its face looks along N
+function q3n(arr,A,B,C,D,N){
+  const ux=B[0]-A[0], uy=B[1]-A[1], uz=B[2]-A[2], vx=C[0]-A[0], vy=C[1]-A[1], vz=C[2]-A[2];
+  const nx=uy*vz-uz*vy, ny=uz*vx-ux*vz, nz=ux*vy-uy*vx;
+  if (nx*N[0]+ny*N[1]+nz*N[2]>=0) arr.push(...A,...B,...C,...A,...C,...D); else arr.push(...A,...C,...B,...A,...D,...C);
+}
+const ARCH_N=10, archPt=(dx,i)=>{ const t=Math.PI-Math.PI*i/ARCH_N; return [dx+DR*Math.cos(t),DS+DR*Math.sin(t)]; };
+// a wall in the plane z=Z, from x0 to x1 and y0 to y1, facing along nz, with the doorway cut out of it
+function holeWall(arr,Z,x0,x1,y0,y1,dx,nz){ const N=[0,0,nz];
+  q3n(arr,[x0,y0,Z],[dx-DR,y0,Z],[dx-DR,y1,Z],[x0,y1,Z],N);
+  q3n(arr,[dx+DR,y0,Z],[x1,y0,Z],[x1,y1,Z],[dx+DR,y1,Z],N);
+  if (y0<DF) q3n(arr,[dx-DR,y0,Z],[dx+DR,y0,Z],[dx+DR,DF,Z],[dx-DR,DF,Z],N);
+  for (let i=0;i<ARCH_N;i++){ const a=archPt(dx,i), b=archPt(dx,i+1); q3n(arr,[a[0],a[1],Z],[b[0],b[1],Z],[b[0],y1,Z],[a[0],y1,Z],N); }
+}
+// the reveal: the sides and soffit of the opening through the thickness of the wall, facing into the opening
+function reveal(arr,Z0,Z1,dx){
+  const P=[[dx-DR,DF]]; for (let i=0;i<=ARCH_N;i++) P.push(archPt(dx,i)); P.push([dx+DR,DF]);
+  for (let i=0;i+1<P.length;i++){ const a=P[i], b=P[i+1], mx=(a[0]+b[0])/2, my=(a[1]+b[1])/2, cy=clamp(my,DF,DS);
+    q3n(arr,[a[0],a[1],Z0],[b[0],b[1],Z0],[b[0],b[1],Z1],[a[0],a[1],Z1],[dx-mx,cy-my,0]); }
+}
+// a centred box without its back (-z) face
+T.boxC5={p:T.boxC.p.slice(0,90),n:new Float32Array(90),smooth:false};
+// a wall in a plane given by P(u,y), facing along N, from u0 to u1 and y0 to y1, with rectangular openings
+// [ua,ub,ya,yb] and, if door is a number, the doorway centred at u=door
+function faceHoles(arr,P,N,u0,u1,y0,y1,rects,door){
+  const q=(ua,ub,ya,yb)=>{ if (ub-ua>1e-4 && yb-ya>1e-4) q3n(arr,P(ua,ya),P(ub,ya),P(ub,yb),P(ua,yb),N); };
+  const us=[u0,u1]; for (const r of rects) us.push(r[0],r[1]); if (door!==null) us.push(door-DR,door+DR);
+  const U=[...new Set(us.map(v=>clamp(v,u0,u1)))].sort((a,b)=>a-b);
+  for (let i=0;i+1<U.length;i++){ const ua=U[i], ub=U[i+1], um=(ua+ub)/2;
+    if (door!==null && um>door-DR && um<door+DR){ if (y0<DF) q(ua,ub,y0,DF); else if (y1<=DS) continue;
+      if (y1>DS+DR) for (let k=0;k<ARCH_N;k++){ const a=archPt(door,k), b=archPt(door,k+1); q3n(arr,P(a[0],a[1]),P(b[0],b[1]),P(b[0],y1),P(a[0],y1),N); }
+      continue; }
+    const cov=rects.filter(r=>r[0]<um && r[1]>um).map(r=>[clamp(r[2],y0,y1),clamp(r[3],y0,y1)]).sort((a,b)=>a[0]-b[0]);
+    let y=y0; for (const [ya,yb] of cov){ q(ua,ub,y,ya); y=Math.max(y,yb); } q(ua,ub,y,y1);
+  }
+}
+// the four sides of a rectangular opening between two parallel planes, facing into the opening
+function rectReveal(arr,P0,P1,r){ const [ua,ub,ya,yb]=r, C=P0((ua+ub)/2,(ya+yb)/2);
+  for (const [a,b] of [[[ua,ya],[ub,ya]],[[ub,ya],[ub,yb]],[[ub,yb],[ua,yb]],[[ua,yb],[ua,ya]]]){
+    const M=P0((a[0]+b[0])/2,(a[1]+b[1])/2); q3n(arr,P0(...a),P0(...b),P1(...b),P1(...a),[C[0]-M[0],C[1]-M[1],C[2]-M[2]]); } }
+// a box without its front (+z) face
+T.box5=(()=>{ const p=T.box.p; return {p:new Float32Array([...p.slice(0,72),...p.slice(90)]),n:new Float32Array(90),smooth:false}; })();
+function shellWithDoor(gb,H,w,h,d,dx,col,by,surf){
+  gb.add(T.box5, mm(H,mat(0,0,0,w,h,d)), col, by, surf);
+  const A=[]; holeWall(A,d/2,-w/2,w/2,0,h,dx,1); reveal(A,d/2,d/2-WT,dx); gb.add(triTpl(A), H, col, by, surf);
+  const S=[]; q3n(S,[dx-DR,DF,d/2-WT],[dx+DR,DF,d/2-WT],[dx+DR,DF,d/2],[dx-DR,DF,d/2],[0,1,0]); gb.add(triTpl(S), H, C_.stone, null, SS);
+}
+// a stone step, jambs and an arch of voussoirs round the opening, standing 5 cm proud of the wall
+function addDoorFrame(gb,H,dx,Z){
+  gb.add(T.box, mm(H,mat(dx,-0.3,Z+0.25,1.35,0.32,0.5)), C_.stone, null, SS);
+  for (const s of [-1,1]) gb.add(T.box, mm(H,mat(dx+s*(DR+0.075),0,Z,0.14,DS,0.1)), C_.stone, null, SS);
+  const m=9, rr=DR+0.075;
+  for (let i=0;i<m;i++){ const a=Math.PI*(i+0.5)/m; gb.add(T.boxC, mm(H,mat(dx+Math.cos(a)*rr,DS+Math.sin(a)*rr,Z,0.14,Math.PI*rr/m+0.02,0.1,0,0,a)), i===4?C_.trim:C_.stone, null, SS); }
+}
+// whether a house can be entered, and if so its room: the floor lies just above the foot of the front wall. Where
+// the hillside rises inside the house above the floor, the ground is not drawn inside the room (see roomClip)
+function doorwayFor(ch,o,base,dx,w,h,d,floors){
+  if (h<2.62 || w<2.4 || d<3) return null;
+  const fl=base+DF, zf=d/2-WT, iw=w/2-WT, zb=-d/2+WT;
+  const R=rng(Math.floor(hash(Math.round(o.x*8),Math.round(o.z*8),4411)*4294967296)), s=R()<0.5?1:-1;
+  const W=(u0,u1,v0,v1)=>{ const [x,z]=localToWorld(o,(u0+u1)/2,(v0+v1)/2); return {x,z,hw:(u1-u0)/2,hd:(v1-v0)/2,rot:o.rot,top:Infinity}; };
+  const walls=[W(-w/2,-iw,-d/2,d/2), W(iw,w/2,-d/2,d/2), W(-w/2,w/2,-d/2,zb), W(-w/2,dx-DR,zf,d/2), W(dx+DR,w/2,zf,d/2)];
+  const [hx,hz]=localToWorld(o,dx-s*DR,d/2-WT/2);
+  const D={x:o.x,z:o.z,rot:o.rot,base,fl,w,d,h,dx,iw,zf,zb,floors,hc:floors>1?2.45:h-0.22,seed:Math.floor(R()*4294967296),s,
+    col:pick(R,DOOR_COLS).clone().multiplyScalar(0.9+R()*0.2),hx,hz,y:base+DF,a:0,av:0,idle:9,walls,wins:[],room:null,idx:-1};
+  (ch.doors||(ch.doors=[])).push(D);
+  return D;
+}
+const DOOR_COLS=['#6a4530','#5a3a28','#3f5f4a','#2f4d6b','#7a3b2a','#4b5a3a','#6b6f72'].map(hex);
+// the leaf, hinged along x=0, in the plane z=0, with its foot at y=0; plank faces come from the building shader
+const DOOR_GEO=(()=>{ const sh=new THREE.Shape(), Sy=DS-DF;
+  sh.moveTo(0,0); sh.lineTo(DOOR_W,0); sh.lineTo(DOOR_W,Sy); sh.absarc(DR,Sy,DR,0,Math.PI,false); sh.lineTo(0,0);
+  const g=new THREE.ExtrudeGeometry(sh,{depth:0.07,bevelEnabled:false,curveSegments:12}).translate(0,0,-0.035);
+  const gb=new GB(), I=new THREE.Matrix4(), white=new THREE.Color(1,1,1), iron=hex('#2a2624');
+  gb.add(tpl(g,false), I, white, 0, SW);
+  for (const z of [-1,1]){ for (const y of [0.25,1.15]) gb.add(T.boxC, mat(DR,y,z*0.04,DOOR_W-0.06,0.12,0.02), white.clone().multiplyScalar(0.85), null, SW);
+    gb.add(T.sph, mat(DOOR_W-0.13,1.0,z*0.075,0.07,0.07,0.07), iron, null);
+    for (const y of [0.3,1.45]) gb.add(T.boxC, mat(0.22,y,z*0.04,0.42,0.05,0.025), iron, null); }
+  return gb.geometry(); })();
+// a window pane, drawn without its inner face, so that from inside a room the window can be seen out of but from
+// the street it cannot be seen into; a house that can be entered records its windows for its rooms
+function addWin(gb,H,x,y,z,ry,w=0.5,h=0.78,shut=null,room=null){
+  gb.add(T.boxC5, mm(H,mat(x,y,z,w,h,0.12,ry)), C_.win, null, Math.random()<0.5?5:0);
+  if (room) room.wins.push({x,y,z,ry,w,h});
   if (shut){ const L=mm(H,mat(x,y,z,1,1,1,ry));
     for (const s of [-1,1]) gb.add(T.boxC, mm(L,mat(s*(w*0.5+0.17),0,0.03,0.32,h+0.06,0.08)), shut, null, SW);
     gb.add(T.boxC, mm(L,mat(0,-h/2-0.06,0.05,w+0.2,0.08,0.18)), C_.trim, null); }
@@ -887,7 +975,9 @@ function addHouse(gb,ch,R,o){
   const wall=o.wall||shade(pick(R,C_.walls),R,0.03);
   const roofC=o.roofCol||(R()<0.1?shade(C_.roofOrange,R,0.04):shade(pick(R,C_.roofs),R,0.05));
   const shut=o.tower?null:(R()<0.4?pick(R,C_.shutters):null);
-  gb.add(T.box, mm(H,mat(0,0,0,w,h,d)), wall, by, o.stoneWalls?SS:SP);
+  // the body is added once the door is placed: a house that can be entered has an opening in its front wall
+  let room=null;
+  const addBody=()=>{ if (room) shellWithDoor(gb,H,w,h,d,room.dx,wall,by,o.stoneWalls?SS:SP); else gb.add(T.box, mm(H,mat(0,0,0,w,h,d)), wall, by, o.stoneWalls?SS:SP); };
   const roof=o.roof||'front', fz=d/2+0.01;
   if (roof==='front') gableRoof(gb,H,w,d,h,w*(0.36+R()*0.12),wall,roofC);
   else if (roof==='side') gableRoof(gb,mm(H,mat(0,0,0,1,1,1,Math.PI/2)),d,w,h,d*(0.32+R()*0.1),wall,roofC);
@@ -903,24 +993,27 @@ function addHouse(gb,ch,R,o){
       gb.add(T.boxC, mm(H,mat(0.55,h+2.8,0,1.0,0.6,0.04)), C_.white, null); }
   }
   const floorH=2.6, floors=Math.max(1,Math.floor(h/floorH));
-  if (!o.noDoor){ const dx=(R()-0.5)*Math.max(0,w-2.6); addDoor(gb,H,dx,fz-0.06);
+  if (!o.noDoor){ const dx=(R()-0.5)*Math.max(0,w-2.6);
+    room=gb.lod===0?doorwayFor(ch,o,base,dx,w,h,d,floors):null;
+    if (room) addDoorFrame(gb,H,dx,d/2); else addDoor(gb,H,dx,fz-0.06);
     if (R()<0.3){ const lx=dx+(dx>0?-0.9:0.9);
       gb.add(T.boxC, mm(H,mat(lx,2.62,fz+0.15,0.06,0.06,0.32)), WIRE, null);
       gb.add(T.boxC, mm(H,mat(lx,2.42,fz+0.3,0.22,0.3,0.22)), BULB, null, 6);
       gb.add(T.pyr, mm(H,mat(lx,2.57,fz+0.3,0.3,0.16,0.3)), WIRE, null);
       const v=new THREE.Vector3(lx,2.42,fz+0.3).applyMatrix4(H); glow(ch,v.x,v.y+gb.oy,v.z,2.2); }
     if (R()<0.12) gb.add(T.boxC, mm(H,mat(dx,2.25,fz+0.45,1.7,0.06,0.95,0,0.32)), R()<0.5?C_.canvasA:C_.white, null);
-    if (R()<0.35){ const sx=dx+(dx>0?-1.4:1.4); if (Math.abs(sx)<w/2-0.5) addWin(gb,H,sx,1.15,fz,0,0.5,0.7,shut); }
+    if (R()<0.35){ const sx=dx+(dx>0?-1.4:1.4); if (Math.abs(sx)<w/2-0.5){ addWin(gb,H,sx,1.15,fz,0,0.5,0.7,shut,room); } }
   }
+  addBody();
   // the climber draws on its own random sequence so that it leaves the layout of the town unchanged
   if (!o.tower && !o.noDoor){ const RB=rng(Math.floor(hash(Math.round(o.x*8),Math.round(o.z*8),4401)*4294967296));
     if (RB()<0.3) addBougainvillea(gb,H,RB,w,fz,Math.min(h-0.4,floors>1?4.4:h-0.3)); }
   for (let f=1; f<floors; f++){
     if (o.tower && f%2===1 && f<floors-1) continue;
     const y=f*floorH+0.95, n=w>4.8&&R()<0.6?2:1;
-    for (let k=0;k<n;k++){ if (R()<0.12) continue; const xx=n===1?(R()-0.5)*(w-1.9):(k?1:-1)*(w*0.24); addWin(gb,H,xx,y,fz,0,0.5,0.78,shut); }
-    for (const s of [1,-1]) if (R()<0.42) addWin(gb,H,s*(w/2+0.01),y,(R()-0.5)*(d-1.8),Math.PI/2*s,0.5,0.78,shut);
-    if (R()<0.3) addWin(gb,H,(R()-0.5)*(w-1.6),y,-fz,Math.PI,0.5,0.78,shut);
+    for (let k=0;k<n;k++){ if (R()<0.12) continue; const xx=n===1?(R()-0.5)*(w-1.9):(k?1:-1)*(w*0.24); addWin(gb,H,xx,y,fz,0,0.5,0.78,shut,room); }
+    for (const s of [1,-1]) if (R()<0.42) addWin(gb,H,s*(w/2+0.01),y,(R()-0.5)*(d-1.8),Math.PI/2*s,0.5,0.78,shut,room);
+    if (R()<0.3) addWin(gb,H,(R()-0.5)*(w-1.6),y,-fz,Math.PI,0.5,0.78,shut,room);
   }
   if (o.tower && o.belfry){ const y=h-1.5;
     for (let s=0;s<4;s++){ const HR=mm(H,mat(0,0,0,1,1,1,s*Math.PI/2)), off=(s%2?w:d)/2+0.01;
@@ -929,6 +1022,7 @@ function addHouse(gb,ch,R,o){
   if (roof==='front' && w>3.8 && R()<0.6) addWin(gb,H,0,h+w*0.13,fz,0,0.38,0.45);
   if (roof!=='flat' && roof!=='spire' && R()<0.3) gb.add(T.box, mm(H,mat(w*0.22,h,-d*0.18,0.55,Math.min(w,d)*0.4+1.0,0.55)), wall, null, SP);
   const ob={x:o.x,z:o.z,hw:w/2,hd:d/2,rot:o.rot,top:Infinity};
+  if (room) ob.room=room;
   ch.obbs.push(ob); ch.place.push(ob);
   return ob;
 }
@@ -1504,7 +1598,7 @@ function genChunk(cx,cz,lod=0){
           // window's own and the two never share a plane
           gb.add(T.cylC, mm(H,mat(s*(W/2+0.01),h-1.4,z,0.6,0.1,0.6,Math.PI/2,Math.PI/2)), C_.win, null, 5); }
         ch.obbs.push({x:cxp,z:czp,hw:W/2,hd:L/2,rot,top:Infinity}); ch.place.push(ob);
-        ch.circles.push({x:cxp-dx*(L/2),z:czp-dz*(L/2),r:W*0.35,top:Infinity});
+        ch.circles.push({x:cxp+dx*(L/2),z:czp+dz*(L/2),r:W*0.35,top:Infinity});   // the apse, behind the altar end
         if (tower){ const th=17+R()*6, top=R(); (ch.snd||(ch.snd=[])).push({id:'church_bell',x:tower.x,y:heightAt(tower.x,tower.z)+th-2,z:tower.z});
           house({x:tower.x,z:tower.z,rot,w:S,d:S,h:th,wall:shade(C_.stone,R,0.04),stoneWalls:true,roof:top<0.4?'flat':'spire',crenel:top<0.2,flag:top<0.4,
             spireCol:R()<0.55?C_.teal:roofC,tower:true,belfry:true,noDoor:true}); }
@@ -2158,6 +2252,7 @@ function updateDaylight(){
   else { LIGHT_DIR.copy(SUN_DIR).multiplyScalar(-1); sun.color.set('#9fb3ff'); sun.intensity=moonUp*1.0; }
   if (LIGHT_DIR.y<0.05) LIGHT_DIR.y=0.05;
   nightU.value=smooth((0.1-e)/0.22); glowU.uNight.value=nightU.value;
+  roomU.value.setRGB(0.97,0.93,0.86).multiplyScalar(0.45+0.5*wd).lerp(_c1.setRGB(0.78,0.58,0.4),nightU.value);
   surfMat.uniforms.uBright.value=0.22+0.78*Math.max(wd,wk*0.75);
   seaMat.specular.set('#121a22').lerp(_c2.set('#9fb0d8'),moonUp);
   renderer.toneMappingExposure=1.0+0.35*wn;
@@ -2230,6 +2325,11 @@ function patchBuildings(mat){
 }
 function patchGround(mat){
   mat.onBeforeCompile=(sh)=>{
+    Object.assign(sh.uniforms,roomClip);
+    sh.fragmentShader=sh.fragmentShader.replace('#include <clipping_planes_fragment>',`#include <clipping_planes_fragment>
+      for (int i=0;i<${ROOM_MAX};i++){ if (i>=uRoomN) break; vec4 A=uRoomA[i], B=uRoomB[i]; vec2 d=vWP.xz-A.xy;
+        if (abs(d.x*A.z-d.y*A.w)<B.x && abs(d.x*A.w+d.y*A.z)<B.y && vWP.y>B.z && vWP.y<B.w) discard; }`)
+      .replace('#include <common>',`#include <common>\nuniform int uRoomN; uniform vec4 uRoomA[${ROOM_MAX}]; uniform vec4 uRoomB[${ROOM_MAX}];`);
     sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nattribute vec2 pave; varying vec2 vPave; varying vec3 vWP; varying vec3 vWN;')
       .replace('#include <project_vertex>','#include <project_vertex>\nvPave=pave; vWP=(modelMatrix*vec4(transformed,1.0)).xyz; vWN=objectNormal;');
     sh.fragmentShader=sh.fragmentShader.replace('#include <common>','#include <common>\nvarying vec2 vPave;'+GLSL_LIB)
@@ -2252,6 +2352,26 @@ function patchGround(mat){
 }
 const nightU={value:0};
 const matB=new THREE.MeshLambertMaterial({vertexColors:true}); patchBuildings(matB);
+// rooms are lit by their own light, not the sun: daylight from the doors and windows by day, lamplight at night.
+// MeshBasicMaterial is unlit, so the faces are shaded here by the way they face
+const roomU={value:new THREE.Color(1,1,1)};
+// the boxes of the rooms that are built, inside which the ground is not drawn: centre, cosine and sine of the
+// heading in A; half width, half depth and the heights between which the ground is cut away in B
+const ROOM_MAX=16, roomClip={uRoomN:{value:0},uRoomA:{value:Array.from({length:ROOM_MAX},()=>new THREE.Vector4())},uRoomB:{value:Array.from({length:ROOM_MAX},()=>new THREE.Vector4())}};
+const matR=new THREE.MeshBasicMaterial({vertexColors:true}); patchBuildings(matR);
+{ const prev=matR.onBeforeCompile; matR.onBeforeCompile=sh=>{ prev(sh); sh.uniforms.uRoom=roomU;
+    sh.vertexShader=sh.vertexShader.replace('#include <begin_vertex>','vec3 objectNormal=vec3(normal);\n#include <begin_vertex>');
+    sh.fragmentShader=sh.fragmentShader.replace('uniform float uNight;','uniform float uNight; uniform vec3 uRoom;')
+      .replace('#include <opaque_fragment>',`{ vec3 n=normalize(vWN); float f=n.y>0.5?0.9:n.y<-0.5?0.66:0.8+0.07*n.x+0.04*n.z; outgoingLight*=uRoom*f;
+        if (vSurf>8.5 && vSurf<9.5) outgoingLight=mix(vec3(0.86,0.92,0.96),vec3(0.05,0.07,0.13),uNight); }
+#include <opaque_fragment>`); };
+  matR.customProgramCacheKey=()=>'rooms'; }
+// the door leaves: lit like the buildings, and at night faintly by the lamps of the rooms they close
+const matD=new THREE.MeshLambertMaterial({vertexColors:true}); patchBuildings(matD);
+{ const prev=matD.onBeforeCompile; matD.onBeforeCompile=sh=>{ prev(sh); sh.uniforms.uRoom=roomU;
+    sh.fragmentShader=sh.fragmentShader.replace('uniform float uNight;','uniform float uNight; uniform vec3 uRoom;')
+      .replace('#include <lights_fragment_begin>','totalEmissiveRadiance+=diffuseColor.rgb*uRoom*(0.22+0.2*uNight);\n#include <lights_fragment_begin>'); };
+  matD.customProgramCacheKey=()=>'doors'; }
 const seaUniforms={uTime:{value:0}};
 const matG=new THREE.MeshLambertMaterial({vertexColors:true}); patchGround(matG);
 /* ---------- fading blocks in and out: a screen-space dither discards a growing share of fragments ---------- */
@@ -2660,6 +2780,7 @@ function updateIsland(){
 let VIEW=4; const VIEW_MIN=2, VIEW_MAX=9;
 let queue=[], farDirty=true, farTimer=0;
 function addChunkToScene(ch){
+  if (ch.doors) doorsDirty=true;
   ch.mesh=new THREE.Mesh(ch.geo,matB); ch.mesh.castShadow=true; ch.mesh.receiveShadow=true;
   ch.ground=new THREE.Mesh(ch.groundGeo,matG); ch.ground.receiveShadow=true;
   scene.add(ch.mesh,ch.ground);
@@ -2681,7 +2802,7 @@ function updateFades(dt){
   for (let i=dying.length-1;i>=0;i--){ const ch=dying[i]; ch.fade-=k;
     if (ch.fade<=0){ disposeChunk(ch); dying.splice(i,1); } else setChunkFade(ch); }
 }
-function disposeChunk(ch){ if (ch.prev){ disposeChunk(ch.prev); ch.prev=null; } untile(ch); scene.remove(ch.mesh,ch.ground); ch.geo.dispose(); ch.groundGeo.dispose(); if (ch.surf){ scene.remove(ch.surf); ch.surfGeo.dispose(); } if (ch.glowPts){ scene.remove(ch.glowPts); ch.glowGeo.dispose(); } for (const b of ch.boats) scene.remove(b.m);
+function disposeChunk(ch){ if (ch.prev){ disposeChunk(ch.prev); ch.prev=null; } if (ch.doors){ doorsDirty=true; for (const D of ch.doors){ disposeRoom(D); doorsMoving.delete(D); } } untile(ch); scene.remove(ch.mesh,ch.ground); ch.geo.dispose(); ch.groundGeo.dispose(); if (ch.surf){ scene.remove(ch.surf); ch.surfGeo.dispose(); } if (ch.glowPts){ scene.remove(ch.glowPts); ch.glowGeo.dispose(); } for (const b of ch.boats) scene.remove(b.m);
   if (ch.fount){ scene.remove(ch.fount); ch.fountGeo.dispose(); } if (ch.clockFaces) for (const f of ch.clockFaces) clockFaces.delete(f); }
 /* ---------- outline blocks drawn in tiles ---------- */
 // Each block is several draw calls, and with hundreds of blocks in view the cost of issuing them, not their
@@ -3242,30 +3363,193 @@ function nearbyChunks(){ const pcx=Math.floor(player.x/C), pcz=Math.floor(player
   return out; }
 function collide(){
   const near=nearbyChunks(), r=player.r, py=player.y;
-  for (let pass=0;pass<3;pass++) for (const ch of near){
-    for (const o of ch.obbs){
-      if (o.top<=py+STEP) continue;
-      if (o.bot!==undefined && py+1.75<o.bot) continue;   // clear underneath
-      if (Math.abs(o.x-player.x)>o.hw+o.hd+1||Math.abs(o.z-player.z)>o.hw+o.hd+1) continue;
+  const pushOut=o=>{
+      if (o.top<=py+STEP) return;
+      if (o.bot!==undefined && py+1.75<o.bot) return;   // clear underneath
+      if (Math.abs(o.x-player.x)>o.hw+o.hd+1||Math.abs(o.z-player.z)>o.hw+o.hd+1) return;
       const [lu,lv]=obbLocal(o,player.x,player.z), cu=clamp(lu,-o.hw,o.hw), cv=clamp(lv,-o.hd,o.hd), du=lu-cu, dv=lv-cv, d=Math.hypot(du,dv);
-      if (d>=r) continue;
+      if (d>=r) return;
       let pu,pv;
       if (d<1e-6){ const ex=o.hw-Math.abs(lu), ez=o.hd-Math.abs(lv), sg=v=>v<0?-1:1; if (ex<ez){ pu=sg(lu)*(o.hw+r); pv=lv; } else { pu=lu; pv=sg(lv)*(o.hd+r); } }
       else { pu=cu+du/d*r; pv=cv+dv/d*r; }
       [player.x,player.z]=localToWorld(o,pu,pv);
-    }
+  };
+  for (let pass=0;pass<3;pass++) for (const ch of near){
+    // a house that can be entered is its walls and furniture, and its door
+    for (const o of ch.obbs){ if (o.room){ if (Math.abs(o.x-player.x)<o.hw+o.hd+1 && Math.abs(o.z-player.z)<o.hw+o.hd+1) for (const q of o.room.walls) pushOut(q); } else pushOut(o); }
     for (const c of ch.circles){
       if (c.top<=py+STEP) continue;
       const dx=player.x-c.x, dz=player.z-c.z, d=Math.hypot(dx,dz), m=c.r+r;
       if (d<m&&d>1e-6){ player.x=c.x+dx/d*m; player.z=c.z+dz/d*m; }
     }
+    if (ch.doors) for (const D of ch.doors) leafPush(D);
   }
   let g=heightAt(player.x,player.z);
+  // indoors the floor replaces the ground, which may rise above it under the back of the house
+  for (const ch of near) for (const o of ch.obbs){ if (!o.room) continue; const [lu,lv]=obbLocal(o,player.x,player.z);
+    if (Math.abs(lu)<=o.hw && Math.abs(lv)<=o.hd && py>o.room.fl-1.2) g=o.room.fl; }
   for (const ch of near){
     for (const o of ch.obbs){ if (o.top===Infinity||o.top>py+STEP) continue; const [lu,lv]=obbLocal(o,player.x,player.z); if (Math.abs(lu)<=o.hw+0.05&&Math.abs(lv)<=o.hd+0.05) g=Math.max(g,o.top); }
     for (const c of ch.circles){ if (c.top===Infinity||c.top>py+STEP) continue; if (Math.hypot(player.x-c.x,player.z-c.z)<=c.r) g=Math.max(g,c.top); }
   }
   return g;
+}
+/* ================= doors and rooms ================= */
+// Every door of the blocks at full detail is one instance of a single mesh. A door swings either way, away from
+// whoever pushes it, as far as it is pushed; once nobody is within its sweep it eases shut. A door whose room has
+// not yet been built stays shut.
+const DOOR_CAP=4096, doorMesh=new THREE.InstancedMesh(DOOR_GEO,matD,DOOR_CAP);
+doorMesh.count=0; doorMesh.frustumCulled=false; doorMesh.castShadow=true; doorMesh.receiveShadow=true; scene.add(doorMesh);
+let doorsDirty=true; const doorsMoving=new Set();
+const _dm=new THREE.Matrix4(), _dqq=new THREE.Quaternion(), _dp=new THREE.Vector3(), _ds=new THREE.Vector3(1,1,1), _dY=new THREE.Vector3(0,1,0);
+const leafAng=(D,a)=>D.rot+(D.s>0?a:Math.PI-a);
+function leafDist(D,a,x,z){ const t=leafAng(D,a), ux=Math.cos(t), uz=-Math.sin(t), px=x-D.hx, pz=z-D.hz, k=clamp(px*ux+pz*uz,0,DOOR_W);
+  return Math.hypot(px-ux*k,pz-uz*k); }
+function doorSet(D){ if (D.idx<0) return;
+  _dm.compose(_dp.set(D.hx,D.y,D.hz),_dqq.setFromAxisAngle(_dY,leafAng(D,D.a)),_ds); doorMesh.setMatrixAt(D.idx,_dm); doorMesh.instanceMatrix.needsUpdate=true; }
+function doorsRebuild(){
+  doorsDirty=false; let n=0;
+  for (const ch of chunks.values()) if (ch.lod===0 && ch.doors) for (const D of ch.doors){
+    if (n>=DOOR_CAP){ D.idx=-1; continue; } D.idx=n++; doorSet(D); doorMesh.setColorAt(D.idx,D.col); }
+  doorMesh.count=n; doorMesh.instanceMatrix.needsUpdate=true; if (doorMesh.instanceColor) doorMesh.instanceColor.needsUpdate=true;
+  for (const D of doorsMoving) if (D.idx<0) doorsMoving.delete(D);
+}
+function nearDoors(rad){ const out=[]; for (const ch of nearbyChunks()) if (ch.doors) for (const D of ch.doors)
+  if (Math.abs(D.hx-player.x)<rad && Math.abs(D.hz-player.z)<rad) out.push(D); return out; }
+// pushing: the door gives way, up to 4 rad/s, until it no longer touches the player; the side it gives way to is
+// taken from where the player stood before this frame's step
+function doorsStep(dt){
+  const r=player.r+0.04;
+  for (const D of nearDoors(3)){
+    if (!D.room || Math.abs(player.y-D.fl)>1.2) continue;
+    let d=leafDist(D,D.a,player.x,player.z); if (d>=r) continue;
+    const t=leafAng(D,D.a), px=player.ox-D.hx, pz=player.oz-D.hz, dLx=-Math.sin(t)*D.s, dLz=-Math.cos(t)*D.s;
+    const dir=(px*dLx+pz*dLz)>0?-1:1, lim=clamp(D.a+dir*4*dt,-DOOR_MAX,DOOR_MAX); let a=D.a;
+    while (d<r && (dir>0?a<lim:a>lim)){ a=dir>0?Math.min(lim,a+0.01):Math.max(lim,a-0.01); d=leafDist(D,a,player.x,player.z); }
+    if (a!==D.a){ if (D.a===0) sndPlay('door_open','world',[D.hx,D.y+1,D.hz]); D.av=(a-D.a)/dt*0.5; D.a=a; D.idle=0; doorsMoving.add(D); doorSet(D); }
+  }
+  for (const D of doorsMoving){
+    D.idle+=dt;
+    const hold=Math.hypot(player.x-D.hx,player.z-D.hz)<DOOR_W+player.r+0.15;
+    if (D.idle>1.2 && !hold) D.av+=(-7*D.a-5.3*D.av)*dt; else D.av*=Math.exp(-dt*5);
+    let a=clamp(D.a+D.av*dt,-DOOR_MAX,DOOR_MAX); if (Math.abs(a)===DOOR_MAX) D.av=0;
+    if (hold && leafDist(D,a,player.x,player.z)<r){ a=D.a; D.av=0; }
+    if (D.a!==0 && (a===0 || Math.sign(a)!==Math.sign(D.a) || (Math.abs(a)<0.003 && Math.abs(D.av)<0.05))){ a=0; D.av=0; doorsMoving.delete(D); sndPlay('door_close','world',[D.hx,D.y+1,D.hz]); }
+    D.a=a; doorSet(D);
+  }
+}
+// the player is kept out of a leaf on the side they came from
+function leafPush(D){
+  if (Math.abs(D.hx-player.x)>2 || Math.abs(D.hz-player.z)>2 || Math.abs(player.y-D.fl)>1.9) return;
+  const r=player.r+0.04, t=leafAng(D,D.a), ux=Math.cos(t), uz=-Math.sin(t), px=player.x-D.hx, pz=player.z-D.hz, k=clamp(px*ux+pz*uz,0,DOOR_W);
+  const cx=D.hx+ux*k, cz=D.hz+uz*k; let dx=player.x-cx, dz=player.z-cz; const d=Math.hypot(dx,dz); if (d>=r) return;
+  const side=Math.sign((player.ox-D.hx)*(-uz)+(player.oz-D.hz)*ux)||1;
+  if (k>0.02 && k<DOOR_W-0.02 && (d<1e-6 || Math.sign(dx*(-uz)+dz*ux)!==side)){ player.x=cx-uz*side*r; player.z=cz+ux*side*r; return; }
+  if (d<1e-6) return; player.x=cx+dx/d*r; player.z=cz+dz/d*r;
+}
+// near a doorway or indoors the player is slimmer, so that a 1 m doorway can be passed
+function playerRadius(dt){
+  let want=0.6;
+  for (const ch of nearbyChunks()){ if (!ch.doors) continue;
+    for (const D of ch.doors){ if (Math.hypot(D.hx-player.x,D.hz-player.z)<3.5){ want=0.3; break; }
+      const [lu,lv]=obbLocal(D,player.x,player.z); if (Math.abs(lu)<D.w/2+0.3 && Math.abs(lv)<D.d/2+0.3){ want=0.3; break; } }
+    if (want<0.6) break; }
+  player.r+=clamp(want-player.r,-0.5*dt,0.5*dt);
+}
+
+/* ---------- rooms ---------- */
+// built for the nearest enterable houses, a few at a time, and taken down again as the player moves away
+const rooms=new Set(); let roomScan=0;
+function disposeRoom(D){ if (!D.room) return; scene.remove(D.room); D.room.geometry.dispose(); D.room=null; rooms.delete(D); }
+function roomsUpdate(dt){
+  if (doorsDirty) doorsRebuild();
+  roomScan-=dt; if (roomScan>0) return; roomScan=0.2;
+  const cand=[], live=new Set();
+  for (const ch of chunks.values()) if (ch.lod===0 && ch.doors) for (const D of ch.doors){ live.add(D);
+    const dd=Math.hypot(D.x-player.x,D.z-player.z); if (dd<30) cand.push([dd,D]); }
+  cand.sort((a,b)=>a[0]-b[0]); const want=new Set(cand.filter(c=>c[0]<26).slice(0,ROOM_MAX).map(c=>c[1]));
+  const short=[...want].some(D=>!D.room);
+  for (const D of rooms) if (!live.has(D) || (!want.has(D) && (short || Math.hypot(D.x-player.x,D.z-player.z)>30))) disposeRoom(D);
+  for (const D of want) if (!D.room && rooms.size<ROOM_MAX){ D.room=new THREE.Mesh(buildRoomGeo(D),matR); D.room.matrixAutoUpdate=false; scene.add(D.room); rooms.add(D); break; }
+  let n=0; for (const D of rooms){ const [cx,cz]=localToWorld(D,0,(D.zb+D.zf)/2);
+    roomClip.uRoomA.value[n].set(cx,cz,Math.cos(D.rot),Math.sin(D.rot)); roomClip.uRoomB.value[n].set(D.iw,(D.zf-D.zb)/2,D.fl-40,D.base+D.hc+0.05); n++; }
+  roomClip.uRoomN.value=n;
+}
+const ROOM_WALLS=['#f2ece2','#efe6d6','#f4efe6','#ece3d3','#f1e7d8'].map(hex), ROOM_DADO=['#b9a27e','#8fa79a','#9fb0bf','#c39a7a','#a8a08a'].map(hex);
+const ROOM_FLOORS=['#b4694c','#a95f45','#c07a58','#9c8a72'].map(hex), ROOM_WOOD=['#7a5a3e','#6e4e34','#86664a'].map(hex);
+function buildRoomGeo(D){
+  const R=rng(D.seed), gb=new GB(0), H=mat(D.x,D.base,D.z,1,1,1,D.rot), iw=D.iw, zf=D.zf, zb=D.zb, F=DF, Hc=D.hc, ao=D.base;
+  const wallC=pick(R,ROOM_WALLS), dadoC=pick(R,ROOM_DADO), floorC=pick(R,ROOM_FLOORS), wood=pick(R,ROOM_WOOD), dark=wood.clone().multiplyScalar(0.6);
+  const quads=(fn,col,surf,aob=ao)=>{ const A=[]; fn(A); gb.add(triTpl(A),H,col,aob,surf); };
+  const B=(x,y,z,sx,sy,sz,col,surf=0,ry=0)=>gb.add(T.box, mm(H,mat(x,y,z,sx,sy,sz,ry)), col, ao, surf);
+  // floor, ceiling and walls, the front one with the doorway
+  quads(A=>q3n(A,[-iw,F,zb],[iw,F,zb],[iw,F,zf],[-iw,F,zf],[0,1,0]), floorC, R()<0.75?SS:SW);
+  quads(A=>q3n(A,[-iw,Hc,zb],[iw,Hc,zb],[iw,Hc,zf],[-iw,Hc,zf],[0,-1,0]), wood.clone().multiplyScalar(1.15), SW);
+  // the inner faces of the four walls, each as P(u,y) at a given inset from the wall's outer face, with its windows
+  const hw=D.w/2, hd=D.d/2, wins=D.wins.filter(v=>v.y-v.h/2>F+0.05 && v.y+v.h/2<Hc-0.05);
+  const faces=[
+    {N:[0,0,-1],P:k=>(u,y)=>[u,y,hd-k],u0:-iw,u1:iw,door:D.dx,sel:v=>Math.abs(v.ry)<0.1,u:v=>v.x},
+    {N:[0,0,1],P:k=>(u,y)=>[u,y,-hd+k],u0:-iw,u1:iw,door:null,sel:v=>Math.abs(Math.abs(v.ry)-Math.PI)<0.1,u:v=>v.x},
+    {N:[-1,0,0],P:k=>(u,y)=>[hw-k,y,u],u0:zb,u1:zf,door:null,sel:v=>Math.abs(v.ry-Math.PI/2)<0.1,u:v=>v.z},
+    {N:[1,0,0],P:k=>(u,y)=>[-hw+k,y,u],u0:zb,u1:zf,door:null,sel:v=>Math.abs(v.ry+Math.PI/2)<0.1,u:v=>v.z}];
+  const dh=F+0.95, e=0.01, back=zb>-hd+WT+0.01;   // a room cut short by the hillside has a plain back wall
+  for (const f of faces){ f.rects=(f===faces[1]&&back)?[]:wins.filter(f.sel).map(v=>[f.u(v)-v.w/2,f.u(v)+v.w/2,v.y-v.h/2,v.y+v.h/2]);
+    f.k=f===faces[1]?hd+zb:WT; }
+  quads(A=>{ for (const f of faces) faceHoles(A,f.P(f.k),f.N,f.u0,f.u1,F,Hc,f.rects,f.door); }, wallC, 0);
+  // a painted dado round the walls, standing a centimetre off them
+  quads(A=>{ for (const f of faces) faceHoles(A,f.P(f.k+e),f.N,f.u0,f.u1,F,dh,f.rects,f.door); }, dadoC, 0);
+  // the windows: the reveal through the wall to the outer face, a casement frame at the outer face and a deep sill
+  quads(A=>{ for (const f of faces) for (const r of f.rects) rectReveal(A,f.P(f.k),f.P(0),r); }, wallC, 0);
+  for (const f of faces) for (const r of f.rects){ const um=(r[0]+r[1])/2, ym=(r[2]+r[3])/2, ry=Math.atan2(-f.N[0],-f.N[2]);
+    const at=(u,y,k)=>f.P(k)(u,y);
+    for (const [sx,sy,u,y] of [[0.04,r[3]-r[2],r[0]+0.02,ym],[0.04,r[3]-r[2],r[1]-0.02,ym],[0.04,r[3]-r[2],um,ym],[r[1]-r[0],0.04,um,r[3]-0.02],[r[1]-r[0],0.04,um,ym+0.08]]){
+      const p=at(u,y,0.1); gb.add(T.boxC, mm(H,mat(p[0],p[1],p[2],sx,sy,0.05,ry)), dark, null); }
+    const p=at(um,r[2]-0.025,f.k-0.04); gb.add(T.boxC, mm(H,mat(p[0],p[1],p[2],r[1]-r[0]+0.16,0.05,f.k+0.08-0.04,ry)), wallC.clone().multiplyScalar(0.92), null); }
+  // beams across the ceiling
+  for (let z=zb+0.6; z<zf-0.3; z+=0.85) B(0,Hc-0.16,z,2*iw,0.16,0.14,dark,SW);
+  // furniture, kept clear of the door's sweep
+  const free=[], hingeX=D.dx-D.s*DR, solid=[];
+  const clearOfDoor=(x,z,hw,hd)=>Math.hypot(clamp(hingeX,x-hw,x+hw)-hingeX, clamp(zf,z-hd,z+hd)-zf)>DOOR_W+0.25;
+  const fits=(x,z,hw,hd)=>x-hw>=-iw-1e-6 && x+hw<=iw+1e-6 && z-hd>=zb-1e-6 && z+hd<=zf+1e-6 && clearOfDoor(x,z,hw,hd) && !free.some(q=>Math.abs(q[0]-x)<q[2]+hw && Math.abs(q[1]-z)<q[3]+hd);
+  const take=(x,z,hw,hd,pad=0)=>{ free.push([x,z,hw+pad,hd+pad]); solid.push([x,z,hw,hd]); };
+  // a dresser of plates against the back wall
+  for (let t=0;t<6;t++){ const x=(R()-0.5)*(2*iw-1.4); if (!fits(x,zb+0.22,0.65,0.22)) continue;
+    B(x,F,zb+0.22,1.3,0.85,0.44,wood,SW); B(x,F+0.85,zb+0.24,1.36,0.04,0.48,dark,SW); B(x,F+0.89,zb+0.1,1.3,0.95,0.2,wood,SW);
+    for (const y of [1.25,1.6]){ B(x,F+y-0.02,zb+0.22,1.24,0.03,0.2,dark,SW);
+      for (let k=0;k<5;k++) gb.add(T.cylC, mm(H,mat(x-0.5+k*0.25,F+y+0.11,zb+0.215,0.22,0.02,0.22,0,Math.PI/2)), R()<0.5?hex('#f3efe6'):hex('#3d6aa8'), null); }
+    take(x,zb+0.22,0.65,0.22,0.1); break; }
+  // a hearth with a chimney breast on one side wall
+  if (zf-zb>2.8){ const side=R()<0.5?-1:1, x=side*(iw-0.25);
+    for (let t=0;t<6;t++){ const z=zb+0.9+R()*(zf-zb-1.8); if (!fits(x,z,0.25,0.75)) continue;
+      B(x,F,z,0.5,Hc-F,1.5,wallC); B(x-side*0.27,F,z,0.06,0.85,0.95,hex('#2a2320'));
+      B(x-side*0.42,F,z,0.35,0.06,1.6,hex('#9a8f80'),SS); B(x-side*0.29,F+1.15,z,0.24,0.07,1.7,wood,SW);
+      for (const dz of [-0.15,0.05]) gb.add(T.cylC, mm(H,mat(x-side*0.36,F+0.12,z+dz,0.12,0.5,0.12,Math.PI/2,0,0)), hex('#4a3626'), null);
+      gb.add(T.boxC, mm(H,mat(x-side*0.36,F+0.2,z,0.18,0.04,0.32)), hex('#ff8a3a'), null);
+      for (let k=0;k<3;k++) gb.add(T.cyl8, mm(H,mat(x-side*0.3,F+1.22,z-0.5+k*0.5,0.12,0.18,0.12)), pick(R,[hex('#c9b48a'),hex('#7d9a6a'),hex('#b5654a')]), null);
+      take(x,z,0.25,0.75,0.05); break; } }
+  // a table with chairs under a hanging lamp, on a rug
+  { const rotT=R()<0.5?0:Math.PI/2, tw=rotT?0.4:0.6, td=rotT?0.6:0.4;
+    for (let t=0;t<10;t++){ const x=(R()-0.5)*(2*iw-2*tw-1.2), z=zb+td+0.6+R()*Math.max(0,zf-zb-2*td-1.2); if (!fits(x,z,tw+0.45,td+0.45)) continue;
+      const rug=pick(R,[hex('#9c3f34'),hex('#3f5f7a'),hex('#7a6a3a')]);
+      B(x,F,z,2*tw+1.0,0.008,2*td+1.0,rug);
+      B(x,F+0.72,z,2*tw,0.04,2*td,wood,SW);
+      for (const sx of [-1,1]) for (const sz of [-1,1]) B(x+sx*(tw-0.06),F,z+sz*(td-0.06),0.05,0.72,0.05,dark);
+      const chairs=rotT?[[0,-1],[0,1],[-1,0],[1,0]]:[[-1,0],[1,0],[0,-1],[0,1]], cn=2+Math.floor(R()*3), chairC=pick(R,[dark,hex('#2f5d46'),hex('#ece8df'),wood]);
+      for (let c=0;c<cn;c++){ const [cxs,czs]=chairs[c], cx=x+cxs*(tw+0.32), cz=z+czs*(td+0.32), H2=mm(H,mat(cx,F,cz,1,1,1,Math.atan2(-cxs,-czs)));
+        for (const lx of [-0.17,0.17]) for (const lz of [-0.17,0.17]) gb.add(T.box, mm(H2,mat(lx,0,lz,0.035,0.45,0.035)), chairC, ao);
+        gb.add(T.box, mm(H2,mat(0,0.45,0,0.42,0.04,0.42)), chairC, ao, SW);
+        gb.add(T.box, mm(H2,mat(0,0.49,0.19,0.42,0.48,0.03)), chairC, ao, SW); }
+      gb.add(T.cyl8, mm(H,mat(x,F+1.9,z,0.015,Hc-F-1.9,0.015)), hex('#2a2624'), null);
+      gb.add(T.cone, mm(H,mat(x,F+1.75,z,0.4,0.22,0.4)), pick(R,[hex('#e9e2cf'),hex('#3f5f4a'),hex('#b5654a')]), null);
+      gb.add(T.sphLo, mm(H,mat(x,F+1.76,z,0.12,0.12,0.12)), hex('#fff1c8'), null);
+      take(x,z,tw+0.4,td+0.4,0); break; } }
+  // a picture on whichever side wall is free
+  { const side=R()<0.5?-1:1, z=(zb+zf)/2+(R()-0.5)*0.8;
+    gb.add(T.boxC, mm(H,mat(side*(iw-0.02),F+1.55,z,0.03,0.5,0.65)), dark, null);
+    gb.add(T.boxC, mm(H,mat(side*(iw-0.035),F+1.55,z,0.02,0.4,0.55)), pick(R,[hex('#6f8fa8'),hex('#a8875a'),hex('#7a9a6a')]), null); }
+  // the furniture's colliders are added to the house's walls once
+  if (!D.furn){ D.furn=true; for (const [x,z,hw,hd] of solid){ const [wx,wz]=localToWorld(D,x,z); D.walls.push({x:wx,z:wz,hw,hd,rot:D.rot,top:Infinity}); } }
+  return gb.geometry();
 }
 // the highest surface the player could stand on at (x,z): terrain, steps, terraces, moles
 function standableAt(x,z){
@@ -3303,6 +3587,7 @@ const SOUND_DEF={
   amb_day:{g:1}, amb_night:{g:1}, amb_dawn:{g:0.8}, amb_cicadas:{g:0.7}, amb_crickets:{g:0.6},
   wind_trees:{g:0.6}, wind_open:{g:0.8}, owl:{g:0.8,ref:12}, gulls:{g:0.7,ref:18},
   water_lap:{g:1,ref:14}, surf:{g:1,ref:14}, waves_rocks:{g:1,ref:10}, hull_slap:{g:0.7,ref:3}, boat_creak:{g:0.6,ref:3}, rigging:{g:0.5,ref:3},
+  door_open:{g:0.7,ref:3}, door_close:{g:0.7,ref:3},
   fountain:{g:0.8,ref:3}, cat_mew:{g:0.8,ref:2.5}, clock_bell:{g:1,ref:30}, church_bell:{g:1,ref:45}, cafe:{g:0.7,ref:5},
   step_pavement:{g:0.5}, step_sand:{g:0.5}, step_soil:{g:0.5}, step_grass:{g:0.5}, step_wood:{g:0.5}, step_metal:{g:0.5}, land:{g:0.7},
   rail_joint:{g:0.8,ref:5}, train_start:{g:1,ref:15}, train_run:{g:1,ref:15}, train_stop:{g:1,ref:15}, train_idle:{g:0.7,ref:8},
@@ -3930,6 +4215,7 @@ function frame(now){
     if (zk) dist=clamp(dist*Math.exp(zk*dt*1.8),7,60000); }
   let mx=(keys.KeyD?1:0)-(keys.KeyA?1:0)+joy.x+pad.x, mz=(keys.KeyW?1:0)-(keys.KeyS?1:0)-joy.y-pad.y;
   const ml=Math.hypot(mx,mz), moving=started&&ml>0.05&&!onBoard();
+  player.ox=player.x; player.oz=player.z;
   if (moving){
     if (ml>1){ mx/=ml; mz/=ml; }
     const fly=mode==='above'&&dist>60, sp=(fly?dist*0.45:4.6)*((keys.ShiftLeft||keys.ShiftRight)?(fly?2.5:1.96):1);
@@ -3942,6 +4228,7 @@ function frame(now){
   }
   if (!onBoard() && !(mode==='above'&&dist>60)){
   if (started && keys.Space && player.grounded){ player.vy=5.2; player.grounded=false; }
+  playerRadius(dt); doorsStep(dt);
   const ground=collide();
   // just ashore from a ferry, the player is held at quay height until the ground under them has been built
   let held=false;
@@ -3955,7 +4242,7 @@ function frame(now){
   if (player.y<ground) player.y=ground;
   eyeY = (eyeY===null||Math.abs(eyeY-player.y)>3) ? player.y : eyeY+(player.y-eyeY)*(1-Math.exp(-dt*14));
   }
-  updateChunks(player.x,player.z,6); updateFades(dt); updateTiles();
+  updateChunks(player.x,player.z,6); updateFades(dt); updateTiles(); roomsUpdate(dt);
   // dynamic draw distance: frames spent building blocks are ignored; slow frames shrink the view, sustained headroom grows it
   if (!queue.length){ perf.t+=dt; perf.n++; perf.sum+=dt;
     if (perf.t>2){ const avg=perf.sum/perf.n;
@@ -3995,7 +4282,10 @@ function frame(now){
     camera.rotation.set(fpPitch,yaw,0,'YXZ'); camPos.copy(camera.position);
     // the bird's-eye view widens the near plane with its zoom; street level always restores it, or ground close
     // to the eye on a slope would be clipped away
-    if (camera.far!==3600 || camera.near!==0.3){ camera.far=3600; camera.near=0.3; camera.updateProjectionMatrix(); sea.scale.setScalar(1); scene.fog.near=90; scene.fog.far=1500; islandMesh.visible=false; farMesh.visible=farGlow.visible=true; }
+    // indoors and in doorways the eye can come within 0.3 m of a wall, so the near plane comes in to keep it whole
+    const nearW=player.r<0.55?0.1:0.3;
+    if (camera.near!==nearW && camera.far===3600){ camera.near=nearW; camera.updateProjectionMatrix(); }
+    if (camera.far!==3600 || camera.near!==nearW){ camera.far=3600; camera.near=nearW; camera.updateProjectionMatrix(); sea.scale.setScalar(1); scene.fog.near=90; scene.fog.far=1500; islandMesh.visible=false; farMesh.visible=farGlow.visible=true; }
     if (descent.t>=0){ descent.t+=dt; const k=smooth(descent.t/descent.dur);
       _dq.copy(camera.quaternion); camera.position.lerpVectors(descent.p,camera.position,k); camera.quaternion.slerpQuaternions(descent.q,_dq,k);
       camera.fov=lerp(descent.fov,70,k); camera.far=lerp(descent.far,3600,k); camera.updateProjectionMatrix(); glowScale();
@@ -4126,7 +4416,7 @@ requestAnimationFrame(()=>setTimeout(()=>{
   document.getElementById('loading').remove();
   requestAnimationFrame(frame);
 },30));
-window.__village={ fe, co, lightsNear, beams, ruinIn, cats, catHome, get ridden(){ return ridden; },
+window.__village={ heightAt, player, chunks, rooms, doorMesh, keys, setYaw:v=>{yaw=v;}, get yaw(){return yaw;}, fe, co, lightsNear, beams, ruinIn, cats, catHome, get ridden(){ return ridden; },
   findHarbour(){ for (let d=0;d<12;d++) for (const sd of SIDES) for (const n of [Math.floor(player.x/HARB)+d,Math.floor(player.x/HARB)-d]){ const H=harbourInfo(sd,n); if (H) return {x:H.x,z:coastZ(sd,H.x)+sd*7,W:H.W,sd,qz:coastZ(sd,H.x+H.W/2-1)+sd*2.5}; } return null; },
   findBeach(){ for (let x=player.x; x<player.x+3000; x+=10) for (const sd of SIDES){ const z=coastZ(sd,x)+sd*5; if (heightAt(x,z)<0.6 && heightAt(x,z)>0.1 && !harbourAt(sd,x)) return {x,z,sd}; } return null; },
   ridge(x){ return {x,z:ridgeZ(x)}; },
