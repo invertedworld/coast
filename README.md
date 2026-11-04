@@ -42,6 +42,7 @@ The panel opened with **H** lists the controls. They are reproduced here for ref
 | Arrow keys | Turn and tilt the bird's-eye view. |
 | B | Turns tilt-shift on or off in the bird's-eye and chase views. |
 | T | Speeds up time while held. |
+| P | Pauses the world: the trains, ferries, boats, sea, lighthouse beams, cats and time of day stand still while the player walks, flies and looks about as usual. P again resumes. |
 | R | Rides in the passenger train's cab. R or V again steps off beside the track. |
 | C | Follows the train being ridden, or else the nearer of the passenger and goods trains, from behind. The mouse orbits the camera and + − change its distance. C or V again steps off beside the track. |
 | G | Rides in the cab of the goods train working the nearest goods line, setting it to work there if none is near. G or V again steps off beside the track. |

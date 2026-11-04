@@ -89,6 +89,7 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
     <div class="group"><h3>Time and island</h3>
       <div class="row"><span><kbd>N</kbd></span><span>Night or day</span></div>
       <div class="row"><span><kbd>T</kbd></span><span>Hold to speed up time</span></div>
+      <div class="row"><span><kbd>P</kbd></span><span>Pause the trains, ferries, boats, sea and time of day; walking and looking about carry on. P again resumes</span></div>
       <div class="row"><span><kbd>I</kbd></span><span>Generate a new island</span></div>
     </div>
     <div class="group"><h3>Sound and screen</h3>
@@ -4935,6 +4936,7 @@ addEventListener('keydown',e=>{ keys[e.code]=true;
   if (e.code==='KeyF' && !e.repeat) toggleFerry();
   if (e.code==='KeyG' && !e.repeat) toggleGoods();
   if (e.code==='KeyB') setTilt(!tiltShift);
+  if (e.code==='KeyP' && !e.repeat){ paused=!paused; lastClock=null; }
   if (e.code==='KeyH' && !e.repeat){ helpEl.hidden=!helpEl.hidden; lastCell=null; }
   if (e.code==='KeyI' && !e.repeat) newIsland();
   if (e.code==='KeyN' && !e.repeat){ hour=nightU.value>0.5?10:22; SNDS.hour=Math.floor(hour); }   // to night, or back to day, without the bells striking the jump
@@ -5223,7 +5225,7 @@ let lastCell=null, lastElev=null, lastClock='';
 function updateHUD(){
   const e=Math.round(player.y);
   const hh=Math.floor(hour), mn=Math.floor((hour-hh)*60/5)*5, clock=`${String(hh).padStart(2,'0')}:${String(mn).padStart(2,'0')}`;
-  if (e!==lastElev||clock!==lastClock){ lastElev=e; lastClock=clock; elevEl.textContent=`${clock} · `+(e<=0?'sea level':`${e} m above the sea`); }
+  if (e!==lastElev||clock!==lastClock){ lastElev=e; lastClock=clock; elevEl.textContent=`${clock} · `+(paused?'paused · ':'')+(e<=0?'sea level':`${e} m above the sea`); }
   let info=null;
   const HB=harbourAt(shoreSide(player.x,player.z),player.x), sh=HB?hbS(HB,player.x,player.z):0;
   if (HB && sh<12 && sh>-HB.L-4 && Math.abs(player.x-HB.x)<HB.W/2+5) info={id:'h'+HB.n,label:'Harbour',name:HB.name,desc:'Basin enclosed by two stone moles, with a quay for mooring and a lighthouse at the entrance.'};
@@ -5287,9 +5289,11 @@ function glowScale(){ glowU.uScale.value=renderer.getPixelRatio()*innerHeight/(2
 function resize(){ const w=innerWidth, h=innerHeight; renderer.setSize(w,h,false); camera.aspect=w/h; camera.updateProjectionMatrix(); glowScale(); }
 addEventListener('resize',resize); resize();
 const camPos=new THREE.Vector3(), camTarget=new THREE.Vector3();
-let last=performance.now(), time=0, firstCam=true, eyeY=null, aboveY=null; const perf={t:0,n:0,sum:0,good:0};
+let paused=false, last=performance.now(), time=0, firstCam=true, eyeY=null, aboveY=null; const perf={t:0,n:0,sum:0,good:0};
 function frame(now){
-  const dt=Math.min(0.05,(now-last)/1000); last=now; time+=dt;
+  // P pauses the world (trains, ferries, boats, the sea, the lighthouses, the cats and the time of day) while the
+  // player still walks, flies and looks about; wdt is the world's step
+  const dt=Math.min(0.05,(now-last)/1000), wdt=paused?0:dt; last=now; time+=wdt;
   pollPad(dt);
   const turn=(keys.KeyQ||keys.ArrowLeft?1:0)-(keys.KeyE||keys.ArrowRight?1:0);
   yaw+=turn*dt*1.8;
@@ -5362,7 +5366,7 @@ function frame(now){
     scene.fog.near=Math.max(160,dist*1.1); scene.fog.far=fogFar;
     sea.scale.setScalar(Math.max(1,dist*8/9000));
   } else if (mode==='street') {
-    camera.position.set(player.x,eyeY+1.62+(moving&&player.grounded?Math.sin(time*9)*0.03:0),player.z);
+    camera.position.set(player.x,eyeY+1.62+(moving&&player.grounded?Math.sin(now*0.009)*0.03:0),player.z);
     camera.rotation.set(fpPitch,yaw,0,'YXZ'); camPos.copy(camera.position);
     // the bird's-eye view widens the near plane with its zoom; street level always restores it, or ground close
     // to the eye on a slope would be clipped away
@@ -5382,9 +5386,9 @@ function frame(now){
   seaUniforms.uTime.value=time;
   for (const ch of chunks.values()) for (const b of ch.boats){ if (!b.floating) continue;
     b.m.position.y=b.y+0.07*Math.sin(time*1.4+b.ph); b.m.rotation.z=0.035*Math.sin(time*1.1+b.ph); b.m.rotation.x=0.022*Math.sin(time*0.8+b.ph*1.7); }
-  updateSailers(dt); updateTrain(dt); updateGoods(dt); updateFerries(dt); gangwayStep(); coachStep(dt,turn);
+  updateSailers(wdt); updateTrain(wdt); updateGoods(wdt); updateFerries(wdt); gangwayStep(); coachStep(wdt,turn);
   const tx=Math.round(player.x/2)*2, tz=Math.round(player.z/2)*2, ty=Math.round(player.y);
-  hour=(hour+dt/HOUR_SEC*(keys.KeyT?40:1))%24; updateDaylight(); updateClocks();
+  hour=(hour+wdt/HOUR_SEC*(keys.KeyT?40:1))%24; updateDaylight(); updateClocks();
   if (mode==='ferry'){
     // walking about the main deck relative to where one looks; the eye rides the ferry's gentle motion
     fe.yaw+=turn*dt*1.8;
@@ -5433,8 +5437,8 @@ function frame(now){
   if (mode==='coach') tunnelLight(dt,true);
   sndUpdate(dt);
   if (window.__freeCam){ camera.position.copy(window.__freeCam.p); camLookAt(window.__freeCam.t); sky.position.copy(camera.position); }
-  updateBeams(dt);
-  updateCats(dt);
+  updateBeams(wdt);
+  updateCats(wdt);
   updateShadowFrame();
   updateHUD();
   render();
