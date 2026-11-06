@@ -1,6 +1,6 @@
 # Coast
 
-Coast is a procedurally generated Mediterranean island, rendered in the browser with Three.js. The island runs without end to the east and west and is between half a kilometre and two kilometres wide. Its villages are laid out from the rules of medieval hill towns, and open country, olive groves, harbours and a coastal railway lie between them. Ferries run from the mainland harbours to smaller offshore islands, sailing boats pass along the coast, and the day passes from dawn to night in twelve minutes.
+Coast is a procedurally generated Mediterranean island, rendered in the browser with Three.js. The island runs without end to the east and west and is between half a kilometre and two kilometres wide. Its villages are laid out from the rules of medieval hill towns, and open country, olive groves, harbours and a coastal railway lie between them. Ferries run from the mainland harbours to smaller offshore islands, sailing boats pass along the coast, and the day passes from dawn to night in twelve minutes. The world repeats every 8.8 km from north to south, so that whoever goes far enough out to sea to the north arrives from the open sea at the south shore, and the other way about; the join lies 4.4 km from the middle of the island, beyond the furthest offshore island, the fog and the outermost ring of blocks. From high above only one island is drawn, the copy nearest the camera.
 
 The program is contained in `index.html`, apart from the cat in `cat/`. There is no build step and there are no local dependencies.
 
@@ -8,10 +8,11 @@ The program is contained in `index.html`, apart from the cat in `cat/`. There is
 
 | Path | Description |
 |---|---|
-| `index.html` | The complete program: markup, styles and one JavaScript module (about 3,560 lines). |
+| `index.html` | The complete program: markup, styles and one JavaScript module (about 7,400 lines). |
 | `cat/` | The cat from Michi-Neko: The Cat Philosopher's Path by c1t1zen1, under the MIT licence (`cat/LICENSE`). See `cat/README.md`. |
 | `sounds.json` | Maps sound identifiers to audio files (see [Sound](#sound)). |
 | `sounds/` | The audio files that `sounds.json` names. |
+| `testbench/seagulls.html` | A stand-alone page for developing the gulls (see [Gulls](#gulls)). |
 
 ## Running the program
 
@@ -42,7 +43,7 @@ The panel opened with **H** lists the controls. They are reproduced here for ref
 | Arrow keys | Turn and tilt the bird's-eye view. |
 | B | Turns tilt-shift on or off in the bird's-eye and chase views. |
 | T | Speeds up time while held. |
-| P | Pauses the world: the trains, ferries, boats, sea, lighthouse beams, cats and time of day stand still while the player walks, flies and looks about as usual. P again resumes. |
+| P | Pauses the world: the trains, ferries, boats, dolphins, sea, lighthouse beams, cats, gulls and time of day stand still while the player walks, flies and looks about as usual. P again resumes. |
 | R | Rides in the passenger train's cab. R or V again steps off beside the track. |
 | C | Follows the train being ridden, or else the nearer of the passenger and goods trains, from behind. The mouse orbits the camera and + − change its distance. C or V again steps off beside the track. |
 | G | Rides in the cab of the goods train working the nearest goods line, setting it to work there if none is near. G or V again steps off beside the track. |
@@ -53,6 +54,9 @@ The panel opened with **H** lists the controls. They are reproduced here for ref
 | M | Mutes or unmutes the sound. |
 | Double click | In the bird's-eye view, the camera flies down over 1.5 s to street level at the point clicked, facing the same way. A click on open water does nothing. |
 | Tab | Full screen |
+| Page Up, Page Down | Increase or reduce the draw distance through seven fixed levels, from simplified blocks to about 140 m with full detail to about 60 m, up to simplified blocks to about 1,060 m with full detail to about 180 m. A fixed draw distance is kept whatever the frame rate. |
+| Home | Returns the draw distance to automatic, in which the simplified blocks reach between about 100 m and 500 m, as far as the frame rate stays near 60 frames per second, and full detail reaches about 100 m. |
+| O | Shows or hides an overlay with the frame rate, the frame time and the slowest frame of the last half second, the draw distance, the number of blocks at each level of detail, the draw calls, the triangles and the player's position. |
 | H | Shows or hides the help panel. |
 
 A game controller is supported through the Gamepad API. The left stick moves and the right stick looks. A jumps, B switches the view, X boards the ferry, Y rides in the cab and LB follows the train. RB sets tilt-shift, the triggers zoom, a press of the left stick switches between running and walking, the D-pad turns and tilts, Back mutes and Start shows the panel. The sticks have a wide dead zone, and after any change of view the left stick is ignored until it has returned to the centre.
@@ -67,7 +71,7 @@ The user interface follows three rules, which apply to every change.
 - Text is written in plain descriptive sentences. Slogans, taglines and "X, not Y" constructions are not used, in the interface or in commit messages.
 - British spelling is used throughout, in the interface, the comments and the documentation.
 
-The help panel is centred on the screen and spans its width, up to 1,320 px: on the left the place where the player stands, a short account of the island and the credit for the cats; on the right the controls in groups (walking, views, train and ferry, time and island, sound and screen, controller), flowing into as many columns as fit. On a narrow screen it becomes one column. It shows the name and kind of the place where the player stands (for example a quarter, a piazza or open country), a short description and the elevation. Piazzas are named from their feature (Piazza dell'Orologio, Piazza della Fontana and so on), and quarters are named after saints and trades.
+The help panel is centred on the screen and spans its width, up to 1,320 px: on the left the place where the player stands, a short account of the island and the credit for the cats; on the right the controls in groups (walking, views, train and ferry, time and island, sound and screen, controller), flowing into as many columns as fit. On a narrow screen it becomes one column. It shows the name and kind of the place where the player stands (for example a quarter, a piazza, open country, or in a cove the cove itself, its sea cave or its cliff path), a short description and the elevation. Piazzas are named from their feature (Piazza dell'Orologio, Piazza della Fontana and so on), quarters are named after saints and trades, and coves (Cala Azzurra), their caves (Grotta di Nettuno) and their paths (Sentiero della Cala Azzurra) are named from their own lists.
 
 ## Architecture
 
@@ -82,7 +86,7 @@ The program is a single ES module. Its main sections appear in the following ord
 5. Building generators: houses, towers, churches, arches, fountains, cafés, festoon lights, bougainvillea, trees, boats, stations, harbours and viaducts.
 6. Block generation, lighting, sky, shadows and the shaders.
 7. Streaming: the rings of detail, fading and the far terrain.
-8. Moving things: sailing boats, the train and the ferries.
+8. Moving things: the dolphins, sailing boats, the train and the ferries.
 9. Collision and the walkable surface.
 10. Sound.
 11. Input, the riding modes, the camera, tilt-shift and the frame loop.
@@ -118,6 +122,7 @@ Beyond the rings, a coarse far terrain (`FN = 200` cells of `FS = 22` m) covers 
 ### Terrain
 
 - **Mainland.** The centre line of the island wanders and its width varies. A ridge of hills and mountains runs down the middle, with peaks (`PEAK = 480` m spacing) that are often crowned by a hill town with its church on the summit. Beaches, rocky shores and cliffs alternate along the coast. `heightAt(x,z)` returns the ground height, including levelled squares, the rail bed and terraces.
+- **Coves.** Here and there the shore becomes a rocky cove between limestone cliffs, with sea caves and a path down a ravine (see [Coves](#coves)).
 - **Offshore islands.** Islands are placed in slots of `ISL = 1300` m. Each takes one of five forms: hills, ridge, volcano, mesa or cliffs. Cliffs face the open sea, so the landward shore, where a jetty stands, keeps its beach.
 - **Rocks at sea.** In slots of `RK_SP = 5200` m along each coast, about half hold a small rock 200–340 m offshore, beyond the sailing boats and at least 170 m from any ferry crossing. Each rock is bare grey stone ringed with boulders and carries a lighthouse.
 - **Ancient ruins.** A ruined temple, or in three cases out of ten a round tholos, stands at some sites on a 650 m grid where the ground is open hillside (rocky ground, olive terraces or wild slopes) more than 18 m up and away from the hill towns, and on about two islands in five. The ruin takes the spot in its block where the ground varies least, with its long side along the contour, and its stepped platform is built up from the lowest ground, so on a slope it becomes a terrace wall. A few columns stand to full height, some carrying a length of architrave; the rest are broken or reduced to stumps. The temple keeps the low walls of its cella, and drums and blocks lie round about. Trees and rocks are kept off it.
@@ -144,6 +149,24 @@ Besides the harbour lights, lighthouses stand in three kinds of place, all decid
 Each is a white tapering tower on a stone plinth, with a gallery, a glazed lantern and a red dome. On land a keeper's cottage stands beside it. The ground within 10.5 m is kept clear of other buildings and trees.
 
 At night each lantern glows steadily and one or two beams turn about it, every 9–17 s. The beams are cones 560 m long drawn with additive blending, brightest along their axis and fading with distance; fog dims them less than other things, so they are seen from up to `LH_RANGE = 4000` m. A mainland lantern is screened on its landward side, so its beams sweep only over the sea.
+
+### Coves
+
+In slots of `CV_SP = 1600` m along each coast, four slots in five are tried for a rocky cove, and about three in ten hold one. A cove is placed only where the shore is close to straight, clear of harbours, villages, headland lights, ferry crossings, goods lines and the railway. The site is chosen with the coves left out of the ground (`NO_COVE`), and the goods lines, the ferry crossings and the headland lights are laid out in the same way, so that none of them depends on a cove.
+
+A cove is laid out in a straight frame of its own: u along the general line of the shore through its centre X, and s square to it, inland. It consists of the following parts.
+
+- **Headlands.** Two headlands reach 13–46 m out to sea and enclose a small bay. Each has its own reach, mouth width, tip, outer flank and height, so no cove is symmetrical. Their outlines are broken by several octaves of noise, by notches in the outer flanks and by inlets in the walls of the bay, each tip has its own bluntness and two deep notches near it, and up to four stacks stand off the tips. The bay's axis is bent, so that the mouth lies off to one side of the head. The mouth is at least 27 m wide.
+- **Cliffs.** The cliffs are pale limestone, 10–30 m high, lowest at the head of the bay and falling away towards each headland's tip. Each face is a mesh of its own, built in columns along the cliff line. A face leans back by 0.4–1.8 m. It has broad bulges and recesses of varying size, level beds 1.3–2.4 m thick each of which juts out at its base by its own amount, vertical joints, flutes and a notch worn by the sea where it stands in the water. In places the face is a smooth slab that keeps only its broad shape and its joints. Its brow is rounded over into the clifftop, and the top edge rises and falls along its length. The rock is coloured in beds of slightly different tints, with streaks of rust, darker joints and recesses, and a dark wet band at the waterline. Boulders and scree lie at the foot, scrub and the occasional pine grow along the top, and the rock carries a shader pattern of its own (surface code 12).
+- **Bay.** The head of the bay holds a sand or shingle beach 3–13 m deep, or, in about one cove in five, a shelf of bare rock just above the water. Below the landing the bed falls gently, from the water's edge to a metre's depth over about five metres, and then into a channel at least 1.2 m deep out to the mouth. Where there is no beach the shelf at the head stands about 0.3 m above the water and serves as the landing. A shelf of rock 2.3–3.4 m wide and 0.55–0.8 m above the sea runs along one wall from the head to the walkable cave.
+- **Caves.** Each cove has one to three sea caves. The first opens above the shelf and may be walked into. The others open at the waterline in the walls of the bay or the headlands and are reached only from the sea. A cave is a bore 4–13 m deep with an irregular, asymmetric cross-section: much wider at its floor, with its crown pushed to one side, its top slanted and its surface lumpy. It opens through a ragged hole cut from that cross-section, a good deal smaller than the bore, which meets the face at an angle. The hole is set in a recess of the face, with fallen rocks in front. The bore widens into a chamber and narrows to its back. Its colours darken unevenly towards the back. The floor of the walkable cave is uneven and raised at the walls, in the cove's own sand or shingle mixed with rock, with darker wet patches, scattered pebbles and rocks fallen along the walls; it slopes down into a shallow pool of sea water at the back, and the pool's edge wanders. Each cave is sized to the rock round it, and the ground is left out wherever it would run through a cave (`coveCaveCell`).
+- **Cliff path.** A ravine runs inland from the head of the bay to the clifftop valley. A rough path zigzags up it in two to four flights, each wandering a little. Its turns are set irregularly beside the ravine's walls. Steps of loose stone lie where it is steep, clear of the turns and of the flights above and below, and low walls of loose stones stand at the two most exposed turns. A trodden track runs on from the head of the ravine to the coast road, which moves inland where the ravine reaches towards it. The parapet of the road is open where the track leaves it.
+
+The outline is traced from a land function (`cvLand`) by marching squares on a half-metre grid, then smoothed and resampled every metre. The result is one open line along the coast and a closed line round each stack. A 1 m grid of signed distances to the line (`cvSdf`) gives the ground near the cliffs. Behind each face the ground stays at the foot of the cliff as far back as the face meets the ground, and in the recess round a cave's mouth. It is then kept below the foot of the cliff to `CV_LZ = 5` m behind the line, and rises to the clifftop. It is hidden by the face and by a cap of rock along the top, which tucks under the ground beyond, so the coarser ground of distant blocks never shows through a face. Each block builds the parts of a cove whose middle lies in it. The cove's geometry is worked out once, when it is first needed, in about 20 ms; the far terrain uses a simplified shape that does not need it. Pressing I clears the coves with the other caches.
+
+Streets, trees, houses, field walls and boats are kept out of a cove, within 14 m of its cliff line.
+
+`coveLanding(cove)` gives the point where a boat lands, either the middle of the beach's waterline or the seaward edge of the shelf at the head, and the heading out to sea along the bay.
 
 ### Railway
 
@@ -191,9 +214,25 @@ Each island with a crossing has a stone jetty with a T-shaped head, a kiosk and 
 
 Sailing boats keep a set distance offshore. `sailClear(sd, x)` gives the distance needed at x to clear any harbour's moles with 12 m to spare. Each boat looks 20 m and 40 m ahead and eases outward at up to 3 m/s where the next harbour reaches further out. A nearby ferry makes a boat bear away from it and reduce its speed.
 
+### Dolphins
+
+Pods of bottlenose dolphins swim in the open sea. The module `createDolphins(parent, opts)` returns an object with `update(dt, ctx)`, `setOptions(o)`, `trigger(kind, pod)`, `reset()`, `shift(dz)` and `dispose()`. It is self-contained, and the same block is used in `testbench/dolphins.html`, where it may be examined on its own with a ferry, an island and a control panel.
+
+Two pods of three to seven dolphins are kept within about 380 m of the player. A pod appears only in water deeper than 10 m, never within 70 m of the shore and seldom within 160 m of it, and now and then ahead of a ferry under way, so that the ferries crossing to the islands are met from time to time. A pod that falls more than 1,140 m behind is placed afresh. Pods keep out of harbours and of the water off a cove, and turn aside from water shallower than 9 m. Where no such water lies within reach, as far inland, a pod waits until there is.
+
+A pod swims in rows two to four abreast, 1.6 m apart and 3.1 m from row to row, on a shared heading at a shared depth of 1.3 to 1.9 m. Every 9 to 20 s it surfaces to breathe, either all together or in a quick ripple across the rows. Each dolphin rises in a smooth arc, so that its head, back and dorsal fin roll through the surface, with a small blow of mist. A leap begins with a dive to between 3 and 3.8 m, and the dolphin leaves the water at 5 to 6 m/s and 50 to 60 degrees, which clears its body by 0.5 to 1.5 m; about one leap in twelve is faster and higher. It flies under gravity, re-enters nose first, and throws spray on leaving the water and on re-entering it.
+
+A pod within 170 m of a ferry or sailing boat moving faster than 3 m/s may join it and ride its bow wave for 25 to 55 s, spaced out ahead of the stem and along both sides, surfacing every 3 to 8 s. It leaves when the time is up, when the boat slows below 2.5 m/s, or when the bow enters a harbour or shallow water, and then draws back into its rows over about 30 s. Each ferry and sailing boat is offered to the pods through one object, kept for good and updated in place each frame.
+
+Each dolphin is a low-poly body 2.6 m long with a dark grey back, paler flanks and a pale belly, and is drawn with instancing. A vertex shader bends the body with a wave that runs towards the flukes, and curves it along the arc of a surfacing or a leap. Since the sea is nearly opaque, a dolphin under water is drawn a second time as a faint dark shape, projected along the line of sight on to the surface and fading with depth, so that hulls and quays above the water still hide it. Rings and patches of foam mark the places where the surface is broken, and spray and mist are drawn as points. All of these are drawn after the sea.
+
+A new island (**I**) places every pod afresh in its waters, and the north–south repeat moves the dolphins, foam and spray with the player through `wrapHooks`. The dolphins stand still while the world is paused. The module's `onSound(kind, x, y, z, strength)` hook is called for a breath, a leap and a splash; no sample is assigned to it yet. `window.__village.findDolphins()` gives the middle of the nearest pod, its distance from the player and what each of its members is doing.
+
 ### Walking and collision
 
 The player stands on the highest walkable surface at their position, given by the walkable-surface function (terrain, steps, terraces, moles, platforms and decks). A step up may be at most `STEP = 0.8` m. The player cannot walk into water deeper than 1 m. Buildings and objects are oriented boxes; the collision code pushes the player out along the shortest axis, and treats a position exactly at an obstacle's centre as lying on the positive side, so that the player is never left inside an obstacle.
+
+In a cove the ground for walking is given by `walkGround`. Near a cliff it is the clifftop for a walker above half the cliff's height and the foot for one below, so the line of the cliff is a sudden step. Inside the walkable cave, below 1.9 m above its floor, the floor of the cave is the ground, within a band that keeps the eye clear of the walls and a ceiling at least 2.35 m high. Each step is checked by `coveMoveOk`: it may rise no more than `STEP` and fall no more than 1.4 m, and the slope of the ravine may be walked only on the path. The path may be walked within 0.85 m of its line, and 1.3 m of a turn. A step is tried along each axis in turn, as everywhere; where both are refused, the step along both at once is tried, so that a walker going diagonally along the narrow path is not held at its edge. The cliffs therefore cannot be climbed or stepped off, and the beach, the shelf and the cave are reached on foot only by the path, or from the sea. `reachable` follows the same rules.
 
 ### Buildings that can be entered
 
@@ -217,7 +256,7 @@ The shadow map is a square centred on the player and moved in 2 m steps. Where t
 
 ### Shading
 
-The building and ground shaders add procedural surface patterns according to the `surf` attribute: plaster, roof tiles, stone, wood, brick and bougainvillea bracts. The sea has layers of ripples, each of which fades out as its wavelength approaches the size of a pixel. Fountains have animated water sheets, jets, arcs and spreading rings.
+The building and ground shaders add procedural surface patterns according to the `surf` attribute: plaster, roof tiles, stone, wood, brick, bougainvillea bracts and natural rock, the last with faint beds, pitting and grain for the cliffs, caves and boulders of the coves. The sea has layers of ripples, each of which fades out as its wavelength approaches the size of a pixel. Fountains have animated water sheets, jets, arcs and spreading rings.
 
 ### Cameras
 
@@ -239,6 +278,20 @@ About two blocks of town in five (quarters, squares, church blocks and the shore
 
 A cat pauses for 2–9 s, then sets off at 1.1 m/s for somewhere 4–18 m away, drawn back towards home once it has strayed 40 m; four times in ten it heads instead for the top of a wall, step, terrace or mole close by. Its route is planned in steps of 0.35 m over the surfaces at each point (the ground and the tops of walls, steps, terraces and moles): rises of up to 0.45 m are walked, so it climbs and descends steps and slopes; a ledge up to 1.9 m higher is a leap, and an edge up to 3 m lower a jump down, each on an arc that clears the higher edge. A route is refused where any part of the body (nose, tail end or flanks) would meet a building, a tree or a wall too high to climb, or where it would reach water. The body tilts with the slope or the steps under it. A cat carries its tail low, and raises it as the player comes within 5 m at street level (through `tailDrop` in `cat/cat.js`). It glances at a player passing within 3 m without breaking off what it is doing. An awake cat mews every 25–70 s, and half the time when the player first comes within 3 m; the sound comes from the cat, pitched a little higher or lower each time, and its mouth opens with it. A mew is heard only from close by: at full level within 6 m of the listener, fading to nothing at 14 m. At night three cats in five curl up asleep where they are, and the rest go on roaming. Cats are hidden in the bird's-eye view above 150 m.
 
+### Gulls
+
+A flock of 90 yellow-legged gulls lives round the player. A gull has a white head and body, a grey mantle and grey wings with a white trailing edge, black wing tips, a yellow bill with a red spot and yellow legs; about one in seven is a brown immature bird. The gulls are drawn at 1.25 times life size, about 0.75 m long with a wingspan of 1.75 m, so that they can be made out at a distance.
+
+The gull code is one block, `createGulls`, which returns an object with `update(dt, ctx)`; the game calls it from `updateGulls` in the frame loop. All the gulls are one `InstancedMesh` in `world`, placed at `ORIGIN` with each bird relative to it, and are drawn in a single draw call. The body is fixed geometry, and the wings are posed in the vertex shader from four numbers per bird (the angle at the shoulder, the angle at the wrist, the sweep of the hand and how far the wing is folded), so that the shadow pass poses them in the same way.
+
+A gull circles on a thermal, banked into the turn at the angle a coordinated turn requires, and flaps in short bursts or when it must climb. It glides from one thermal to another, follows a sailing boat or a ferry, or comes down to stand on a perch or to sit on the sea, where it bobs and drifts. A slow boat is circled from a point astern; a ferry, which moves too fast to be circled, is kept pace with from a place astern and to one side. Gulls that are close together steer apart. A gull that is standing faces into the wind and now and then raises its wings. It takes off when the player comes within 6–12 m of it, or when a boat comes close on the water, and those standing near it take off a moment later. As the light fails the gulls come down to roost on the perches and the sea, and stay there until morning.
+
+Perches are gathered by `gullPerches` within 320 m of the player, again whenever the player has moved 60 m and every 10 s: the coping and bollards of the harbour quays and the parapets of the moles, from `harbourInfo`; the rocks that carry a lighthouse, from `seaRockInfo`; the stacks and landing of each cove once it is built; and the first dry ground above the water along the rest of the shore. Thermals are placed only along the shore, and a flying gull keeps within about 70 m of the shoreline: beyond about 40 m inland (`seaDist`) a pull towards the sea begins and grows smoothly towards that limit, and it starts sooner in an onshore wind. Land perches more than 40 m from the water are not used. The gulls fly in still air until there is a global wind; `gullWind` is the place to supply it.
+
+The flock stands still while the world is paused, moves with the world when it repeats from north to south (`wrapHooks`), and is placed afresh round the player when a new island is generated. A gull's call goes to the sound `gulls`, at most one every 2.5 s and only from gulls within 140 m. For automated checks, `window.__gulls` holds the flock (`G`), its context (`ctx`) and a switch (`on`) that removes the gulls entirely.
+
+The gulls were developed in `testbench/seagulls.html`, a page with a beach, a quay, a boat and controls for the number of gulls, the wind, the time of day and the view, served from the repository root like the game. Its `createGulls` block is the same as the game's.
+
 ## Sound
 
 ### Engine
@@ -249,6 +302,7 @@ Sounds are routed to four buses: `world`, `train`, `ferry` and `player`. Each bu
 
 - **Inside a coach,** the world is cut at 900 Hz and the train at 1,100 Hz. **In the cab,** the cut-offs are 1,400 Hz and 1,800 Hz.
 - **In a tunnel,** a generated convolution reverb is used, consisting of early reflections and a 2.8 s tail that darkens over time. The world outside is attenuated as the listener moves into the bore.
+- **In a sea cave,** the same reverb is used, but the world outside is not attenuated.
 - **Occlusion.** A train inside a tunnel, heard from outside, is quieter and low-passed.
 
 ### What the engine plays
@@ -263,7 +317,7 @@ Sounds are routed to four buses: `world`, `train`, `ferry` and `player`. Each bu
   - The two nearest cafés, which are busy from morning until late evening.
   - At the nearest moored boat, water slapping at the hull, creaks, and rigging on boats that carry a sail.
   - The clock striking the hour, followed shortly afterwards by the church bell.
-- **Footsteps.** A loop for the surface underfoot plays while the player walks, faster while running. The surface (pavement, sand, soil or grass) is read from the ground mesh. Grass uses the soil loop, and the decks of a ferry and the floor of a coach use the pavement loop. A separate sound plays on landing from a jump.
+- **Footsteps.** A loop for the surface underfoot plays while the player walks, faster while running. The surface (pavement, sand, soil or grass) is read from the ground mesh. Grass uses the soil loop, the pebbles of a sea cave the sand loop and the cliffs' bare rock the pavement loop, and the decks of a ferry and the floor of a coach use the pavement loop. A separate sound plays on landing from a jump.
 - **Train.** Run and idle loops at the locomotive, and a rumble from the point on the train nearest the listener. A bridge loop plays on viaducts and a rail joint every 18 m under each bogie. Separate sounds play for starting, stopping, brakes, the doors opening and closing, and the horn on departure and before a tunnel.
 - **Ferry.** Run and idle loops at the stern, and the wake at the bow. Separate sounds play for the horn, starting, stopping, the gangway, the gates and the fenders.
 - **Goods train.** Its engine at the leading shunter, a start, a horn and the clatter of the couplings as it sets off, a stop, and rail joints (`goods_run`, `goods_idle`, `goods_start`, `goods_stop`, `goods_horn`, `goods_buffer`). Until they have recordings of their own they borrow the train's, through `SOUND_ALIAS`.
@@ -327,6 +381,8 @@ node --check /tmp/m.mjs
 | `islandRoute`, `ferryLanding`, `ferryPortInfo` | Ferry routes and landing points. |
 | `toggleTrain`, `toggleView`, `setHour`, `setYaw`, `setPitch`, `setDist`, `setFpPitch`, `updateChunks` | Driving the scene. |
 | `SND`, `SNDV`, `SNDS`, `startAudio`, `audioState`, `shore`, `surfaceAt` | The sound engine and its inputs. |
+| `findCove()`, `coveInfo(sd,n)`, `coveLanding(cove)` | The nearest cove, with its beach, landing, cave mouth, a point inside the cave and the top and foot of its path; the cove in slot `n` of a coast; and where a boat lands in a cove. |
+| `walkGround(x,z,y)`, `coveMoveOk(...)`, `standableAt(x,z)`, `coveFns` | The walking rules of the coves and the cove's internal functions, for tests. |
 | `reachable(x0,z0,y0,goal,lim)` | A breadth-first walkability search that follows the player's own rules for step height, body radius and deep water. It is used to confirm that no landing point is a trap. |
 | `tunnelK` | How far the listener is inside a tunnel bore. |
 
@@ -347,3 +403,7 @@ Setting `window.__freeCam = {p: Vector3, t: Vector3}` places the camera at `p` l
 - The ticket kiosks cannot yet be entered.
 - In a narrow tower the stair's first pass along the front wall may run close above the door.
 - Through the window of a shut coach door, the view is mostly of the inside of the opposite door across the vestibule.
+- Only the first cave of a cove can be walked into. The others are seen from the sea, and a boat cannot yet enter them.
+- Where blocks at different levels of detail meet, a cove's cliff face may show a thin crack, because the columns of the face differ between levels.
+- The sea in a cove is the same deep blue as the open sea. The shallows over the beach and in the cave's pool are not lighter.
+- The far terrain samples a cove every 22 m without its cliff meshes, so beyond the outline blocks a cove appears only as a rough notch in the coast.

@@ -31,6 +31,11 @@ html,body{height:100%;margin:0;overflow:hidden;background:var(--sea);color:var(-
 .help .credits{margin-top:12px;padding-top:12px;border-top:1px solid var(--line);font-size:.8rem}
 .help a{color:var(--verdigris)}
 .help .controls{columns:280px;column-gap:28px}
+.stats{position:fixed;z-index:3;top:16px;left:16px;max-width:calc(100vw - 32px);box-sizing:border-box;display:grid;grid-template-columns:auto auto;gap:2px 14px;
+  background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:10px 14px;backdrop-filter:blur(8px);pointer-events:none;
+  font-size:.82rem;line-height:1.35;font-variant-numeric:tabular-nums}
+.stats>span:nth-child(odd){font-size:.68rem;letter-spacing:.14em;text-transform:uppercase;color:var(--verdigris);align-self:center}
+.stats[hidden]{display:none}
 .help .group>p{color:var(--plaster)}
 .help .group{break-inside:avoid;margin:0 0 14px}
 .help h3{margin:0 0 4px;font-size:.72rem;font-weight:500;letter-spacing:.16em;text-transform:uppercase;color:var(--verdigris)}
@@ -52,6 +57,7 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
 <canvas id="scene" tabindex="0" aria-label="Procedurally generated medieval village"></canvas>
 <div class="vignette"></div>
 <div class="loading" id="loading">Laying out the village…</div>
+<div class="stats" id="stats" hidden aria-label="Statistics"></div>
 <div class="seeding" id="seeding" hidden><span></span><b><i></i></b></div>
 
 <div class="joy" id="joy" hidden><i></i></div>
@@ -65,7 +71,7 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
       <p id="placeDesc"></p>
       <p class="elev" id="elev"></p>
     </div>
-    <p class="about">An island that never ends to the east or west, between half a kilometre and two kilometres wide. Villages are laid out from the rules of medieval hill towns, with open country, olive groves and a coastal railway between them. Draw distance adjusts itself to hold 60 frames per second: <span id="viewState">—</span>.</p>
+    <p class="about">An island that never ends to the east or west, between half a kilometre and two kilometres wide. Villages are laid out from the rules of medieval hill towns, with open country, olive groves and a coastal railway between them. Here and there the shore breaks into rocky coves with sea caves, each reached by a path down the cliffs. Draw distance adjusts itself to hold 60 frames per second unless it has been fixed with Page Up or Page Down: <span id="viewState">—</span>.</p>
     <p class="credits">The cats are from <a href="https://github.com/c1t1zen1/Michi-Neko-The-Cat-Philosophers-Path" target="_blank" rel="noopener">Michi-Neko: The Cat Philosopher’s Path</a> by c1t1zen1, used under the MIT licence.</p>
   </div>
   <div class="controls">
@@ -101,6 +107,9 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
     <div class="group"><h3>Sound and screen</h3>
       <div class="row"><span><kbd>M</kbd></span><span>Mute or unmute the sound</span></div>
       <div class="row"><span><kbd>Tab</kbd></span><span>Full screen</span></div>
+      <div class="row"><span><kbd>PgUp</kbd><kbd>PgDn</kbd></span><span>Increase or reduce the draw distance, which then stays fixed</span></div>
+      <div class="row"><span><kbd>Home</kbd></span><span>Return the draw distance to automatic</span></div>
+      <div class="row"><span><kbd>O</kbd></span><span>Show or hide the frame rate and draw distance</span></div>
       <div class="row"><span><kbd>H</kbd></span><span>Show or hide this panel</span></div>
     </div>
     <div class="group"><h3>Controller</h3>
@@ -298,6 +307,7 @@ function baseH(x,z){
   if (h>0) h+=peakAdd(x,z)*clamp(Math.min(sS,sN)/120,0,1);
   if (sS<-150) h=Math.max(h,islandH(1,x,z)); else if (sN<-150) h=Math.max(h,islandH(-1,x,z));
   if (sS<-120) h=Math.max(h,seaRockH(1,x,z)); else if (sN<-120) h=Math.max(h,seaRockH(-1,x,z));
+  if (!NO_COVE){ const cv=coveAtXZ(x,z); if (cv) h=coveH(cv,x,z,h); }
   return h;
 }
 /* ---------- small rocky islands off both coasts, clear of the ferry lane ---------- */
@@ -392,7 +402,8 @@ function lhMake(id,sd,x,z,ix,iz,kind,R){
   return {id,sd,x,z,g,ix,iz,kind,H,y:g+H+1.6,foot:10.5,hx:x+tx*side*7.8,hz:z+tz*side*7.8,hrot:Math.atan2(tx,tz),
     beams:R(0)<0.5?2:1,period:9+R(1)*8,phase:R(2)*6.283,spin:R(3)<0.8?1:-1,sea:kind==='head'?Math.atan2(sd,0):null};
 }
-function headlandLight(sd,n){
+function headlandLight(sd,n){ return noCove(()=>headlandLight0(sd,n)); }
+function headlandLight0(sd,n){
   const k='h'+sd+':'+n; if (lhCache.has(k)) return lhCache.get(k);
   const o=sd>0?0:40, R=q=>hash(n,q,1711+o); let L=null;
   if (hash(n,0,1701+o)<0.45){
@@ -444,6 +455,646 @@ function ruinIn(cx,cz){
   if (S){ S.tholos=hash(S.seed,0,1921)<0.3; S.rot=hash(S.seed,1,1922)*Math.PI; }
   if (ruCache.size>20000) ruCache.clear(); ruCache.set(k,S); return S;
 }
+/* ---------- rocky coves: a small bay between limestone cliffs, with a beach or a shelf of rock at its head, one to
+   three sea caves and a rough path down the ravine behind the head. A cove is laid out in a straight frame of its own:
+   u along the general line of the shore through X, s square to it, inland (negative out to sea). Every cove differs:
+   its two headlands have their own reach, width, height and outline, broken by inlets and with stacks standing off
+   them; the bay is bent and off-centre; the beach may be sand, shingle or bare rock. The outline is traced from a land
+   function, so that whatever shape that function gives, the cliff line follows it.
+   The cliff faces are meshes of their own; behind each face the ground is kept below the foot of the cliff for
+   CV_LZ metres, hidden by the face and by the cap of rock along its top, so that the coarse ground never shows
+   through the face. Sites are chosen with the coves themselves left out of the ground (NO_COVE), and the features
+   they keep clear of (goods lines, ferry crossings, headland lights) are worked out the same way. ---------- */
+const CV_SP=1600, CV_LZ=5, cvCache=new Map();
+let NO_COVE=0, COVE_FAST=0, cvMemoN=NaN, cvMemoA=null, cvMemoB=null;
+function noCove(f){ NO_COVE++; try{ return f(); } finally{ NO_COVE--; } }
+function baseH0(x,z){ NO_COVE++; try{ return baseH(x,z); } finally{ NO_COVE--; } }
+const CALA=['dei Gabbiani','Azzurra','del Corallo','Bianca','delle Sirene','del Pesce','dei Colombi','Rossa','del Faraglione','della Luna','delle Monache','del Turco','dei Pini','del Moro','Fonda','Scura'];
+const GROTTA=['Azzurra','Verde','del Bue Marino','delle Sirene','dei Colombi','di Nettuno','del Tuono','Smeralda'];
+function coveInfo(sd,n){
+  const k=n*4+sd; { const v=cvCache.get(k); if (v!==undefined) return v; }
+  // while a site is being chosen its slot counts as having no cove, since the features it is checked against
+  // (a headland light's cottage, say) may ask after the coast road beside it
+  if (cvCache.size>4000) cvCache.clear(); cvCache.set(k,null);
+  const cv=noCove(()=>coveSite(sd,n)); cvCache.set(k,cv); return cv;
+}
+function coveSite(sd,n){
+  const o=sd>0?0:60, hh=q=>hash(n,q,2101+o);
+  if (hh(0)>=0.8) return null;
+  const k=0.75+0.55*hh(1);   // the cove's overall size
+  const P={sd,n,k,seed:2150+n*13+o,geo:null,Bh:-4+hh(2)*5,Lg:(12+hh(3)*5)*Math.sqrt(k),Ag0:5+hh(4)*2.5,bend:(hh(5)-0.5)*20*k,gbend:(hh(6)-0.5)*6,
+    Thead:10+hh(7)*4,bt:1.3,lean:0.4+hh(8)*1.4,bed:1.3+hh(9)*1.1,
+    Bw:hh(10)<0.22?0:3+hh(11)*8*k, shingle:hh(12)<0.5, tint:hh(13), nCaves:1+(hh(14)<0.5?1:0)+(hh(15)<0.18?1:0), pathSide:hh(16)<0.5?1:-1,
+    name:'Cala '+CALA[Math.floor(hh(17)*CALA.length)],cave:'Grotta '+GROTTA[Math.floor(hh(18)*GROTTA.length)]};
+  // each headland its own: how far out it reaches, how wide the bay's mouth is on its side, how blunt its tip, how
+  // far its outer flank runs along the coast, and how high it stands
+  P.side=[0,1].map(i=>{ const q=b=>hh(20+i*10+b); return {Am:(8+q(0)*8)*k,R:(17+q(1)*18)*k,rt:5+q(2)*5,Fw:9+q(3)*13,bulge:(2+q(4)*7)*k,T:14+q(5)*15,tipP:0.5+q(6)*1.3,seed:P.seed+101*(i+1)}; });
+  // the mouth is left at least 27 m wide, so that a boat may sail in
+  { const m=P.side[0].Am+P.side[1].Am; if (m<27) for (const S of P.side) S.Am*=27/m; }
+  P.R=Math.max(P.side[0].R,P.side[1].R); P.rt=Math.max(P.side[0].rt,P.side[1].rt);
+  for (const S of P.side){ const sg=S===P.side[0]?-1:1; S.uc=cvAxis(P,-S.R)+sg*S.Am; S.Uc=Math.abs(S.uc)+2*S.rt+S.Fw; }
+  P.Uc=Math.max(Math.abs(P.side[0].uc)+2*P.side[0].rt+P.side[0].Fw,Math.abs(P.side[1].uc)+2*P.side[1].rt+P.side[1].Fw);
+  P.UX=P.Uc+50; P.sHead=P.Bh+P.Lg; P.sRoad=P.sHead+9.5; P.Vw=P.Ag0*1.7; P.s0g=-P.R-P.rt-26; P.s1g=P.sRoad+64;
+  P.Tarm=Math.max(P.side[0].T,P.side[1].T);
+  // stacks standing off the headlands
+  P.stacks=[]; { const ns=Math.floor(hh(40)*4.3); for (let i=0;i<ns;i++){ const S=P.side[hh(41+i)<0.5?0:1], sg=S===P.side[0]?-1:1;
+    // off the outer side of the headland's tip, clear of the way into the bay
+    const r=1.5+hh(50+i)*2; P.stacks.push({u:S.uc+sg*(r+2+hh(44+i)*S.rt*1.6),s:-S.R-S.rt-r-4-hh(47+i)*7,r}); } }
+  // notches cut into the headlands' outer edges and inlets into the bay's walls
+  P.notch=[]; for (let i=0;i<6;i++) P.notch.push({side:i%2?1:-1,t:i<2?0.1+hh(200+i)*0.25:0.35+hh(200+i)*0.65,d:i<2?3+hh(210+i)*4:2+hh(210+i)*3.5,w:i<2?0.9+hh(220+i)*1.2:1.3+hh(220+i)*2});
+  P.inlet=[]; for (let i=0;i<2;i++) P.inlet.push({side:hh(72+i)<0.5?1:-1,t:0.3+hh(74+i)*0.45,d:1.5+hh(76+i)*3,w:1.2+hh(78+i)*1.6});
+  { let am=0; for (let s=-P.R;s<=P.Bh;s+=1) am=Math.max(am,cvA(P,s,1),cvA(P,s,-1)); P.Amax=am+Math.abs(P.bend); }
+  for (let t=0;t<10;t++){ const X=n*CV_SP+P.UX+110+hash(n,t,2120+o)*(CV_SP-2*P.UX-220); P.X=X; cvFrame(P);
+    if (coveSiteOk(P)){
+      // the head of the ravine sits at the level of the ground there, within limits
+      const h0=baseH(X,coastZ(sd,X)+sd*P.sRoad); P.Thead=clamp(Math.max(P.Thead,h0-2),10,14);
+      for (const S of P.side) S.T=Math.max(S.T,P.Thead+4); P.Tarm=Math.max(P.side[0].T,P.side[1].T);
+      return P; } }
+  return null;
+}
+function coveSiteOk(P){
+  const sd=P.sd, X=P.X;
+  for (let u=-P.UX;u<=P.UX;u+=8){ const x=X+u*P.tx, q=cvS(P,x,coastZ(sd,x)); if (Math.abs(q)>(Math.abs(u)<P.Uc?10:22)) return false; }
+  for (let q=Math.floor((X-P.UX-300)/HARB); q<=Math.floor((X+P.UX+300)/HARB); q++){ const H=harbourInfo(sd,q); if (H && Math.abs(H.x-X)<P.UX+H.W/2+70) return false; }
+  for (let u=-P.UX;u<=P.UX;u+=20) for (let s=-10;s<=P.sRoad+40;s+=20){ const x=X+u, z=coastZ(sd,x)+sd*s; if (isVillage(Math.floor(x/C),Math.floor(z/C))) return false; }
+  for (let u=-P.UX-30;u<=P.UX+30;u+=10){ const x=X+u; if (sd*(railZ(x)-coastZ(sd,x))<P.sRoad+75) return false; }
+  for (let u=-P.UX-60;u<=P.UX+60;u+=40) for (const B of branchesAt(X+u)) if (B.sd===sd && brIn(B,X+u,60)) return false;
+  for (let q=Math.floor((X-P.UX)/LH_SP)-1; q<=Math.floor((X+P.UX)/LH_SP)+1; q++){ const L=headlandLight(sd,q); if (L && Math.abs(L.x-X)<P.UX+80) return false; }
+  for (let u=-P.Uc-10;u<=P.Uc+10;u+=10){ const x=X+u, z=coastZ(sd,x)-sd*(P.R+P.rt+14); if (nearFerryRoute(x,z,70)) return false; }
+  for (let u=-P.Uc;u<=P.Uc;u+=10) for (const s of [10,P.sRoad,P.sRoad+20]){ const x=X+u, h=baseH(x,coastZ(sd,x)+sd*s);
+    if (h>(Math.abs(u)<P.Ag0+10?P.Thead+12:P.Tarm+8)) return false; }
+  return true;
+}
+// the bay's axis, bent so that its mouth lies off to one side of its head; the ravine's axis above the head
+function cvAxis(cv,s){ const t=clamp((cv.Bh-s)/(cv.Bh+cv.R),0,1); return cv.bend*t*t; }
+function cvGAxis(cv,s){ return cv.gbend*Math.pow(clamp((s-cv.Bh)/cv.Lg,0,1),1.5); }
+// the half-width of the bay at s on the side sg (-1 or 1): from the mouth to the head, bulging and irregular, with inlets
+function cvA(cv,s,sg){ const S=cv.side[sg<0?0:1], t=clamp((s+S.R)/(cv.Bh+S.R),0,1), b=Math.sin(Math.PI*t);
+  let w=lerp(S.Am,cv.Ag0,t)+S.bulge*Math.pow(b,1.6)+(fbm(s*0.07,sg*13+3,S.seed,3)-0.5)*5*cv.k*Math.pow(b,1.3)+(vnoise(s*0.35,sg*7,S.seed+1)-0.5)*1.2*b;
+  for (const I of cv.inlet) if (I.side===sg){ const q=(t-I.t)*(cv.Bh+S.R)/I.w; w+=I.d*Math.exp(-q*q); }
+  return Math.max(1.5,w); }
+function cvAg(cv,s,sg){ const g=clamp((s-cv.Bh)/cv.Lg,0,1);
+  return (cv.Ag0+1.6*(vnoise(s*0.21,sg*5.3+2,cv.seed+1)-0.5)*Math.sin(Math.PI*g)+sg*0.6*(vnoise(s*0.09,4,cv.seed+3)-0.5)*Math.sin(Math.PI*g))*Math.sqrt(Math.max(0,1-g*g)); }
+// the seaward edge of the headland on the side of u: the blunt, broken tip, the outer flank and the open coast beyond
+function cvEdge(cv,u){ const mid=cvAxis(cv,-cv.R), sg=u<mid?-1:1, S=cv.side[sg<0?0:1], au=sg*(u-S.uc);
+  let e;
+  if (au<0) return -Math.min(cv.side[0].R,cv.side[1].R);   // within the mouth: the bay, and open sea beyond the shorter arm
+  else if (au<2*S.rt){ const q=au-S.rt; e=-S.R-S.rt*Math.pow(Math.max(0,1-(q*q)/(S.rt*S.rt)),S.tipP)*(1+0.35*(vnoise(au*0.5,sg*9,S.seed+8)-0.5)); }
+  else if (au<2*S.rt+S.Fw){ const sp=(au-2*S.rt)/S.Fw; e=-S.R*Math.pow(1-sp*sp,0.75); }
+  else return 0;
+  const tp=smooth((2*S.rt+S.Fw-au)/6);
+  e+=((fbm(u*0.06,sg*5,S.seed+4,3)-0.5)*6+(vnoise(u*0.4,sg*3,S.seed+5)-0.5)*1.4)*tp;
+  for (const N of cv.notch) if (N.side===sg){ const at=N.t*(2*S.rt+S.Fw*0.8), q=(au-at)/N.w; e+=N.d*Math.exp(-q*q)*tp; }
+  return Math.min(e,0); }
+function cvLand(cv,u,s){
+  for (const K of cv.stacks){ const du=u-K.u, ds=s-K.s, r=K.r*(0.8+0.4*vnoise(Math.atan2(ds,du)*1.5+3,K.r,cv.seed+6)); if (du*du+ds*ds<r*r) return true; }
+  if (s<cvEdge(cv,u)) return false;
+  if (s>=cv.Bh){ if (s<=cv.sHead){ const gu=u-cvGAxis(cv,s), sg=gu<0?-1:1; if (Math.abs(gu)<cvAg(cv,s,sg)) return false; } return true; }
+  const c=cvAxis(cv,s), sg=u<c?-1:1, S=cv.side[sg<0?0:1];
+  if (s>=-S.R && Math.abs(u-c)<cvA(cv,s,sg)) return false;
+  return true; }
+// the weight of the cove's clifftop over the natural ground, and the clifftop's height: lowest at the ravine, each
+// headland at its own height, falling away towards its tip
+function cvW(cv,u,s){ return (1-smooth((Math.abs(u)-cv.Uc)/45))*(1-smooth((s-cv.sRoad-8)/40)); }
+function cvTop(cv,u,s,hNat){ const vw=cv.Vw+Math.max(0,s-cv.sHead)*1.6, Ts=lerp(cv.side[0].T,cv.side[1].T,smooth((u-cvAxis(cv,s)+12)/24));
+  let T=cv.Thead+(Ts-cv.Thead)*(1-Math.exp(-(u*u)/(vw*vw)));
+  T*=1-0.25*smooth(-s/(cv.R+cv.rt+4));
+  T+=3*(fbm((cv.X+u)*0.03,s*0.03,cv.seed+7,3)-0.5);
+  for (const K of cv.stacks){ const d=Math.hypot(u-K.u,s-K.s); if (d<K.r*1.6+1) T*=lerp(1,0.45+0.3*hash(Math.round(K.u*10),Math.round(K.s*10),2401),smooth((K.r*1.6+1-d)/1.5)); }   // the stacks stand lower than the headlands
+  return lerp(hNat,T,cvW(cv,u,s)); }
+// the cove's frame is straight: u along the shore's general line through X, s square to it, inland
+const cvL2W=(cv,u,s)=>[cv.X+u*cv.tx+s*cv.nx,cv.Z0+u*cv.tz+s*cv.nz];
+const cvU=(cv,x,z)=>(x-cv.X)*cv.tx+(z-cv.Z0)*cv.tz, cvS=(cv,x,z)=>(x-cv.X)*cv.nx+(z-cv.Z0)*cv.nz;
+function cvFrame(P){ const sd=P.sd, X=P.X, m=(coastZ(sd,X+60)-coastZ(sd,X-60))/120, l=Math.hypot(1,m);
+  P.Z0=coastZ(sd,X); P.tx=1/l; P.tz=m/l; P.nx=-sd*m/l; P.nz=sd/l;
+  let x0=1e9,x1=-1e9,z0=1e9,z1=-1e9; for (const u of [-P.UX-3,P.UX+3]) for (const s of [P.s0g,P.s1g]){ const [x,z]=cvL2W(P,u,s); x0=Math.min(x0,x); x1=Math.max(x1,x); z0=Math.min(z0,z); z1=Math.max(z1,z); }
+  P.bb=[x0,x1,z0,z1]; }
+// the floor of the bay and of the ravine: a beach or a shelf of rock at the head, deepening towards the mouth, scree
+// at the foot of the walls, and a shelf of rock along the wall that leads to the cave; the ravine rises steeply from
+// the head and levels out at the clifftop
+function cvFloor(cv,u,s,d,hNat,G){
+  const gu=u-cvGAxis(cv,s);
+  if (s>=cv.Bh && Math.abs(gu)<cv.Ag0+3){ const gs=clamp((s-cv.Bh)/cv.Lg,0,1); let h=cv.bt+((G?G.Thead:cv.Thead)-cv.bt)*(1-Math.pow(1-gs,1.6));
+    if (G){ h+=0.5*(vnoise(u*0.5,s*0.5,cv.seed+9)-0.5)*Math.min(1,(1-gs)*4); if (cvPathAt(G,u,s)) h=lerp(h,_pY-0.1,_pW); }
+    return h; }
+  const c=cvAxis(cv,s), sg=u<c?-1:1, S=cv.side[sg<0?0:1];
+  if (s>=-cv.R-16 && Math.abs(u-c)<cv.Amax+2){
+    const q=cv.Bh-s, Bw=Math.max(cv.Bw,2.5); let h;
+    // the landing: the beach, or where there is none a shelf of rock just above the water; below it the bed falls
+    // gently to a metre's depth and then on into the channel, at least 1.2 m deep, out to the mouth
+    if (cv.Bw>0) h=q<Bw?0.06+(cv.bt-0.06)*Math.pow(1-q/Bw,1.2):Math.max(-5.5,0.06-(q-Bw)*0.2-Math.max(0,q-Bw-6)*0.08);
+    else h=q<3.5?0.3+0.1*(vnoise(u*0.8,s*0.8,cv.seed+14)-0.5):Math.max(-5.5,0.3-(q-3.5)*0.24-Math.max(0,q-9)*0.08);
+    h+=(q<Bw?0.1:0.4)*(vnoise(u*0.4,s*0.4,cv.seed+11)-0.5);
+    if (G){
+      // scree fallen from the walls, where the foot of the wall is dry or shallow
+      const wd=-d; if (wd<2.6 && h>-1.2){ const n=vnoise(u*0.45,s*0.45,cv.seed+15); if (n>0.45 && !cvNearKeep(G,u,s)) h+=Math.min(0.7,1.1*(n-0.45)*Math.pow(1-wd/2.6,1.5)*2); }
+      if (sg===G.caveSide && s>G.shA-2 && s<G.shB+2){
+        const f=smooth((s-G.shA+2)/2)*smooth((G.shB+2-s)/2), sw=G.shW*(0.8+0.4*vnoise(s*0.3,1,cv.seed+12));
+        h=Math.max(h,lerp(h,G.shH+0.08*(vnoise(u*1.3,s*1.3,cv.seed+13)-0.5),f*(1-smooth((wd-sw)/0.7)))); }
+      if (s>cv.Bh-2.6 && cvPathAt(G,u,s)) h=lerp(h,_pY-0.1,_pW); }
+    if (s<-S.R) h=lerp(h,hNat,smooth((-S.R-s)/12));
+    return h; }
+  return hNat;
+}
+// places the scree keeps clear of: the mouths of walkable caves and the foot of the path
+function cvNearKeep(G,u,s){ for (const A of G.caves) if (A.walk && Math.hypot(u-A.u,s-A.s)<A.wM+3.5) return true;
+  if (G.shA!==undefined && (u<0?-1:1)===G.caveSide && s>G.shA-3 && s<G.shB+3) return true;
+  return Math.hypot(u-G.pathFoot.u,s-G.pathFoot.s)<3; }
+// the nearest part of the path: its height and how far the ground is shaped to it
+let _pY=0, _pW=0;
+function cvPathAt(G,u,s){ let best=1e9, y=0;
+  for (const L of G.legs){ const du=L.u1-L.u0, ds=L.s1-L.s0, t=clamp(((u-L.u0)*du+(s-L.s0)*ds)/(du*du+ds*ds),0,1), d=Math.hypot(u-L.u0-du*t,s-L.s0-ds*t);
+    if (d<best){ best=d; y=lerp(L.y0,L.y1,t); } }
+  for (const P of G.lands){ const d=Math.max(0,Math.hypot(u-P.u,s-P.s)-0.5); if (d<best){ best=d; y=P.y; } }
+  if (best>1.4) return false; _pY=y; _pW=1-smooth((best-0.75)/0.6); return true; }
+function cvPathDist(G,u,s){ let best=1e9;
+  for (const L of G.legs){ const du=L.u1-L.u0, ds=L.s1-L.s0, t=clamp(((u-L.u0)*du+(s-L.s0)*ds)/(du*du+ds*ds),0,1); best=Math.min(best,Math.hypot(u-L.u0-du*t,s-L.s0-ds*t)); }
+  for (const P of G.lands) best=Math.min(best,Math.hypot(u-P.u,s-P.s)-0.45); return best; }
+function cvOnPath(G,u,s){
+  for (const L of G.legs){ const du=L.u1-L.u0, ds=L.s1-L.s0, t=clamp(((u-L.u0)*du+(s-L.s0)*ds)/(du*du+ds*ds),0,1);
+    if (Math.hypot(u-L.u0-du*t,s-L.s0-ds*t)<(L.fin?0.9:0.85)) return true; }
+  for (const P of G.lands) if (Math.hypot(u-P.u,s-P.s)<1.3) return true;
+  return false; }
+// the signed distance to the cliff line (positive on the land side) and the nearest point of it, from a 1 m grid
+let _cd=0, _ci=-1;
+function cvSdf(G,u,s){ const fu=u-G.u0, fs=s-G.s0; if (fu<0||fs<0||fu>=G.nu-1||fs>=G.ns-1) return false;
+  const i=Math.floor(fu), j=Math.floor(fs), tu=fu-i, ts=fs-j, o=j*G.nu+i, D=G.D, n=G.nu;
+  _cd=(D[o]*(1-tu)+D[o+1]*tu)*(1-ts)+(D[o+n]*(1-tu)+D[o+n+1]*tu)*ts; _ci=G.I[(ts<0.5?o:o+n)+(tu<0.5?0:1)]; return true; }
+// the cliff line, traced from the land function by marching squares on a half-metre grid, smoothed and resampled every
+// metre: an open line from one end of the cove to the other, and a closed one round each stack. Each line runs with
+// the land on its left
+function cvOutline(cv){
+  const h=0.5, u0=-cv.Uc-1.5, s0=-cv.R-cv.rt-18, nu=Math.ceil((2*cv.Uc+3)/h)+1, ns=Math.ceil((cv.sHead+2-s0)/h)+1, M=new Uint8Array(nu*ns);
+  for (let j=0;j<ns;j++) for (let i=0;i<nu;i++){ const u=u0+i*h, s=s0+j*h; M[j*nu+i]=(i===0||i===nu-1)?(s>=0?1:0):j===ns-1?1:cvLand(cv,u,s)?1:0; }
+  // edges: a point on each cell edge where the land changes, keyed by the edge
+  const segs=new Map(), add=(a,b)=>{ (segs.get(a)||segs.set(a,[]).get(a)).push(b); (segs.get(b)||segs.set(b,[]).get(b)).push(a); };
+  const ek=(i,j,dir)=>(j*nu+i)*2+dir;   // dir 0: the edge from (i,j) to (i+1,j); 1: from (i,j) to (i,j+1)
+  for (let j=0;j<ns-1;j++) for (let i=0;i<nu-1;i++){
+    const a=M[j*nu+i], b=M[j*nu+i+1], c=M[(j+1)*nu+i+1], d=M[(j+1)*nu+i], E=[];
+    if (a!==b) E.push(ek(i,j,0)); if (b!==c) E.push(ek(i+1,j,1)); if (c!==d) E.push(ek(i,j+1,0)); if (d!==a) E.push(ek(i,j,1));
+    if (E.length===2) add(E[0],E[1]); else if (E.length===4){ if (a){ add(E[0],E[1]); add(E[2],E[3]); } else { add(E[0],E[3]); add(E[1],E[2]); } } }
+  const pt=k=>{ const dir=k&1, c=k>>1, i=c%nu, j=Math.floor(c/nu); return dir?[u0+i*h,s0+(j+0.5)*h]:[u0+(i+0.5)*h,s0+j*h]; };
+  const used=new Set(), lines=[];
+  const walk=(start)=>{ const L=[start]; used.add(start); let cur=start, prev=-1;
+    for (;;){ const nx=(segs.get(cur)||[]).find(q=>q!==prev && !used.has(q)); if (nx===undefined) break; used.add(nx); L.push(nx); prev=cur; cur=nx; }
+    return L; };
+  for (const [k,v] of segs) if (v.length===1 && !used.has(k)){ const L=walk(k); lines.push({p:L.map(pt),closed:false}); }
+  for (const [k] of segs) if (!used.has(k)){ const L=walk(k); if (L.length>8) lines.push({p:L.map(pt),closed:true}); }
+  const out=[];
+  for (const Ln of lines){ let p=Ln.p; if (p.length<12) continue;
+    // land on the left: test beside the middle of the line
+    { const m=Math.floor(p.length/2), a=p[m-1], b=p[m+1], tu=b[0]-a[0], ts=b[1]-a[1], l=Math.hypot(tu,ts)||1; if (!cvLand(cv,p[m][0]-ts/l*0.6,p[m][1]+tu/l*0.6)) p=p.reverse(); }
+    if (!Ln.closed){ // the open line runs out along the natural coast to the ends of the cove
+      if (p[0][0]>p[p.length-1][0]) p=p.reverse();
+      const pre=[], post=[]; for (let u=-cv.UX;u<p[0][0]-0.5;u+=0.5) pre.push([u,0]); for (let u=p[p.length-1][0]+0.5;u<=cv.UX;u+=0.5) post.push([u,0]); p=[...pre,...p,...post]; }
+    // smoothed to take out the steps of the grid
+    for (let it=0;it<3;it++){ const q=p.map(v=>v.slice()), n=p.length; for (let i=0;i<n;i++){ if (!Ln.closed && (i===0||i===n-1)) continue; const a=q[(i-1+n)%n], b=q[(i+1)%n]; p[i][0]=(a[0]+2*q[i][0]+b[0])/4; p[i][1]=(a[1]+2*q[i][1]+b[1])/4; } }
+    if (Ln.closed) p.push(p[0]);
+    const L=[0]; for (let i=1;i<p.length;i++) L.push(L[i-1]+Math.hypot(p[i][0]-p[i-1][0],p[i][1]-p[i-1][1]));
+    const tot=L[L.length-1]; if (tot<6) continue; const n=Ln.closed?Math.max(6,Math.round(tot)):Math.floor(tot)+1, st=Ln.closed?tot/n:1, pts=[];
+    for (let k=0,j=0;k<n;k++){ const d=k*st; while (j<p.length-2 && L[j+1]<d) j++; const t=clamp((d-L[j])/Math.max(1e-6,L[j+1]-L[j]),0,1); pts.push([lerp(p[j][0],p[j+1][0],t),lerp(p[j][1],p[j+1][1],t)]); }
+    out.push({pts,closed:Ln.closed}); }
+  return out;
+}
+function cvBuild(cv){
+  if (cv.geo) return cv.geo;
+  NO_COVE++;
+  try{
+  const lines=cvOutline(cv), G={chains:[]}; cv._bg=G; let n=0; for (const L of lines) n+=L.pts.length;
+  const U=new Float32Array(n), S=new Float32Array(n), K=new Int8Array(n), CH=new Int16Array(n), NU=new Float32Array(n), NS=new Float32Array(n);
+  { let o=0; lines.forEach((L,c)=>{ const m=L.pts.length; G.chains.push({i0:o,i1:o+m-1,closed:L.closed});
+      for (let k=0;k<m;k++){ U[o+k]=L.pts[k][0]; S[o+k]=L.pts[k][1]; CH[o+k]=c; }
+      for (let k=0;k<m;k++){ const a=L.closed?(k-1+m)%m:Math.max(0,k-1), b=L.closed?(k+1)%m:Math.min(m-1,k+1), tu=U[o+b]-U[o+a], ts=S[o+b]-S[o+a], l=Math.hypot(tu,ts)||1; NU[o+k]=ts/l; NS[o+k]=-tu/l; }
+      o+=m; }); }
+  // what each point of the line is: 0 the open coast, 1 a headland, 3 a wall of the bay, 4 a wall of the ravine, 5 a stack
+  for (let i=0;i<n;i++){ const u=U[i], s=S[i], c=cvAxis(cv,s), sg=u<c?-1:1, Sd=cv.side[sg<0?0:1];
+    K[i]=G.chains[CH[i]].closed?5:s>cv.Bh-0.5&&Math.abs(u-cvGAxis(cv,s))<cv.Ag0+2.5?4:Math.abs(s)<0.8&&Math.abs(u)>Math.min(cv.side[0].Uc,cv.side[1].Uc)-4?0:s>-Sd.R+1&&Math.abs(u-c)<cv.Amax+1?3:1; }
+  Object.assign(G,{n,U,S,K,CH,NU,NS});
+  const next=(i,dd)=>{ const C=G.chains[CH[i]], m=C.i1-C.i0+1; let j=i+dd; if (j<C.i0||j>C.i1){ if (!C.closed) return -1; j=C.i0+((j-C.i0)%m+m)%m; } return j; };
+  G.next=next;
+  // the distance grid
+  G.u0=-cv.UX-3; G.s0=cv.s0g; G.nu=Math.ceil(2*cv.UX+6)+1; G.ns=Math.ceil(cv.s1g-cv.s0g)+1;
+  const D=new Float32Array(G.nu*G.ns).fill(16), I=new Int32Array(G.nu*G.ns).fill(-1);
+  for (let j=0;j<n;j++){ const jn=next(j,1); if (jn<0) continue; const au=U[j], as=S[j], du=U[jn]-au, ds=S[jn]-as, l2=du*du+ds*ds||1;
+    const i0=Math.max(0,Math.floor(Math.min(au,au+du)-16-G.u0)), i1=Math.min(G.nu-1,Math.ceil(Math.max(au,au+du)+16-G.u0));
+    const k0=Math.max(0,Math.floor(Math.min(as,as+ds)-16-G.s0)), k1=Math.min(G.ns-1,Math.ceil(Math.max(as,as+ds)+16-G.s0));
+    for (let k=k0;k<=k1;k++) for (let i=i0;i<=i1;i++){ const u=G.u0+i, s=G.s0+k, t=clamp(((u-au)*du+(s-as)*ds)/l2,0,1), d=Math.hypot(u-au-du*t,s-as-ds*t), o=k*G.nu+i;
+      if (d<D[o]){ D[o]=d; I[o]=t<0.5?j:jn; } } }
+  for (let k=0;k<G.ns;k++) for (let i=0;i<G.nu;i++){ const o=k*G.nu+i; if (!cvLand(cv,G.u0+i,G.s0+k)) D[o]=-D[o]; }
+  G.D=D; G.I=I;
+  const nat=(u,s)=>{ const [x,z]=cvL2W(cv,u,s); return baseH(x,z); };
+  const top=(u,s)=>cvTop(cv,u,s,nat(u,s));
+  G.Thead=top(cvGAxis(cv,cv.sHead),cv.sHead);
+  const R=rng(cv.seed*7+3);
+  // the path: a rough trodden path zigzagging up the ravine from the head of the bay, its turns set irregularly, each
+  // stretch wandering a little, and a last gentle stretch to the clifftop
+  { const bt=cv.bt, gOf=gs=>bt+(G.Thead-bt)*(1-Math.pow(1-gs,1.6)), sOf=y=>cv.Bh+cv.Lg*(1-Math.pow(1-clamp((y-bt)/(G.Thead-bt),0,1),1/1.6));
+    const N=clamp(Math.round((G.Thead-bt)/3.2),2,4), yTop=gOf(0.78+R()*0.06), y0=cv.Bw>0?0.06+(bt-0.06)*Math.pow(1-1/Math.max(cv.Bw,2.5),1.2):0.55;
+    const half=(s,sg)=>Math.max(1.2,(s>=cv.Bh?cvAg(cv,s,sg):cvA(cv,s,sg))-1.5-R()*1.4);
+    const pts=[]; let sg=cv.pathSide;
+    for (let k=0;k<=N;k++){ const f=k?(k+(k<N?(R()-0.5)*0.35:0))/N:0, y=k?y0+f*(yTop-y0):y0, s=k?sOf(y):cv.Bh-1; pts.push({u:(s>=cv.Bh?cvGAxis(cv,s):0)+sg*half(s,sg),s,y}); sg=-sg; }
+    G.legs=[]; G.lands=[]; G.nLeg=0;
+    const leg=(a,b,fin)=>{ const m=fin?3:5, du=b.u-a.u, ds=b.s-a.s, l=Math.hypot(du,ds)||1, wob=(R()-0.5)*1.0, ph=R()*6; let p=a;
+      for (let i=1;i<=m;i++){ const t=i/m, off=i<m?Math.sin(Math.PI*t)*wob+0.2*Math.sin(t*9+ph)*Math.sin(Math.PI*t):0, q={u:a.u+du*t-ds/l*off,s:a.s+ds*t+du/l*off,y:lerp(a.y,b.y,t)};
+        G.legs.push({u0:p.u,s0:p.s,y0:p.y,u1:q.u,s1:q.s,y1:q.y,fin,id:G.nLeg}); p=q; } G.nLeg++; };
+    for (let k=0;k<N;k++){ leg(pts[k],pts[k+1],false); if (k) G.lands.push({u:pts[k].u,s:pts[k].s,y:pts[k].y}); }
+    const e=pts[N]; G.lands.push({u:e.u,s:e.s,y:e.y});
+    const ht=cvGAxis(cv,cv.sHead); leg(e,{u:ht,s:cv.sHead+2.5,y:top(ht,cv.sHead+2.5)},true);
+    G.pathTop={u:ht,s:cv.sHead+2.5}; G.pathFoot={u:pts[0].u,s:pts[0].s-1.5}; }
+  // the shelf of rock that leads along one wall of the bay to its cave
+  const hh=q=>hash(cv.n,q,2201+(cv.sd>0?0:60));
+  G.caveSide=-cv.pathSide; G.caves=[];
+  { const want=Math.max(-cv.side[G.caveSide<0?0:1].R+7,cv.Bh-Math.max(cv.Bw,2.5)-2.5-hh(1)*6); let ic=-1, bd=1e9;
+    for (let i=0;i<n;i++) if (K[i]===3 && Math.sign(U[i]-cvAxis(cv,S[i]))===G.caveSide && Math.abs(S[i]-want)<bd){ bd=Math.abs(S[i]-want); ic=i; }
+    G.ic=ic; G.shA=(ic>=0?S[ic]:want)-5; G.shB=cv.Bh-Math.max(cv.Bw,2.5)*0.4; G.shW=2.3+hh(2)*1.1; G.shH=0.55+hh(3)*0.25; }
+  // the foot and the top of the cliff at each point of its line; the top edge rises and falls along the cliff
+  const foot=new Float32Array(n), tp=new Float32Array(n), tv=new Float32Array(n);
+  G.caves=[];   // cvFloor asks after the caves' mouths before they are known
+  for (let i=0;i<n;i++){ const fu=U[i]+NU[i]*0.5, fs=S[i]+NS[i]*0.5; foot[i]=cvFloor(cv,fu,fs,-0.5,nat(fu,fs),G);
+    tv[i]=2.4*(fbm(i*0.05+CH[i]*7,1,cv.seed+60,3)-0.5)+0.6*(vnoise(i*0.4,2,cv.seed+61)-0.5);
+    tp[i]=top(U[i]-NU[i]*cv.lean,S[i]-NS[i]*cv.lean)+0.06+tv[i]; }
+  for (let i=0;i<n;i++) if (tp[i]-foot[i]<1.6 || K[i]===4){ tp[i]-=tv[i]; tv[i]=0; }   // and none round the ravine, where the path comes out on the clifftop
+  G.foot=foot; G.top=tp; G.tv=tv; G.topOff=cv.lean+1.3;
+  { let m=0; for (let i=0;i<n;i++) m=Math.max(m,tp[i]-Math.max(foot[i]-1.5,-6)); G.Hmax=m; }
+  // vertical joints along the cliffs: where each is and how deep
+  G.joints=[]; { let a=R()*6; while (a<n){ G.joints.push({i:a,d:0.6+R()*1.0,w:0.7+R()*0.8}); a+=3+R()*7; } }
+  // the caves: the first opens above the shelf and may be walked into; the others open at the waterline in the walls of
+  // the bay or the headlands and are reached only from the sea. Each is sized to the rock round it
+  const tryCave=(i,walk)=>{ const nu=-NU[i], ns=-NS[i], ang=(R()-0.5)*0.4, c=Math.cos(ang), sn=Math.sin(ang), sc=walk?1:0.6+R()*0.35;
+    const A={i,walk,u:U[i],s:S[i],au:nu*c-ns*sn,as:nu*sn+ns*c,fM:walk?foot[i]:-1.5,Lc:(walk?9+R()*4:5+R()*5),wL:(1.2+R()*0.9)*sc,wR:(1.2+R()*0.9)*sc,hM:(2.8+R()*1.0)*sc,
+      wX:(2.6+R()*1.2)*sc,hX:(3.7+R()*1.4)*sc,pw:0.75+R()*0.6,lean:(R()<0.5?-1:1)*(0.35+R()*0.75)*sc,tilt:(R()-0.5)*0.5,recess:0.6+R()*1.4,seed:cv.seed+300+i};
+    A.lu=-A.as; A.ls=A.au; A.wM=Math.max(A.wL,A.wR);
+    for (let tries=0;tries<9;tries++){ let ok=true; A.aX=A.Lc*(0.4+0.2*hash(i,1,77));
+      for (let a=1;a<=A.Lc && ok;a+=1){ const w=Math.max(cvCaveWs(A,a,1),cvCaveWs(A,a,-1))*1.3+1.0, hgt=cvCaveH(A,a)*1.25;
+        for (const b of [-w,0,w]){ const u=A.u+A.au*a+A.lu*b, s=A.s+A.as*a+A.ls*b;
+          if (!cvLand(cv,u,s) || !cvSdf(G,u,s) || _cd<0.6) { ok=false; break; }
+          if (b===0 && top(u,s)<cvCaveF(A,a)+hgt+1.5){ ok=false; break; } } }
+      for (const B of G.caves) if (Math.hypot(B.u-A.u,B.s-A.s)<B.wM+A.wM+6) ok=false;
+      if (cvPathAt(G,A.u,A.s)) ok=false;
+      if (ok) break;
+      A.wX*=0.85; A.hX*=0.88; A.Lc*=0.85; A.wL=Math.min(A.wL,A.wX); A.wR=Math.min(A.wR,A.wX); A.wM=Math.max(A.wL,A.wR); A.hM=Math.min(A.hM,A.hX); }
+    if (A.Lc<4) return null;
+    A.aX=A.Lc*(0.4+0.2*hash(i,1,77)); A.a0=A.recess-1.0-0.3*A.wM;
+    cvCaveWalkBand(A);
+    if (walk && A.aMax<3) return null;
+    // the opening in the face: the cross-section where the cave meets the cliff, a good deal smaller than the bore, which meets the face at an angle
+    A.hole=[]; for (let k=0;k<=32;k++){ const [b,y]=cvCaveSec(A,0,k/32*Math.PI,false); A.hole.push([b*0.68,y*0.74]); }
+    return A; };
+  // the walkable cave: tried first near the shelf's far end on its side, then anywhere along the bay's walls near the head
+  { const cand=[]; for (let i=0;i<n;i++) if (K[i]===3){ const side=Math.sign(U[i]-cvAxis(cv,S[i])); cand.push([i,Math.abs(S[i]-(G.ic>=0?S[G.ic]:cv.Bh-6))+(side===G.caveSide?0:30)]); }
+    cand.sort((a,b)=>a[1]-b[1]);
+    for (const [i] of cand.filter((_,q)=>q%2===0).slice(0,120)){ if (foot[i]<-0.2 && Math.sign(U[i]-cvAxis(cv,S[i]))!==G.caveSide) continue; const A=tryCave(i,true); if (A){ G.caves.push(A); break; } }
+    const W0=G.caves[0]; if (W0 && Math.sign(W0.u-cvAxis(cv,W0.s))!==G.caveSide){ G.caveSide=-G.caveSide; }
+    if (W0){ G.shA=W0.s-5; for (let i=0;i<n;i++){ const fu=U[i]+NU[i]*0.5, fs=S[i]+NS[i]*0.5; foot[i]=cvFloor(cv,fu,fs,-0.5,nat(fu,fs),G); } W0.fM=foot[W0.i]; } }
+  for (let t=0;t<30 && G.caves.length<cv.nCaves;t++){ const i=Math.floor(R()*n); if ((K[i]!==3&&K[i]!==1) || foot[i]>-0.4 || foot[i]<-4 || tp[i]-foot[i]<8) continue;
+    const A=tryCave(i,false); if (A) G.caves.push(A); }
+  G.cave=G.caves.find(A=>A.walk)||G.caves[0]||null;
+  // how far behind the cliff line the face meets the ground: the ground stays at the foot of the cliff that far back,
+  // so that no trench opens between the line and a face that leans back at its foot
+  G.fo=new Float32Array(n); for (let i=0;i<n;i++){ const c=cvColumn(cv,i,12); let m=0; for (let j=0;j<c.P.length;j++){ const y=c.P[j][1]; if (y<foot[i]+0.8) m=Math.max(m,c.F[j]); } G.fo[i]=m; }
+  // the shelf height at the walkable cave's mouth is the floor of its mouth
+  for (const A of G.caves) if (A.walk) A.fM=foot[A.i];
+  // boulders and scree: at the foot of the walls, along the shelf's edge, round the headlands and stacks and in the
+  // ravine; with scrub along the clifftop and in the ravine
+  { const B=[], V=[];
+    const near=(u,s,r)=>{ if (cvPathDist(G,u,s)<r*0.6+1.4) return true;
+      for (const A of G.caves) if (A.walk && Math.hypot(u-A.u,s-A.s)<A.wM+2.2) return true;
+      return B.some(b=>Math.hypot(b.u-u,b.s-s)<(b.r+r)*0.8); };
+    for (let t=0;t<900 && B.length<120;t++){ const i=Math.floor(R()*n), k=K[i]; if (k===0) continue;
+      const shelfWall=k===3&&Math.sign(U[i]-cvAxis(cv,S[i]))===G.caveSide&&S[i]>G.shA-1&&S[i]<G.shB+1;
+      const big=R()<0.25, r=(k===1||k===5?0.8+R()*1.8:big?0.7+R()*0.9:0.25+R()*0.45);
+      const off=k===4?0.3+R()*1.2:shelfWall?G.shW+0.1+R()*0.7:0.4+R()*(big?2.6:1.6);
+      const u=U[i]+NU[i]*(off+r*0.4), s=S[i]+NS[i]*(off+r*0.4);
+      if (cvLand(cv,u,s) || near(u,s,r)) continue;
+      if (shelfWall && off<G.shW) continue;
+      B.push({u,s,r,k}); }
+    // a few rocks fallen in front of each cave's mouth, clear of the way in
+    for (const A of G.caves) for (let q=0;q<4;q++){ const sgn=q%2?1:-1, a=-1.2-R()*2.2, b=sgn*(A.wM+0.6+R()*1.4), u=A.u+A.au*a+A.lu*b, s=A.s+A.as*a+A.ls*b;
+      if (!cvLand(cv,u,s) && !cvOnPath(G,u,s)) B.push({u,s,r:0.35+R()*0.7,k:6}); }
+    for (let t=0;t<500 && V.length<70;t++){ const i=Math.floor(R()*n); if (K[i]===0 && R()<0.7) continue; const dd=G.topOff+0.6+R()*7, u=U[i]-NU[i]*dd, s=S[i]-NS[i]*dd;
+      if (!cvSdf(G,u,s) || _cd<G.topOff+0.4 || cvOnPath(G,u,s) || Math.abs(u-G.pathTop.u)<1.5&&s>cv.sHead-1) continue; V.push({u,s,r:0.5+R()*0.9,pine:R()<0.08&&dd>5}); }
+    for (let t=0;t<40;t++){ const s=cv.Bh+R()*cv.Lg*0.9, sg=R()<0.5?1:-1, u=cvGAxis(cv,s)+sg*R()*cvAg(cv,s,sg);
+      if (cvLand(cv,u,s) || cvPathAt(G,u,s)&&_pW>0) continue; V.push({u,s,r:0.35+R()*0.5,gully:true}); }
+    G.boulders=B; G.scrub=V; }
+  G.roadS=cvS(cv,cv.X,coastRoadZ(cv.sd,cv.X));
+  G.cols={};
+  return (cv.geo=G);
+  } finally{ NO_COVE--; }
+}
+// a cave's shape along its axis a, from the mouth: its half-width on each side, its height and its floor
+function cvCaveWs(A,a,sg){ const wm=sg>0?A.wR:A.wL; return a<=0?wm:a<A.aX?lerp(wm,A.wX,smooth(a/A.aX)):lerp(A.wX,0.5,smooth((a-A.aX)/(A.Lc-A.aX))); }
+function cvCaveH(A,a){ return a<=0?A.hM:a<A.aX?lerp(A.hM,A.hX,smooth(a/A.aX)):lerp(A.hX,0.9,Math.pow(smooth((a-A.aX)/(A.Lc-A.aX)),0.8)); }
+function cvCaveF(A,a){ if (!A.walk) return A.fM; return a<0?A.fM-0.05+a*0.12:a<0.45*A.Lc?A.fM:lerp(A.fM,-0.5,smooth((a-0.45*A.Lc)/(0.45*A.Lc))); }
+// a point of the cross-section at angle th (0 the right foot, pi the left): wider low down, its crown pushed to one
+// side, and lumpy where lumps are wanted. Returns [b, height above the floor]
+function cvCaveSec(A,a,th,lumpy){ const c=Math.cos(th), sn=Math.sin(th), aa=Math.max(0,a), w=cvCaveWs(A,aa,c>=0?1:-1), h=cvCaveH(A,aa);
+  const hy=Math.pow(Math.abs(sn),0.9), irr=1+0.32*(vnoise(th*2.6+aa*0.25,A.seed*0.37,A.seed+7)-0.5);
+  let b=w*Math.sign(c||1)*Math.pow(Math.abs(c),A.pw)*(1+0.65*Math.pow(1-hy,2.5))*irr, y=h*hy*irr;
+  y*=1+A.tilt*clamp(b/Math.max(0.5,w),-1,1)*hy;
+  b+=A.lean*hy;
+  if (lumpy){ const r=aa<0.3?0.4:1, n1=vnoise(aa*0.9+3,th*2.2,A.seed), n2=vnoise(aa*2.3,th*4.1,A.seed+1), n3=vnoise(aa*0.35,th*0.9,A.seed+2);
+    const k=(0.28*n1+0.14*n2+0.2*n3)*r; b+=Math.sign(c||1)*w*k*(1-0.5*hy); y+=h*k*0.55*hy; }
+  return [b,y]; }
+// where a walker fits along the cave: the cross-section's extent between knee and head height, less a margin, while
+// there is headroom
+function cvCaveWalkBand(A){ A.band=[]; A.aMax=-2.2; let ok=true;
+  for (let a=0;a<=A.Lc;a+=0.25){ const h=cvCaveH(A,a); let lo=-1e9, hi=1e9;
+    for (let k=0;k<=48;k++){ const [b,y]=cvCaveSec(A,a,k/48*Math.PI,false); if (y<0.25||y>1.95) continue; if (b>=A.lean*0.5) hi=Math.min(hi,b); else lo=Math.max(lo,b); }
+    const L=lo+0.45, Rr=hi-0.45; A.band.push([L,Rr]);
+    if (A.walk && ok && h>=2.35 && Rr-L>0.5) A.aMax=a; else ok=false; } }
+function cvCaveLocal(A,u,s){ const du=u-A.u, ds=s-A.s; return [du*A.au+ds*A.as, du*A.lu+ds*A.ls]; }
+// the floor inside the walkable cave, where a walker at height y stands within it
+function cvCaveFloor(A,u,s,y){ if (!A || !A.walk) return null; const [a,b]=cvCaveLocal(A,u,s); if (a<-2.2 || a>A.aMax) return null;
+  const B=A.band[clamp(Math.round(Math.max(a,0)/0.25),0,A.band.length-1)]; if (b<B[0] || b>B[1]) return null;
+  const f=a<0?A.fM:cvCaveF(A,a); if (y>f+1.9) return null; return f; }
+// the cove whose ground covers a point
+function coveAtXZ(x,z){ const n=Math.floor(x/CV_SP); if (n!==cvMemoN){ cvMemoN=n; cvMemoA=coveInfo(1,n); cvMemoB=coveInfo(-1,n); }
+  for (const cv of [cvMemoA,cvMemoB]){ if (!cv || x<cv.bb[0] || x>cv.bb[1] || z<cv.bb[2] || z>cv.bb[3]) continue;
+    const u=cvU(cv,x,z), s=cvS(cv,x,z); if (Math.abs(u)<cv.UX && s>cv.s0g && s<cv.s1g) return cv; }
+  return null; }
+// the height of the clifftop just behind the edge, where its line rises and falls
+function cvCapTop(cv,G,u,s,hNat,d,i){ return cvTop(cv,u,s,hNat)+(i>=0?G.tv[i]*(1-smooth((d-G.topOff)/4)):0); }
+// the ground of a cove at a point, given the natural ground there
+function coveH(cv,x,z,hNat){
+  const u=cvU(cv,x,z), s=cvS(cv,x,z);
+  if (!cv.geo){ if (COVE_FAST) return cvLand(cv,u,s)?cvTop(cv,u,s,hNat):cvFloor(cv,u,s,-3,hNat,null); cvBuild(cv); }
+  const G=cv.geo; if (!cvSdf(G,u,s)) return hNat;
+  const d=_cd, i=_ci;
+  if (d>=0){ if (i<0 || d>=CV_LZ+1.5) return cvTop(cv,u,s,hNat); const top=cvCapTop(cv,G,u,s,hNat,d,i);
+    const ft=G.foot[i], tp=G.top[i], k=smooth((tp-ft-0.8)/1.5); if (k<=0) return top;
+    if (d<G.fo[i]+0.3) return ft-0.05;
+    // in the recess round a cave's mouth the ground stays at the foot of the cliff, under the cave's floor
+    if (d<CV_LZ) for (const A of G.caves){ const [a,b]=cvCaveLocal(A,u,s); if (a>-1 && a<A.recess+0.8 && Math.abs(b)<A.wM+3.2) return (A.walk?A.fM:ft)-0.15; }
+    return lerp(top,ft-1.2,k*(d<CV_LZ?1:1-smooth((d-CV_LZ)/1.5))); }
+  return cvFloor(cv,u,s,d,hNat,G);
+}
+// within a cove the streets, trees, houses and boats keep clear of the cliffs, the bay and the ravine
+function coveCore(x,z){ const cv=coveAtXZ(x,z); if (!cv) return false; const G=cvBuild(cv), u=cvU(cv,x,z), s=cvS(cv,x,z);
+  if (!cvSdf(G,u,s)) return false; return _cd<14; }
+/* ---------- walking in a cove: the cliffs cannot be climbed or stepped off, the ravine's slope is walked only on
+   the path, and inside the cave its floor is the ground ---------- */
+function walkGround(x,z,y){
+  const cv=coveAtXZ(x,z); if (!cv || !cv.geo) return heightAt(x,z);
+  const G=cv.geo, u=cvU(cv,x,z), s=cvS(cv,x,z);
+  { const f=cvCaveFloor(G.cave,u,s,y); if (f!==null) return f; }
+  if (!cvSdf(G,u,s) || _ci<0) return heightAt(x,z);
+  const d=_cd, i=_ci, ft=G.foot[i], tp=G.top[i]; if (tp-ft<1.6) return heightAt(x,z);
+  const thr=y>(ft+tp)/2?G.topOff+0.25:-0.55;
+  if (d>=thr && d<CV_LZ+1.5) return cvCapTop(cv,G,u,s,baseH0(x,z),d,i);
+  return heightAt(x,z);
+}
+function coveNoWalk(cv,x,z){ const G=cv.geo; if (!G) return false; const u=cvU(cv,x,z), s=cvS(cv,x,z);
+  if (s<=cv.Bh+0.25 || s>cv.sHead+0.5 || Math.abs(u-cvGAxis(cv,s))>cv.Ag0+2 || cvLand(cv,u,s)) return false;
+  return !cvOnPath(G,u,s); }
+// whether a step from (ox,oz), standing on gO, to (nx,nz), whose standing height is gN, is allowed
+function coveMoveOk(ox,oz,y,gO,nx,nz,gN){
+  const cv=coveAtXZ(nx,nz); if (!cv || !cv.geo) return true;
+  if (coveNoWalk(cv,nx,nz) && (!coveNoWalk(cv,ox,oz) || gN>gO+0.02)) return false;
+  if (gN-Math.max(y,gO)>STEP) return false;
+  if (gO-gN>1.4) return false;
+  return true; }
+// what the help panel says of a point in a cove
+function coveHere(x,z,y){ const cv=coveAtXZ(x,z); if (!cv || !cv.geo) return null; const G=cv.geo, u=cvU(cv,x,z), s=cvS(cv,x,z);
+  if (cvCaveFloor(G.cave,u,s,y)!==null) return {id:'cave'+cv.n+':'+cv.sd,label:'Sea cave',name:cv.cave,desc:'Cave worn into the foot of the cliff by the sea, with a floor of pebbles and fallen rock and a pool of sea water at the back.'};
+  const land=cvLand(cv,u,s);
+  if (!land && s>cv.Bh-0.5 && Math.abs(u-cvGAxis(cv,s))<cv.Ag0+2 || cvOnPath(G,u,s)) return {id:'path'+cv.n+':'+cv.sd,label:'Cliff path',name:'Sentiero della '+cv.name,desc:'Rough path that zigzags down the ravine at the head of the cove, with steps of loose stone where it is steep.'};
+  if (!land && s>-cv.R && Math.abs(u-cvAxis(cv,s))<cv.Amax+1) return {id:'cove'+cv.n+':'+cv.sd,label:'Cove',name:cv.name,
+    desc:cv.Bw>0?'Small bay between limestone cliffs, with a '+(cv.shingle?'shingle':'sand')+' beach at its head and a shelf of rock along one side, below a cave.':'Small bay between limestone cliffs, with shelves of bare rock at its head and along one side, below a cave.'};
+  return null; }
+function coveInCave(x,z,y){ const cv=coveAtXZ(x,z); if (!cv || !cv.geo) return false; return cvCaveFloor(cv.geo.cave,cvU(cv,x,z),cvS(cv,x,z),y)!==null; }
+// the coast road moves inland where a cove's ravine reaches towards it
+function coveRoadBump(sd,x){ const cv=coveInfo(sd,Math.floor(x/CV_SP)); if (!cv || Math.abs(x-cv.X)>=cv.UX+60) return 0;
+  const s0=19+3*Math.sin(x*0.017+(sd>0?1.3:4.1)), z=coastZ(sd,x)+sd*s0, au=Math.abs(cvU(cv,x,z)); if (au>=cv.UX) return 0;
+  return Math.max(0,cv.sRoad-cvS(cv,x,z))/Math.abs(cv.nz)*(1-smooth((au-cv.Ag0-12)/(cv.UX-cv.Ag0-14))); }
+/* ---------- the cove's meshes, each piece built by the block that holds it ---------- */
+const CV_ROCK=[hex('#ddd4c4'),hex('#cdbfa6'),hex('#bfa98a'),hex('#a69a87'),hex('#5f5b52'),hex('#c49a6c'),hex('#c9c6bd')], CV_PEBBLE=[hex('#cbc4b6'),hex('#a9a092'),hex('#bdb19c')], CV_SAND=[hex('#e8d6ae'),hex('#dcc596'),hex('#e2cfa6')];
+function gbTri(gb,A,B,Cc,na,nb,nc,ca,cb,cc,surf){ gb.p.push(A[0],A[1],A[2],B[0],B[1],B[2],Cc[0],Cc[1],Cc[2]); gb.n.push(...na,...nb,...nc); gb.c.push(...ca,...cb,...cc); gb.s.push(surf,surf,surf); }
+// a quad from two triangles, wound so that it faces along f
+function gbQuad(gb,P,N,Cl,ia,ib,ic,id,f,surf){ const a=P[ia], b=P[ib], c=P[ic];
+  const ux=b[0]-a[0], uy=b[1]-a[1], uz=b[2]-a[2], vx=c[0]-a[0], vy=c[1]-a[1], vz=c[2]-a[2], nx=uy*vz-uz*vy, ny=uz*vx-ux*vz, nz=ux*vy-uy*vx;
+  if ((nx*f[0]+ny*f[1]+nz*f[2])>=0){ gbTri(gb,P[ia],P[ib],P[ic],N[ia],N[ib],N[ic],Cl[ia],Cl[ib],Cl[ic],surf); gbTri(gb,P[ia],P[ic],P[id],N[ia],N[ic],N[id],Cl[ia],Cl[ic],Cl[id],surf); }
+  else { gbTri(gb,P[ia],P[ic],P[ib],N[ia],N[ic],N[ib],Cl[ia],Cl[ic],Cl[ib],surf); gbTri(gb,P[ia],P[id],P[ic],N[ia],N[id],N[ic],Cl[ia],Cl[id],Cl[ic],surf); } }
+// the colour of the rock: beds of slightly different tints, streaks of rust below the ledges, darker in the joints and
+// recesses, wet and dark at the waterline
+// a quad with a winding fixed by the caller, so that a strip folded under an overhang keeps one orientation
+// a triangle so thin that it would show only as a shard is left out (its neighbours cover the place)
+function cvSliver(A,B,Cc){ const e=(p,q)=>Math.hypot(p[0]-q[0],p[1]-q[1],p[2]-q[2]), a=e(A,B), b=e(B,Cc), c=e(Cc,A), m=Math.max(a,b,c);
+  const ux=B[0]-A[0], uy=B[1]-A[1], uz=B[2]-A[2], vx=Cc[0]-A[0], vy=Cc[1]-A[1], vz=Cc[2]-A[2], ar=Math.hypot(uy*vz-uz*vy,uz*vx-ux*vz,ux*vy-uy*vx);
+  return m>0.8 && ar/(m*m)<0.02; }
+function gbQuadW(gb,P,N,Cl,ia,ib,ic,id,flip,surf){
+  const t=(i,j,k)=>{ if (!cvSliver(P[i],P[j],P[k])) gbTri(gb,P[i],P[j],P[k],N[i],N[j],N[k],Cl[i],Cl[j],Cl[k],surf); };
+  if (!flip){ t(ia,ib,ic); t(ia,ic,id); } else { t(ia,ic,ib); t(ia,id,ic); } }
+function cvRockCol(cv,arc,y,foot,dark){
+  const c=new THREE.Color(), bedN=Math.floor((y+1.1*vnoise(arc*0.03,3,cv.seed+23))/cv.bed), bh=hash(bedN,cv.n,2301);
+  c.copy(CV_ROCK[0]).lerp(CV_ROCK[cv.tint<0.33?6:1],0.35+0.3*cv.tint).lerp(CV_ROCK[bh<0.5?1:2],0.25+0.35*bh);
+  const n1=vnoise(arc*0.04,y*0.3,cv.seed+20), n2=vnoise(arc*0.5,y*0.06,cv.seed+21), n3=vnoise(arc*0.9,y*1.3,cv.seed+22);
+  c.lerp(CV_ROCK[3],0.25*smooth((n1-0.5)/0.3));
+  if (n2>0.66) c.lerp(CV_ROCK[5],(n2-0.66)*1.4);
+  c.multiplyScalar(0.93+0.12*n3);
+  const wet=Math.max(foot,0)+0.4+0.5*n1; if (y<wet) c.lerp(CV_ROCK[4],smooth((wet-y)/0.6)*0.75);
+  if (dark) c.multiplyScalar(dark);
+  return [c.r,c.g,c.b]; }
+// the opening of a cave in the face, at lateral distance b from its centre: the height of its top, or -1
+function cvHoleTop(A,b){ const H=A.hole; let best=-1, low=1e9;
+  for (let k=0;k<H.length-1;k++){ const p=H[k], q=H[k+1]; if ((b-p[0])*(b-q[0])>0) continue; const t=Math.abs(q[0]-p[0])<1e-6?0:(b-p[0])/(q[0]-p[0]), y=lerp(p[1],q[1],t); best=Math.max(best,y); low=Math.min(low,y); }
+  // only where the opening reaches down to the floor: under an overhanging crown the face stays whole
+  if (H.length && b<Math.min(H[0][0],H[H.length-1][0])-0.01 || b>Math.max(H[0][0],H[H.length-1][0])+0.01) return -1;
+  return best; }
+// a column of the cliff face at fractional index fi of the cliff line: from below the ground to the top, leaning back,
+// with bulges, beds that jut out at their base, joints, a notch worn by the sea at its foot where it stands in the
+// water, a rounded brow, and a cave's opening and the recess round it where one opens here
+function cvColumn(cv,fi,nr){
+  const G=cv.geo||cv._bg, i0=Math.floor(fi), i1=G.next(i0,1)<0?i0:G.next(i0,1), t=clamp(fi-i0,0,1);
+  const u=lerp(G.U[i0],G.U[i1],t), s=lerp(G.S[i0],G.S[i1],t), foot=lerp(G.foot[i0],G.foot[i1],t), top=lerp(G.top[i0],G.top[i1],t);
+  let nu=lerp(G.NU[i0],G.NU[i1],t), ns=lerp(G.NS[i0],G.NS[i1],t); const nl=Math.hypot(nu,ns)||1; nu/=nl; ns/=nl;
+  const kind=G.K[t<0.5?i0:i1], arc=fi+G.CH[i0]*1000;
+  const [px,pz]=cvL2W(cv,u,s), [qx,qz]=cvL2W(cv,u+nu*0.5,s+ns*0.5); let wx=qx-px, wz=qz-pz; const wl=Math.hypot(wx,wz)||1; wx/=wl; wz/=wl;
+  // a cave opening here: the lateral distance from its centre along the face
+  let A=null, b=0; for (const C of G.caves){ if (G.CH[C.i]!==G.CH[i0]) continue; const bb=fi-C.i; if (Math.abs(bb)<C.wM+4){ A=C; b=bb; break; } }
+  const holeTop=A?cvHoleTop(A,b):-1, mouth=holeTop>0.05, mt=A?0.3+0.7*smooth((Math.abs(b)-A.wM-0.2)/3):1;
+  const ybot=Math.max(foot-1.5,-6), cutY=mouth?A.fM+holeTop:-1e9; let cut=0;
+  const hgt=Math.max(0.01,top-foot), notch=smooth((0.9-foot)/0.6)*(kind===4?0:1), P=[], Cl=[], F=[];
+  let joint=0; for (const J of G.joints){ const q=(fi-J.i)/J.w; if (Math.abs(q)<3) joint+=J.d*Math.exp(-q*q); }
+  for (let j=0;j<=nr;j++){ const tau=Math.pow(j/nr,1.25); let y=ybot+tau*(top-ybot);
+    // the rows below a cave's opening are left out; the first row above it is drawn down onto its edge
+    if (mouth && !cut && y>=cutY && j<nr){ y=cutY; cut=j; }
+    const rel=clamp((y-foot)/hgt,0,1);
+    const taper=clamp((top-y)/1.5,0,1)*clamp((y-foot+1.5)/1.5,0,1);
+    // rough ground and smooth slabs: in a slab only the broad shape and the joints remain
+    const rough=smooth((fbm(arc*0.012,y*0.015,cv.seed+36,2)-0.42)/0.22);
+    const flute=0.3*Math.sin(arc*0.6+5*vnoise(arc*0.05,y*0.03,cv.seed+32))*smooth((vnoise(arc*0.025,y*0.015,cv.seed+33)-0.55)/0.25);
+    // the beds run level, each jutting at its base by its own amount
+    const by=y+0.35*(vnoise(arc*0.008,5,cv.seed+34)-0.5)*cv.bed, bedN=Math.floor(by/cv.bed), bedF=by/cv.bed-bedN, jut=hash(bedN,cv.n,2311);
+    const ledge=(jut<0.35?0:0.25+0.6*jut)*bedF*bedF*(0.4+0.6*smooth((vnoise(arc*0.03,bedN,cv.seed+35)-0.25)/0.4));
+    const big=(fbm(arc*0.035,y*0.03,cv.seed+30,3)-0.5)*(2.2+2.2*vnoise(arc*0.01,7,cv.seed+37));
+    let off=cv.lean*rel+(big+(flute+(vnoise(arc*0.3,y*0.4,cv.seed+31)-0.5)*0.35)*rough+ledge*(0.35+0.65*rough)+joint)*taper*mt;
+    off+=1.2*notch*mt*Math.exp(-(((y-0.5)/0.5)**2));
+    // the alcove round a cave's mouth
+    if (A) off+=A.recess*Math.exp(-((b/(A.wM+1.6))**2))*smooth((A.fM+A.hM+3.5-y)/3.2);
+    // the brow, rounded over into the clifftop
+    const rb=1.4, qb=clamp((y-(top-rb))/rb,0,1); off+=1.3*(1-Math.sqrt(1-qb*qb));
+    if (kind===4 || y<foot+2.5) off=Math.max(off,0.3*cv.lean*rel); else off=Math.max(off,-1.0);
+    off=Math.min(off,CV_LZ-0.6);
+    // round a cave's opening the face stands behind the start of the bore, so that no gap opens between them
+    if (A){ const wb=smooth((A.wM+1.6-Math.abs(b))/1.4)*smooth((A.fM+A.hM*1.2+2-y)/1.4); off=Math.max(off,(A.recess-0.3)*wb);
+      off=Math.max(off,0); }   // near a cave the face neither overhangs nor jumps from one column to the next
+    if (j===nr) off=G.topOff;
+    P.push([px-wx*off,y,pz-wz*off]); F.push(off);
+    const dk=(1-0.3*clamp((off-cv.lean*rel-0.3)/1.4,0,1))*(1-0.25*clamp(joint/1.2,0,1));
+    Cl.push(cvRockCol(cv,arc,y,foot,dk)); }
+  return {P,Cl,F,ybot,cut,wx,wz,u,s,top,foot,kind,small:top-foot<0.5,i:t<0.5?i0:i1};
+}
+// the columns of the face for a level of detail: every metre, two or four, and closer round each cave's mouth
+function cvFaceCols(cv,lod){
+  const G=cv.geo; if (G.cols[lod]) return G.cols[lod];
+  const st=lod===0?1:lod===1?2:4, out=[];
+  for (const C of G.chains){ const L=[], m=C.i1-C.i0+1, last=C.closed?C.i1+1:C.i1;
+    const zones=G.caves.filter(A=>G.CH[A.i]===G.CH[C.i0]).map(A=>[A.i-A.wM-1.6,A.i+A.wM+1.6]);
+    for (let i=C.i0;i<=last;i+=st){ const z=zones.find(Z=>i>Z[0]&&i<Z[1]); if (z){ if (!z.done){ z.done=1; for (let f=Math.ceil(z[0]*4)/4;f<z[1];f+=lod<2?0.3:0.6) L.push(f); } continue; } L.push(i); }
+    if (!C.closed && L[L.length-1]!==C.i1) L.push(C.i1);
+    if (C.closed && L[L.length-1]!==C.i1+1) L.push(C.i1+1);
+    out.push({L:L.map(f=>f>C.i1?f-m:f),closed:C.closed}); }
+  return (G.cols[lod]=out); }
+function buildCoveChunk(gb,ch,cx,cz,lod){
+  const x0=cx*C, z0=cz*C, own=(x,z)=>x>=x0&&x<x0+C&&z>=z0&&z<z0+C;
+  for (const sd of SIDES){ const cv=coveInfo(sd,Math.floor((x0+C/2)/CV_SP)); if (!cv) continue;
+    if (x0+C<cv.bb[0] || x0>cv.bb[1] || z0+C<cv.bb[2] || z0>cv.bb[3]) continue;
+    const G=cvBuild(cv), R=rng(cv.seed+cx*31+cz*17);
+    /* --- the cliff face and its cap of rock --- */
+    { const nr=lod===0?clamp(Math.ceil(G.Hmax/0.45),10,64):lod===1?clamp(Math.ceil(G.Hmax/1.2),6,26):clamp(Math.ceil(G.Hmax/4),3,9);
+      const CAPF=[0,0.12,0.3,0.5,0.7,0.85,1];
+      for (const CL of cvFaceCols(cv,lod)){ const L=CL.L, cache=new Map();
+        const col=k=>{ let c=cache.get(k); if (!c){ c=cvColumn(cv,L[k],nr); cache.set(k,c); } return c; };
+        const cap=k=>{ const c=col(k); if (c.cap) return c.cap; const nu=G.NU[c.i], ns=G.NS[c.i];
+          // where the land is narrow (an arm of the cove, a stack) the caps from either side meet, and overlap a little,
+          // over the middle; elsewhere the cap runs back over the clifftop and tucks under the ground
+          let dm=11, met=false; for (let dd=G.topOff+1;dd<=11;dd+=0.5){ if (cvSdf(G,c.u-nu*dd,c.s-ns*dd) && _cd<dd-0.3){ dm=dd+0.4; met=true; break; } }
+          const P=[], Cl=[];
+          for (const f of CAPF){ const dd=G.topOff+(dm-G.topOff)*f, u=c.u-nu*dd, s=c.s-ns*dd, [x,z]=cvL2W(cv,u,s);
+            const h=f===0?c.top:cvCapTop(cv,G,u,s,baseH0(x,z),dd,c.i)+(met||dd<=CV_LZ+2.5?0.06:f===1?-0.4:-0.15);
+            if (f===0){ const q=c.P[c.P.length-1]; P.push([q[0],c.top,q[2]]); } else P.push([x,h,z]);
+            const g=vnoise(x*0.9,z*0.9,cv.seed+50), cl=LIMESTONE.clone().multiplyScalar(0.84+0.12*g).lerp(CV_ROCK[cv.tint<0.33?6:1],0.3*(1-f)); Cl.push([cl.r,cl.g,cl.b]); }
+          return (c.cap={P,Cl}); };
+        for (let k=0;k<L.length-1;k++){ const a=col(k), b=col(k+1);
+          const [ax,az]=cvL2W(cv,a.u,a.s), [bx,bz]=cvL2W(cv,b.u,b.s); if (!own((ax+bx)/2,(az+bz)/2)) continue;
+          if (a.small && b.small) continue;
+          const nb=[k>0?col(k-1):CL.closed?col(L.length-2):a,a,b,k+2<L.length?col(k+2):CL.closed?col(1):b];
+          const P=[], Cl=[], N=[];
+          for (const [c,cl,cr] of [[a,nb[0],b],[b,a,nb[3]]]) for (let j=0;j<=nr;j++){
+            const up=c.P[Math.min(nr,j+1)], dn=c.P[Math.max(0,j-1)], l=cl.P[j], r=cr.P[j];
+            const tx=r[0]-l[0], ty=r[1]-l[1], tz=r[2]-l[2], vx=up[0]-dn[0], vy=up[1]-dn[1], vz=up[2]-dn[2];
+            let nx=ty*vz-tz*vy, ny=tz*vx-tx*vz, nz=tx*vy-ty*vx; if (nx*c.wx+nz*c.wz<0){ nx=-nx; ny=-ny; nz=-nz; } const nl=Math.hypot(nx,ny,nz)||1;
+            P.push(c.P[j]); Cl.push(c.Cl[j]); N.push([nx/nl,ny/nl,nz/nl]); }
+          // the winding is set once for the strip, from the whole height of its columns
+          const W=nr+1, hx=P[W][0]-P[0][0], hz=P[W][2]-P[0][2], vx=P[nr][0]-P[0][0], vy=P[nr][1]-P[0][1], vz=P[nr][2]-P[0][2];
+          const rnx=-hz*vy, rnz=hx*vy, rny=hz*vx-hx*vz, flip=(rnx*(a.wx+b.wx)+rnz*(a.wz+b.wz))<0;
+          // where the opening's edge falls at different rows in the two columns, the step between them is filled by a fan
+          // to the higher edge vertex, so the edge runs straight across
+          const tri=(i,j,k)=>{ if (flip) gbTri(gb,P[i],P[k],P[j],N[i],N[k],N[j],Cl[i],Cl[k],Cl[j],12); else gbTri(gb,P[i],P[j],P[k],N[i],N[j],N[k],Cl[i],Cl[j],Cl[k],12); };
+          const ca=a.cut, cb=b.cut;
+          if (ca>cb) for (let j=cb;j<ca;j++) tri(ca,W+j,W+j+1);
+          else if (cb>ca) for (let j=ca;j<cb;j++) tri(j,W+cb,j+1);
+          for (let j=Math.max(ca,cb);j<nr;j++) gbQuadW(gb,P,N,Cl,j,W+j,W+j+1,j+1,flip,12);
+          if (a.top-a.foot>0.8 || b.top-b.foot>0.8){ const ca=cap(k), cb=cap(k+1), Q=[...ca.P,...cb.P], QC=[...ca.Cl,...cb.Cl], M=CAPF.length, QN=Q.map(()=>[0,1,0]);
+            for (let j=0;j<M;j++){ const p=Q[j], q=Q[M+j], pu=Q[Math.min(M-1,j+1)], pd=Q[Math.max(0,j-1)];
+              const tx=q[0]-p[0], ty=q[1]-p[1], tz=q[2]-p[2], vx=pu[0]-pd[0], vy=pu[1]-pd[1], vz=pu[2]-pd[2]; let nx=ty*vz-tz*vy, ny=tz*vx-tx*vz, nz=tx*vy-ty*vx;
+              if (ny<0){ nx=-nx; ny=-ny; nz=-nz; } const nl=Math.hypot(nx,ny,nz)||1; QN[j]=QN[M+j]=[nx/nl,ny/nl,nz/nl]; }
+            for (let j=0;j<M-1;j++) gbQuad(gb,Q,QN,QC,j,M+j,M+j+1,j+1,[0,1,0],12); } } } }
+    /* --- the caves --- */
+    for (const A of G.caves){ const [mx,mz]=cvL2W(cv,A.u,A.s); if (own(mx,mz)) buildCave(gb,ch,cv,A,lod); }
+    /* --- the path: steps of loose stone where it is steep, and low dry-stone walls at the most exposed turns --- */
+    { const W=(u,s)=>cvL2W(cv,u,s);
+      for (const Lg of G.legs){ const len=Math.hypot(Lg.u1-Lg.u0,Lg.s1-Lg.s0), dy=Lg.y1-Lg.y0, grade=Math.abs(dy)/Math.max(0.1,len); if (grade<0.16) continue;
+        const du=(Lg.u1-Lg.u0)/len, ds=(Lg.s1-Lg.s0)/len, rs=rng(Math.round((Lg.u0*31+Lg.s0*17)*10)), nst=Math.max(1,Math.round(len/(0.55+0.25*rs())));
+        for (let i=0;i<nst;i++){ const t=(i+0.3+0.4*rs())/nst, u=Lg.u0+du*len*t+(rs()-0.5)*0.25*-ds, s=Lg.s0+ds*len*t+(rs()-0.5)*0.25*du, [x,z]=W(u,s); if (!own(x,z)) continue;
+          if (G.lands.some(P=>Math.hypot(P.u-u,P.s-s)<2.4)) continue;   // the turns are left clear, where the flights above and below meet
+          if (G.legs.some(M=>{ if (M.id===Lg.id) return false; const mu=M.u1-M.u0, ms=M.s1-M.s0, tt=clamp(((u-M.u0)*mu+(s-M.s0)*ms)/(mu*mu+ms*ms),0,1); return Math.hypot(u-M.u0-mu*tt,s-M.s0-ms*tt)<1.5; })) continue;
+          const [x2,z2]=W(u+du,s+ds), rot=Math.atan2(x2-x,z2-z)+(rs()-0.5)*0.6, top=lerp(Lg.y0,Lg.y1,t)+0.06+rs()*0.08, w=0.8+rs()*0.4, dp=0.4+rs()*0.3, bot=top-0.3;
+          const cl=GREY_ROCK.clone().lerp(LIMESTONE,0.3+0.4*rs()).multiplyScalar(0.8+rs()*0.15);
+          gb.add(T.sphLo, mat(x,bot,z,w*1.15,(top-bot)*1.6,dp*1.2,rot,(rs()-0.5)*0.1,(rs()-0.5)*0.1), cl, bot, 12);
+          ch.obbs.push({x,z,hw:w/2,hd:dp/2,rot,top}); } }
+      // landings: the two with the longest drop below them get a low wall of rough stones on their downhill side
+      const drops=G.lands.map((P,k)=>({P,k,dr:P.y-cvFloor(cv,P.u,P.s-2.2,-3,0,null)})).sort((a,b)=>b.dr-a.dr).slice(0,2);
+      for (const {P} of drops){ const rs=rng(Math.round(P.u*101+P.s*37));
+        for (let a=-2.6;a<=-0.5;a+=0.3+rs()*0.15){ const cu=P.u+Math.cos(a)*1.45, cs=P.s+Math.sin(a)*1.45; if (cvOnPath(G,cu,cs) || cvLand(cv,cu,cs)) continue;
+          const [x,z]=W(cu,cs); if (!own(x,z)) continue; const sz=0.3+rs()*0.25, cl=GREY_ROCK.clone().lerp(LIMESTONE,rs()*0.6).multiplyScalar(0.85+rs()*0.15);
+          // a low wall of loose stones laid in two or three rough courses
+          for (let c=0;c<2+(rs()<0.5?1:0);c++) gb.add(T.sphLo, mat(x+(rs()-0.5)*0.15,P.y-0.15+c*0.24,z+(rs()-0.5)*0.15,sz*1.6,0.32,sz*1.2,rs()*3), cl.clone().multiplyScalar(0.9+rs()*0.2), P.y-0.2, 12); } } }
+    /* --- boulders, scree and scrub --- */
+    for (const B of G.boulders){ const [x,z]=cvL2W(cv,B.u,B.s); if (!own(x,z)) continue; const g=heightAt(x,z), r=B.r;
+      gb.add(T.sphLo, mat(x,g-r*0.35,z,r*(1.4+0.6*R()),r*(0.8+0.6*R()),r*(1.1+0.5*R()),R()*6.28,(R()-0.5)*0.5,(R()-0.5)*0.5), shade(CV_ROCK[R()<0.5?0:R()<0.5?1:6],R,0.1).multiplyScalar(g<0.4?0.8:0.95), null, 12);
+      ch.circles.push({x,z,r:r*0.6,top:g+r*0.45}); }
+    for (const V of G.scrub){ const [x,z]=cvL2W(cv,V.u,V.s); if (!own(x,z)) continue; const g=heightAt(x,z), r=V.r;
+      if (V.pine){ gb.add(T.cyl8, mat(x,g-0.3,z,0.35,5.2,0.35,0,(R()-0.5)*0.3), hex('#6b4a33'), g); gb.add(T.sph, mat(x,g+5.1,z,5.5,1.9,5,R()*6), shade(hex('#3f5a2c'),R,0.06), null); ch.circles.push({x,z,r:0.35,top:Infinity}); }
+      else gb.add(T.sphLo, mat(x,g-r*0.25,z,r*2,r*(0.9+0.5*R()),r*1.7,R()*6), shade(hex(V.gully?'#6d7745':'#5e6b37'),R,0.12), null); }
+  }
+}
+function buildCave(gb,ch,cv,A,lod){
+  const da=lod===0?0.5:lod===1?1.2:2.6, K=lod===0?22:lod===1?12:6, rings=[], W=(u,s)=>cvL2W(cv,u,s);
+  const ring=a=>{ const f=a<0?A.fM:cvCaveF(A,a), cu=A.u+A.au*a, cs=A.s+A.as*a, pts=[], cl=[], h=cvCaveH(A,Math.max(0,a));
+    const pt=(b,y)=>{ const [x,z]=W(cu+A.lu*b,cs+A.ls*b); return [x,y,z]; };
+    const [br]=cvCaveSec(A,a,0,true), [bl]=cvCaveSec(A,a,Math.PI,true);
+    pts.push(pt(br+0.1,f-0.7));
+    for (let k=0;k<=K;k++){ const [b,y]=cvCaveSec(A,a,k/K*Math.PI,true); pts.push(pt(b,f+y)); }
+    pts.push(pt(bl-0.1,f-0.7));
+    for (const p of pts){ const yy=p[1]-f, dep=lerp(0.95,0.16,smooth(a/(A.Lc*0.85)))*(0.75+0.4*vnoise(a*0.6,p[1]*0.8,A.seed+5));
+      cl.push(cvRockCol(cv,a*2+50,p[1],A.walk?f:0,dep*(yy<0.7?0.7:yy>h*0.7?0.8:1))); }
+    const [ox,oz]=W(cu,cs); return {pts,cl,c:[ox,f+h*0.45,oz],f,br,bl,cu,cs,a}; };
+  for (let a=A.a0;a<A.Lc;a+=da) rings.push(ring(a)); rings.push(ring(A.Lc));
+  for (let r=0;r<rings.length-1;r++){ const R0=rings[r], R1=rings[r+1], M=R0.pts.length, P=[...R0.pts,...R1.pts], Cl=[...R0.cl,...R1.cl];
+    const N=P.map((p,i)=>{ const c=i<M?R0.c:R1.c, nx=c[0]-p[0], ny=(c[1]-p[1])*0.6, nz=c[2]-p[2], l=Math.hypot(nx,ny,nz)||1; return [nx/l,ny/l,nz/l]; });
+    for (let k=0;k<M-1;k++){ const cx=(R0.c[0]+R1.c[0])/2, cy=(R0.c[1]+R1.c[1])/2, cz=(R0.c[2]+R1.c[2])/2, p=P[k];
+      gbQuad(gb,P,N,Cl,k,M+k,M+k+1,k+1,[cx-p[0],cy-p[1],cz-p[2]],12); }
+    // the floor: wet pebbles, and under the pool the sea bed; uneven, so the pool's edge wanders
+    const nf=lod===0?7:3, F=[], FC=[], FN=[];
+    for (const Rr of [R0,R1]) for (let q=0;q<=nf;q++){ const b=lerp(Rr.bl-0.3,Rr.br+0.3,q/nf), edge=Math.abs(q/nf-0.5)*2, [x,z]=W(Rr.cu+A.lu*b,Rr.cs+A.ls*b);
+      const y=Rr.f+0.3*(vnoise(x*0.8,z*0.8,cv.seed+42)-0.5)+0.12*(vnoise(x*2.6,z*2.6,cv.seed+46)-0.5)+0.25*edge*edge-(Rr.a<A.recess+0.3?0.3:0);   // tucked under the ground outside the face
+      const dep=lerp(0.9,0.22,smooth(Rr.a/(A.Lc*0.85))), wet=smooth((vnoise(x*0.9,z*0.9,cv.seed+47)-0.5)/0.15);
+      const base=(cv.shingle?CV_PEBBLE:CV_SAND)[Math.floor(vnoise(x*1.7,z*1.7,cv.seed+45)*2.99)].clone().lerp(CV_ROCK[3],0.35*vnoise(x*1.3,z*1.3,cv.seed+48));
+      const c=(y<-0.05?C_.seabed.clone():base.multiplyScalar(1-0.4*wet)).multiplyScalar(dep*(0.85+0.25*vnoise(x*3,z*3,cv.seed+43)));
+      F.push([x,y,z]); FC.push([c.r,c.g,c.b]); FN.push([0,1,0]); }
+    for (let q=0;q<nf;q++) gbQuad(gb,F,FN,FC,q,nf+1+q,nf+2+q,q+1,[0,1,0],0);
+  }
+  // the back of the cave, closed round its last ring
+  { const Rl=rings[rings.length-1], [ex,ez]=W(A.u+A.au*(A.Lc+0.6),A.s+A.as*(A.Lc+0.6)), E=[ex,Rl.f+0.4,ez], M=Rl.pts.length;
+    for (let k=0;k<M-1;k++){ const a=Rl.pts[k], b=Rl.pts[k+1], ux=b[0]-a[0], uy=b[1]-a[1], uz=b[2]-a[2], vx=E[0]-a[0], vy=E[1]-a[1], vz=E[2]-a[2];
+      let nx=uy*vz-uz*vy, ny=uz*vx-ux*vz, nz=ux*vy-uy*vx; const into=(Rl.c[0]-E[0])*nx+(Rl.c[1]-E[1])*ny+(Rl.c[2]-E[2])*nz; const l=Math.hypot(nx,ny,nz)||1, nn=[nx/l,ny/l,nz/l];
+      const cc=Rl.cl[k]; if (into>0) gbTri(gb,a,b,E,nn,nn,nn,cc,cc,cc,12); else gbTri(gb,a,E,b,nn.map(v=>-v),nn.map(v=>-v),nn.map(v=>-v),cc,cc,cc,12); } }
+  // rocks fallen inside, along the walls and clear of the way in
+  if (A.walk && lod<2){ const R=rng(A.seed+9);
+    // pebbles over the floor
+    if (lod===0) for (let q=0;q<26;q++){ const a=0.3+R()*(A.aMax-0.3), B=A.band[clamp(Math.round(a/0.25),0,A.band.length-1)], b=lerp(B[0]-0.4,B[1]+0.4,R()), [x,z]=W(A.u+A.au*a+A.lu*b,A.s+A.as*a+A.ls*b), f=cvCaveF(A,a), r=0.07+R()*0.12;
+      if (f<0) continue; gb.add(T.ico, mat(x,f+0.02,z,r*2,r*0.9,r*1.6,R()*6), (cv.shingle?CV_PEBBLE:CV_ROCK)[Math.floor(R()*3)].clone().multiplyScalar(lerp(0.85,0.3,a/A.Lc)), null, 0); }
+    for (let q=0;q<6;q++){ const a=1+R()*(A.aMax-1), B=A.band[clamp(Math.round(a/0.25),0,A.band.length-1)], sgn=R()<0.5?-1:1, r=0.25+R()*0.4;
+      const b=sgn>0?B[1]+0.45+r*0.3:B[0]-0.45-r*0.3, [x,z]=W(A.u+A.au*a+A.lu*b,A.s+A.as*a+A.ls*b), f=cvCaveF(A,a);
+      gb.add(T.sphLo, mat(x,f-r*0.3,z,r*1.8,r*1.1,r*1.4,R()*6), CV_ROCK[3].clone().multiplyScalar(lerp(0.8,0.25,a/A.Lc)), null, 12); } }
+}
+// whether a cell of the ground falls inside a cave and must be left out
+function coveCaveCell(x,z,hmin){ const cv=coveAtXZ(x,z); if (!cv || !cv.geo) return false; const u=cvU(cv,x,z), s=cvS(cv,x,z);
+  if (!cvSdf(cv.geo,u,s) || _ci<0 || _cd<cv.geo.fo[_ci]+0.4) return false;   // cells in front of the face's foot keep their ground
+  for (const A of cv.geo.caves){ const [a,b]=cvCaveLocal(A,u,s);
+    // only behind the face: the recess in front keeps its ground
+    if (a<A.recess-0.3 || a>A.Lc+1.2) continue; const w=Math.max(cvCaveWs(A,Math.max(0,a),1),cvCaveWs(A,Math.max(0,a),-1))*1.45+Math.abs(A.lean)+1.0; if (Math.abs(b)>w) continue;
+    if (hmin<cvCaveF(A,Math.max(0,a))+cvCaveH(A,Math.max(0,a))*1.3+0.6) return true; }
+  return false; }
+// the colour of the ground in a cove, or null where the cove leaves it alone
+function coveGroundCol(x,z,h,cA){ const cv=coveAtXZ(x,z); if (!cv || !cv.geo) return null; const G=cv.geo, u=cvU(cv,x,z), s=cvS(cv,x,z);
+  if (!cvSdf(G,u,s)) return null; const d=_cd, n1=vnoise(x*0.9,z*0.9,cv.seed+50), n2=vnoise(x*0.13,z*0.13,cv.seed+51);
+  if (d>=0){ if (Math.abs(u-G.pathTop.u)<0.8 && s>cv.sHead && s<G.roadS){ cA.lerp(DIRT,0.75); return 0.12; }
+    if (d<CV_LZ+1.5 && h<0.2){ cA.copy(GREY_ROCK).multiplyScalar(0.55); return 0; }   // the low ground behind a face, should any of it show
+    if (d<17){ cA.lerp(LIMESTONE.clone().multiplyScalar(0.84+0.1*n1),0.4*smooth((17-d)/6)); if (n2>0.55) cA.lerp(hex('#5e6b37'),0.35*smooth((n2-0.55)/0.2)); } return null; }
+  if (s>=cv.Bh && Math.abs(u-cvGAxis(cv,s))<cv.Ag0+3){ if (cvPathAt(G,u,s) && _pW>0.5){ cA.copy(DIRT).lerp(GREY_ROCK,0.35+0.3*n1); return 0.12; }
+    cA.copy(GREY_ROCK).lerp(LIMESTONE,0.1+0.3*n1).multiplyScalar(0.66+0.14*vnoise(x*0.35,z*0.35,cv.seed+52)); if (n2>0.42) cA.lerp(hex('#66703e'),0.7*smooth((n2-0.42)/0.15)); return 0; }
+  if (h>-0.2 && s>-cv.R){ const sg=u<cvAxis(cv,s)?-1:1, shelf=(sg===G.caveSide && s>G.shA-2 && s<G.shB+2 && -d<G.shW*1.3 && h>0.35) || cv.Bw===0 || -d<2.4&&h>0.5;
+    if (shelf) cA.copy(GREY_ROCK).lerp(LIMESTONE,0.35+0.4*n1).multiplyScalar(0.9+0.12*n2);
+    else if (cv.shingle) cA.copy(CV_PEBBLE[0]).lerp(CV_PEBBLE[1],n1).lerp(CV_PEBBLE[2],n2*0.5);
+    else cA.copy(CV_SAND[0]).lerp(CV_SAND[1],n1*0.6).lerp(CV_SAND[2],n2*0.5);
+    return 0; }
+  return null; }
+// where a boat lands in a cove: the middle of the beach's waterline, or the seaward edge of the shelf at the head, with
+// the heading that points from there out to sea along the bay
+function coveLanding(cv){ const q=cv.Bw>0?cv.Bw+0.5:4, s=cv.Bh-q, u=cvAxis(cv,s), s2=s-6, u2=cvAxis(cv,s2), [x,z]=cvL2W(cv,u,s), [x2,z2]=cvL2W(cv,u2,s2), l=Math.hypot(x2-x,z2-z)||1;
+  return {x,z,heading:Math.atan2(x2-x,z2-z),dx:(x2-x)/l,dz:(z2-z)/l}; }
 function lightsNear(x,z,r){
   const out=[];
   for (const sd of SIDES){
@@ -466,7 +1117,7 @@ function hSegAt(x,z){ let i=Math.floor(x/C); if (x<vRoadX(i,z)) i--; else if (x>
 /* ---------- coastal road, a little inland from the shore, running the length of the coast ---------- */
 const CR_HW=2.8;
 const SIDES=[1,-1];
-function coastRoadZ0(sd,x){ return coastZ(sd,x)+sd*(19+3*Math.sin(x*0.017+(sd>0?1.3:4.1))); }
+function coastRoadZ0(sd,x){ return coastZ(sd,x)+sd*(19+3*Math.sin(x*0.017+(sd>0?1.3:4.1))+coveRoadBump(sd,x)); }
 // beside a goods line the road keeps at least GL_RD from its track, moving inland where the shore it follows bends
 // more sharply than the line, and easing back over 40 m beyond the line's ends
 const GL_RD=CR_HW+6;
@@ -605,7 +1256,8 @@ function glFit(A,B,S){
   for (let x=x0; x<=x1; x+=4){ const g=baseH(x,zt(x)), y=glY(L,x); if (g>y+12 || g<y-5 || g<0.15) return null; }
   return L;
 }
-function glZone(sd,zi){
+function glZone(sd,zi){ return noCove(()=>glZone0(sd,zi)); }
+function glZone0(sd,zi){
   const key=zi*4+sd; let Z=brZones.get(key); if (Z) return Z; Z=[];
   const H=[]; for (let n=Math.floor(zi*GL_ZONE/HARB)-1; n<=Math.floor((zi+1)*GL_ZONE/HARB)+1; n++){ const h=harbourInfo(sd,n); if (h && h.x>=zi*GL_ZONE && h.x<(zi+1)*GL_ZONE) H.push(h); }
   H.sort((a,b)=>a.x-b.x);
@@ -654,6 +1306,7 @@ function roadDist(x,z){
   if (seaDist(x,z)<-150) return 99;
   let d=Math.min(Math.abs(z-coastRoadZ(1,x)),Math.abs(z-coastRoadZ(-1,x)))-CR_HW;
   d=Math.min(d,railPerp(x,z)-2.6);
+  if (coveCore(x,z)) return d;
   const i=Math.round(x/C); if (vSegOn(i,vSegAt(x,z))) d=Math.min(d,Math.abs(x-vRoadX(i,z))-vRoadW(i,z));
   const j=Math.round(z/C); if (hSegOn(hSegAt(x,z),j)) d=Math.min(d,Math.abs(z-hRoadZ(j,x))-hRoadW(j,x));
   return d;
@@ -734,7 +1387,7 @@ function heightAt(x,z){
 function heightAtExact(x,z){
   let h=baseH(x,z), wsum=0, tsum=0, wmax=0;
   const add=(d,hw,hc)=>{ const w=1-smooth((d-hw)/1.6); if (w>0){ wsum+=w; tsum+=w*hc; if (w>wmax) wmax=w; } };
-  const offshore=seaDist(x,z)<-150;
+  const offshore=seaDist(x,z)<-150 || coveCore(x,z);   // no street runs out to sea, nor down a cove's cliffs
   const i=Math.round(x/C); if (!offshore && vSegOn(i,vSegAt(x,z))){ const xr=vRoadX(i,z), hc=vRoadCenterH(i,xr,z), fw=Math.max(1.6,1.5*(hc-baseH(xr,z)));
     if (fw>1.6){ const d=Math.abs(x-xr)-vRoadW(i,z), w=1-smooth(d/fw); if (w>0){ h=Math.max(h,lerp(h,hc,w)); } } else add(Math.abs(x-xr),vRoadW(i,z),hc); }
   const j=Math.round(z/C); if (!offshore && hSegOn(hSegAt(x,z),j)){ const zr=hRoadZ(j,x); add(Math.abs(z-zr),hRoadW(j,x),baseH(x,zr)); }
@@ -1507,7 +2160,7 @@ function buildBoatGeo(kind,hullC,bandC,sailC){
       const far=[sg*20,Hs*0.5,hint[2]];
       for (let k=k0;k<k1;k++){ const a=rings[i][k], b=rings[i][k+1], c=rings[i+1][k+1], d=rings[i+1][k];
         const sc=v=>[v[0]-Math.sign(v[0])*0.06,v[1],v[2]];
-        gb.quadOut(sc(a),sc(b),sc(c),sc(d),[-far[0],far[1],far[2]],inner); }
+        gb.quadOut(sc(a),sc(b),sc(c),sc(d),far,inner); }   // facing away from a point far outboard, so towards the centreline
     } else {
       const a=rings[i][0], b=rings[i][8], c=rings[i+1][8], d=rings[i+1][0], y=Math.min(a[1],c[1])-0.05;
       gb.quadOut([a[0]+0.03,y,a[2]],[b[0]-0.03,y,b[2]],[c[0]-0.03,y,c[2]],[d[0]+0.03,y,d[2]],[0,-5,hint[2]],wood,SW);
@@ -1572,6 +2225,8 @@ const BOAT_SPECS=[
   ['trawler','#f3efe6','#2f5f8f',null], ['trawler','#2f5f8f','#f3efe6',null], ['trawler','#a23b2e','#f3efe6',null],
 ];
 const BOATS=BOAT_SPECS.map(([k,h,b,sl])=>buildBoatGeo(k,hex(h),hex(b),sl?hex(sl):null));
+// each boat's whole reach, rudder and stem included, abaft and forward of its origin and to either side
+for (const B of BOATS){ B.geo.computeBoundingBox(); const bb=B.geo.boundingBox; B.aft=-bb.min.z; B.fore=bb.max.z; B.half=Math.max(-bb.min.x,bb.max.x); }
 const BOAT_SMALL=5, BOAT_SAIL=[0,2,3];
 let matBoat=null;
 // whether a point lies within d metres of a ferry crossing, so that moored boats keep the channel clear
@@ -1584,6 +2239,11 @@ function nearFerryRoute(x,z,d){
 function placeBoat(ch,idx,x,y,z,rot,floating,roll=0){
   if (GEN_LOD>=2) return;
   if (floating && nearFerryRoute(x,z,16)) return;
+  // a boat afloat is left out where its hull, with 15 cm to spare, would cut into a mole, a quay or anything else solid
+  // or where any part of it would stand over a quay, which the obbs do not hold, or over the shore
+  if (floating){ const Bt=BOATS[idx], c=Math.cos(rot), s=Math.sin(rot), hw=Bt.half+0.15, va=-Bt.aft-0.15, vf=Bt.fore+0.15, vm=(va+vf)/2;
+    if (ch.obbs.some(o=>obbOverlap({x:x+s*vm,z:z+c*vm,hw,hd:(vf-va)/2,rot},o,0))) return;
+    for (const [u,v] of [[-hw,va],[hw,va],[-hw,vf],[hw,vf],[0,va],[0,vf],[-hw,vm],[hw,vm]]) if (heightAt(x+c*u+s*v,z-s*u+c*v)>-0.2) return; }
   const B=BOATS[idx], m=new THREE.Mesh(B.geo,matBoat);
   m.rotation.order='YXZ'; m.position.set(x,y,z); m.rotation.set(0,rot,roll); m.castShadow=true; m.receiveShadow=true;
   world.add(m); ch.boats.push({m,y,ph:hash(Math.round(x*7),Math.round(z*7),9)*6.28,floating,roll,sail:BOAT_SAIL.includes(idx)});
@@ -1710,7 +2370,7 @@ function buildHarbour(gb,ch,R,H){
   // boats moored stern-to along the quay, and a couple swinging in the basin
   for (let x=H.x-H.W/2+5; x<H.x+H.W/2-4; x+=4.4){
     if (R()<0.28) continue;
-    const idx=Math.floor(R()*BOATS.length), L=BOATS[idx].L, z=coastZ(S,x)-S*(0.9+L/2);
+    const idx=Math.floor(R()*BOATS.length), z=coastZ(S,x)-S*(0.9+BOATS[idx].aft);   // the rudder 20 cm off the quay's face
     placeBoat(ch,idx,x+(R()-0.5)*0.4,0,z,(S>0?Math.PI:0)+(R()-0.5)*0.12,true);
   }
   for (let q=0;q<2;q++){ const x=H.x+(R()-0.5)*H.W*0.5, z=coastZ(S,H.x)-S*H.L*0.55+(R()-0.5)*6; placeBoat(ch,Math.floor(R()*BOATS.length),x,0,z,R()*6.28,true); }
@@ -1931,7 +2591,7 @@ function genChunk(cx,cz,lod=0){
   const alleyS=(A,x,z)=>A.dir==='h'?z-A.f(x):x-A.f(z);
   function canPlace(o,pad=0.04,opt={}){
     const pts=obbSamples(o); let hmin=1e9, hmax=-1e9;
-    for (const p of pts){ if (!cellOk(p[0],p[1],-0.35)) return false; const h=heightAt(p[0],p[1]); hmin=Math.min(hmin,h); hmax=Math.max(hmax,h); }
+    for (const p of pts){ if (!cellOk(p[0],p[1],-0.35) || coveCore(p[0],p[1])) return false; const h=heightAt(p[0],p[1]); hmin=Math.min(hmin,h); hmax=Math.max(hmax,h); }
     if (hmin<0.9 || hmax-hmin>(opt.maxRange||MR)) return false;
     for (const A of ch.alleys){ let sg=0;
       for (const p of pts){ const s=alleyS(A,p[0],p[1]); if (Math.abs(s)<A.hw-0.2) return false; const g=Math.sign(s); if (sg&&g!==sg) return false; sg=g; } }
@@ -2319,7 +2979,7 @@ function genChunk(cx,cz,lod=0){
       if (best){ ch.place.push({...best.o,hw:w/2+3,hd:d/2+3}); buildRuin(gb,ch,R,{...S,x:best.o.x,z:best.o.z,rot:best.o.rot}); } } }
   /* --- open country --- */
   if (COUNTRY.has(ch.kind) && ch.kind!=='wild'){
-    const okPt=(x,z,m=1.6)=>cellOk(x,z,-0.5) && roadDist(x,z)>m && heightAt(x,z)>1;
+    const okPt=(x,z,m=1.6)=>cellOk(x,z,-0.5) && roadDist(x,z)>m && heightAt(x,z)>1 && !coveCore(x,z);
     if (ch.kind==='farm'){
       for (let t=0;t<20;t++){ const x=xc+(R()-0.5)*14, z=zc+(R()-0.5)*14, rot=R()*6.28;
         if (canPlace({x,z,hw:4,hd:5,rot},0.1,{maxRange:5})){ house({x,z,rot,w:7.5,d:9.5,h:5.6,roof:'side',stoneWalls:true});
@@ -2375,7 +3035,7 @@ function genChunk(cx,cz,lod=0){
     const x=x0+R()*C, z=z0+R()*C, rot=R()*6.28, r=R();
     if (ch.kind==='wild'){
       if (r<0.55){ if (canPlace({x,z,hw:0.7,hd:0.7,rot:0},0,{maxRange:9})){ addTree(gb,ch,x,z,R,0.7+R()*0.5,undefined,R()<0.45?'cypress':(R()<0.6?'olive':'round')); ch.place.push({x,z,hw:1.2,hd:1.2,rot:0}); } }
-      else if (r<0.85){ const s=0.8+R()*1.8, h=heightAt(x,z); if (h>1 && !(ch.ruin && Math.hypot(x-ch.ruin.x,z-ch.ruin.z)<ch.ruin.r)){ gb.add(T.sphLo, mat(x,h-s*0.25,z,s*1.6,s,s*1.3,rot), shade(C_.rock,R,0.08), null, SS); ch.circles.push({x,z,r:s*0.6,top:h+s*0.25}); } }
+      else if (r<0.85){ const s=0.8+R()*1.8, h=heightAt(x,z); if (h>1 && !coveCore(x,z) && !(ch.ruin && Math.hypot(x-ch.ruin.x,z-ch.ruin.z)<ch.ruin.r)){ gb.add(T.sphLo, mat(x,h-s*0.25,z,s*1.6,s,s*1.3,rot), shade(C_.rock,R,0.08), null, SS); ch.circles.push({x,z,r:s*0.6,top:h+s*0.25}); } }
       else if (r<0.88){ const w=3.6, d=5.5; if (canPlace({x,z,hw:w/2,hd:d/2,rot},0.04,{maxRange:5})) house({x,z,rot,w,d,h:4.2,roof:'front',stoneWalls:R()<0.6}); }
       continue;
     }
@@ -2394,6 +3054,7 @@ function genChunk(cx,cz,lod=0){
     if (g>rh-0.9) continue;
     const iv=Math.round(x/C); if (vSegOn(iv,vSegAt(x,zs)) && Math.abs(x-vRoadX(iv,zs))<vRoadW(iv,zs)+0.8) continue;
     if (branchPerp(x,zs)<4.2) continue;   // open where a goods line crosses the road
+    { const cv=coveInfo(sd,Math.floor(x/CV_SP)); if (cv && Math.abs(x-cv.X)<cv.UX && Math.abs(cvU(cv,x,zs)-cvBuild(cv).pathTop.u)<2.2) continue; }   // and where a cove's path leaves it
     const rot=Math.atan2(-(coastRoadZ(sd,x+0.75)-coastRoadZ(sd,x-0.75)),1.5), bot=g-0.8;
     gb.add(T.box, mat(x,bot,zs,1.56,rh+0.1-bot,0.6,rot), shade(C_.stone,R,0.03), bot, SS);
     gb.add(T.box, mat(x,rh+0.1,zs,1.56,0.78,0.45,rot), shade(C_.terrace,R,0.02), null, SP);
@@ -2418,8 +3079,14 @@ function genChunk(cx,cz,lod=0){
       a[1]=heightAt(a[0],a[2])+5; b[1]=heightAt(b[0],b[2])+5; festoon(gb,ch,a,b,0.7); } }
   if (!COUNTRY.has(ch.kind)) for (const sd of SIDES) for (let x=Math.ceil(x0/22)*22; x<x0+C; x+=22){
     const zr=coastRoadZ(sd,x); if (zr<z0||zr>=z0+C) continue;
-    const z=zr-sd*(CR_HW+0.2), y=coastRoadH(sd,x); if (branchPerp(x,z)<3.5) continue;
-    gb.add(T.cyl8, mat(x,y-0.3,z,0.18,3.9,0.18), WIRE, null);
+    const z=zr-sd*(CR_HW-0.2); if (branchPerp(x,z)<3.5) continue;
+    // the lamp stands just inside the seaward edge of the road, on the ground as shaped at its foot, which may lie below
+    // the road's nominal level; its post goes down to the lowest ground round the foot, and on ground too steep for a
+    // post the lamp is left out
+    const y=heightAt(x,z); let gmin=y; for (const [dx,dz] of [[0.3,0],[-0.3,0],[0,0.3],[0,-0.3]]) gmin=Math.min(gmin,heightAt(x+dx,z+dz));
+    if (gmin<y-1.0) continue;
+    const foot=gmin-0.5;
+    gb.add(T.cyl8, mat(x,foot,z,0.18,y+3.6-foot,0.18), WIRE, null);
     gb.add(T.boxC, mat(x,y+3.5,z+sd*0.35,0.07,0.07,0.8), WIRE, null);
     gb.add(T.boxC, mat(x,y+3.22,z+sd*0.72,0.3,0.42,0.3), BULB, null, 6);
     gb.add(T.pyr, mat(x,y+3.43,z+sd*0.72,0.44,0.24,0.44), WIRE, null);
@@ -2557,11 +3224,15 @@ function genChunk(cx,cz,lod=0){
     for (let t=0;t<40 && afloat+beached<4;t++){
       const x=x0+R()*C, z=z0+R()*C, h=heightAt(x,z), rot=R()*6.28, HB=harbourAt(shoreSide(x,z),x);
       if (HB && Math.abs(x-HB.x)<HB.W/2+10) continue;
+      if (coveAtXZ(x,z)) continue;
       if (h<-1.6 && h>-8 && afloat<3 && (ch.kind==='shore'||(ch.kind==='coast'&&R()<0.4))){ placeBoat(ch,Math.floor(R()*BOATS.length),x,0,z,rot,true); afloat++; }
       else if (h>0.2 && h<0.75 && beached<2 && roadDist(x,z)>1.5 && Math.abs(heightAt(x,z+2)-heightAt(x,z-2))<0.6){
         const idx=Math.floor(R()*BOAT_SMALL); placeBoat(ch,idx,x,h-0.12,z,rot,false,0.2); beached++; }
     }
   }
+
+  /* --- rocky coves: cliffs, the cave, the path up the ravine and boulders --- */
+  buildCoveChunk(gb,ch,cx,cz,lod);
 
   /* --- surf: a band of breaking waves along the shoreline --- */
   { const OFFS=[-9,-6,-3.5,-1.8,-0.7,0.3,1.5], NC=27, nr=OFFS.length, spos=[], ssv=[], sidx=[];
@@ -2572,6 +3243,7 @@ function genChunk(cx,cz,lod=0){
       for (let c=0;c<NC;c++){
         const xm=x0+(c+0.5)*C/NC, zm=(cols[c]+cols[c+1])/2; if (zm<z0||zm>=z0+C) continue;
         const HB=harbourAt(sd,xm); if (HB && Math.abs(xm-HB.x)<HB.W/2+5) continue;
+        { const cv=coveInfo(sd,Math.floor(xm/CV_SP)); if (cv && Math.abs(xm-cv.X)<cv.Uc+4) continue; }
         for (let r=0;r<nr-1;r++){ const a=base+c*nr+r, b=a+1, d=a+nr, e=d+1; if (sd>0) sidx.push(a,b,d,b,e,d); else sidx.push(a,d,b,b,d,e); }   // facing up on either coast
       }
     }
@@ -2603,6 +3275,7 @@ function genChunk(cx,cz,lod=0){
   const N=lod===0?40:lod===1?20:10, step=C/N, G=N+3, hg=new Float32Array(G*G);
   for (let j=0;j<G;j++) for (let i=0;i<G;i++) hg[j*G+i]=heightAt(x0+(i-1)*step,z0+(j-1)*step);
   const gpos=[], gnor=[], gcol=[], gpav=[], idx=[], cA=new THREE.Color();
+  const cvNear=[[x0,z0],[x0+C,z0],[x0,z0+C],[x0+C,z0+C],[xc,zc]].some(([a,b])=>coveAtXZ(a,b));
   for (let j=0;j<=N;j++) for (let i=0;i<=N;i++){
     const x=x0+i*step, z=z0+j*step, gi=(j+1)*G+(i+1), h=hg[gi];
     const dx=(hg[gi+1]-hg[gi-1])/(2*step), dz=(hg[gi+G]-hg[gi-G])/(2*step), nl=Math.hypot(dx,1,dz), slope=Math.hypot(dx,dz);
@@ -2625,7 +3298,8 @@ function genChunk(cx,cz,lod=0){
     const seaRock=ch.kind==='isle' && h>-1 && !islandNear(x,z);
     if (seaRock) cA.copy(C_.rock).lerp(GREY_ROCK,0.5+0.5*n1).multiplyScalar(0.92+n2*0.14);
     cA.multiplyScalar(1-0.1*(1-pv));   // unpaved ground is a tenth darker than its base colours; the beach is not
-    if (!seaRock && h<1.6){ const t=clamp((1.6-h)/1.2,0,1)*(1-cob*0.7); cA.lerp(C_.beach,t); }
+    const cvc=cvNear?coveGroundCol(x,z,h,cA):null; if (cvc!==null){ cob=Math.max(cob,cvc); }
+    if (!seaRock && h<1.6 && (cvc===null||cvc===0.12)){ const t=clamp((1.6-h)/1.2,0,1)*(1-cob*0.7); cA.lerp(C_.beach,t); }
     if (h<0){ cA.lerp(C_.seabed,clamp(-h/2.2,0,1)); cob=0; flag=0; }
     if (h>-0.45 && h<0.12) cA.lerp(C_.foam,0.55*(1-Math.abs(h+0.15)/0.3));
     gpos.push(x,h,z); gnor.push(-dx/nl,1/nl,-dz/nl); gcol.push(cA.r,cA.g,cA.b); gpav.push(cob,flag);
@@ -2636,6 +3310,8 @@ function genChunk(cx,cz,lod=0){
   for (let j=0;j<N;j++) for (let i=0;i<N;i++){ const a=j*(N+1)+i, b=a+1, c=a+N+1, d=c+1;
     if (portals.length){ const h00=hg[(j+1)*G+i+1], h10=hg[(j+1)*G+i+2], h01=hg[(j+2)*G+i+1], h11=hg[(j+2)*G+i+2];
       if (Math.max(h00,h10,h01,h11)-Math.min(h00,h10,h01,h11)>2.5 && inPortal(x0+(i+0.5)*step,z0+(j+0.5)*step)) continue; }
+    // the ground is left out where it would run through a sea cave
+    if (cvNear && coveCaveCell(x0+(i+0.5)*step,z0+(j+0.5)*step,Math.min(hg[(j+1)*G+i+1],hg[(j+1)*G+i+2],hg[(j+2)*G+i+1],hg[(j+2)*G+i+2]))) continue;
     idx.push(a,c,b,b,c,d); }
   const gg=new THREE.BufferGeometry();
   gg.setAttribute('position',new THREE.BufferAttribute(relPos(gpos,x0,z0),3));
@@ -2693,6 +3369,19 @@ function updateOrigin(){
   ORIGIN.set(ox,0,oz); world.position.set(-ox,0,-oz); world.updateMatrixWorld(true);
   QORIGIN.set(Math.round(ox/OP)*OP,0,Math.round(oz/OP)*OP); origU.value.set(ox-QORIGIN.x,0,oz-QORIGIN.z);
   originMoved++; return true;
+}
+/* The world repeats every WRAP_Z metres from north to south: whoever goes far enough out to sea to the north comes
+   in from the open sea to the south shore, and the other way about. The join lies WRAP_Z/2 from the island's middle
+   line, beyond the furthest offshore island (about 2.9 km) by more than the fog and the outermost ring of blocks, so
+   the sea on either side of it is empty and the same; crossing it moves the player, the camera and whatever travels
+   with them by WRAP_Z in one frame, and the blocks round them are rebuilt as on any long move. WRAP_Z is a whole
+   number of blocks and of cells of the distant terrain, so both grids fall in the same places after the move. */
+const WRAP_Z=8800, WRAP_J=WRAP_Z/22, wrapHooks=[];
+function wrapWorld(){
+  if (Math.abs(player.z)<=WRAP_Z/2 || onBoard() || descent.t>=0 || ascent.t>=0) return false;
+  const d=-Math.sign(player.z)*WRAP_Z;
+  player.z+=d; camPos.z+=d; camera.position.z+=d; for (const f of wrapHooks) f(d);
+  chunkState=''; farDirty=true; return true;
 }
 const FOG=hex('#9fc0dc');
 scene.fog=new THREE.Fog(FOG,90,1500); scene.background=FOG.clone();
@@ -2817,6 +3506,11 @@ function patchBuildings(mat,clip=false){
           float bract=mix(0.8, smoothstep(0.26,0.48,c1*0.55+c2*0.3+c3*0.15), far);
           diffuseColor.rgb=mix(vec3(0.21,0.33,0.12)*(0.8+0.4*c3), diffuseColor.rgb*(0.82+0.36*c3), bract);
           k=mix(1.,0.72+0.36*c2,far); }
+        else if (vSurf>11.5 && vSurf<12.5){ vec2 uv=abs(n.y)>0.6?_wp.xz:wallUV(_wp,n);
+          k=0.9+0.12*fb(uv*0.3)+0.07*fb(uv*1.9)+0.04*vn(uv*9.);
+          k*=1.-0.07*smoothstep(0.66,0.86,vn(uv*2.3+7.));
+          if (abs(n.y)<0.6){ float bed=fract((_wp.y+0.9*vn(vec2(_wp.x+_wp.z,0.)*0.05))/1.7); k*=mix(0.9,1.,smoothstep(0.,0.1,bed)); }
+          amp=1.-smoothstep(70.,240.,dist); }
         else if (vSurf>6.5 && vSurf<7.5){ vec2 uv=wallUV(_wp,n); float row=floor(uv.y/0.075);
           vec2 q=vec2(uv.x/0.225+0.5*mod(row,2.), uv.y/0.075), f=fract(q), id=floor(q);
           float m=min(min(f.x,1.-f.x)*0.225, min(f.y,1.-f.y)*0.075);
@@ -3297,7 +3991,7 @@ function farPoint(gi,gj){
   const x=gi*FS, z=gj*FS, h=baseH(x,z), c=new THREE.Color();
   if (h<0) c.copy(C_.seabed);
   else if (h<1.6) c.copy(C_.beach);
-  else if (h<80 && isVillage(Math.floor(x/C),Math.floor(z/C))){ const r=hash(gi,gj,900); c.copy(r<0.42?C_.roofs[0]:r<0.85?C_.walls[1]:C_.leaf[1]).lerp(C_.sand2,0.25); }
+  else if (h<80 && isVillage(Math.floor(x/C),Math.floor(z/C))){ c.copy(C_.walls[1]).lerp(C_.leaf[1],0.35).lerp(C_.sand2,0.25); }   // one even tone of walls and gardens: colours picked at random for each point of the 22 m grid smeared into blotches, roof red into pink ones
   else if (h<80){ const r=hash(gi,gj,901); c.copy(r<0.5?C_.olive:DRYGRASS).lerp(C_.sand2,0.2).multiplyScalar(0.9); }
   else { c.copy(C_.scrub).lerp(C_.rock,clamp((h-80)/80,0,0.8)).multiplyScalar(0.9); }
   let lights=null;
@@ -3307,11 +4001,12 @@ function farPoint(gi,gj){
   F={h,r:c.r,g:c.g,b:c.b,lights}; farCache.set(k,F); return F;
 }
 let farOrigin='', farLit=[];
-function rebuildFar(px,pz){
+function rebuildFar(px,pz){ COVE_FAST++; try{ rebuildFar0(px,pz); } finally{ COVE_FAST--; } }
+function rebuildFar0(px,pz){
   const gx=Math.round(px/FS), gz=Math.round(pz/FS), P=farGeo.attributes.position.array, Co=farGeo.attributes.color.array, W=FN+1;
   if (farOrigin!==gx+','+gz+','+originMoved){ farOrigin=gx+','+gz+','+originMoved; farLit=[]; farMesh.position.copy(ORIGIN); farGlow.position.copy(ORIGIN);
     for (let j=0;j<=FN;j++) for (let i=0;i<=FN;i++){
-      const gi=gx+i-FN/2, gj=gz+j-FN/2, F=farPoint(gi,gj), o=(j*W+i)*3;
+      const gi=gx+i-FN/2, gj=gz+j-FN/2, F=farPoint(gi,gj-WRAP_J*Math.round(gj/WRAP_J)), o=(j*W+i)*3;   // across the wrap, the far shore
       P[o]=gi*FS-ORIGIN.x; P[o+1]=F.h-0.35; P[o+2]=gj*FS-ORIGIN.z; Co[o]=F.r; Co[o+1]=F.g; Co[o+2]=F.b; if (F.lights) farLit.push(F.lights,gi*FS,gj*FS);
     }
     // normals straight from the height grid, by central differences
@@ -3338,7 +4033,11 @@ islandGeo.setAttribute('color',new THREE.Float32BufferAttribute(new Float32Array
 { const id=[]; for (let j=0;j<INZ;j++) for (let i=0;i<INX;i++){ const a=j*(INX+1)+i, b=a+1, c=a+INX+1, d=c+1; id.push(a,c,b,b,c,d); } islandGeo.setIndex(id); }
 const islandMesh=new THREE.Mesh(islandGeo,new THREE.MeshLambertMaterial({vertexColors:true})); islandMesh.frustumCulled=false; islandMesh.visible=false; world.add(islandMesh);
 let islandKey=null;
-function updateIsland(){
+function updateIsland(){ COVE_FAST++; try{ updateIsland0(); } finally{ COVE_FAST--; }
+  // the island repeats every WRAP_Z to the north and south, but only one copy is drawn: the one round the point the
+  // camera looks at, which is the player's own, since the player is always within WRAP_Z/2 of its middle
+}
+function updateIsland0(){
   if (dist<700){ islandMesh.visible=false; return; }
   islandMesh.visible=true;
   const step=Math.max(20,Math.pow(2,Math.ceil(Math.log2(dist/45)))), ox=Math.round(player.x/(step*8))*step*8, k=step+':'+ox;
@@ -3352,7 +4051,7 @@ function updateIsland(){
       const nearPlayer=Math.abs(x-player.x)<1300&&Math.abs(z-player.z)<1300;
       P[o]=x-ORIGIN.x; P[o+1]=(h<0?Math.max(h,-6):h)-(nearPlayer?6:1.5); P[o+2]=z-ORIGIN.z;
       if (h<0) c.copy(C_.seabed); else if (h<1.6) c.copy(C_.beach);
-      else if (h<80 && isVillage(Math.floor(x/C),Math.floor(z/C))){ const r=hash(Math.round(x/40),Math.round(z/40),900); c.copy(r<0.4?C_.roofs[0]:r<0.8?C_.walls[1]:C_.leaf[1]).lerp(C_.sand2,0.3); }
+      else if (h<80 && isVillage(Math.floor(x/C),Math.floor(z/C))){ c.copy(C_.walls[1]).lerp(C_.leaf[1],0.35).lerp(C_.sand2,0.3); }
       else if (h<80) c.copy(C_.olive).lerp(C_.sand2,0.35).multiplyScalar(0.9);
       else c.copy(C_.scrub).lerp(C_.rock,clamp((h-80)/80,0,0.8)).multiplyScalar(0.9);
       Co[o]=c.r; Co[o+1]=c.g; Co[o+2]=c.b;
@@ -3362,7 +4061,11 @@ function updateIsland(){
 }
 
 /* ================= chunk manager ================= */
-let VIEW=4; const VIEW_MIN=2, VIEW_MAX=9;
+let VIEW=4; const VIEW_MIN=2, VIEW_MAX=12;
+// draw distances the player may fix with Page Up and Page Down, as [full-detail ring, simplified ring] in blocks;
+// drawLvl -1 leaves the simplified ring to the automatic adjustment, with full detail to the second ring
+const DRAW_LVLS=[[1,3],[2,5],[2,8],[3,12],[3,16],[4,20],[4,26]];
+let drawLvl=-1;
 let queue=[], farDirty=true, farTimer=0;
 function addChunkToScene(ch){
   if (ch.doors) doorsDirty=true;
@@ -3436,14 +4139,24 @@ function updateTiles(budgetMs=2){
   }
 }
 // rings of detail: full detail close by, simplified in the middle distance, outlines further out to the fog
-const LOD0=2;
-const lodRing=()=>Math.min(36,VIEW*4);
+let LOD0=2;
+const lodRing=()=>Math.max(VIEW+2,Math.min(36,VIEW*4));
+// Page Up and Page Down step to the next fixed draw distance beyond or within the present one; Home restores the automatic one
+function setDrawLvl(step){
+  if (step===0){ drawLvl=-1; LOD0=2; VIEW=Math.min(Math.max(VIEW,VIEW_MIN),VIEW_MAX); }
+  else { let i=drawLvl;
+    if (i<0){ i=step>0?DRAW_LVLS.findIndex(L=>L[1]>VIEW):DRAW_LVLS.findLastIndex(L=>L[1]<VIEW); if (i<0) i=step>0?DRAW_LVLS.length-1:0; }
+    else i=clamp(i+step,0,DRAW_LVLS.length-1);
+    drawLvl=i; [LOD0,VIEW]=DRAW_LVLS[i]; }
+  perf.t=perf.n=perf.sum=perf.good=0; statsT=1e9;
+  const vs=document.getElementById('viewState'); if (vs) vs.textContent=`${drawLvl<0?'automatic':'fixed'}, full detail to about ${(LOD0+0.5)*C} m, simplified to about ${(VIEW+0.5)*C} m and outlines to about ${(lodRing()+0.5)*C} m`;
+}
 function wantLod(dx,dz){ const d=Math.max(Math.abs(dx),Math.abs(dz)); return d<=LOD0?0:d<=VIEW?1:d<=lodRing()?2:-1; }
 let chunkState='';
 // loading (a whole island at once, as at the start or while a new one is seeded) builds every block outright,
 // without fading, in slices of budgetMs
 function updateChunks(px,pz,budgetMs,loading=budgetMs>=1e8){
-  const pcx=Math.floor(px/C), pcz=Math.floor(pz/C), RR=lodRing(), st=pcx+','+pcz+','+VIEW;
+  const pcx=Math.floor(px/C), pcz=Math.floor(pz/C), RR=lodRing(), st=pcx+','+pcz+','+VIEW+','+LOD0;
   // the rings only change when the player crosses into another block or the draw distance changes
   if (st===chunkState && !queue.length && !loading) return;
   chunkState=st;
@@ -3470,18 +4183,501 @@ function updateChunks(px,pz,budgetMs,loading=budgetMs>=1e8){
     if (ch.lod>=2 && ch.fade>=1) tilesDirty.add(tileKey(ch));
   }
 }
-function resetWorld(){ chunkState=''; farCache.clear(); farOrigin=''; for (const T of tiles.values()) disposeTile(T); tiles.clear(); tilesDirty.clear(); tilesUrgent.clear(); for (const ch of chunks.values()) disposeChunk(ch); chunks.clear(); for (const ch of dying) disposeChunk(ch); dying.length=0; pkCache.clear(); pzCache.clear(); alCache.clear(); hbCache.clear(); vgCache.clear(); ryCache.clear(); rzCache.clear(); rrCache.clear(); rsCache.clear(); stCache.clear(); rxCache.clear(); lhCache.clear(); rkCache.clear(); ruCache.clear();
+function resetWorld(){ chunkState=''; farCache.clear(); farOrigin=''; for (const T of tiles.values()) disposeTile(T); tiles.clear(); tilesDirty.clear(); tilesUrgent.clear(); for (const ch of chunks.values()) disposeChunk(ch); chunks.clear(); for (const ch of dying) disposeChunk(ch); dying.length=0; pkCache.clear(); pzCache.clear(); alCache.clear(); hbCache.clear(); vgCache.clear(); ryCache.clear(); rzCache.clear(); rrCache.clear(); rsCache.clear(); stCache.clear(); rxCache.clear(); lhCache.clear(); rkCache.clear(); ruCache.clear(); cvCache.clear(); cvMemoN=NaN;
   // the goods lines, the offshore islands, the ferry ports and the ferries' routes all belong to the old island
   brZones.clear(); brBucket.clear(); isCache.clear(); fpCache.clear(); irCache.clear();
   goods.R=null; goods.check=0; for (const c of goods.cars) c.m.visible=false;
   for (const F of ferries) if (F!==ridden){ F.R=null; F.m.visible=false; }
   beams.t=0; train.init=false; farDirty=true; }
 
+/* ================= dolphins =================
+   Pods of bottlenose dolphins for Coast. Everything below this line and above the matching closing line is
+   self-contained and may be pasted into index.html as it stands; it needs only THREE.
+
+   const D=createDolphins(parent, opts)   parent: the group the meshes join (in Coast, `world`)
+     opts: pods (3), podSize (5, or [min, max] for a size drawn for each pod), leapsPerMinute (per pod, 3), bowRide (true), minDepth (m, 6),
+           range (m from the focus within which pods keep, 260), formation ('tight' or 'loose'), maxDolphins (64), seed, ghost (0..1, 0.45),
+           onSound(kind, x, y, z, strength), kind being 'breath', 'leap' or 'splash'
+   D.update(dt, ctx)                      ctx: camera, focus {x,z} (defaults to the camera), boats
+                                           [{x,z,head,v,len,beam}] (forward is (sin head, cos head)),
+                                           depthAt(x,z) (depth of water in metres, negative on land), seaLevel (0),
+                                           bright (0..1, the light on unlit foam and spray), paused,
+                                           keepOut(x,z) (true where pods must not go), spawnWeight(x,z) (0..1, the
+                                           chance that a pod may appear there)
+   D.setOptions(o)   D.trigger(kind, pod)   ('breath', 'leap' or 'ride')   D.reset()   D.shift(dz)
+   D.dolphins   D.pods   D.dispose()
+
+   Positions are world metres with y up and the sea at y = seaLevel. Under water each dolphin is drawn a second
+   time as a faint dark shape projected on to the surface along the line of sight, so that it reads through the
+   nearly opaque sea and is still hidden correctly by hulls and quays above the water. */
+function createDolphins(parent, opts={}){
+  const O=Object.assign({pods:3,podSize:5,leapsPerMinute:3,bowRide:true,minDepth:6,range:260,maxDolphins:64,seed:20261106,ghost:0.45,formation:'tight',onSound:null},opts);
+  let sd=(O.seed>>>0)||1;
+  const R=()=>{ sd=(sd+0x6D2B79F5)>>>0; let t=sd; t=Math.imul(t^t>>>15,t|1); t^=t+Math.imul(t^t>>>7,t|61); return ((t^t>>>14)>>>0)/4294967296; };
+  const rr=(a,b)=>a+(b-a)*R();
+  const cl=(v,a,b)=>Math.max(a,Math.min(b,v));
+  const angTo=(a,b)=>Math.atan2(Math.sin(b-a),Math.cos(b-a));
+  const G=9.81, TAU=Math.PI*2;
+  let SEA=0;
+
+  /* ---------- the body: rings of eight round a tapering axis, with dorsal fin, flippers and flukes ----------
+     The dolphin is 2.6 m long, its nose towards +z and its back towards +y; the flukes reach 1.47 m behind the
+     centre. The colour grades from a dark grey cape through paler flanks to a near-white belly. */
+  function buildGeo(){
+    const P=[], C=[];
+    const cBack=hex('#525f6b'), cFlank=hex('#8794a0'), cBelly=hex('#dcdcd6'), cFin=hex('#48545f'), cEye=hex('#16191d');
+    const tri=(a,b,c,dir,ca,cb,cc)=>{
+      const ux=b[0]-a[0],uy=b[1]-a[1],uz=b[2]-a[2],vx=c[0]-a[0],vy=c[1]-a[1],vz=c[2]-a[2];
+      const nx=uy*vz-uz*vy, ny=uz*vx-ux*vz, nz=ux*vy-uy*vx;
+      if (nx*dir[0]+ny*dir[1]+nz*dir[2]<0){ const t=b; b=c; c=t; const q=cb; cb=cc; cc=q; }
+      P.push(a[0],a[1],a[2],b[0],b[1],b[2],c[0],c[1],c[2]); C.push(ca.r,ca.g,ca.b,cb.r,cb.g,cb.b,cc.r,cc.g,cc.b); };
+    // z, half width, half height, height of the axis
+    const ST=[[-1.18,0.022,0.05,0.0],[-1.0,0.042,0.095,0.005],[-0.75,0.085,0.155,0.012],[-0.45,0.15,0.225,0.02],[-0.15,0.205,0.27,0.025],
+      [0.15,0.232,0.285,0.02],[0.45,0.212,0.25,0.018],[0.70,0.165,0.195,0.02],[0.86,0.118,0.135,0.0],[0.95,0.066,0.062,-0.045],
+      [1.12,0.046,0.042,-0.06],[1.27,0.022,0.02,-0.066]];
+    const colAt=(s,z)=>{ const c=cBelly.clone().lerp(cFlank,smooth((s+0.75)/0.6)); c.lerp(cBack,smooth((s-0.05)/0.6));
+      if (z>0.9 && s<0) c.lerp(cBelly,0.4); return c; };
+    const N=8, rings=ST.map(([z,rx,ry,yc])=>{ const ring=[]; for (let k=0;k<N;k++){ const a=Math.PI/2+k*TAU/N, s=Math.sin(a);
+      ring.push({p:[rx*Math.cos(a),yc+ry*s,z],c:colAt(s,z)}); } return {ring,yc,z}; });
+    for (let i=0;i<rings.length-1;i++){ const A=rings[i], B=rings[i+1];
+      for (let k=0;k<N;k++){ const j=(k+1)%N, a=A.ring[k], b=A.ring[j], c=B.ring[j], d=B.ring[k];
+        const m=[(a.p[0]+c.p[0])/2,(a.p[1]+c.p[1])/2-(A.yc+B.yc)/2,0];
+        tri(a.p,d.p,c.p,m,a.c,d.c,c.c); tri(a.p,c.p,b.p,m,a.c,c.c,b.c); } }
+    { const A=rings[0], T=[0,0,-1.22]; for (let k=0;k<N;k++){ const a=A.ring[k], b=A.ring[(k+1)%N]; tri(a.p,b.p,T,[a.p[0]+b.p[0],a.p[1]+b.p[1],-0.2],a.c,b.c,cFlank); } }
+    { const A=rings[rings.length-1], T=[0,-0.066,1.32]; for (let k=0;k<N;k++){ const a=A.ring[k], b=A.ring[(k+1)%N]; tri(a.p,b.p,T,[a.p[0]+b.p[0],a.p[1]+b.p[1]+0.13,0.2],a.c,b.c,cFlank); } }
+    // a thin plate from an outline, its thickness th at each point measured along nrm
+    const plate=(pts,th,nrm,col)=>{ const n=pts.length;
+      const top=pts.map((p,i)=>[p[0]+nrm[0]*th[i]/2,p[1]+nrm[1]*th[i]/2,p[2]+nrm[2]*th[i]/2]);
+      const bot=pts.map((p,i)=>[p[0]-nrm[0]*th[i]/2,p[1]-nrm[1]*th[i]/2,p[2]-nrm[2]*th[i]/2]);
+      const cen=[0,0,0]; for (const p of pts){ cen[0]+=p[0]/n; cen[1]+=p[1]/n; cen[2]+=p[2]/n; }
+      const neg=[-nrm[0],-nrm[1],-nrm[2]];
+      for (let i=1;i<n-1;i++){ tri(top[0],top[i],top[i+1],nrm,col,col,col); tri(bot[0],bot[i],bot[i+1],neg,col,col,col); }
+      for (let i=0;i<n;i++){ const j=(i+1)%n, m=[(pts[i][0]+pts[j][0])/2-cen[0],(pts[i][1]+pts[j][1])/2-cen[1],(pts[i][2]+pts[j][2])/2-cen[2]];
+        tri(top[i],bot[i],bot[j],m,col,col,col); tri(top[i],bot[j],top[j],m,col,col,col); } };
+    // dorsal fin: falcate, its tip swept back over the hollow of its trailing edge
+    plate([[0,0.27,0.14],[0,0.40,-0.01],[0,0.50,-0.19],[0,0.575,-0.42],[0,0.47,-0.36],[0,0.36,-0.33],[0,0.235,-0.37]],
+      [0.065,0.05,0.032,0,0.02,0.035,0.05],[1,0,0],cFin);
+    // flippers, angled down and back from the lower flank
+    for (const sx of [-1,1]){ const n=new THREE.Vector3(sx*0.5,0.86,0.1).normalize();
+      plate([[sx*0.15,-0.11,0.52],[sx*0.29,-0.19,0.41],[sx*0.43,-0.31,0.2],[sx*0.37,-0.28,0.19],[sx*0.17,-0.16,0.31]],[0.05,0.035,0,0.012,0.04],[n.x,n.y,n.z],cFin); }
+    // flukes, swept back with a notch at the middle of the trailing edge
+    plate([[0,0,-1.05],[0.17,0,-1.21],[0.37,0,-1.44],[0.31,0,-1.48],[0.15,0,-1.41],[0,0,-1.35],[-0.15,0,-1.41],[-0.31,0,-1.48],[-0.37,0,-1.44],[-0.17,0,-1.21]],
+      [0.07,0.045,0,0,0.02,0.03,0.02,0,0,0.045],[0,1,0],cFin);
+    // eyes
+    for (const sx of [-1,1]){ const x=sx*0.15; tri([x,0.03,0.80],[x,-0.012,0.83],[x,-0.006,0.765],[sx,0,0],cEye,cEye,cEye); }
+    const g=new THREE.BufferGeometry();
+    g.setAttribute('position',new THREE.Float32BufferAttribute(P,3)); g.setAttribute('color',new THREE.Float32BufferAttribute(C,3));
+    g.computeVertexNormals(); return g;
+  }
+
+  /* ---------- the flex: a wave runs back along the body, growing towards the flukes, which pitch with its slope;
+     aFlex = (phase, amplitude at the flukes in metres, curvature of the path in 1/m) ---------- */
+  const FLEX=`vec3 transformed = vec3( position );
+    { float zz=transformed.z, zn=zz/1.3;
+      float w=clamp((0.25-zn)/1.3,0.0,1.0), w2=w*w, dw=(w>0.0&&w<1.0)?-2.0*w/1.69:0.0;
+      float ph=aFlex.x+2.4*zn, s=sin(ph), c=cos(ph);
+      float dy=aFlex.y*w2*s+0.5*aFlex.z*zz*zz;
+      float sl=aFlex.y*(dw*s+w2*c*2.4/1.3)+aFlex.z*zz;
+      float a=atan(sl), yl=transformed.y;
+      transformed.y=dy+yl*cos(a); transformed.z=zz-yl*sin(a); }`;
+  const patchFlex=sh=>{ sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nattribute vec3 aFlex;').replace('#include <begin_vertex>',FLEX); };
+
+  const geo=buildGeo(), MAXD=O.maxDolphins;
+  const flexA=new THREE.InstancedBufferAttribute(new Float32Array(MAXD*3),3); flexA.setUsage(THREE.DynamicDrawUsage); geo.setAttribute('aFlex',flexA);
+  const bodyMat=new THREE.MeshPhongMaterial({vertexColors:true,flatShading:true,shininess:36,specular:hex('#2f353b')});
+  bodyMat.onBeforeCompile=patchFlex; bodyMat.customProgramCacheKey=()=>'dolphin-body';
+  const depthMat=new THREE.MeshDepthMaterial({depthPacking:THREE.RGBADepthPacking}); depthMat.onBeforeCompile=patchFlex; depthMat.customProgramCacheKey=()=>'dolphin-depth';
+  const body=new THREE.InstancedMesh(geo,bodyMat,MAXD); body.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  body.castShadow=true; body.customDepthMaterial=depthMat; body.frustumCulled=false; body.count=0;
+  for (let i=0;i<MAXD;i++) body.setColorAt(i,new THREE.Color(1,1,1));
+  // the shape under water, drawn after the sea at the depth of the surface
+  const ghostU={uSeaY:{value:0}};
+  const ghostCol=hex('#183650'), ghostMat=new THREE.MeshBasicMaterial({color:ghostCol.clone(),transparent:true,opacity:O.ghost,depthWrite:false,
+    polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-4});
+  ghostMat.onBeforeCompile=sh=>{ patchFlex(sh); sh.uniforms.uSeaY=ghostU.uSeaY;
+    sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nvarying float vDepth; uniform float uSeaY;')
+      .replace('#include <project_vertex>',`vec4 wp=vec4(transformed,1.0);
+        #ifdef USE_INSTANCING
+          wp=instanceMatrix*wp;
+        #endif
+        wp=modelMatrix*wp; vDepth=uSeaY-wp.y;
+        vec3 sp=wp.xyz; if (wp.y<uSeaY && cameraPosition.y>uSeaY){ sp=cameraPosition+(wp.xyz-cameraPosition)*((cameraPosition.y-uSeaY)/(cameraPosition.y-wp.y)); }
+        vec4 mvPosition=viewMatrix*vec4(sp,1.0); gl_Position=projectionMatrix*mvPosition;`);
+    sh.fragmentShader=sh.fragmentShader.replace('#include <common>','#include <common>\nvarying float vDepth;')
+      .replace('vec4 diffuseColor = vec4( diffuse, opacity );','if (vDepth<0.0) discard; vec4 diffuseColor=vec4(diffuse,opacity*exp(-vDepth/2.0)*smoothstep(0.0,0.25,vDepth));'); };
+  ghostMat.customProgramCacheKey=()=>'dolphin-ghost';
+  const ghost=new THREE.InstancedMesh(geo,ghostMat,MAXD); ghost.instanceMatrix=body.instanceMatrix; ghost.frustumCulled=false; ghost.count=0; ghost.renderOrder=2;
+
+  /* ---------- foam rings where the water is broken ---------- */
+  const MAXR=240, foamCol=hex('#f4f1e8');
+  const ringGeo=new THREE.CircleGeometry(1,20).rotateX(-Math.PI/2);
+  const ringA=new THREE.InstancedBufferAttribute(new Float32Array(MAXR*3),3); ringA.setUsage(THREE.DynamicDrawUsage); ringGeo.setAttribute('aRing',ringA);
+  const fxU=THREE.UniformsUtils.merge([THREE.UniformsLib.fog,{uCol:{value:foamCol.clone()},uBright:{value:1},uScale:{value:800}}]);
+  const ringMat=new THREE.ShaderMaterial({uniforms:fxU,transparent:true,depthWrite:false,fog:true,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-6,
+    vertexShader:`attribute vec3 aRing; varying vec3 vR; varying vec2 vP;
+      #include <fog_pars_vertex>
+      void main(){ vP=position.xz; vR=aRing; vec4 mvPosition=modelViewMatrix*instanceMatrix*vec4(position,1.0); gl_Position=projectionMatrix*mvPosition;
+        #include <fog_vertex>
+      }`,
+    fragmentShader:`uniform vec3 uCol; uniform float uBright; varying vec3 vR; varying vec2 vP;
+      #include <common>
+      #include <fog_pars_fragment>
+      float h2(vec2 p){ return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453); }
+      float n2(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
+        return mix(mix(h2(i),h2(i+vec2(1.0,0.0)),f.x),mix(h2(i+vec2(0.0,1.0)),h2(i+vec2(1.0,1.0)),f.x),f.y); }
+      void main(){
+        float r=length(vP); if (r>1.0) discard;
+        float age=vR.x, pt=step(1.5,vR.y), n=n2(vP*4.0+vR.y*31.0)*0.6+n2(vP*9.0-vR.y*17.0)*0.4, m=n2(vP*13.0+vR.y*7.0);
+        // an outlined ring for a break of the surface, or a soft patch of foam with no outline
+        float ring=(1.0-pt)*(1.0-smoothstep(0.0,0.07+0.22*age,abs(r-0.82)))*(0.55+0.45*m);
+        float core=(1.0-smoothstep(0.1,0.85,r))*mix(1.0-smoothstep(0.0,0.5,age),1.0,pt);
+        float f=smoothstep(0.3,0.62,max(ring*0.85,core*0.95)*(0.35+0.95*n));
+        float a=f*vR.z*(1.0-age)*(1.0-0.4*age); if (a<0.01) discard;
+        gl_FragColor=vec4(uCol*uBright,a);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+        #include <fog_fragment>
+      }`});
+  const rings=new THREE.InstancedMesh(ringGeo,ringMat,MAXR); rings.instanceMatrix.setUsage(THREE.DynamicDrawUsage); rings.frustumCulled=false; rings.count=0; rings.renderOrder=3;
+  const RG=[];   // live rings: {x,z,r0,r1,age,life,str,seed}
+
+  /* ---------- spray: drops thrown up by a splash, and the mist of a breath ---------- */
+  const MAXP=1200, pPos=new Float32Array(MAXP*3), pSize=new Float32Array(MAXP), pAlpha=new Float32Array(MAXP);
+  const pGeo=new THREE.BufferGeometry();
+  pGeo.setAttribute('position',new THREE.BufferAttribute(pPos,3).setUsage(THREE.DynamicDrawUsage));
+  pGeo.setAttribute('aSize',new THREE.BufferAttribute(pSize,1).setUsage(THREE.DynamicDrawUsage));
+  pGeo.setAttribute('aAlpha',new THREE.BufferAttribute(pAlpha,1).setUsage(THREE.DynamicDrawUsage));
+  const sprayMat=new THREE.ShaderMaterial({uniforms:fxU,transparent:true,depthWrite:false,fog:true,
+    vertexShader:`attribute float aSize; attribute float aAlpha; uniform float uScale; varying float vA;
+      #include <fog_pars_vertex>
+      void main(){ vA=aAlpha; vec4 mvPosition=modelViewMatrix*vec4(position,1.0); gl_PointSize=max(1.5,aSize*uScale/max(0.2,-mvPosition.z)); gl_Position=projectionMatrix*mvPosition;
+        #include <fog_vertex>
+      }`,
+    fragmentShader:`uniform vec3 uCol; uniform float uBright; varying float vA;
+      #include <common>
+      #include <fog_pars_fragment>
+      void main(){ vec2 c=gl_PointCoord-0.5; float d=length(c); if (d>0.5) discard;
+        gl_FragColor=vec4(uCol*uBright,vA*(1.0-smoothstep(0.32,0.5,d)));
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+        #include <fog_fragment>
+      }`});
+  const spray=new THREE.Points(pGeo,sprayMat); spray.frustumCulled=false; spray.renderOrder=4;
+  const _sz=new THREE.Vector2();
+  spray.onBeforeRender=(renderer,scene,camera)=>{ renderer.getDrawingBufferSize(_sz); fxU.uScale.value=_sz.y/(2*Math.tan(THREE.MathUtils.degToRad((camera.fov||50)/2))); };
+  const PT=[];   // live particles: {x,y,z,vx,vy,vz,age,life,size,a,mist}
+  pGeo.setDrawRange(0,0);
+  parent.add(body,ghost,rings,spray);
+
+  const sound=(k,x,y,z,s)=>{ if (O.onSound) try { O.onSound(k,x,y,z,s); } catch(e){} };
+  function ring(x,z,r0,r1,life,str){ if (RG.length>=MAXR) RG.shift(); RG.push({x,z,r0,r1,age:0,life,str,seed:R()}); }
+  function patch(x,z,r0,r1,life,str){ if (RG.length>=MAXR) RG.shift(); RG.push({x,z,r0,r1,age:0,life,str,seed:2+R()}); }
+  function drops(x,y,z,n,up,out,dirx,dirz,carry){ for (let i=0;i<n;i++){ if (PT.length>=MAXP) PT.shift();
+    const a=R()*TAU, o=out*(0.3+0.7*R());
+    PT.push({x:x+(R()-0.5)*0.5,y:y,z:z+(R()-0.5)*0.5,vx:Math.cos(a)*o+dirx*carry*R(),vy:up*(0.45+0.55*R()),vz:Math.sin(a)*o+dirz*carry*R(),
+      age:0,life:rr(0.7,1.5),size:rr(0.05,0.13),a:rr(0.6,0.95),mist:false}); } }
+  function mist(x,y,z,n,dirx,dirz,sp){ for (let i=0;i<n;i++){ if (PT.length>=MAXP) PT.shift();
+    PT.push({x:x+(R()-0.5)*0.12,y:y+0.05,z:z+(R()-0.5)*0.12,vx:(R()-0.5)*0.5+dirx*sp,vy:rr(1.2,3.4),vz:(R()-0.5)*0.5+dirz*sp,
+      age:0,life:rr(0.45,0.85),size:rr(0.035,0.08),a:rr(0.25,0.45),mist:true}); } }
+
+  /* ---------- pods and their members ---------- */
+  const pods=[], dolphins=[];
+  let FX=0, FZ=0, depthAt=()=>100, boats=[], keepOut=()=>false, spawnW=()=>1;
+  const depth=(x,z)=>{ const d=depthAt(x,z); return Number.isFinite(d)?d:100; };
+  const okSpot=(x,z)=>depth(x,z)>O.minDepth+4 && !keepOut(x,z) && R()<spawnW(x,z);
+  // a place for a pod to appear, out of the way of the focus: now and then ahead of a large boat under way, so
+  // that it meets the pod, otherwise anywhere in deep, open water; null if there is none within reach
+  function deepSpot(){
+    for (const B of boats) if ((B.len||0)>15 && B.v>3 && Math.hypot(B.x-FX,B.z-FZ)<O.range*1.5 && R()<0.4){
+      const a=rr(120,220), l=rr(-40,40), x=B.x+Math.sin(B.head)*a+Math.cos(B.head)*l, z=B.z+Math.cos(B.head)*a-Math.sin(B.head)*l; if (okSpot(x,z)) return [x,z]; }
+    for (let k=0;k<80;k++){ const a=R()*TAU, r=O.range*rr(0.35,0.85), x=FX+Math.sin(a)*r, z=FZ+Math.cos(a)*r; if (okSpot(x,z)) return [x,z]; }
+    return null; }
+  function placePod(pod){ const q=deepSpot(); pod.dormant=!q; pod.retry=2; if (!q) return;
+    [pod.x,pod.z]=q; pod.head=R()*TAU; pod.speed=pod.cruise; pod.mode='cruise'; pod.boat=null; pod.spread=1;
+    for (const d of pod.members){ d.x=pod.x+(R()-0.5)*6; d.z=pod.z+(R()-0.5)*8; d.y=d.cy; d.vy=0; d.slope=0; d.man=null; d.prev=null; d.head=pod.head; d.speed=pod.cruise; d.breathIn=-1; d.leapIn=-1; }
+    formation(pod); }
+  const sizeFor=()=>Array.isArray(O.podSize)?Math.round(rr(O.podSize[0],O.podSize[1])):O.podSize;
+  // rows two to four abreast, one behind another; members take the places nearest to where they already are,
+  // so that a pod regrouping after bow-riding does not cross over itself
+  function formation(pod){ const n=pod.members.length, tight=O.formation!=='loose';
+    const cols=n<=4?2:n<=6?3:4, lat=tight?1.6:2.7, lon=tight?3.1:4.6, j=tight?0.1:0.6, ch=Math.cos(pod.head), sh=Math.sin(pod.head);
+    const loc=d=>{ const dx=d.x-pod.x, dz=d.z-pod.z; return [dx*ch-dz*sh, dx*sh+dz*ch]; };
+    const ms=pod.members.slice().sort((a,b)=>loc(b)[1]-loc(a)[1]);
+    for (let r=0;r*cols<n;r++){ const row=ms.slice(r*cols,r*cols+cols).sort((a,b)=>loc(a)[0]-loc(b)[0]);
+      row.forEach((d,c)=>{ d.row=r; d.col=c; d.sx=(c-(row.length-1)/2)*lat+(r%2?lat*0.25:0)+rr(-j,j); d.sz=((Math.ceil(n/cols)-1)/2-r)*lon+rr(-j,j)*1.5;
+        d.cy=pod.cy+rr(-0.12,0.12); }); } }
+  function rideSlots(pod){ const n=pod.members.length; pod.members.forEach((d,i)=>{ const side=i%2?1:-1, rank=Math.floor(i/2);
+    d.rx=side*rr(0.8,1.5)+side*rank*1.7; d.rz=rr(0.8,2.4)+rank*rr(1.5,2.5)-(rank>1?rr(3,5):0); d.ry=rr(-1.3,-0.8); d.rideBreath=rr(1,6); }); }
+  function newDolphin(pod){ const d={pod,x:pod.x+(R()-0.5)*6,z:pod.z+(R()-0.5)*8,y:rr(-2.6,-1.6),head:pod.head,speed:pod.speed,slope:0,vy:0,pitch:0,roll:0,
+      cy:rr(-2.2,-1.3),man:null,breathIn:-1,leapIn:-1,leapCool:rr(2,8),flex:R()*TAU,amp:0.1,curv:0,scale:rr(0.86,1.06),ph:R()*TAU,
+      prev:null,foamT:0,state:'swim',sx:0,sz:0,rx:0,rz:0,ry:-1,rideBreath:3};
+    d.y=d.cy; return d; }
+  function newPod(){ const q=[FX,FZ], pod={x:q[0],z:q[1],dormant:false,retry:2,size:sizeFor(),head:R()*TAU,speed:rr(2.4,3.6),cruise:rr(2.4,3.6),mode:'cruise',boat:null,t:0,t2:0,rideT:0,cool:rr(0,10),spread:1,cy:rr(-1.9,-1.3),
+      breathT:rr(1,6),ph:R()*TAU,members:[]}; return pod; }
+  const fresh=[];
+  function setMembers(pod,n){ while (pod.members.length>n){ const d=pod.members.pop(); dolphins.splice(dolphins.indexOf(d),1); }
+    while (pod.members.length<n && dolphins.length<MAXD){ const d=newDolphin(pod); pod.members.push(d); dolphins.push(d); }
+    formation(pod); if (pod.mode!=='cruise') rideSlots(pod); }
+  function rebuild(){ while (pods.length>O.pods){ const p=pods.pop(); setMembers(p,0); }
+    while (pods.length<O.pods){ const p=newPod(); pods.push(p); fresh.push(p); }
+    let room=MAXD; for (const p of pods){ p.size=Math.min(p.size,Math.max(0,room)); room-=p.size; }
+    for (const p of pods) if (p.members.length!==p.size) setMembers(p,p.size);
+    while (fresh.length) placePod(fresh.pop()); }
+
+  // vertical paths are given as functions of the horizontal distance run: Hermite pieces in the water, and a
+  // ballistic flight in the air
+  const H=(y1,m1,L)=>({type:'h',y1,m1,L,x:0,y0:null,m0:0});
+  function evalH(s){ const u=cl(s.x/s.L,0,1), L=s.L, u2=u*u, u3=u2*u;
+    const y=(2*u3-3*u2+1)*s.y0+(u3-2*u2+u)*L*s.m0+(-2*u3+3*u2)*s.y1+(u3-u2)*L*s.m1;
+    const dy=((6*u2-6*u)*s.y0+(3*u2-4*u+1)*L*s.m0+(-6*u2+6*u)*s.y1+(3*u2-2*u)*L*s.m1)/L;
+    const ddy=((12*u-6)*s.y0+(6*u-4)*L*s.m0+(-12*u+6)*s.y1+(6*u-2)*L*s.m1)/(L*L);
+    return [y,dy,ddy,u>=1]; }
+  function startBreath(d){ const riding=d.pod.mode!=='cruise', peak=riding?rr(0.0,0.12):(d.peak??rr(-0.02,0.08));
+    const U=cl((riding?d.speed:d.pod.speed)*2.6,7,15); d.peak=null;
+    d.man={kind:'breath',i:0,vT:0,segs:[H(peak,0,U),H(riding?d.ry:d.cy,0,U*(riding?rr(0.9,1.25):1.05))]}; d.state='breath'; }
+  // A leap begins with a dive to between 3 and 3.8 m, then a steep climb that breaks the surface at the speed and
+  // angle of the flight: 5 to 6 m/s at 50 to 60 degrees (a body's clearance of 0.5 to 1.5 m), and now and then up
+  // to 7 m/s for a leap of about 2.5 m. On a bow wave the dolphin must keep up with the boat, so it leaves the
+  // water flatter, at the boat's speed, with the same rise.
+  function startLeap(d){ const riding=d.pod.mode!=='cruise', b=d.pod.boat;
+    let vx, vy;
+    if (riding&&b){ vx=b.v+0.4; vy=rr(3.6,4.6); }
+    else { const v=R()<0.08?rr(6.5,7.1):rr(5,6), th=rr(50,60)*Math.PI/180; vx=v*Math.cos(th); vy=v*Math.sin(th); }
+    const deep=-Math.min(rr(3,3.8),depth(d.x,d.z)-1.5), m=vy/vx, Ur=cl(2.0*(-deep)/m+1.2,3.5,riding?14:6);
+    d.man={kind:'leap',i:0,vT:Math.max(vx,d.speed*0.8),segs:[H(deep,0,cl(d.speed*1.1,3,9)),H(0,m,Ur),{type:'air',vx,vy},H(riding?d.ry:d.cy,0,cl(vx*1.6,5,12))]};
+    d.state='leap'; d.leapCool=rr(5,10);
+    for (const o of d.pod.members) if (o!==d && !o.man && o.leapIn<0 && R()<0.3) o.leapIn=rr(0.25,0.7); }
+
+  // pose of a point on the body (local x right, y up, z forward) in the world
+  const _w=[0,0,0];
+  function toWorld(d,lx,ly,lz){ const s=d.scale, ch=Math.cos(d.head), sh=Math.sin(d.head), cp=Math.cos(d.pitch), sp=Math.sin(d.pitch);
+    lx*=s; ly*=s; lz*=s;
+    _w[0]=d.x+ch*lx-sh*sp*ly+sh*cp*lz; _w[1]=d.y+cp*ly+sp*lz; _w[2]=d.z-sh*lx-ch*sp*ly+ch*cp*lz; return _w; }
+  const SAMPLES=[[0,-0.06,1.3],[0,0.17,0.62],[0,0.575,-0.42],[0,0,-1.4],[0,0.27,0.0]];   // nose, blowhole, fin tip, flukes, fin base
+
+  function surfaceFx(d,h){
+    const ys=SAMPLES.map(p=>{ const w=toWorld(d,...p); return [w[0],w[1]-SEA,w[2]]; });
+    const prev=d.prev; d.prev=ys.map(w=>w[1]);
+    if (!prev) return;
+    const fx=Math.sin(d.head), fz=Math.cos(d.head), seg=d.man&&d.man.segs[d.man.i], air=seg&&seg.type==='air', leaping=d.man&&d.man.kind==='leap';
+    for (let k=0;k<4;k++){ const y0=prev[k], y1=ys[k][1]; if ((y0<0)===(y1<0)) continue;
+      const [x,,z]=ys[k], v=(y1-y0)/h, up=y1>=0;
+      if (k===0){
+        if (up && leaping && v>2){ ring(x,z,0.5,2.3+v*0.12,2.4,0.85); patch(x,z,0.5,1.3,2.4,0.9); drops(x,SEA,z,14+Math.round(v*4),v*0.75,1.4,fx,fz,d.speed*0.5); sound('leap',x,SEA,z,cl(v/6,0,1)); }
+        else if (!up && leaping && v<-2){ ring(x,z,0.7,2.7+(-v)*0.18,2.8,0.9); patch(x,z,0.8,1.9,3.2,1); drops(x,SEA,z,26+Math.round(-v*6),rr(3.5,5.5),2.2,fx,fz,d.speed*0.35); sound('splash',x,SEA,z,cl(-v/7,0,1)); }
+        else { ring(x,z,0.3,1.1,1.7,0.5); patch(x,z,0.3,0.7,1.6,0.6); drops(x,SEA,z,3,1.2,0.6,fx,fz,0.5); }
+      } else if (k===1){ if (up && !leaping){ mist(x,ys[1][1]+SEA,z,22,fx,fz,d.speed*0.6); sound('breath',x,SEA,z,0.6); } }
+      else if (k===2){ ring(x,z,0.2,0.75,1.3,0.55); }
+      else if (k===3){ if (up && leaping && v>1.5){ drops(x,SEA,z,10+Math.round(v*3),v*0.55,0.9,fx,fz,d.speed*0.4); ring(x,z,0.4,1.6,2,0.7); }
+        if (!up){ const big=leaping&&v<-2; ring(x,z,big?0.6:0.3,big?2.2:1.2,big?2.4:1.6,big?0.9:0.6);
+          if (Math.abs(v)>0.4) drops(x,SEA,z,big?18:4,big?4:1.4,big?1.6:0.7,fx,fz,0.4); } }
+    }
+    // a trail of foam where the fin or the back cuts the surface
+    d.foamT-=h; if (d.foamT<=0 && !air){
+      const fb=ys[4], ft=ys[2];
+      if (fb[1]<0 && ft[1]>0){ const t=fb[1]/(fb[1]-ft[1]); patch(lerp(fb[0],ft[0],t),lerp(fb[2],ft[2],t),0.15,0.5+d.speed*0.04,1.4,0.55); d.foamT=0.06; }
+      const n=ys[0], f=ys[3]; if ((n[1]>0)!==(f[1]>0) && d.y-SEA>-0.4){ const t=n[1]/(n[1]-f[1]); patch(lerp(n[0],f[0],t),lerp(n[2],f[2],t),0.3,0.9,1.6,0.45); d.foamT=0.06; }
+    }
+  }
+
+  function podStep(pod,h){
+    if (pod.dormant){ pod.retry-=h; if (pod.retry<=0) placePod(pod); return; }
+    pod.t+=h;
+    const b=pod.boat;
+    if (pod.mode!=='cruise'){
+      if (!b || !boats.includes(b) || b.v<2.5 || !O.bowRide){ leave(pod); return; }
+      const fx=Math.sin(b.head), fz=Math.cos(b.head);
+      pod.x=b.x+fx*b.len/2; pod.z=b.z+fz*b.len/2; pod.head=b.head; pod.speed=b.v;
+      if (pod.mode==='approach'){ pod.t2+=h; let m=0; for (const d of pod.members) m+=Math.hypot(d.x-pod.x,d.z-pod.z)/pod.members.length;
+        if (m<9){ pod.mode='ride'; } else if (pod.t2>90) leave(pod); }
+      else { pod.rideT-=h; if (pod.rideT<=0 || depth(pod.x,pod.z)<O.minDepth || keepOut(pod.x,pod.z)) leave(pod); }
+      return;
+    }
+    const fx=Math.sin(pod.head), fz=Math.cos(pod.head);
+    let turn=0.10*Math.sin(pod.t*0.071+pod.ph)+0.06*Math.sin(pod.t*0.19+pod.ph*2.3);
+    // shallow water and the places kept clear (harbours, the channels into coves) ahead turn the pod aside
+    const room=(x,z)=>keepOut(x,z)?-1:depth(x,z);
+    const dA=Math.min(room(pod.x+fx*25,pod.z+fz*25),room(pod.x+fx*55,pod.z+fz*55));
+    const dF=Math.hypot(pod.x-FX,pod.z-FZ);
+    if (dA<O.minDepth+3){ const l=room(pod.x+Math.sin(pod.head+0.7)*40,pod.z+Math.cos(pod.head+0.7)*40), r=room(pod.x+Math.sin(pod.head-0.7)*40,pod.z+Math.cos(pod.head-0.7)*40); turn=(l>r?1:-1)*0.5; }
+    else if (dF>O.range) turn+=cl(angTo(pod.head,Math.atan2(FX-pod.x,FZ-pod.z)),-1,1)*0.2;
+    pod.head+=turn*h;
+    pod.speed+=(pod.cruise-pod.speed)*(1-Math.exp(-h*0.25)); pod.spread+=(1-pod.spread)*(1-Math.exp(-h*0.12));
+    pod.x+=fx*pod.speed*h; pod.z+=fz*pod.speed*h;
+    if (dF>O.range*3){ placePod(pod); return; }
+    pod.cool-=h;
+    if (O.bowRide && pod.cool<=0) for (const B of boats){ if (B.v<3) continue; const dd=Math.hypot(B.x-pod.x,B.z-pod.z);
+      if (dd<170 && R()<0.5*h){ pod.mode='approach'; pod.boat=B; pod.t2=0; pod.rideT=rr(25,55); rideSlots(pod); for (const d of pod.members) d.breathIn=-1; break; } }
+    pod.breathT-=h;
+    if (pod.breathT<=0){ pod.breathT=rr(9,20); const ripple=R()<0.6, gap=rr(0.12,0.24), peak=rr(-0.02,0.08), dir=R()<0.5;
+      for (const d of pod.members){ if (!d.man && d.breathIn<0){ const c=dir?d.col:-d.col+4;
+        d.breathIn=ripple?(c*gap+d.row*gap*0.6)%1.6:rr(0,0.1); d.peak=peak+rr(-0.015,0.015); } } }
+  }
+  function leave(pod){ const b=pod.boat; let mx=0, mz=0, lat=0; const n=pod.members.length||1;
+    for (const d of pod.members){ mx+=d.x/n; mz+=d.z/n; if (b) lat+=((d.x-b.x)*Math.cos(b.head)-(d.z-b.z)*Math.sin(b.head))/n; }
+    pod.mode='cruise'; pod.x=mx; pod.z=mz; pod.head=(b?b.head:pod.head)+(lat>=0?1:-1)*rr(0.55,1.1);
+    pod.speed=b?b.v:pod.speed; pod.cool=rr(35,70); pod.boat=null; pod.breathT=rr(3,8); pod.spread=2.4; formation(pod); }
+
+  function dolphinStep(d,h){
+    const pod=d.pod, riding=pod.mode!=='cruise', b=pod.boat;
+    let tx, tz, base, fH;
+    if (riding && b){ const fx=Math.sin(b.head), fz=Math.cos(b.head), rx=Math.cos(b.head), rz=-Math.sin(b.head);
+      const jx=d.rx+0.35*Math.sin(pod.t*0.4+d.ph), jz=b.len/2+d.rz+0.8*Math.sin(pod.t*0.27+d.ph*1.3);
+      tx=b.x+rx*jx+fx*jz; tz=b.z+rz*jx+fz*jz; base=b.v; fH=b.head; }
+    else { const h0=pod.head, A=O.formation==='loose'?1:0.22, sx=d.sx*pod.spread+A*Math.sin(pod.t*0.13+d.ph), sz=d.sz*pod.spread+A*1.4*Math.sin(pod.t*0.09+d.ph*1.7);
+      tx=pod.x+Math.cos(h0)*sx+Math.sin(h0)*sz; tz=pod.z-Math.sin(h0)*sx+Math.cos(h0)*sz; base=pod.speed; fH=h0; }
+    // aim at a point ahead of the place in the formation, so that a dolphin on its place swims with the pod
+    const ax=tx+Math.sin(fH)*6-d.x, az=tz+Math.cos(fH)*6-d.z, ex=tx-d.x, ez=tz-d.z;
+    let want=Math.atan2(ax,az);
+    const ahead=ex*Math.sin(d.head)+ez*Math.cos(d.head);
+    let vT=cl(base+cl(ahead*(riding?0.9:0.5),-2.5,riding?6:3),0.8,riding?13:9);
+    if (depth(d.x,d.z)<O.minDepth*0.7) want=Math.atan2(pod.x-d.x,pod.z-d.z);
+    const seg=d.man&&d.man.segs[d.man.i], air=seg&&seg.type==='air';
+    if (d.man && d.man.vT && d.man.i<3) vT=d.man.i===1?d.man.vT:Math.max(vT*0.9,d.man.vT);
+    if (!air) d.speed+=cl(vT-d.speed,-(d.man&&d.man.kind==='leap'?6:3)*h,(d.man&&d.man.kind==='leap'?6:4)*h);
+    const tr=air?0:d.man?0.45:riding?1.4:1.0, dh=cl(angTo(d.head,want)*2.0,-tr,tr);
+    d.head+=dh*h;
+    d.x+=Math.sin(d.head)*d.speed*h; d.z+=Math.cos(d.head)*d.speed*h;
+    // keep out of the hulls of boats
+    for (const B of boats){ const dx=d.x-B.x, dz=d.z-B.z; if (dx*dx+dz*dz>900) continue;
+      const c=Math.cos(B.head), s=Math.sin(B.head), lx=dx*c-dz*s, lz=dx*s+dz*c, hw=(B.beam||6)/2+0.9, hl=(B.len||20)/2+0.6;
+      if (Math.abs(lz)<hl && Math.abs(lx)<hw && d.y>-3){ const push=(Math.sign(lx)||1)*(hw-Math.abs(lx)); d.x+=c*push; d.z+=-s*push; } }
+    // vertical path
+    let curvT=0;
+    if (!d.man){
+      d.state='swim';
+      const floor=-(depth(d.x,d.z)-1.5), cy=Math.max(riding?d.ry:d.cy,Math.min(-0.8,floor));
+      if (d.breathIn>=0){ d.breathIn-=h; if (d.breathIn<0) startBreath(d); }
+      if (d.leapIn>=0){ d.leapIn-=h; if (d.leapIn<0 && !d.man && depth(d.x,d.z)>O.minDepth) startLeap(d); }
+      d.leapCool-=h;
+      if (!d.man && riding && pod.mode==='ride'){ d.rideBreath-=h; if (d.rideBreath<=0){ d.rideBreath=rr(3,8); startBreath(d); } }
+      const lam=O.leapsPerMinute/60/Math.max(1,pod.members.length)*(pod.mode==='ride'?1.6:1);
+      if (!d.man && d.leapCool<=0 && R()<lam*h && depth(d.x,d.z)>O.minDepth && Math.abs(d.y-cy)<0.6) startLeap(d);
+      if (!d.man){ d.vy+=(4*(cy-d.y)-4*d.vy)*h; d.y+=d.vy*h; d.slope=d.vy/Math.max(d.speed,0.6); }
+    }
+    if (d.man){ const s=d.man.segs[d.man.i];
+      if (s.type==='h'){ if (s.y0===null){ s.y0=d.y; s.m0=d.slope; }
+        s.x+=d.speed*h; const [y,dy,ddy,done]=evalH(s); d.y=y; d.slope=dy; curvT=ddy/Math.pow(1+dy*dy,1.5);
+        if (done) nextSeg(d); }
+      else { if (!s.init){ s.init=true; if (s.vx===undefined) s.vx=d.speed; s.vy=s.vy??s.vx*d.slope; }
+        d.speed=s.vx; s.vy-=G*h; d.y+=s.vy*h; d.slope=s.vy/s.vx; curvT=-G/(s.vx*s.vx)/Math.pow(1+d.slope*d.slope,1.5)*0.6;
+        if (d.y<SEA && s.vy<0) nextSeg(d); }
+      d.vy=d.slope*d.speed;
+    }
+    d.pitch=Math.atan(d.slope);
+    d.curv+=(cl(curvT,-0.6,0.6)-d.curv)*(1-Math.exp(-h*10));
+    d.roll+=(cl(-dh*0.5,-0.5,0.5)-d.roll)*(1-Math.exp(-h*4));
+    // the beat of the flukes: harder when climbing to leap, almost still in the air or gliding on a bow wave
+    const sg=d.man&&d.man.segs[d.man.i];
+    let ampT=cl(0.06+0.018*d.speed,0.06,0.2), fr=0.7+0.28*d.speed;
+    if (riding && pod.mode==='ride' && Math.abs(ahead)<2.5){ ampT=0.04; fr=1.2; }
+    if (d.man && d.man.kind==='leap' && d.man.i===0){ ampT=0.24; fr=3.2; }
+    if (sg && sg.type==='air'){ ampT=0.02; fr=0.5; }
+    d.amp+=(ampT-d.amp)*(1-Math.exp(-h*4)); d.flex+=TAU*fr*h; if (d.flex>1e4) d.flex-=TAU*1000;
+    surfaceFx(d,h);
+  }
+  function nextSeg(d){ const m=d.man; m.i++; if (m.i>=m.segs.length){ d.man=null; d.vy=0; return; }
+    const s=m.segs[m.i]; if (s.type==='h'){ s.y0=d.y; s.m0=d.slope; } d.state=s.type==='air'?'air':m.kind; }
+
+  function fxStep(dt){
+    for (let i=PT.length-1;i>=0;i--){ const p=PT[i]; p.age+=dt/p.life;
+      if (p.mist){ const k=Math.exp(-3*dt); p.vx*=k; p.vz*=k; p.vy=p.vy*k-0.6*dt; p.size+=dt*0.12; }
+      else { const k=Math.exp(-0.4*dt); p.vx*=k; p.vz*=k; p.vy-=G*dt; }
+      p.x+=p.vx*dt; p.y+=p.vy*dt; p.z+=p.vz*dt;
+      if (p.age>=1 || (!p.mist && p.y<SEA-0.05 && p.vy<0)){ PT[i]=PT[PT.length-1]; PT.pop(); } }
+    for (let i=RG.length-1;i>=0;i--){ RG[i].age+=dt/RG[i].life; if (RG[i].age>=1) RG.splice(i,1); }
+  }
+
+  const _m=new THREE.Matrix4(), _q=new THREE.Quaternion(), _e=new THREE.Euler(0,0,0,'YXZ'), _p=new THREE.Vector3(), _s=new THREE.Vector3();
+  function write(){
+    let i=0;
+    for (const d of dolphins){ if (d.pod.dormant) continue; _e.set(-d.pitch,d.head,d.roll,'YXZ'); _q.setFromEuler(_e); _p.set(d.x,d.y,d.z); _s.setScalar(d.scale);
+      _m.compose(_p,_q,_s); body.setMatrixAt(i,_m); flexA.setXYZ(i,d.flex,d.amp/d.scale,d.curv*d.scale); i++; }
+    body.count=ghost.count=i; body.instanceMatrix.needsUpdate=true; flexA.needsUpdate=true;
+    _q.identity();
+    RG.forEach((g,i)=>{ const r=lerp(g.r0,g.r1,Math.sqrt(g.age)); _p.set(g.x,SEA+0.02,g.z); _s.set(r,1,r); _m.compose(_p,_q,_s); rings.setMatrixAt(i,_m); ringA.setXYZ(i,g.age,g.seed,g.str); });
+    rings.count=RG.length; rings.instanceMatrix.needsUpdate=true; ringA.needsUpdate=true;
+    PT.forEach((p,i)=>{ pPos[i*3]=p.x; pPos[i*3+1]=p.y; pPos[i*3+2]=p.z; pSize[i]=p.size; pAlpha[i]=p.a*(1-p.age)*(p.mist?1:Math.min(1,p.age*8+0.3)); });
+    pGeo.setDrawRange(0,PT.length); for (const k of ['position','aSize','aAlpha']) pGeo.attributes[k].needsUpdate=true;
+  }
+
+  function readCtx(ctx){
+    SEA=ctx.seaLevel||0; ghostU.uSeaY.value=SEA;
+    if (ctx.depthAt) depthAt=ctx.depthAt;
+    boats=ctx.boats||[]; keepOut=ctx.keepOut||(()=>false); spawnW=ctx.spawnWeight||(()=>1);
+    const f=ctx.focus||(ctx.camera&&ctx.camera.position); if (f){ FX=f.x; FZ=f.z; }
+    const br=ctx.bright===undefined?1:ctx.bright; fxU.uBright.value=br;
+    ghostMat.color.copy(ghostCol).multiplyScalar(0.35+0.65*br); ghostMat.opacity=O.ghost;
+  }
+  let started=false;
+  function update(dt,ctx={}){
+    readCtx(ctx);
+    if (!started){ started=true; rebuild(); write(); }
+    if (ctx.paused || !(dt>0)) return;
+    dt=Math.min(dt,0.1); const n=Math.ceil(dt*60-1e-6), h=dt/n;
+    for (let k=0;k<n;k++){ for (const p of pods) podStep(p,h); for (const d of dolphins) if (!d.pod.dormant) dolphinStep(d,h); }
+    fxStep(dt); write();
+  }
+  function setOptions(o){ Object.assign(O,o); O.pods=cl(Math.round(O.pods),0,32);
+    if (!Array.isArray(O.podSize)) O.podSize=cl(Math.round(O.podSize),1,16);
+    if ('podSize' in o) for (const p of pods) p.size=sizeFor();
+    if (started){ rebuild(); if ('formation' in o) for (const p of pods) if (p.mode==='cruise') formation(p); } }
+  function trigger(kind,pi=0){ const pod=pods[pi%Math.max(1,pods.length)]; if (!pod) return;
+    if (kind==='breath') pod.breathT=0;
+    else if (kind==='leap'){ const d=pod.members.find(m=>!m.man); if (d){ d.leapCool=0; startLeap(d); } }
+    else if (kind==='ride' && boats.length){ let B=boats[0]; for (const b of boats) if (Math.hypot(b.x-pod.x,b.z-pod.z)<Math.hypot(B.x-pod.x,B.z-pod.z)) B=b;
+      pod.mode='approach'; pod.boat=B; pod.t2=0; pod.rideT=rr(25,55); rideSlots(pod); } }
+  // a new island: every pod is placed afresh in its waters, and the foam and spray of the old one are cleared
+  function reset(){ RG.length=0; PT.length=0; for (const p of pods){ p.dormant=true; p.retry=0; } if (started) write(); }
+  // the world has moved by dz from north to south (Coast repeats every WRAP_Z)
+  function shift(dz){ for (const p of pods) p.z+=dz; for (const d of dolphins) d.z+=dz; for (const g of RG) g.z+=dz; for (const q of PT) q.z+=dz; if (started) write(); }
+  function dispose(){ parent.remove(body,ghost,rings,spray); geo.dispose(); ringGeo.dispose(); pGeo.dispose();
+    for (const m of [bodyMat,depthMat,ghostMat,ringMat,sprayMat]) m.dispose(); }
+  return {update,setOptions,trigger,reset,shift,dispose,get dolphins(){ return dolphins; },get pods(){ return pods; },options:O,meshes:{body,ghost,rings,spray}};
+}
+/* ================= end of dolphins ================= */
+/* Coast's pods: two within reach of the player, appearing in open water clear of harbours and of the channels into
+   coves, and seldom close inshore. The ferries and the sailing boats are offered for bow-riding, each through one
+   object kept for good, so that a riding pod keeps hold of its boat. A new island (I) places the pods afresh, and
+   the north-south repeat moves them with the player. onSound is left as a hook, since there is no sample yet. */
+const dolphins=createDolphins(world,{pods:2,podSize:[3,7],leapsPerMinute:2,range:380,seed:(SEED*7919+13)>>>0});
+const dlBoats=new Map(), dlFocus={x:0,z:0};
+const dlBoat=(o,len,beam)=>{ let b=dlBoats.get(o); if (!b){ b={x:0,z:0,head:0,v:0,len,beam}; dlBoats.set(o,b); } return b; };
+// how far a point lies out to sea from the shore of side sd (negative inland)
+const dlOut=(sd,x,z)=>sd*(coastZ(sd,x)-z);
+// pods keep out of harbours and of the water off a cove, where boats come in to land
+function dlKeepOut(x,z){
+  for (const sd of SIDES){ const o=dlOut(sd,x,z); if (o<-60 || o>240) continue;
+    for (let n=Math.floor(x/HARB)-1;n<=Math.floor(x/HARB)+1;n++){ const H=harbourInfo(sd,n); if (H && Math.abs(x-H.x)<H.W/2+90) return true; }
+    for (let n=Math.floor(x/CV_SP)-1;n<=Math.floor(x/CV_SP)+1;n++){ const cv=coveInfo(sd,n); if (cv && Math.abs(x-cv.X)<cv.UX+30) return true; } }
+  return false; }
+const dlCtx={camera,focus:dlFocus,boats:[],depthAt:(x,z)=>-heightAt(x,z),seaLevel:0,bright:1,paused:false,keepOut:dlKeepOut,
+  spawnWeight:(x,z)=>{ const o=-seaDist(x,z); return o<70?0:o<160?0.3:1; }};
+let dlSeed=SEED;
+wrapHooks.push(d=>dolphins.shift(d));
+function updateDolphins(wdt){
+  if (SEED!==dlSeed){ dlSeed=SEED; dolphins.reset(); }
+  dlFocus.x=player.x; dlFocus.z=player.z; dlCtx.paused=paused; dlCtx.bright=surfMat.uniforms.uBright.value;
+  const B=dlCtx.boats; B.length=0;
+  for (const F of ferries){ if (!F.R || !F.m.visible) continue; const b=dlBoat(F,FL,FB); b.x=F.m.position.x; b.z=F.m.position.z; b.head=F.head; b.v=F.v; B.push(b); }
+  for (const s of sailers){ const b=dlBoat(s,7,2.4); b.x=s.m.position.x; b.z=s.m.position.z; b.head=s.m.rotation.y; b.v=s.sp; B.push(b); }
+  dolphins.update(wdt,dlCtx);
+  // window.__village is made once the main loop has started, so the helper is added to it when it first exists
+  if (window.__village && !window.__village.findDolphins){ window.__village.findDolphins=findDolphins; window.__village.dolphins=dolphins; }
+}
+// the middle of the nearest pod in the water, with its distance from the player, for tests and for finding them
+function findDolphins(){ let best=null;
+  for (const p of dolphins.pods){ if (p.dormant || !p.members.length) continue; const n=p.members.length;
+    const x=p.members.reduce((s,d)=>s+d.x,0)/n, z=p.members.reduce((s,d)=>s+d.z,0)/n, dist=Math.hypot(x-player.x,z-player.z);
+    if (!best || dist<best.dist) best={x,z,dist,head:p.head,mode:p.mode,size:n,states:p.members.map(d=>d.state)}; }
+  return best; }
+
 /* ================= boats under sail along the coast ================= */
 const sailers=[];
 // how far offshore a boat must keep at x to stay clear of any harbour's moles, with 12 m to spare
-function sailClear(sd,x){ const H=harbourAt(sd,x); if (!H) return 0; const ax=Math.abs(x-H.x);
-  if (ax>H.W/2+10) return 0; return H.sd*(coastZ(sd,x)-H.zo)+12; }
+function sailClear(sd,x){ const cv=coveInfo(sd,Math.floor(x/CV_SP)), c=cv&&Math.abs(x-cv.X)<cv.Uc+30?cv.R+cv.rt+18:0;   // and well outside a cove's headlands
+  const H=harbourAt(sd,x); if (!H) return c; const ax=Math.abs(x-H.x);
+  if (ax>H.W/2+10) return c; return Math.max(c,H.sd*(coastZ(sd,x)-H.zo)+12); }
 function updateSailers(dt){
   if (!sailers.length) for (let i=0;i<5;i++){ const m=new THREE.Mesh(BOATS[BOAT_SAIL[i%3]].geo,matB); m.rotation.order='YXZ'; m.castShadow=true; world.add(m);
     sailers.push({m,sd:i%2?1:-1,x:player.x+(Math.random()-0.5)*600,off:40+Math.random()*130,dir:Math.random()<0.5?1:-1,sp:1.8+Math.random()*1.6,ph:Math.random()*6}); }
@@ -3918,7 +5114,9 @@ function ferryLoop(A,dA,B,dB,r,oA,oB){
   for (let i=0;i<N;i++){ const a=pts[(i-2+N)%N], b=pts[(i+2)%N]; pts[i][2]=Math.atan2(b[0]-a[0],b[1]-a[1]); }
   return {pts,L,len:L[N],stopI};
 }
-function islandRoute(sd,m){
+// the crossings, the goods lines and the headland lights are laid out as if there were no coves, which keep clear of them
+function islandRoute(sd,m){ return noCove(()=>islandRoute0(sd,m)); }
+function islandRoute0(sd,m){
   const key=sd+':'+m; if (irCache.has(key)) return irCache.get(key);
   let R=null; const I=islandInfo(sd,m);
   if (I){ let P=null; for (const k of [Math.floor(I.x/FP),Math.floor(I.x/FP)-1,Math.floor(I.x/FP)+1]){ const Q=ferryPortInfo(sd,k); if (Q && (!P||Math.abs(Q.x-I.x)<Math.abs(P.x-I.x))) P=Q; }
@@ -4257,7 +5455,7 @@ function collide(){
     }
     if (ch.doors) for (const D of ch.doors) leafPush(D);
   }
-  let g=heightAt(player.x,player.z);
+  let g=walkGround(player.x,player.z,py);
   // indoors the floor replaces the ground, which may rise above it under the back of the house
   for (const ch of near) for (const o of ch.obbs){ if (!o.room) continue; const [lu,lv]=obbLocal(o,player.x,player.z);
     const A=o.room.area||o, [au,av]=A===o?[lu,lv]:obbLocal(A,player.x,player.z);
@@ -4615,7 +5813,7 @@ function buildChurch(C){
 }
 // the highest surface the player could stand on at (x,z): terrain, steps, terraces, moles
 function standableAt(x,z){
-  let g=heightAt(x,z);
+  let g=walkGround(x,z,player.y);
   for (const ch of nearbyChunks()){
     for (const o of ch.obbs){ if (o.top===Infinity||o.top>player.y+STEP) continue;
       if (Math.abs(o.x-x)>o.hw+o.hd+0.5||Math.abs(o.z-z)>o.hw+o.hd+0.5) continue;
@@ -4744,7 +5942,8 @@ function sndPlay(id,group,pos,{gain=1,rate=1,vel=null,delay=0,occl=0}={}){
 
 /* where the player stands decides the footstep: paving and structures, sand, grass or bare soil */
 function surfaceAt(x,z,y){
-  const h=heightAt(x,z); if (y>h+0.15) return 'pavement';
+  if (coveInCave(x,z,y)) return 'sand';
+  const h=walkGround(x,z,y); if (y>h+0.15) return 'pavement';
   if (h<1.2) return 'sand';
   const ch=chunks.get(key(Math.floor(x/C),Math.floor(z/C))); if (!ch||!ch.groundGeo) return 'soil';
   const pv=ch.groundGeo.getAttribute('pave'), col=ch.groundGeo.getAttribute('color'), n=Math.round(Math.sqrt(pv.count))-1, st=C/n;
@@ -4809,7 +6008,7 @@ function sndUpdate(dt){
   const open=room&&room.kind!=='church'?Math.min(1,Math.abs(room.a||0)):0;
   SNDS.inK=(SNDS.inK??0)+(((room||cabin)?1:0)-(SNDS.inK??0))*(1-Math.exp(-dt*4)); const iK=SNDS.inK*(1-0.6*open);
   // the reverb follows whether the listener is inside the bore, eased so it swells and dies away at the portals
-  const inBore=(inside&&railState(camera.position.x)==='tunnel')||(room&&room.kind==='church')?1:0; SNDS.tun=(SNDS.tun??0)+(inBore-(SNDS.tun??0))*(1-Math.exp(-dt*2.5)); const tK=SNDS.tun;
+  const inCave=mode==='street'&&coveInCave(player.x,player.z,player.y), inBore=(inside&&railState(camera.position.x)==='tunnel')||(room&&room.kind==='church')||inCave?1:0; SNDS.tun=(SNDS.tun??0)+(inBore-(SNDS.tun??0))*(1-Math.exp(-dt*2.5)); const tK=SNDS.tun;
   // the listener is the camera
   _sl.copy(camera.position); camera.getWorldDirection(_sf);
   const L=ctx.listener;
@@ -4817,7 +6016,7 @@ function sndUpdate(dt){
   else { L.setPosition(_sl.x,_sl.y,_sl.z); L.setOrientation(_sf.x,_sf.y,_sf.z,0,1,0); }
   // group treatment: inside the train the world outside is muffled and the train's own sound low-passed
   SND.cut.world=inCoach?900:inCab?1400:iK>0.02?20000*Math.pow(1200/20000,iK):20000; SND.cut.train=inCoach?1100:inCab?1800:20000; SND.cut.ferry=cabin?1800:20000; SND.cut.player=20000;
-  SND.gmul.world=(inside?0.7:1-0.45*iK)*(1-0.92*(room?0:tK)); SND.gmul.train=1; SND.gmul.ferry=1; SND.gmul.player=1;
+  SND.gmul.world=(inside?0.7:1-0.45*iK)*(1-0.92*(room||inCave?0:tK)); SND.gmul.train=1; SND.gmul.ferry=1; SND.gmul.player=1;
   SND.send.world=0; SND.send.train=0.8*tK; SND.send.ferry=0; SND.send.player=0.8*tK;
   for (const g in SND.bus) sndParam(SND.bus[g].lp.frequency,SND.cut[g],0.15);
   sndParam(SND.revOut.gain,tK>0.01?1:0,0.2);
@@ -4966,6 +6165,10 @@ addEventListener('keydown',e=>{ keys[e.code]=true;
   if (e.code==='KeyP' && !e.repeat){ paused=!paused; lastClock=null; }
   if (e.code==='KeyH' && !e.repeat){ helpEl.hidden=!helpEl.hidden; lastCell=null; }
   if (e.code==='KeyI' && !e.repeat) newIsland();
+  if (e.code==='PageUp'){ e.preventDefault(); if (!e.repeat) setDrawLvl(1); }
+  if (e.code==='PageDown'){ e.preventDefault(); if (!e.repeat) setDrawLvl(-1); }
+  if (e.code==='Home'){ e.preventDefault(); if (!e.repeat) setDrawLvl(0); }
+  if (e.code==='KeyO' && !e.repeat){ statsEl.hidden=!statsEl.hidden; statsT=0; }
   if (e.code==='KeyN' && !e.repeat){ hour=nightU.value>0.5?10:22; SNDS.hour=Math.floor(hour); }   // to night, or back to day, without the bells striking the jump
   if (e.code==='KeyM' && !e.repeat) setMuted(!muted);
   if (e.code==='Tab'){ e.preventDefault(); if (!e.repeat) try{ if (document.fullscreenElement) document.exitFullscreen(); else { const q=document.documentElement.requestFullscreen(); if (q&&q.catch) q.catch(()=>{}); } }catch(_){} }
@@ -4999,7 +6202,7 @@ function lockPointer(){ try{ const p=canvas.requestPointerLock(); if (p&&p.catch
 canvas.addEventListener('mousedown',e=>{ dragging=true; lx=e.clientX; ly=e.clientY; if (mode!=='above'&&started&&document.pointerLockElement!==canvas) lockPointer(); });
 addEventListener('mouseup',()=>dragging=false);
 /* a double click on the ground in the bird's-eye view goes down to street level at that spot, facing the same way */
-function surfaceTopAt(x,z){ let g=heightAt(x,z); const cx=Math.floor(x/C), cz=Math.floor(z/C);
+function surfaceTopAt(x,z){ let g=walkGround(x,z,1e4); const cx=Math.floor(x/C), cz=Math.floor(z/C);
   for (let j=-1;j<=1;j++) for (let i=-1;i<=1;i++){ const ch=chunks.get(key(cx+i,cz+j)); if (!ch) continue;
     for (const o of ch.obbs){ if (o.top===Infinity||o.top>g+12) continue; const [lu,lv]=obbLocal(o,x,z); if (Math.abs(lu)<=o.hw&&Math.abs(lv)<=o.hd) g=Math.max(g,o.top); }
     for (const c of ch.circles){ if (c.top===Infinity||c.top>g+12) continue; if (Math.hypot(x-c.x,z-c.z)<=c.r) g=Math.max(g,c.top); } }
@@ -5279,7 +6482,9 @@ function updateHUD(){
   if (e!==lastElev||clock!==lastClock){ lastElev=e; lastClock=clock; elevEl.textContent=`${clock} · `+(paused?'paused · ':'')+(e<=0?'sea level':`${e} m above the sea`); }
   let info=null;
   const HB=harbourAt(shoreSide(player.x,player.z),player.x), sh=HB?hbS(HB,player.x,player.z):0;
-  if (HB && sh<12 && sh>-HB.L-4 && Math.abs(player.x-HB.x)<HB.W/2+5) info={id:'h'+HB.n,label:'Harbour',name:HB.name,desc:'Basin enclosed by two stone moles, with a quay for mooring and a lighthouse at the entrance.'};
+  const CH=coveHere(player.x,player.z,player.y);
+  if (CH) info=CH;
+  else if (HB && sh<12 && sh>-HB.L-4 && Math.abs(player.x-HB.x)<HB.W/2+5) info={id:'h'+HB.n,label:'Harbour',name:HB.name,desc:'Basin enclosed by two stone moles, with a quay for mooring and a lighthouse at the entrance.'};
   else if (stationNear(player.x,45) && railPerp(player.x,player.z)<18){ const S=stationNear(player.x,45); info={id:'st'+S.n,label:'Railway station',name:S.name,desc:'Station with a raised platform, a canopy and a booking hall. Trains stop here for a few seconds in each direction.'}; }
   else if (railPerp(player.x,player.z)<3) info={id:'rail',label:'Railway',name:'Ferrovia dell’Isola',desc:'Single-track railway that weaves between the two coasts. It runs in cuttings and tunnels through the hills and crosses valleys on stone viaducts.'};
   else if (SIDES.some(sd=>Math.abs(player.z-coastRoadZ(sd,player.x))<CR_HW+0.6)) info={id:'coast',label:'Coastal road',name:'Strada Litoranea',desc:'Road along the coast above the beaches, with a parapet on the seaward side.'};
@@ -5361,8 +6566,12 @@ function frame(now){
     const fx=-Math.sin(yaw), fz=-Math.cos(yaw), rx=Math.cos(yaw), rz=-Math.sin(yaw);
     const vx=(fx*mz+rx*mx)*sp, vz=(fz*mz+rz*mx)*sp, ox=player.x, oz=player.z;
     if (fly){ player.x+=vx*dt; player.z+=vz*dt; player.y=Math.max(heightAt(player.x,player.z),0); player.vy=0; eyeY=player.y; }
-    else { player.x+=vx*dt; if (standableAt(player.x,player.z)<-1.0) player.x=ox;
-    player.z+=vz*dt; if (standableAt(player.x,player.z)<-1.0) player.z=oz; }
+    else { const g0=standableAt(ox,oz); player.x+=vx*dt; const g1=standableAt(player.x,player.z);
+      if (g1<-1.0 || !coveMoveOk(ox,oz,player.y,g0,player.x,player.z,g1)) player.x=ox;
+      const g2=player.x===ox?g0:g1; player.z+=vz*dt; const g3=standableAt(player.x,player.z);
+      if (g3<-1.0 || !coveMoveOk(player.x,oz,player.y,g2,player.x,player.z,g3)) player.z=oz;
+      // on a narrow path each step along one axis alone may leave it while the step along both stays on it
+      if (player.x===ox && player.z===oz){ const nx=ox+vx*dt, nz=oz+vz*dt, g4=standableAt(nx,nz); if (g4>=-1.0 && coveMoveOk(ox,oz,player.y,g0,nx,nz,g4)){ player.x=nx; player.z=nz; } } }
     player.face=Math.atan2(vx,vz);
   }
   if (!onBoard() && !(mode==='above'&&dist>60)){
@@ -5381,10 +6590,12 @@ function frame(now){
   if (player.y<ground) player.y=ground;
   eyeY = (eyeY===null||Math.abs(eyeY-player.y)>3) ? player.y : eyeY+(player.y-eyeY)*(1-Math.exp(-dt*14));
   }
+  wrapWorld();
   if (updateOrigin()){ doorsDirty=true; roomScan=0; setChurchU(); for (const D of rooms) setRoomLights(D); maskDirty=true; beams.t=0; rebuildFar(player.x,player.z); }
   updateChunks(player.x,player.z,6); updateFades(dt); updateTiles(); roomsUpdate(dt);
   // dynamic draw distance: frames spent building blocks are ignored; slow frames shrink the view, sustained headroom grows it
-  if (!queue.length){ perf.t+=dt; perf.n++; perf.sum+=dt;
+  // a draw distance fixed with Page Up or Page Down is left as it is
+  if (!queue.length && drawLvl<0){ perf.t+=dt; perf.n++; perf.sum+=dt;
     if (perf.t>2){ const avg=perf.sum/perf.n;
       if (avg>1/52 && VIEW>VIEW_MIN){ VIEW--; perf.good=0; }
       else if (avg<1/58.5){ perf.good+=perf.t; if (perf.good>5 && VIEW<VIEW_MAX){ VIEW++; perf.good=0; } }
@@ -5495,11 +6706,641 @@ function frame(now){
   sndUpdate(dt);
   if (window.__freeCam){ camera.position.copy(window.__freeCam.p); camLookAt(window.__freeCam.t); sky.position.copy(camera.position); }
   updateBeams(wdt);
+  updateDolphins(wdt);
   updateCats(wdt);
+  updateGulls(dt);
   updateShadowFrame();
   updateHUD();
+  updateStats();
   render();
   requestAnimationFrame(frame);
+}
+
+/* ================= seagulls =================
+   Yellow-legged gulls (Larus michahellis): white head and body, mid-grey mantle and wings with a white trailing
+   edge, black wing tips, a yellow bill with a red spot and yellow legs. About one in seven is a brown immature bird.
+
+   createGulls(parent, opts) adds one InstancedMesh to parent and returns
+     { mesh, birds, thermals, update(dt, ctx), setCount(n), count, birdPosition(i, out), modeOf(i), shift(dx, dz),
+       reset(), shoreDistance(x, z), inland, dispose() }.
+   opts:  count (80), max (256), scale (1), range (240 m), shadows (true), random (Math.random),
+          inland (70 m): how far inland of the shoreline a flying gull may go; a steering force towards the sea
+            begins at a little over half that distance and grows smoothly to the limit,
+          perchInland (40 m): land perches further than this from the water are not used,
+          onCall({x,y,z,kind}) where kind is 'long', 'alarm' or 'mew'.
+   ctx, passed to every update:
+     player        {x,y,z} of the player (feet); gulls perched within a few metres of it take off
+     daylight      0 at night to 1 by day; below about 0.35 the gulls settle to roost
+     wind          {x,z} in m/s, the direction the air moves
+     groundHeight  (x,z) => height of whatever is underfoot (terrain, quays, rocks); below seaLevel is sea
+     seaLevel      0 in Coast
+     boats         [{x,z,heading,speed,length}], heading as in rotation.y (the bow points along sin, cos)
+     perches       [{x,y,z}] places a gull may stand: rock tops, quay edges, bollards, ridges
+     paused        while true the gulls hold still
+     origin        optional {x,y,z} of the floating origin; the mesh is placed there and instances relative to it
+     shoreDist     optional (x,z) => distance inland from the shoreline in metres (0 or less at sea); without it the
+                   distance is found by sampling groundHeight in rings round the point
+   The wings are posed in the vertex shader from four numbers per bird (shoulder and wrist angles, the sweep of the
+   hand and how far the wings are folded), so a frame costs one draw call and a few hundred floats. */
+function createGulls(parent, opts={}){
+  const MAX=opts.max??256, SCALE=opts.scale??1, RANGE=opts.range??240, INLAND=opts.inland??70, PERCH_IN=opts.perchInland??40, R=opts.random??Math.random, onCall=opts.onCall??null;
+  const TAU=Math.PI*2, cl=(v,a,b)=>Math.max(a,Math.min(b,v)), ease=(k,h)=>1-Math.exp(-k*h);
+  const wrap=a=>{ a=(a+Math.PI)%TAU; if (a<0) a+=TAU; return a-Math.PI; };
+  const SOAR=0, GLIDE=1, FOLLOW=2, LAND=3, PERCH=4, TAKEOFF=5, MODES=['soar','glide','follow','land','perch','takeoff'];
+
+  /* ---------- geometry: one bird, +z forward, +y up, in metres; aSeg 0 body, 1 arm, 2 hand, 3 legs ---------- */
+  function buildGeometry(){
+    const P=[], N=[], C=[], S=[], c=h=>new THREE.Color(h);
+    const WHITE=c('#f4f2ed'), MANTLE=c('#a2abb5'), BLACK=c('#24242a'), BILL=c('#f0c23a'), RED=c('#c9362b'),
+      LEG=c('#e3c04c'), EYE=c('#1d1d22'), UNDER=c('#eef0f0'), UNDERTIP=c('#4a4b52');
+    function tri(a,b,cc,col,seg,hint){
+      const ux=b[0]-a[0], uy=b[1]-a[1], uz=b[2]-a[2], vx=cc[0]-a[0], vy=cc[1]-a[1], vz=cc[2]-a[2];
+      let nx=uy*vz-uz*vy, ny=uz*vx-ux*vz, nz=ux*vy-uy*vx; const l=Math.hypot(nx,ny,nz); if (l<1e-12) return;
+      const mx=(a[0]+b[0]+cc[0])/3-hint[0], my=(a[1]+b[1]+cc[1])/3-hint[1], mz=(a[2]+b[2]+cc[2])/3-hint[2];
+      if (nx*mx+ny*my+nz*mz<0){ const t=b; b=cc; cc=t; nx=-nx; ny=-ny; nz=-nz; }
+      for (const p of [a,b,cc]){ P.push(p[0],p[1],p[2]); N.push(nx/l,ny/l,nz/l); C.push(col.r,col.g,col.b); S.push(seg); }
+    }
+    const quad=(a,b,cc,d,col,seg,hint)=>{ tri(a,b,cc,col,seg,hint); tri(a,cc,d,col,seg,hint); };
+    function box(cx,cy,cz,sx,sy,sz,col,seg){
+      const v=(i,j,k)=>[cx+i*sx/2,cy+j*sy/2,cz+k*sz/2], h=[cx,cy,cz];
+      for (const [a,b,cc,d] of [[v(-1,-1,1),v(1,-1,1),v(1,1,1),v(-1,1,1)],[v(-1,-1,-1),v(1,-1,-1),v(1,1,-1),v(-1,1,-1)],
+        [v(-1,1,-1),v(1,1,-1),v(1,1,1),v(-1,1,1)],[v(-1,-1,-1),v(1,-1,-1),v(1,-1,1),v(-1,-1,1)],
+        [v(1,-1,-1),v(1,1,-1),v(1,1,1),v(1,-1,1)],[v(-1,-1,-1),v(-1,1,-1),v(-1,1,1),v(-1,-1,1)]]) quad(a,b,cc,d,col,seg,h);
+    }
+    // body, head and bill lofted through eight-sided rings: [z, half width, half height, centre height]
+    const ST=[[-0.33,0.052,0.008,0.035],[-0.22,0.058,0.022,0.03],[-0.10,0.074,0.06,0.006],[0.03,0.082,0.075,0],
+      [0.12,0.06,0.06,0.02],[0.17,0.046,0.05,0.06],[0.215,0.043,0.047,0.075],[0.252,0.027,0.031,0.069],
+      [0.262,0.013,0.017,0.066],[0.298,0.009,0.013,0.061],[0.324,0.006,0.011,0.054]];
+    const K=8, rings=ST.map(([z,w,h,y])=>Array.from({length:K},(_,k)=>{ const a=k/K*TAU; return [w*Math.sin(a),y+h*Math.cos(a),z]; }));
+    for (let i=0;i<ST.length-1;i++){
+      const hint=[0,(ST[i][3]+ST[i+1][3])/2,(ST[i][0]+ST[i+1][0])/2], hm=(ST[i][2]+ST[i+1][2])/2;
+      for (let k=0;k<K;k++){
+        const a=rings[i][k], b=rings[i][(k+1)%K], cc=rings[i+1][(k+1)%K], d=rings[i+1][k];
+        const cy=(a[1]+b[1]+cc[1]+d[1])/4, cz=(a[2]+b[2]+cc[2]+d[2])/4, ny=(cy-hint[1])/hm;
+        let col=WHITE;
+        if (cz>0.262) col=(cz>0.29&&cz<0.315&&ny<-0.2)?RED:BILL;
+        else if (ny>0.3&&cz>-0.2&&cz<0.09) col=MANTLE;
+        quad(a,b,cc,d,col,0,hint);
+      }
+    }
+    const tail=[0,0.035,-0.345], tip=[0,0.046,0.338];
+    for (let k=0;k<K;k++){ tri(rings[0][k],rings[0][(k+1)%K],tail,WHITE,0,[0,0.035,-0.2]);
+      tri(rings[ST.length-1][k],rings[ST.length-1][(k+1)%K],tip,BILL,0,[0,0.055,0.3]); }
+    for (const s of [-1,1]){
+      box(s*0.039,0.087,0.219,0.012,0.013,0.013,EYE,0);
+      // legs, folded into the belly in flight; webbed feet
+      box(s*0.03,-0.122,0.006,0.012,0.135,0.012,LEG,3);
+      const f0=[s*0.03,-0.197,-0.004], f1=[s*0.06,-0.197,0.066], f2=[s*0.002,-0.197,0.066];
+      tri(f0,f1,f2,LEG,3,[s*0.03,-0.3,0.04]); tri(f0,f1,f2,LEG,3,[s*0.03,0,0.04]);
+      // wing: stations along the span [x, leading edge z, trailing edge z, raised spar height]
+      const W=[[0.05,0.075,-0.11,0.015],[0.2,0.085,-0.12,0.013],[0.34,0.07,-0.125,0.011],[0.54,-0.005,-0.13,0.008],[0.72,-0.072,-0.088,0.002]];
+      const y0=0.035;
+      for (let i=0;i<W.length-1;i++){
+        const A=W[i], B=W[i+1], seg=i<2?1:2, tipPart=i===3;
+        const pt=(St,f,top)=>{ const le=St[1], te=St[2], z=le+(te-le)*f; const y=top?y0+St[3]*(f<0.3?f/0.3:(1-f)/0.7):y0-0.003; return [s*St[0],y,z]; };
+        const strip=st=>1-0.026/Math.max(0.03,st[1]-st[2]);
+        const fA=[0,0.3,strip(A),1], fB=[0,0.3,strip(B),1];
+        const up=[s*(A[0]+B[0])/2,y0-0.2,(A[1]+A[2])/2];
+        for (let j=0;j<3;j++){
+          const col=tipPart?BLACK:(j===2?WHITE:MANTLE);
+          quad(pt(A,fA[j],true),pt(B,fB[j],true),pt(B,fB[j+1],true),pt(A,fA[j+1],true),col,seg,up);
+        }
+        quad(pt(A,0,false),pt(B,0,false),pt(B,1,false),pt(A,1,false),tipPart?UNDERTIP:UNDER,seg,[up[0],y0+0.2,up[2]]);
+        // the leading and trailing edges are closed so the wing has a little thickness when seen edge on
+        if (i===0) tri(pt(A,0,true),pt(A,0.3,true),pt(A,1,true),WHITE,seg,[s*0.5,y0,0]);
+      }
+    }
+    const g=new THREE.BufferGeometry();
+    g.setAttribute('position',new THREE.Float32BufferAttribute(P,3));
+    g.setAttribute('normal',new THREE.Float32BufferAttribute(N,3));
+    g.setAttribute('color',new THREE.Float32BufferAttribute(C,3));
+    g.setAttribute('aSeg',new THREE.Float32BufferAttribute(S,1));
+    g.computeBoundingSphere();
+    return g;
+  }
+
+  const GLSL_DEFORM=`
+    attribute vec4 iWing; attribute float iLeg; attribute float aSeg;
+    void gullRot(inout vec2 v,float a){ float c=cos(a), s=sin(a); v=vec2(c*v.x-s*v.y, s*v.x+c*v.y); }
+    void gullDeform(inout vec3 p, inout vec3 n){
+      if (aSeg>2.5){ p=mix(vec3(p.x*0.5,-0.03,0.0),p,iLeg); return; }
+      if (aSeg<0.5) return;
+      float s=sign(p.x);
+      vec3 sh=vec3(s*0.05,0.035,0.0), q=p-sh, m=n;
+      if (aSeg>1.5){
+        vec3 w=vec3(s*0.29,0.0,0.0), r=q-w; float k=tan(iWing.z);
+        r.z-=abs(r.x)*k; m.x+=k*s*m.z;
+        vec2 a=r.xy; gullRot(a,s*iWing.y); r.xy=a; a=m.xy; gullRot(a,s*iWing.y); m.xy=a;
+        q=w+r;
+      }
+      vec2 a=q.xy; gullRot(a,s*iWing.x); q.xy=a; a=m.xy; gullRot(a,s*iWing.x); m.xy=a;
+      vec3 spread=sh+q;
+      // folded: the wing lies back along the body, upper side out, the black primaries crossing over the tail
+      float u=abs(p.x)-0.05, c=p.z, t=p.y-0.035;
+      vec3 nF=vec3(s*0.55,0.835,0.0), cF=vec3(s*0.835,-0.55,0.0), sF=normalize(vec3(0.0,-0.09,-1.0));
+      vec3 folded=vec3(s*0.066,0.058,0.05)+sF*(u*0.58)+cF*(c*0.45)+nF*t-vec3(s*u*0.062,0.0,0.0);
+      vec3 nFold=sF*(n.x*s)+nF*n.y+cF*n.z;
+      p=mix(spread,folded,iWing.w);
+      n=normalize(mix(normalize(m),nFold,iWing.w));
+    }`;
+  function patch(sh,lit){
+    sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\n'+GLSL_DEFORM);
+    if (lit) sh.vertexShader=sh.vertexShader
+      .replace('#include <beginnormal_vertex>','vec3 objectNormal=vec3(normal); vec3 gP=vec3(position); gullDeform(gP,objectNormal);')
+      .replace('#include <begin_vertex>','vec3 transformed=gP;');
+    else sh.vertexShader=sh.vertexShader.replace('#include <begin_vertex>','vec3 gP=vec3(position), gN=vec3(0.0,1.0,0.0); gullDeform(gP,gN); vec3 transformed=gP;');
+  }
+
+  const geo=buildGeometry();
+  const wingA=new THREE.InstancedBufferAttribute(new Float32Array(MAX*4),4).setUsage(THREE.DynamicDrawUsage);
+  const legA=new THREE.InstancedBufferAttribute(new Float32Array(MAX),1).setUsage(THREE.DynamicDrawUsage);
+  geo.setAttribute('iWing',wingA); geo.setAttribute('iLeg',legA);
+  const mat=new THREE.MeshLambertMaterial({vertexColors:true}); mat.onBeforeCompile=sh=>patch(sh,true);
+  mat.customProgramCacheKey=()=>'gull';
+  const depth=new THREE.MeshDepthMaterial({depthPacking:THREE.RGBADepthPacking}); depth.onBeforeCompile=sh=>patch(sh,false);
+  depth.customProgramCacheKey=()=>'gullDepth';
+  const mesh=new THREE.InstancedMesh(geo,mat,MAX);
+  mesh.customDepthMaterial=depth; mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  mesh.frustumCulled=false; mesh.castShadow=opts.shadows??true; mesh.receiveShadow=false; mesh.count=0;
+  const ADULT=new THREE.Color(1,1,1), JUV=new THREE.Color('#b29c84');
+  for (let i=0;i<MAX;i++) mesh.setColorAt(i,ADULT);
+  parent.add(mesh);
+
+  /* ---------- state ---------- */
+  const birds=[], thermals=[], taken=new Set();
+  let t=0, lastCtx=null, want=Math.min(opts.count??80,MAX);
+  const ground=(ctx,x,z)=>ctx.groundHeight?ctx.groundHeight(x,z):-10;
+  const sea=ctx=>ctx.seaLevel??0;
+  const day=ctx=>ctx.daylight??1;
+  const W=ctx=>ctx.wind??{x:0,z:0};
+
+  /* ---------- the shore ---------- */
+  // distance inland from the shoreline (0 at sea) and the direction towards the nearest sea, into out {d, sx, sz, ok}
+  const DIRS=Array.from({length:12},(_,k)=>[Math.cos(k/12*TAU),Math.sin(k/12*TAU)]);
+  function shoreProbe(ctx,x,z,out={}){
+    const sl=sea(ctx);
+    if (ctx.shoreDist){
+      const f=ctx.shoreDist, e=4, gx=f(x+e,z)-f(x-e,z), gz=f(x,z+e)-f(x,z-e), l=Math.hypot(gx,gz);
+      out.d=Math.max(0,f(x,z)); out.ok=l>1e-6; if (out.ok){ out.sx=-gx/l; out.sz=-gz/l; } return out;
+    }
+    if (ground(ctx,x,z)<=sl){ out.d=0; out.ok=false; return out; }
+    const step=10, maxR=INLAND+60;
+    for (let r=step;r<=maxR;r+=step){
+      let sx=0, sz=0, n=0;
+      for (const [cx,cz] of DIRS) if (ground(ctx,x+cx*r,z+cz*r)<=sl){ sx+=cx; sz+=cz; n++; }
+      if (!n) continue;
+      const l=Math.hypot(sx,sz); if (l<1e-6){ out.d=r; out.ok=false; return out; }
+      const ux=sx/l, uz=sz/l; let lo=r-step, hi=r;
+      for (let k=0;k<4;k++){ const m=(lo+hi)/2; if (ground(ctx,x+ux*m,z+uz*m)<=sl) hi=m; else lo=m; }
+      out.d=(lo+hi)/2; out.sx=ux; out.sz=uz; out.ok=true; return out;
+    }
+    out.d=maxR+step; out.ok=false; return out;
+  }
+  const _pr={};
+  // whether there is land within reach of a point at sea: thermals and circling centres keep close to the coast
+  function nearLand(ctx,x,z,r){ const sl=sea(ctx); for (const rr of [r*0.5,r]) for (const [cx,cz] of DIRS) if (ground(ctx,x+cx*rr,z+cz*rr)>sl) return true; return false; }
+  function inBand(ctx,x,z,maxIn){ const pr=shoreProbe(ctx,x,z,_pr); return pr.d>0?pr.d<=maxIn:nearLand(ctx,x,z,35); }
+  // a place in the shore band near the player, searching further out if there is none close by
+  function bandSpot(ctx,maxIn){
+    const p=ctx.player;
+    for (let k=0;k<60;k++){ const a=R()*TAU, r=10+R()*(k<30?RANGE*0.35:RANGE*1.2), x=p.x+Math.cos(a)*r, z=p.z+Math.sin(a)*r;
+      if (inBand(ctx,x,z,maxIn)) return {x,z}; }
+    // out at sea, away from any shore (on a ferry, say), the gulls circle over the open water near the player
+    for (let k=0;k<30;k++){ const a=R()*TAU, r=20+R()*RANGE*0.3, x=p.x+Math.cos(a)*r, z=p.z+Math.sin(a)*r;
+      if (shoreProbe(ctx,x,z,_pr).d<=0 && ground(ctx,x,z)<sea(ctx)-1) return {x,z}; }
+    return null;
+  }
+  function newThermal(ctx,T){
+    // the circle, at most 1.2 times the thermal's radius, stays inside the inland limit
+    const r=15+R()*13, s=bandSpot(ctx,Math.max(5,INLAND*0.45-r*0.5));
+    if (!s && T) { T.life=20; return T; }
+    const at=s||{x:ctx.player.x,z:ctx.player.z};
+    return Object.assign(T||{},{x:at.x,z:at.z,r,dir:R()<0.5?1:-1,top:14+R()*20,lift:0.9+R()*0.8,life:70+R()*120,chk:R(),gen:((T&&T.gen)||0)+1});
+  }
+  function nearestThermal(b,except){
+    let best=null, bd=Infinity;
+    for (const T of thermals){ if (T===except) continue; const d=Math.hypot(T.x-b.x,T.z-b.z)+R()*40; if (d<bd){ bd=d; best=T; } }
+    return best||thermals[0];
+  }
+  function waterSpot(ctx,cx,cz,rMin,rMax){
+    for (let k=0;k<40;k++){ const a=R()*TAU, r=rMin+R()*(rMax-rMin), x=cx+Math.cos(a)*r, z=cz+Math.sin(a)*r, g=ground(ctx,x,z)-sea(ctx);
+      if (g<-1.2 && (g>-30 || k>=20)) return {x,y:sea(ctx),z,water:true}; }
+    return null;
+  }
+  // land perches are used only near the water; the answer is kept for each perch object
+  const perchNear=new WeakMap();
+  function perchOK(ctx,q){ let v=perchNear.get(q); if (v===undefined){ v=shoreProbe(ctx,q.x,q.z,_pr).d<=PERCH_IN; perchNear.set(q,v); } return v; }
+  function pickPerch(b,ctx){
+    const p=ctx.player, list=ctx.perches||[], roost=day(ctx)<0.35;
+    if (R()<(roost?0.5:0.35)){ const w=waterSpot(ctx,b.x,b.z,10,90)||waterSpot(ctx,p.x,p.z,15,RANGE*0.6); if (w) return w; }
+    let best=null, bs=-Infinity;
+    for (let k=0;k<24&&list.length;k++){ const q=list[(R()*list.length)|0]; if (taken.has(q)||!perchOK(ctx,q)) continue;
+      const d=Math.hypot(q.x-b.x,q.z-b.z), dp=Math.hypot(q.x-p.x,q.z-p.z); if (dp<b.scareR+4||d>150) continue;
+      const sc=-d*0.025-dp*0.004+R(); if (sc>bs){ bs=sc; best=q; } }
+    if (best) return best;
+    const a=R()*TAU; return waterSpot(ctx,b.x,b.z,10,120)||{x:b.x+Math.cos(a)*40,y:sea(ctx),z:b.z+Math.sin(a)*40,water:true};
+  }
+
+  function makeBird(i){
+    return {i,mode:SOAR,x:0,y:20,z:0,psi:R()*TAU,sp:9,vy:0,yawRate:0,bank:0,pitch:0,ph:R()*TAU,ph2:R()*TAU,flap:0,drive:0,
+      freq:2.6+R()*0.6,baseFreq:0,burst:0,nextBurst:2+R()*8,fold:0,legs:0,size:0.92+R()*0.16,juv:R()<0.14,
+      th:null,orbR:20,top:30,timer:10,tx:0,ty:0,tz:0,perch:null,landPhase:0,minD:1e9,ax:0,az:0,boat:null,rejoin:false,
+      fBack:6,fSide:0,fAlt:8,fDir:1,diveT:20,scareR:6+R()*6,flush:-1,raise:0,nextRaise:15+R()*40,callT:5+R()*40,
+      age:0,psiT:0,bob:0,sx:0,sy:0,sz:0,extra:0,y0:0,flare:0,shT:R()*0.5,inl:0,seaX:0,seaZ:0,seaOK:false};
+  }
+  function setMode(b,m){ b.mode=m; b.age=0; }
+  function freePerch(b){ if (b.perch) taken.delete(b.perch); b.perch=null; }
+  function startSoar(b,T,ctx){
+    setMode(b,SOAR); b.th=T||nearestThermal(b); b.orbR=b.th.r*(0.7+R()*0.5); b.top=b.th.top*(0.6+R()*0.5); b.timer=25+R()*60;
+  }
+  function startGlide(b,T){ setMode(b,GLIDE); b.th=T; b.tx=T.x; b.tz=T.z; b.ty=Math.max(12,b.y-6+R()*10); }
+  function startFollow(b,B){
+    setMode(b,FOLLOW); b.boat=B; b.fBack=2+R()*10; b.fSide=(R()-0.5)*8; b.fAlt=3.5+R()*8; b.fDir=R()<0.5?1:-1;
+    b.orbR=5+R()*5; b.timer=60+R()*150; b.diveT=8+R()*30;
+  }
+  function startLand(b,ctx,P){
+    freePerch(b); P=P||pickPerch(b,ctx); b.perch=P; if (!P.water) taken.add(P);
+    setMode(b,LAND); b.landPhase=0; b.minD=1e9;
+    const w=W(ctx), ws=Math.hypot(w.x,w.z);
+    // land into the wind, approaching from downwind; in still air, from the side the bird is already on
+    let ux, uz; if (ws>1.5){ ux=w.x/ws; uz=w.z/ws; } else { const d=Math.hypot(b.x-P.x,b.z-P.z)||1; ux=(b.x-P.x)/d; uz=(b.z-P.z)/d; }
+    b.ax=P.x+ux*22; b.az=P.z+uz*22;
+    // an approach from deep inland is turned round to come in from the seaward side
+    if (!P.water && shoreProbe(ctx,b.ax,b.az,_pr).d>PERCH_IN+8){ b.ax=P.x-ux*22; b.az=P.z-uz*22; }
+  }
+  function startTakeoff(b,ctx,scared){
+    const p=ctx.player, w=W(ctx), ws=Math.hypot(w.x,w.z);
+    const water=b.perch&&b.perch.water; freePerch(b);
+    setMode(b,TAKEOFF);
+    if (scared) b.psi=Math.atan2(b.x-p.x,b.z-p.z)+(R()-0.5)*0.9;
+    else if (ws>1.5) b.psi=Math.atan2(-w.x,-w.z)+(R()-0.5)*0.6;
+    b.sp=water?1.5:2.5; b.vy=water?0.8:1.8; b.flap=0.6; b.freq=3.6+R()*0.5; b.timer=2.6+R()*1.2; b.y0=b.y; b.yawRate=0;
+    if (onCall && R()<(scared?0.55:0.15)) onCall({x:b.x,y:b.y,z:b.z,kind:scared?'alarm':'mew'});
+  }
+  function spawn(b,ctx){
+    const p=ctx.player, roost=day(ctx)<0.35, boats=ctx.boats||[], r=R();
+    b.juv=R()<0.14; mesh.setColorAt(b.i,b.juv?JUV:ADULT); if (mesh.instanceColor) mesh.instanceColor.needsUpdate=true;
+    if (r<(roost?0.85:0.28)){
+      b.x=p.x; b.z=p.z; const P=pickPerch(b,ctx); b.perch=P; if (!P.water) taken.add(P);
+      setMode(b,PERCH); b.x=P.x; b.z=P.z; b.y=P.y+(P.water?0.035:0.2)*SCALE*b.size; b.fold=1; b.legs=P.water?0:1; b.sp=0;
+      b.psi=R()*TAU; b.psiT=b.psi; b.timer=30+R()*120; return;
+    }
+    if (r<0.48 && boats.length){ const B=boats[(R()*boats.length)|0]; startFollow(b,B);
+      b.x=B.x+(R()-0.5)*30; b.z=B.z+(R()-0.5)*30; b.y=b.fAlt; return; }
+    const T=thermals[(R()*thermals.length)|0]; startSoar(b,T,ctx);
+    const a=R()*TAU; b.x=T.x+Math.cos(a)*b.orbR; b.z=T.z+Math.sin(a)*b.orbR; b.y=8+R()*(b.top-8);
+    b.psi=Math.atan2(-Math.sin(a)*T.dir,Math.cos(a)*T.dir);
+  }
+
+  /* ---------- flight ---------- */
+  // steer towards a direction, height and airspeed with limited turn rate, coordinated banking and gliding sink;
+  // the bird flaps when it needs to climb faster than the air carries it, when slow and during bursts
+  function fly(b,ctx,h,dx,dz,alt,spd,lift,maxYaw,landing){
+    const w=W(ctx), ws=Math.hypot(w.x,w.z);
+    if (b.sx||b.sz){ dx+=b.sx; dz+=b.sz; }
+    // keeping to the coast: beyond a little over half the inland limit a pull towards the sea sets in, growing smoothly
+    // so that at the limit it outweighs whatever else the gull is doing; the final approach to a perch is exempt
+    if (!landing){
+      b.shT-=h;
+      if (b.shT<=0){ const pr=shoreProbe(ctx,b.x,b.z,_pr); b.inl=pr.d;
+        if (pr.ok){ b.seaX=pr.sx; b.seaZ=pr.sz; b.seaOK=true; }
+        else if (pr.d>0 && !b.seaOK){ const T=nearestThermal(b); if (T){ const l=Math.hypot(T.x-b.x,T.z-b.z)||1; b.seaX=(T.x-b.x)/l; b.seaZ=(T.z-b.z)/l; } }
+        b.shT=b.inl<INLAND*0.35?0.6:0.2; }
+      // an onshore wind carries a gull inland while it turns, so the pull starts earlier the stronger it blows
+      const onshore=b.inl>0?Math.max(0,-(w.x*b.seaX+w.z*b.seaZ)):0, de=b.inl+onshore*6;
+      const u=cl((de-INLAND*0.55)/(INLAND*0.45),0,1), k=u*u*(3-2*u)*2.5+Math.max(0,(de-INLAND)/15);
+      if (k>0){ const l=Math.hypot(dx,dz)||1; dx=dx/l+b.seaX*k; dz=dz/l+b.seaZ*k;
+        spd+=Math.min(k,2)*(1.5+onshore*0.4); maxYaw=Math.max(maxYaw,0.9+Math.min(k,2)*0.35); }
+    }
+    const diff=wrap(Math.atan2(dx,dz)-b.psi);
+    b.yawRate+=(cl(diff*1.2,-maxYaw,maxYaw)-b.yawRate)*ease(2.2,h);
+    b.psi=wrap(b.psi+b.yawRate*h);
+    // the floor looks ahead along the course, so a gull rises before a slope instead of on it
+    const fx=Math.sin(b.psi), fz=Math.cos(b.psi), ahead=landing?b.x:b.x+fx*12, aheadZ=landing?b.z:b.z+fz*12;
+    const floor=Math.max(ground(ctx,b.x,b.z),ground(ctx,ahead,aheadZ),sea(ctx))+(landing?0:3);
+    if (!landing) alt=Math.max(alt,floor+1.5);
+    alt+=b.sy;
+    const passive=lift-0.6;
+    let wantVy=cl((alt-b.y)*0.4,-3.5,2.8);
+    let drive=(b.burst>0||b.extra>0)?1:0;
+    if (wantVy>passive+0.35) drive=1;
+    if (b.sp<6.2) drive=1;
+    b.drive=drive;
+    b.flap+=(drive-b.flap)*ease(drive>b.flap?4:1.8,h);
+    const vyT=Math.min(wantVy,passive+2.8*b.flap);
+    b.vy+=(vyT-b.vy)*ease(1.5,h);
+    // a landing gull sets its airspeed from the ground speed it wants plus the headwind, so it can hang in a gale
+    const spT=landing?cl(spd-(w.x*fx+w.z*fz),2.5,14):spd+ws*0.35-Math.min(0,b.vy)*0.5;
+    b.sp+=(spT-b.sp)*ease(landing?1.6:0.8,h);
+    const bankT=cl(Math.atan(b.sp*b.yawRate/9.81),-1.0,1.0);
+    b.bank+=(bankT-b.bank)*ease(3.5,h);
+    b.pitch+=(Math.atan2(b.vy,Math.max(b.sp,2))*0.6+b.flare-b.pitch)*ease(3,h);
+    b.x+=(fx*b.sp+w.x)*h; b.z+=(fz*b.sp+w.z)*h; b.y+=b.vy*h;
+    if (!landing && b.y<floor-1.5){ b.y+=(floor-1.5-b.y)*ease(3,h); b.vy=Math.max(b.vy,0); b.drive=1; }
+    if (b.flap>0.01) b.ph+=TAU*b.freq*h*(0.6+0.4*b.flap);
+  }
+
+  function separate(){
+    for (const b of birds){ b.sx=b.sy=b.sz=0; }
+    for (let i=0;i<birds.length;i++){ const a=birds[i]; if (a.mode>FOLLOW) continue;
+      for (let j=i+1;j<birds.length;j++){ const c=birds[j]; if (c.mode>FOLLOW) continue;
+        const dx=a.x-c.x, dy=a.y-c.y, dz=a.z-c.z, d2=dx*dx+dy*dy+dz*dz; if (d2>16||d2<1e-6) continue;
+        const k=(16-d2)/16/Math.sqrt(d2);
+        a.sx+=dx*k; a.sz+=dz*k; a.sy+=Math.sign(dy||1)*k*2; c.sx-=dx*k; c.sz-=dz*k; c.sy-=Math.sign(dy||1)*k*2; } }
+  }
+
+  function step(ctx,h){
+    t+=h;
+    const p=ctx.player, boats=ctx.boats||[], light=day(ctx), roost=light<0.35, w=W(ctx);
+    const nT=cl(Math.round(birds.length/24),2,8);
+    while (thermals.length<nT) thermals.push(newThermal(ctx));
+    // a thermal leans and drifts downwind more slowly than the wind itself, and is let go once it has drifted well
+    // away or out of the shore band
+    for (const T of thermals){ T.x+=w.x*0.4*h; T.z+=w.z*0.4*h; T.life-=h; T.chk-=h;
+      let out=false; if (T.chk<=0){ T.chk=1; out=!inBand(ctx,T.x,T.z,INLAND*0.45-T.r*0.5+10); }
+      if (out||T.life<0||Math.hypot(T.x-p.x,T.z-p.z)>RANGE*0.6) newThermal(ctx,T); }
+    const nearPlayer=thermals.some(T=>Math.hypot(T.x-p.x,T.z-p.z)<RANGE);
+    separate();
+    const followers=birds.reduce((n,b)=>n+(b.mode===FOLLOW),0);
+    for (const b of birds){
+      b.age+=h;
+      if (b.mode<=FOLLOW){
+        b.nextBurst-=h; b.burst-=h;
+        if (b.nextBurst<=0){ b.burst=(2+R()*4)/b.freq; b.nextBurst=b.mode===FOLLOW?3+R()*6:6+R()*14; }
+        b.callT-=h; if (b.callT<=0){ b.callT=20+R()*70; if (onCall && R()<light) onCall({x:b.x,y:b.y,z:b.z,kind:R()<0.6?'long':'mew'}); }
+        // a bird that has strayed far from the player is brought back towards it
+        const dp=Math.hypot(b.x-p.x,b.z-p.z);
+        if (dp>RANGE*2 && nearPlayer){ spawn(b,ctx); continue; }
+        if (dp>RANGE*1.2 && b.mode!==GLIDE && b.mode!==FOLLOW) startGlide(b,nearestThermal({x:p.x,z:p.z}));
+        if (roost && b.mode!==FOLLOW && R()<h*0.08) startLand(b,ctx);
+        // a boat passing close by draws gulls after it, now and then
+        else if (!roost && b.mode!==FOLLOW && followers<birds.length*0.3 && R()<h*0.04)
+          for (const B of boats) if (Math.hypot(B.x-b.x,B.z-b.z)<150){ startFollow(b,B); break; }
+      }
+      b.flare=0; b.extra=0;
+      switch (b.mode){
+      case SOAR: {
+        const T=b.th; if (!T||!thermals.includes(T)){ startSoar(b,nearestThermal(b),ctx); break; }
+        const rx=b.x-T.x, rz=b.z-T.z, d=Math.hypot(rx,rz)||1, k=cl((d-b.orbR)/b.orbR*1.6,-0.8,1.6);
+        const tx=-rz/d*T.dir, tz=rx/d*T.dir;
+        const lift=d<T.r*1.5?T.lift*(roost?0.3:1):0;
+        fly(b,ctx,h,tx-rx/d*k,tz-rz/d*k,b.top+3*Math.sin(t*0.2+b.ph2),8.6+b.size,lift,0.9,false);
+        b.timer-=h*(b.y>b.top-2?2:1);
+        if (b.timer<=0){
+          const B=boats.length?boats.reduce((m,o)=>Math.hypot(o.x-b.x,o.z-b.z)<Math.hypot(m.x-b.x,m.z-b.z)?o:m):null;
+          const r=R();
+          if (roost||r<0.2) startLand(b,ctx);
+          else if (B && Math.hypot(B.x-b.x,B.z-b.z)<220 && followers<birds.length*0.3 && r<0.45) startFollow(b,B);
+          else if (r<0.75) startGlide(b,nearestThermal(b,T));
+          else startSoar(b,T,ctx);
+        }
+        break; }
+      case GLIDE: {
+        const dx=b.tx-b.x, dz=b.tz-b.z, d=Math.hypot(dx,dz);
+        fly(b,ctx,h,dx,dz,b.ty,10.5,0,0.8,false);
+        if (d<25 || b.age>60) startSoar(b,b.th&&thermals.includes(b.th)?b.th:nearestThermal(b),ctx);
+        break; }
+      case FOLLOW: {
+        const B=b.boat; if (!B||!boats.includes(B)){ startSoar(b,nearestThermal(b),ctx); break; }
+        const fx=Math.sin(B.heading), fz=Math.cos(B.heading), L=(B.length||8)/2, v=B.speed||0;
+        // circle a point that hangs behind the stern and moves with the boat, a little ahead of where it is now
+        const cx=B.x-fx*(L+b.fBack)+fz*b.fSide+fx*v*1.5, cz=B.z-fz*(L+b.fBack)-fx*b.fSide+fz*v*1.5;
+        // the circle is held upwind of the slot by the drift the wind would give it, so the wheeling gulls stay over the wake
+        const ox=cx-w.x*1.2, oz=cz-w.z*1.2;
+        const rx=b.x-ox, rz=b.z-oz, d=Math.hypot(rx,rz)||1, k=cl((d-b.orbR)/b.orbR*1.8,-0.8,2.5);
+        const tx=-rz/d*b.fDir+fx*v*0.08, tz=rx/d*b.fDir+fz*v*0.08;
+        let dx=tx-rx/d*k, dz=tz-rz/d*k, spd=7.2+v*0.4+(d>40?3:0);
+        // a fast boat such as a ferry is kept pace with from a slot astern and to one side, since a gull cannot
+        // circle a point moving nearly as fast as it flies; slow boats are circled
+        const fm=cl((v-2.5)/4,0,1);
+        if (fm>0){
+          const gx=B.x-fx*(L+b.fBack)+fz*b.fSide*1.5-b.x, gz=B.z-fz*(L+b.fBack)-fx*b.fSide*1.5-b.z, gd=Math.hypot(gx,gz), q=1.2/Math.max(gd,6);
+          const ax=fx+gx*q, az=fz+gz*q, la=Math.hypot(ax,az)||1, lo=Math.hypot(dx,dz)||1;
+          dx=dx/lo*(1-fm)+ax/la*fm; dz=dz/lo*(1-fm)+az/la*fm;
+          spd=spd*(1-fm)+Math.max(7,v+cl((gx*fx+gz*fz)*0.45,-3,7))*fm;
+        }
+        fly(b,ctx,h,dx,dz,b.fAlt+1.5*Math.sin(t*0.37+b.ph2),spd,0.4,1.7,false);
+        b.timer-=h; b.diveT-=h;
+        if (b.diveT<=0){ b.diveT=10+R()*35;
+          if (R()<0.5){ const P={x:B.x-fx*(L+6+R()*16)+fz*(R()-0.5)*6,y:sea(ctx),z:B.z-fz*(L+6+R()*16)-fx*(R()-0.5)*6,water:true};
+            if (ground(ctx,P.x,P.z)<sea(ctx)-1){ b.rejoin=true; startLand(b,ctx,P); break; } } }
+        if (b.timer<=0||roost){ b.boat=null; b.rejoin=false; if (roost) startLand(b,ctx); else startSoar(b,nearestThermal(b),ctx); }
+        break; }
+      case LAND: {
+        const P=b.perch, ph=(P.water?0.035:0.2)*SCALE*b.size, gy=P.y+ph;
+        if (b.landPhase===0){
+          const dx=b.ax-b.x, dz=b.az-b.z, d=Math.hypot(dx,dz);
+          fly(b,ctx,h,dx,dz,gy+6,9.5,0,1.1,false);
+          if (d<12||b.age>25){ b.landPhase=1; b.minD=1e9; }
+        } else {
+          const dx=P.x-b.x, dz=P.z-b.z, d=Math.hypot(dx,dz), dy=gy-b.y;
+          b.flare=cl(1-d/8,0,1)*0.45; b.extra=d<10?1:0;
+          b.legs+=((d<14?1:0)-b.legs)*ease(3,h);
+          if (d<4 && Math.abs(dy)<3){
+            // the last few metres: the gull hangs on its wings and lets itself down onto the spot
+            const D=Math.hypot(d,dy)||1e-6, v=Math.min(4,0.4+D*1.1)*h, k=Math.min(1,v/D);
+            b.x+=dx*k; b.z+=dz*k; b.y+=dy*k; b.sp+=(1.5-b.sp)*ease(3,h); b.vy=0; b.flap+=(1-b.flap)*ease(4,h);
+            b.ph+=TAU*b.freq*h; b.bank*=1-ease(4,h); b.pitch+=(0.35-b.pitch)*ease(4,h); b.yawRate=0;
+            if (d>0.3) b.psi=wrap(b.psi+cl(wrap(Math.atan2(dx,dz)-b.psi),-1,1)*ease(3,h));
+            if (D<0.06){ setMode(b,PERCH); b.sp=0; b.vy=0; b.x=P.x; b.z=P.z; b.y=gy; b.psiT=b.psi; b.timer=b.rejoin?3+R()*8:(roost?1e9:25+R()*110); }
+            break;
+          }
+          fly(b,ctx,h,dx,dz,gy+d*0.25,cl(1.2+d*0.33,1.2,9.5),0,2.4,true);
+          b.minD=Math.min(b.minD,d);
+          if (b.minD<7 && d>b.minD+9) startLand(b,ctx,P);   // overshot: go round again
+          else if (b.age>60) startLand(b,ctx);                // beaten by the wind: choose somewhere nearer
+        }
+        break; }
+      case PERCH: {
+        const P=b.perch||{x:b.x,y:b.y,z:b.z,water:true}, water=!!P.water;
+        b.fold+=(1-b.fold)*ease(2.2,h); b.flap*=1-ease(6,h);
+        b.legs+=((water?0:1)-b.legs)*ease(2,h);
+        b.bank*=1-ease(3,h); b.pitch*=1-ease(3,h);
+        if (water){ b.x+=w.x*0.06*h; b.z+=w.z*0.06*h; P.x=b.x; P.z=b.z;
+          b.y=sea(ctx)+0.035*SCALE*b.size+0.03*Math.sin(t*1.3+b.ph2)+0.012*Math.sin(t*2.7+b.ph);
+          b.pitch=0.05*Math.cos(t*1.3+b.ph2); b.bank=0.04*Math.sin(t*1.1+b.ph); }
+        else { b.y=P.y+0.2*SCALE*b.size; b.pitch=0.13; }   // a standing gull holds its body tilted up a little
+        // gulls stand facing into the wind and shift round now and then
+        const ws=Math.hypot(w.x,w.z);
+        if (R()<h*0.12) b.psiT=ws>2?Math.atan2(-w.x,-w.z)+(R()-0.5)*0.7:b.psi+(R()-0.5)*2;
+        b.psi=wrap(b.psi+cl(wrap(b.psiT-b.psi),-1,1)*ease(1.2,h));
+        b.nextRaise-=h; if (b.nextRaise<=0){ b.raise=1.8; b.nextRaise=20+R()*60; if (onCall&&R()<0.5*light) onCall({x:b.x,y:b.y,z:b.z,kind:'long'}); }
+        if (b.raise>0) b.raise-=h;
+        const dp=Math.hypot(b.x-p.x,b.z-p.z,b.y-(p.y??0));
+        let go=dp<b.scareR*(water?1.3:1);
+        for (const B of boats) if (water && Math.hypot(B.x-b.x,B.z-b.z)<(B.length||8)*0.5+6) go=true;
+        if (b.flush>0){ b.flush-=h; if (b.flush<=0){ b.flush=-1; go=true; } }
+        if (go){
+          startTakeoff(b,ctx,true);
+          // neighbours take fright a moment later
+          for (const o of birds) if (o.mode===PERCH && o.flush<0 && Math.hypot(o.x-b.x,o.z-b.z)<9) o.flush=0.15+R()*0.8;
+          break; }
+        b.timer-=h*(roost?0:1);
+        if (b.timer<=0) startTakeoff(b,ctx,false);
+        break; }
+      case TAKEOFF: {
+        b.extra=1; b.fold+=(0-b.fold)*ease(9,h);
+        if (b.age>0.35) b.legs+=(0-b.legs)*ease(7,h);
+        fly(b,ctx,h,Math.sin(b.psi),Math.cos(b.psi),b.y0+14,9,0,0.6,b.age<1);
+        b.timer-=h;
+        if (b.timer<=0){ b.freq=2.6+R()*0.6;
+          if (b.rejoin && b.boat && boats.includes(b.boat)){ b.rejoin=false; startFollow(b,b.boat); }
+          else if (roost) startLand(b,ctx); else startSoar(b,nearestThermal(b),ctx); }
+        break; }
+      }
+      if (b.mode<=FOLLOW||b.mode===TAKEOFF) b.fold+=(0-b.fold)*ease(6,h);
+      if (b.mode<=FOLLOW) b.legs+=(0-b.legs)*ease(3,h);
+    }
+  }
+
+  /* ---------- writing the instances ---------- */
+  const M=new THREE.Matrix4(), Q=new THREE.Quaternion(), E=new THREE.Euler(0,0,0,'YXZ'), V=new THREE.Vector3(), Sv=new THREE.Vector3();
+  function write(ctx){
+    const o=ctx&&ctx.origin, ox=o?o.x:0, oy=o?o.y:0, oz=o?o.z:0; mesh.position.set(ox,oy,oz);
+    const wa=wingA.array, la=legA.array;
+    for (let i=0;i<birds.length;i++){
+      const b=birds[i], f=b.flap, s=Math.sin(b.ph), c=Math.cos(b.ph);
+      // gliding: a shallow dihedral at the shoulder, the hand angled down a little and swept back with speed
+      const g1=0.1+0.05*Math.sin(t*0.8+b.ph2), g2=-0.12-0.05*Math.sin(t*0.6+b.ph2*1.7), gs=0.08+cl((b.sp-9)/5,0,1)*0.4;
+      // flapping: a deeper stroke on take-off and landing (b.extra) than in cruising flight
+      const amp=b.extra?0.6:0.46;
+      let th1=g1+(0.12+amp*s-g1)*f, th2=g2+(amp*0.55*Math.sin(b.ph-0.9)-g2)*f, sw=gs+(0.1+0.42*Math.max(0,c)-gs)*f, fold=b.fold;
+      if (b.raise>0){ const k=Math.sin(Math.PI*cl(b.raise/1.8,0,1)); th1=lerpN(th1,1.05,k); th2=lerpN(th2,0.2,k); sw=lerpN(sw,0.05,k); fold*=1-k*0.85; }
+      if (b.flare>0){ sw*=1-b.flare; }
+      wa[i*4]=th1; wa[i*4+1]=th2; wa[i*4+2]=sw; wa[i*4+3]=fold; la[i]=b.legs;
+      E.set(-b.pitch,b.psi,-b.bank); Q.setFromEuler(E);
+      V.set(b.x-ox,b.y-oy-0.025*c*f*SCALE,b.z-oz); Sv.setScalar(SCALE*b.size);
+      M.compose(V,Q,Sv); mesh.setMatrixAt(i,M);
+    }
+    mesh.count=birds.length; mesh.instanceMatrix.needsUpdate=true; wingA.needsUpdate=true; legA.needsUpdate=true;
+  }
+  const lerpN=(a,b,k)=>a+(b-a)*k;
+
+  function resize(ctx){
+    while (birds.length>want){ const b=birds.pop(); freePerch(b); }
+    while (birds.length<want){ const b=makeBird(birds.length); birds.push(b); spawn(b,ctx); }
+  }
+
+  return {
+    mesh, birds, thermals,
+    get count(){ return want; },
+    setCount(n){ want=Math.max(0,Math.min(MAX,n|0)); if (lastCtx) resize(lastCtx); },
+    update(dt,ctx){
+      lastCtx=ctx;
+      if (!thermals.length) for (let k=0;k<2;k++) thermals.push(newThermal(ctx));
+      resize(ctx);
+      if (!ctx.paused && dt>0){ const n=Math.ceil(Math.min(dt,0.25)/(1/30)), h=Math.min(dt,0.25)/n; for (let k=0;k<n;k++) step(ctx,h); }
+      write(ctx);
+    },
+    // moves every gull, its targets and the thermals, as when the world is shifted under them
+    shift(dx,dz){ const ps=new Set();
+      for (const b of birds){ b.x+=dx; b.z+=dz; b.tx+=dx; b.tz+=dz; b.ax+=dx; b.az+=dz; if (b.perch) ps.add(b.perch); }
+      for (const P of ps){ P.x+=dx; P.z+=dz; } for (const T of thermals){ T.x+=dx; T.z+=dz; } },
+    // forgets every gull and thermal; the flock is placed afresh on the next update
+    reset(){ birds.length=0; thermals.length=0; taken.clear(); },
+    shoreDistance(x,z){ return lastCtx?shoreProbe(lastCtx,x,z,{}).d:0; },
+    inland:INLAND,
+    birdPosition(i,out){ const b=birds[i]; return out.set(b.x,b.y,b.z); },
+    modeOf(i){ return MODES[birds[i].mode]; },
+    dispose(){ parent.remove(mesh); geo.dispose(); mat.dispose(); depth.dispose(); mesh.dispose(); birds.length=0; thermals.length=0; taken.clear(); },
+  };
+}
+/* ================= end of seagulls ================= */
+/* ---------- the gulls in the world ----------
+   One flock of yellow-legged gulls lives round the player: circling on thermals along the shore, standing on the
+   harbour walls, the rocks and the beaches, riding on the sea and following the boats and ferries. They keep within
+   70 m of the shoreline (seaDist), take off as the player comes near and settle to roost at dusk. */
+// the wind the gulls fly in, {x,z} in m/s, the direction the air moves; null leaves them in still air.
+// Hook: set this to the global wind once the sailing work provides one.
+let gullWind=null;
+let gullCallT=0;
+// a call from one gull, through the existing 'gulls' sound; calls are spaced and only near ones are heard
+function gullCall(e){
+  if (time-gullCallT<2.5 || Math.hypot(e.x-player.x,e.z-player.z)>140) return;
+  gullCallT=time; sndPlay('gulls','world',[e.x,e.y,e.z],{rate:0.9+Math.random()*0.2});
+}
+const GULLS=createGulls(world,{count:90,scale:1.25,range:260,onCall:gullCall});
+// places a gull may stand within 320 m of the player, gathered again only when the player has moved 60 m or after
+// ten seconds (so that coves whose cliffs have since been built are included)
+const gullPerch={x:NaN,z:NaN,t:0,list:[]};
+function gullPerches(){
+  if (Math.hypot(player.x-gullPerch.x,player.z-gullPerch.z)<60 && time-gullPerch.t<10) return gullPerch.list;
+  gullPerch.x=player.x; gullPerch.z=player.z; gullPerch.t=time;
+  const out=[], Rr=320, x0=player.x-Rr, x1=player.x+Rr, near=(x,z)=>Math.abs(x-player.x)<Rr&&Math.abs(z-player.z)<Rr;
+  for (const sd of SIDES){
+    // harbours: the coping of the quay wall and its bollards, and the parapets of the moles (the deck where the
+    // ferry's gangway leaves the parapet open)
+    for (let n=Math.floor(x0/HARB)-1;n<=Math.floor(x1/HARB)+1;n++){ const H=harbourInfo(sd,n); if (!H || !near(H.x,H.zo)) continue;
+      const S=H.sd, top=1.6;
+      for (let x=H.x-H.W/2+1.8;x<H.x+H.W/2-1.8;x+=2){ const z=coastZ(S,x)-S*0.25; out.push({x,y:1.42,z}); if (Math.round(x)%6===0) out.push({x,y:1.97,z:z+S*1.0}); }
+      const arms=[-1,1].map(a=>{ const xa=H.x+a*H.W/2; return {a,xa,z0:coastZ(S,xa)+S*4,z1:H.zo}; });
+      for (const A of arms) for (let z=A.z0;S*(z-A.z1)>1;z-=S*2.2) out.push({x:A.xa+A.a*1.7,y:top+1.17,z});
+      const FR=ferryRouteAt(H), gapX=FR?FR.P.x+Math.sign(FR.I.x-FR.P.x||1)*FGZ:1e9, RA=arms.find(a=>a.a===H.side), rl=H.W*0.55, zr=RA.z1+S*2;
+      for (let k=0.5;k<rl/2.2;k++){ const x=RA.xa-H.side*k*2.2, open=Math.abs(x-gapX)<1.1+FGW;
+        const [px,pz]=open?[x,zr]:localToWorld({x,z:zr,rot:Math.PI/2},S*1.7,0); out.push({x:px,y:open?top+0.06:top+1.17,z:pz}); } }
+    // the rocks out at sea that carry a lighthouse, clear of the tower and the keeper's cottage
+    for (let n=Math.floor(x0/RK_SP);n<=Math.floor(x1/RK_SP);n++){ const K=seaRockInfo(sd,n); if (!K || !near(K.x,K.z)) continue; const L=rockLight(sd,n);
+      for (let a=0;a<12;a++){ const r=K.r*(0.5+0.3*hash(n,a,4701)), x=K.x+Math.cos(a/12*6.283)*r, z=K.z+Math.sin(a/12*6.283)*r;
+        if (L && Math.hypot(x-L.hx,z-L.hz)<4.5) continue; const y=heightAt(x,z); if (y>0.4) out.push({x,y,z}); } }
+    // coves: the tops of the stacks off the headlands and the landing at the head of the bay, once built
+    for (let n=Math.floor(x0/CV_SP);n<=Math.floor(x1/CV_SP);n++){ const cv=coveInfo(sd,n); if (!cv || !cv.geo) continue;
+      for (const K of cv.stacks){ const [x,z]=cvL2W(cv,K.u,K.s); if (!near(x,z)) continue; const y=walkGround(x,z,1e3); if (y>0.5) out.push({x,y,z}); }
+      const Ld=coveLanding(cv); if (near(Ld.x,Ld.z)) for (const q of [-2,0,2]){ const x=Ld.x-Ld.dz*q-Ld.dx*1.5, z=Ld.z+Ld.dx*q-Ld.dz*1.5, y=walkGround(x,z,1e3); if (y>0.1) out.push({x,y,z}); } }
+    // the shoreline elsewhere: the first dry ground a few metres up from the water's edge
+    for (let x=Math.ceil(x0/14)*14;x<=x1;x+=14){ if (harbourAt(sd,x)) continue; const zc=coastZ(sd,x); if (!near(x,zc)) continue;
+      for (const k of [1,3,5,8]){ const z=zc+sd*k, y=walkGround(x,z,1e3); if (y>0.15 && y<4){ out.push({x,y,z}); break; } } }
+  }
+  gullPerch.list=out; return out;
+}
+// the boats the gulls may follow: one lasting record for each sailing boat and ferry, updated in place
+const gullBoatRec=new Map(), gullBoatList=[];
+function gullBoats(){
+  gullBoatList.length=0;
+  const add=(key,x,z,heading,speed,length)=>{ if (Math.hypot(x-player.x,z-player.z)>600) return;
+    let o=gullBoatRec.get(key); if (!o){ o={}; gullBoatRec.set(key,o); }
+    o.x=x; o.z=z; o.heading=heading; o.speed=speed; o.length=length; gullBoatList.push(o); };
+  for (const s of sailers) add(s,s.m.position.x,s.m.position.z,s.m.rotation.y,s.sp,6.2);
+  for (const F of ferries) if (F.R && F.m.visible) add(F,F.m.position.x,F.m.position.z,F.head,F.v,FL);
+  return gullBoatList;
+}
+const gullCtx={player,daylight:1,wind:undefined,groundHeight:(x,z)=>walkGround(x,z,1e3),seaLevel:0,shoreDist:seaDist,boats:gullBoatList,perches:[],paused:false,origin:ORIGIN};
+let gullSeed=SEED;
+let gullsOn=true;
+function updateGulls(dt){
+  if (!gullsOn) return;
+  // a new island: the flock is placed afresh round the new start
+  if (gullSeed!==SEED){ gullSeed=SEED; GULLS.reset(); gullPerch.x=NaN; gullBoatRec.clear(); }
+  gullCtx.daylight=1-nightU.value; gullCtx.wind=gullWind||undefined; gullCtx.paused=paused;
+  gullCtx.perches=gullPerches(); gullCtx.boats=gullBoats();
+  GULLS.update(dt,gullCtx);
+}
+// the world repeats from north to south every WRAP_Z metres: the flock moves with it
+wrapHooks.push(d=>{ GULLS.shift(0,d); gullPerch.x=NaN; });
+// for automated checks: the flock, its context, and a switch that removes the gulls entirely
+window.__gulls={G:GULLS,ctx:gullCtx,get on(){ return gullsOn; },set on(v){ gullsOn=v; GULLS.mesh.visible=v; }};
+
+/* ================= statistics overlay (O): frame rate, draw distance and what is being drawn ================= */
+const statsEl=document.getElementById('stats'); let statsT=0, statsN=0, statsSum=0, statsWorst=0, statsLast=performance.now();
+function updateStats(){
+  const now=performance.now(), gap=now-statsLast; statsLast=now;
+  if (statsEl.hidden) return;
+  statsN++; statsSum+=gap; statsWorst=Math.max(statsWorst,gap); statsT+=gap;
+  if (statsT<500 && statsEl.dataset.ready) return;
+  const m=v=>`${Math.round((v+0.5)*C)} m`, info=renderer.info, avg=statsN?statsSum/statsN:gap;
+  let lods=[0,0,0]; for (const ch of chunks.values()) if (ch.lod>=0&&ch.lod<=2) lods[ch.lod]++;
+  const rows=[
+    ['Frame rate',`${(1000/avg).toFixed(0)} fps`],
+    ['Frame time',`${avg.toFixed(1)} ms, slowest ${statsWorst.toFixed(0)} ms`],
+    ['Draw distance',drawLvl<0?'automatic':`fixed, level ${drawLvl+1} of ${DRAW_LVLS.length}`],
+    ['Full detail',m(LOD0)],
+    ['Simplified',m(VIEW)],
+    ['Outlines',m(lodRing())],
+    ['Blocks',`${lods[0]} full, ${lods[1]} simplified, ${lods[2]} outline${queue.length?`, ${queue.length} waiting`:''}`],
+    ['Draw calls',`${info.render.calls}`],
+    ['Triangles',`${(info.render.triangles/1e6).toFixed(2)} million`],
+    ['Position',`${player.x.toFixed(0)}, ${player.z.toFixed(0)}, height ${player.y.toFixed(1)} m`]];
+  statsEl.innerHTML=rows.map(([k,v])=>`<span>${k}</span><span>${v}</span>`).join('');
+  statsEl.dataset.ready='1'; statsT=statsN=statsSum=statsWorst=0;
 }
 
 /* ================= performance overlay (?perf in the address) ================= */
@@ -5574,7 +7415,7 @@ window.__village={ goods, glZone, branchesAt, genChunk, coastRoadZ, brZ, brY, he
   reachable(x0,z0,y0,goal,lim=60000){
     const G=0.4, r=player.r, seen=new Map(), q=[[0,0,y0]];
     const near=(x,z)=>{ const out=[], cx=Math.floor(x/C), cz=Math.floor(z/C); for (let j=-2;j<=2;j++) for (let i=-2;i<=2;i++){ const ch=chunks.get(key(cx+i,cz+j)); if (ch) out.push(ch); } return out; };
-    const ground=(x,z,y,N)=>{ let g=heightAt(x,z); for (const ch of N){ for (const o of ch.obbs){ if (o.top===Infinity||o.top>y+STEP) continue; const [lu,lv]=obbLocal(o,x,z); if (Math.abs(lu)<=o.hw&&Math.abs(lv)<=o.hd) g=Math.max(g,o.top); }
+    const ground=(x,z,y,N)=>{ let g=walkGround(x,z,y); for (const ch of N){ for (const o of ch.obbs){ if (o.top===Infinity||o.top>y+STEP) continue; const [lu,lv]=obbLocal(o,x,z); if (Math.abs(lu)<=o.hw&&Math.abs(lv)<=o.hd) g=Math.max(g,o.top); }
       for (const c of ch.circles){ if (c.top===Infinity||c.top>y+STEP) continue; if (Math.hypot(x-c.x,z-c.z)<=c.r) g=Math.max(g,c.top); } } return g; };
     const blocked=(x,z,y,N)=>{ for (const ch of N){ for (const o of ch.obbs){ if (o.top<=y+STEP) continue; if (o.bot!==undefined && y+1.75<o.bot) continue; if (obbCircleDist(o,x,z)<r-0.05) return true; }
       for (const c of ch.circles){ if (c.top<=y+STEP) continue; if (Math.hypot(x-c.x,z-c.z)<c.r+r-0.05) return true; } } return false; };
@@ -5584,9 +7425,15 @@ window.__village={ goods, glZone, branchesAt, genChunk, coastRoadZ, brZ, brY, he
       const k2=Math.floor(x/C)+','+Math.floor(z/C); if (k2!==nk){ nk=k2; N=near(x,z); }
       for (const [di,dj] of [[1,0],[-1,0],[0,1],[0,-1]]){ const ii=i+di, jj=j+dj, kk=ii+','+jj; if (seen.has(kk)) continue;
         const nx=x0+ii*G, nz=z0+jj*G, g=ground(nx,nz,y,N);
-        if (g<-1.0 || blocked(nx,nz,y,N)) continue;
+        if (g<-1.0 || blocked(nx,nz,y,N) || !coveMoveOk(x,z,y,y,nx,nz,g)) continue;
         seen.set(kk,1); q.push([ii,jj,g]); } }
     return {ok:false,steps:n}; },
+  // the nearest cove: its beach, the top and foot of its path, and the mouth of its cave with a point inside
+  findCove(){ const n0=Math.floor(player.x/CV_SP); for (let k=0;k<60;k++) for (const n of [n0+k,n0-k]) for (const sd of SIDES){ const cv=coveInfo(sd,n); if (!cv) continue; const G=cvBuild(cv), A=G.cave, W=(u,s)=>{ const [x,z]=cvL2W(cv,u,s); return {x,z}; };
+      return {cv,sd,X:cv.X,name:cv.name,cave:cv.cave,beach:W(cvAxis(cv,cv.Bh-Math.max(cv.Bw,2.5)*0.5),cv.Bh-Math.max(cv.Bw,2.5)*0.5),pathTop:W(G.pathTop.u,G.roadS-CR_HW-0.5),pathFoot:W(G.pathFoot.u,G.pathFoot.s),landing:coveLanding(cv),
+        mouth:A&&{...W(A.u+A.au*-1.5,A.s+A.as*-1.5),y:A.fM},inside:A&&{...W(A.u+A.au*A.aMax*0.7,A.s+A.as*A.aMax*0.7)},caves:G.caves.length}; } return null; },
+  coveLanding, coveFns:{cvOnPath,cvLand,cvU,cvS,cvL2W,cvAxis,cvBuild,coveAtXZ,coveCaveCell,cvCaveLocal},
+  coveInfo, walkGround, coveMoveOk, standableAt, get holdT(){ return player.holdT; },
   findIsland(){ const m0=Math.floor(player.x/ISL); for (let k=0;k<20;k++) for (const m of [m0+k,m0-k]) for (const sd of SIDES){ const I=islandInfo(sd,m); if (I) return I; } return null; },
   player,chunks,get mode(){return mode},toggleView,setYaw:v=>yaw=v,setPitch:v=>pitch=v,setFpPitch:v=>fpPitch=v,setDist:v=>dist=v,keys,heightAt};
 </script>
