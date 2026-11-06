@@ -19,29 +19,17 @@ html,body{height:100%;margin:0;overflow:hidden;background:var(--sea);color:var(-
 .vignette{position:fixed;inset:0;pointer-events:none;background:radial-gradient(ellipse at 50% 45%,transparent 55%,rgba(18,40,70,.32) 100%)}
 .help{position:fixed;z-index:4;top:50%;left:50%;transform:translate(-50%,-50%);width:min(1320px,calc(100vw - 32px));max-height:calc(100% - 32px);overflow:auto;box-sizing:border-box;
   background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:18px 22px 20px;backdrop-filter:blur(8px);font-size:clamp(.92rem,.62rem + .4vw,1.08rem);line-height:1.4;
-  display:grid;grid-template-columns:minmax(240px,300px) 1fr;gap:0 28px}
-.help .side{border-right:1px solid var(--line);padding-right:24px}
-.help .eyebrow{margin:0 0 10px;font-family:var(--font-display);font-size:1.5rem;color:var(--plaster)}
-.help .here{border-bottom:1px solid var(--line);padding-bottom:12px;margin-bottom:12px}
-.help .kind{font-size:.72rem;letter-spacing:.16em;text-transform:uppercase;color:var(--verdigris)}
-.help h2{font-family:var(--font-display);font-weight:400;font-size:1.3rem;margin:2px 0;line-height:1.15;text-wrap:balance}
-.help p{margin:0;color:var(--plaster-dim)}
-.help .elev{margin-top:6px;font-size:.8rem;letter-spacing:.06em;color:var(--verdigris);font-variant-numeric:tabular-nums}
-.help .about{font-size:.84rem}
-.help .credits{margin-top:12px;padding-top:12px;border-top:1px solid var(--line);font-size:.8rem}
-.help a{color:var(--verdigris)}
+  display:block}
 .help .controls{columns:280px;column-gap:28px}
 .stats{position:fixed;z-index:3;top:16px;left:16px;max-width:calc(100vw - 32px);box-sizing:border-box;display:grid;grid-template-columns:auto auto;gap:2px 14px;
   background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:10px 14px;backdrop-filter:blur(8px);pointer-events:none;
   font-size:.82rem;line-height:1.35;font-variant-numeric:tabular-nums}
 .stats>span:nth-child(odd){font-size:.68rem;letter-spacing:.14em;text-transform:uppercase;color:var(--verdigris);align-self:center}
 .stats[hidden]{display:none}
-.help .group>p{color:var(--plaster)}
-.help .group{break-inside:avoid;margin:0 0 14px}
-.help h3{margin:0 0 4px;font-size:.72rem;font-weight:500;letter-spacing:.16em;text-transform:uppercase;color:var(--verdigris)}
-.help .row{display:grid;grid-template-columns:auto 1fr;gap:0 10px;padding:3px 0;align-items:baseline}
+.help .group{break-inside:avoid;margin:0 0 14px;display:grid;grid-template-columns:max-content 1fr;gap:6px 12px;align-items:baseline}
+.help h3{grid-column:1/-1;margin:0 0 -2px;font-size:.72rem;font-weight:500;letter-spacing:.16em;text-transform:uppercase;color:var(--verdigris)}
+.help .row{display:contents}
 .help .row>span:first-child{white-space:nowrap}
-@media (max-width:720px){ .help{grid-template-columns:1fr} .help .side{border-right:0;padding-right:0;border-bottom:1px solid var(--line);padding-bottom:12px;margin-bottom:14px} }
 kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink);border-radius:3px;padding:3px 6px;margin-right:3px;display:inline-block;min-width:1em;text-align:center;box-shadow:0 2px 0 var(--plaster-dim)}
 .joy{position:fixed;width:110px;height:110px;margin:-55px 0 0 -55px;border-radius:50%;border:2px solid rgba(245,233,215,.55);pointer-events:none;z-index:3}
 .joy i{position:absolute;left:50%;top:50%;width:44px;height:44px;margin:-22px 0 0 -22px;border-radius:50%;background:rgba(245,233,215,.7)}
@@ -63,58 +51,90 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
 <div class="joy" id="joy" hidden><i></i></div>
 
 <aside class="help" id="help" hidden aria-label="Help">
-  <div class="side">
-    <p class="eyebrow">Coast</p>
-    <div class="here">
-      <div class="kind" id="placeKind">Quarter</div>
-      <h2 id="placeName">—</h2>
-      <p id="placeDesc"></p>
-      <p class="elev" id="elev"></p>
-    </div>
-    <p class="about">An island that never ends to the east or west, between half a kilometre and two kilometres wide. Villages are laid out from the rules of medieval hill towns, with open country, olive groves and a coastal railway between them. Here and there the shore breaks into rocky coves with sea caves, each reached by a path down the cliffs. Draw distance adjusts itself to hold 60 frames per second unless it has been fixed with Page Up or Page Down: <span id="viewState">—</span>.</p>
-    <p class="credits">The cats are from <a href="https://github.com/c1t1zen1/Michi-Neko-The-Cat-Philosophers-Path" target="_blank" rel="noopener">Michi-Neko: The Cat Philosopher’s Path</a> by c1t1zen1, used under the MIT licence.</p>
-  </div>
   <div class="controls">
     <div class="group"><h3>Walking</h3>
       <div class="row"><span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><span>Walk</span></div>
       <div class="row"><span><kbd>Shift</kbd></span><span>Run</span></div>
       <div class="row"><span><kbd>Space</kbd></span><span>Jump</span></div>
+      <div class="row"><span><kbd>Z</kbd></span><span>Crouch</span></div>
       <div class="row"><span><kbd>Q</kbd><kbd>E</kbd></span><span>Turn</span></div>
-      <div class="row"><span><kbd>Mouse</kbd></span><span>Look. Click to capture the mouse, Esc to release it</span></div>
+      <div class="row"><span><kbd>Mouse</kbd></span><span>Look</span></div>
+      <div class="row"><span>Click</span><span>Capture the mouse</span></div>
+      <div class="row"><span><kbd>Esc</kbd></span><span>Release the mouse</span></div>
+      <div class="row"><span>Walk into a door</span><span>Open the door</span></div>
     </div>
-    <div class="group"><h3>Views</h3>
-      <div class="row"><span><kbd>V</kbd></span><span>Switch between street level and the bird’s-eye view</span></div>
-      <div class="row"><span><kbd>+</kbd><kbd>−</kbd></span><span>Zoom the bird’s-eye view in and out (− also leaves street level). Pinch also zooms</span></div>
-      <div class="row"><span>Double click</span><span>Go down to street level at that spot in the bird’s-eye view</span></div>
-      <div class="row"><span><kbd>2-finger drag</kbd></span><span>Pan quickly across the island in the bird’s-eye view</span></div>
-      <div class="row"><span><kbd>B</kbd></span><span>Tilt-shift in the bird’s-eye and chase views: <span id="tiltState">off</span></span></div>
+    <div class="group"><h3>Bird’s-eye view</h3>
+      <div class="row"><span><kbd>V</kbd></span><span>Bird’s-eye view or street level</span></div>
+      <div class="row"><span><kbd>+</kbd><kbd>−</kbd></span><span>Zoom</span></div>
+      <div class="row"><span>Pinch</span><span>Zoom</span></div>
+      <div class="row"><span>Two-finger drag</span><span>Pan</span></div>
+      <div class="row"><span><kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd></span><span>Turn and tilt</span></div>
+      <div class="row"><span>Double click</span><span>Down to street level here</span></div>
+      <div class="row"><span><kbd>B</kbd></span><span>Tilt-shift</span></div>
     </div>
-    <div class="group"><h3>Train, ferry and dinghy</h3>
-      <div class="row"><span><kbd>R</kbd></span><span>Ride in front of the passenger train. R or V again steps off beside the track</span></div>
-      <div class="row"><span><kbd>C</kbd></span><span>Follow the train being ridden, or else the nearer one, from behind. The mouse moves the camera round it and <kbd>+</kbd><kbd>−</kbd> change the distance. C or V again steps off beside the track. Sailing, C changes between the helm and a view from astern of the dinghy</span></div>
-      <div class="row"><span><kbd>G</kbd></span><span>Ride in front of the goods train. G or V again steps off beside the track</span></div>
-      <div class="row"><span><kbd>F</kbd></span><span>Board the nearest ferry wherever it is. While it lies at a landing it may also be boarded by its gangway. On board, W A S D walk about the decks and the mouse looks round. F or V again steps ashore, or at the next landing while the ferry is under way</span></div>
-      <div class="row"><span><kbd>Y</kbd></span><span>Go to the quay beside the nearest harbour’s dinghy. Within 6 m of a dinghy, board it. Aboard, A and D steer, W and S paddle when she is nearly stopped and the mouse looks round; V shows the boat from above. Y again steps ashore within 3 m of a quay or a beach, or out at sea returns to the quay beside the dinghy’s berth</span></div>
+    <div class="group"><h3>Passenger train</h3>
+      <div class="row"><span><kbd>R</kbd></span><span>Ride in the cab</span></div>
+      <div class="row"><span><kbd>C</kbd></span><span>Follow from behind</span></div>
+      <div class="row"><span><kbd>+</kbd><kbd>−</kbd></span><span>Following distance</span></div>
+      <div class="row"><span><kbd>B</kbd></span><span>Tilt-shift</span></div>
+      <div class="row"><span><kbd>V</kbd></span><span>Step off</span></div>
     </div>
-    <div class="group"><h3>Buildings</h3>
-      <div class="row"><span>Walk into a door</span><span>Houses, barns, churches, towers, the station, the keeper’s cottage and the ferry’s saloon and wheelhouse may be entered. A door swings open when it is walked into, from either side, and closes again behind</span></div>
+    <div class="group"><h3>Goods train</h3>
+      <div class="row"><span><kbd>G</kbd></span><span>Ride in the cab</span></div>
+      <div class="row"><span><kbd>C</kbd></span><span>Follow from behind</span></div>
+      <div class="row"><span><kbd>B</kbd></span><span>Tilt-shift</span></div>
+      <div class="row"><span><kbd>V</kbd></span><span>Step off</span></div>
     </div>
-    <div class="group"><h3>Time and island</h3>
+    <div class="group"><h3>Ferry</h3>
+      <div class="row"><span><kbd>F</kbd></span><span>Board the nearest ferry</span></div>
+      <div class="row"><span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><span>Walk about the decks</span></div>
+      <div class="row"><span><kbd>F</kbd></span><span>Step ashore</span></div>
+      <div class="row"><span><kbd>V</kbd></span><span>Bird’s-eye view</span></div>
+    </div>
+    <div class="group"><h3>Sailing</h3>
+      <div class="row"><span><kbd>Y</kbd></span><span>Go to the nearest dinghy</span></div>
+      <div class="row"><span><kbd>Y</kbd></span><span>Board, within 6 m</span></div>
+      <div class="row"><span><kbd>A</kbd><kbd>D</kbd></span><span>Steer</span></div>
+      <div class="row"><span><kbd>W</kbd><kbd>S</kbd></span><span>Paddle</span></div>
+      <div class="row"><span><kbd>Q</kbd><kbd>E</kbd></span><span>Turn the head</span></div>
+      <div class="row"><span><kbd>C</kbd></span><span>Helm or view from astern</span></div>
+      <div class="row"><span><kbd>V</kbd></span><span>Bird’s-eye view</span></div>
+      <div class="row"><span><kbd>Y</kbd></span><span>Step ashore, or back to the quay</span></div>
+    </div>
+    <div class="group"><h3>Time</h3>
       <div class="row"><span><kbd>N</kbd></span><span>Night or day</span></div>
-      <div class="row"><span><kbd>T</kbd></span><span>Hold to speed up time</span></div>
-      <div class="row"><span><kbd>P</kbd></span><span>Pause the trains, ferries, boats, sea and time of day; walking and looking about carry on. P again resumes</span></div>
-      <div class="row"><span><kbd>I</kbd></span><span>Generate a new island</span></div>
+      <div class="row"><span>Hold <kbd>T</kbd></span><span>Speed up time</span></div>
+      <div class="row"><span><kbd>P</kbd></span><span>Pause the world</span></div>
+    </div>
+    <div class="group"><h3>Island</h3>
+      <div class="row"><span><kbd>I</kbd></span><span>New island</span></div>
+    </div>
+    <div class="group"><h3>Draw distance</h3>
+      <div class="row"><span><kbd>PgUp</kbd></span><span>Increase</span></div>
+      <div class="row"><span><kbd>PgDn</kbd></span><span>Reduce</span></div>
+      <div class="row"><span><kbd>Home</kbd></span><span>Automatic</span></div>
+      <div class="row"><span><kbd>O</kbd></span><span>Frame rate</span></div>
     </div>
     <div class="group"><h3>Sound and screen</h3>
-      <div class="row"><span><kbd>M</kbd></span><span>Mute or unmute the sound</span></div>
+      <div class="row"><span><kbd>M</kbd></span><span>Mute</span></div>
       <div class="row"><span><kbd>Tab</kbd></span><span>Full screen</span></div>
-      <div class="row"><span><kbd>PgUp</kbd><kbd>PgDn</kbd></span><span>Increase or reduce the draw distance, which then stays fixed</span></div>
-      <div class="row"><span><kbd>Home</kbd></span><span>Return the draw distance to automatic</span></div>
-      <div class="row"><span><kbd>O</kbd></span><span>Show or hide the frame rate and draw distance</span></div>
-      <div class="row"><span><kbd>H</kbd></span><span>Show or hide this panel</span></div>
+      <div class="row"><span><kbd>H</kbd></span><span>This panel</span></div>
     </div>
     <div class="group"><h3>Controller</h3>
-      <p>The left stick moves and the right stick looks. A jumps, B switches the view, X boards the ferry, Y rides with the train and LB follows it. Within reach of a dinghy, or while sailing, Y stands for the Y key, as a press of the right stick always does; at the helm the left stick steers and paddles and the triggers trim the sail. RB sets tilt-shift, the triggers zoom, pressing the left stick switches between running and walking, the D-pad turns and tilts, Back mutes and Start shows this panel</p>
+      <div class="row"><span>Left stick</span><span>Move</span></div>
+      <div class="row"><span>Right stick</span><span>Look</span></div>
+      <div class="row"><span>Press left stick</span><span>Run or walk</span></div>
+      <div class="row"><span>A</span><span>Jump</span></div>
+      <div class="row"><span>B</span><span>Bird’s-eye view</span></div>
+      <div class="row"><span>X</span><span>Ferry</span></div>
+      <div class="row"><span>Y</span><span>Passenger train, or dinghy when near one</span></div>
+      <div class="row"><span>Press right stick</span><span>Dinghy</span></div>
+      <div class="row"><span>LB</span><span>Follow the train</span></div>
+      <div class="row"><span>RB</span><span>Tilt-shift</span></div>
+      <div class="row"><span>Triggers</span><span>Zoom; trim the sail when sailing</span></div>
+      <div class="row"><span>D-pad</span><span>Turn and tilt</span></div>
+      <div class="row"><span>Back</span><span>Mute</span></div>
+      <div class="row"><span>Start</span><span>This panel</span></div>
     </div>
   </div>
 </aside>
@@ -601,21 +621,23 @@ function cvFloor(cv,u,s,d,hNat,G){
 function cvNearKeep(G,u,s){ for (const A of G.caves) if (A.walk && Math.hypot(u-A.u,s-A.s)<A.wM+3.5) return true;
   if (G.shA!==undefined && (u<0?-1:1)===G.caveSide && s>G.shA-3 && s<G.shB+3) return true;
   return Math.hypot(u-G.pathFoot.u,s-G.pathFoot.s)<3; }
-// the nearest part of the path: its height and how far the ground is shaped to it
+// the nearest part of the path: its height and how far the ground is shaped to it.
+// The path is walked within CV_PW of its line and CV_PL of a turn. Where the flight above and the flight below come
+// together at a turn, the height is a blend of the two by their nearness, so the ground runs smoothly from one to the
+// other with no step
+const CV_PW=1.2, CV_PL=1.8;
 let _pY=0, _pW=0;
-function cvPathAt(G,u,s){ let best=1e9, y=0;
+function cvPathAt(G,u,s){ let best=1e9; const D=[];
   for (const L of G.legs){ const du=L.u1-L.u0, ds=L.s1-L.s0, t=clamp(((u-L.u0)*du+(s-L.s0)*ds)/(du*du+ds*ds),0,1), d=Math.hypot(u-L.u0-du*t,s-L.s0-ds*t);
-    if (d<best){ best=d; y=lerp(L.y0,L.y1,t); } }
-  for (const P of G.lands){ const d=Math.max(0,Math.hypot(u-P.u,s-P.s)-0.5); if (d<best){ best=d; y=P.y; } }
-  if (best>1.4) return false; _pY=y; _pW=1-smooth((best-0.75)/0.6); return true; }
+    D.push(d,lerp(L.y0,L.y1,t)); if (d<best) best=d; }
+  for (const P of G.lands){ const d=Math.max(0,Math.hypot(u-P.u,s-P.s)-(CV_PL-CV_PW)); D.push(d,P.y); if (d<best) best=d; }
+  if (best>CV_PW+0.8) return false;
+  let ws=0, ys=0; for (let k=0;k<D.length;k+=2){ const w=1-smooth((D[k]-best)/1.6); if (w>0){ ws+=w; ys+=w*D[k+1]; } }
+  _pY=ys/ws; _pW=1-smooth((best-CV_PW-0.05)/0.7); return true; }
 function cvPathDist(G,u,s){ let best=1e9;
   for (const L of G.legs){ const du=L.u1-L.u0, ds=L.s1-L.s0, t=clamp(((u-L.u0)*du+(s-L.s0)*ds)/(du*du+ds*ds),0,1); best=Math.min(best,Math.hypot(u-L.u0-du*t,s-L.s0-ds*t)); }
-  for (const P of G.lands) best=Math.min(best,Math.hypot(u-P.u,s-P.s)-0.45); return best; }
-function cvOnPath(G,u,s){
-  for (const L of G.legs){ const du=L.u1-L.u0, ds=L.s1-L.s0, t=clamp(((u-L.u0)*du+(s-L.s0)*ds)/(du*du+ds*ds),0,1);
-    if (Math.hypot(u-L.u0-du*t,s-L.s0-ds*t)<(L.fin?0.9:0.85)) return true; }
-  for (const P of G.lands) if (Math.hypot(u-P.u,s-P.s)<1.3) return true;
-  return false; }
+  for (const P of G.lands) best=Math.min(best,Math.hypot(u-P.u,s-P.s)-(CV_PL-CV_PW)); return best; }
+function cvOnPath(G,u,s){ return cvPathDist(G,u,s)<CV_PW; }
 // the signed distance to the cliff line (positive on the land side) and the nearest point of it, from a 1 m grid
 let _cd=0, _ci=-1;
 function cvSdf(G,u,s){ const fu=u-G.u0, fs=s-G.s0; if (fu<0||fs<0||fu>=G.nu-1||fs>=G.ns-1) return false;
@@ -691,7 +713,7 @@ function cvBuild(cv){
   // stretch wandering a little, and a last gentle stretch to the clifftop
   { const bt=cv.bt, gOf=gs=>bt+(G.Thead-bt)*(1-Math.pow(1-gs,1.6)), sOf=y=>cv.Bh+cv.Lg*(1-Math.pow(1-clamp((y-bt)/(G.Thead-bt),0,1),1/1.6));
     const N=clamp(Math.round((G.Thead-bt)/3.2),2,4), yTop=gOf(0.78+R()*0.06), y0=cv.Bw>0?0.06+(bt-0.06)*Math.pow(1-1/Math.max(cv.Bw,2.5),1.2):0.55;
-    const half=(s,sg)=>Math.max(1.2,(s>=cv.Bh?cvAg(cv,s,sg):cvA(cv,s,sg))-1.5-R()*1.4);
+    const half=(s,sg)=>Math.max(1.2,(s>=cv.Bh?cvAg(cv,s,sg):cvA(cv,s,sg))-CV_PL-0.4-R()*0.8);   // turns kept clear of the ravine's walls
     const pts=[]; let sg=cv.pathSide;
     for (let k=0;k<=N;k++){ const f=k?(k+(k<N?(R()-0.5)*0.35:0))/N:0, y=k?y0+f*(yTop-y0):y0, s=k?sOf(y):cv.Bh-1; pts.push({u:(s>=cv.Bh?cvGAxis(cv,s):0)+sg*half(s,sg),s,y}); sg=-sg; }
     G.legs=[]; G.lands=[]; G.nLeg=0;
@@ -758,7 +780,7 @@ function cvBuild(cv){
   // boulders and scree: at the foot of the walls, along the shelf's edge, round the headlands and stacks and in the
   // ravine; with scrub along the clifftop and in the ravine
   { const B=[], V=[];
-    const near=(u,s,r)=>{ if (cvPathDist(G,u,s)<r*0.6+1.4) return true;
+    const near=(u,s,r)=>{ if (cvPathDist(G,u,s)<r*0.6+CV_PW+0.9) return true;
       for (const A of G.caves) if (A.walk && Math.hypot(u-A.u,s-A.s)<A.wM+2.2) return true;
       return B.some(b=>Math.hypot(b.u-u,b.s-s)<(b.r+r)*0.8); };
     for (let t=0;t<900 && B.length<120;t++){ const i=Math.floor(R()*n), k=K[i]; if (k===0) continue;
@@ -845,12 +867,16 @@ function walkGround(x,z,y){
   return heightAt(x,z);
 }
 function coveNoWalk(cv,x,z){ const G=cv.geo; if (!G) return false; const u=cvU(cv,x,z), s=cvS(cv,x,z);
-  if (s<=cv.Bh+0.25 || s>cv.sHead+0.5 || Math.abs(u-cvGAxis(cv,s))>cv.Ag0+2 || cvLand(cv,u,s)) return false;
-  return !cvOnPath(G,u,s); }
+  if (s<=cv.Bh+0.25 || s>cv.sHead+0.5 || Math.abs(u-cvGAxis(cv,s))>cv.Ag0+2 || cvLand(cv,u,s) || cvOnPath(G,u,s)) return false;
+  // only where the ravine's floor is steep: its gentle foot and head may be walked anywhere
+  const gx=heightAt(x+0.4,z)-heightAt(x-0.4,z), gz=heightAt(x,z+0.4)-heightAt(x,z-0.4);
+  return Math.hypot(gx,gz)/0.8>0.6; }
 // whether a step from (ox,oz), standing on gO, to (nx,nz), whose standing height is gN, is allowed
 function coveMoveOk(ox,oz,y,gO,nx,nz,gN){
   const cv=coveAtXZ(nx,nz); if (!cv || !cv.geo) return true;
-  if (coveNoWalk(cv,nx,nz) && (!coveNoWalk(cv,ox,oz) || gN>gO+0.02)) return false;
+  // off the path on the ravine's slope a walker may only go down, or back towards the path, so that whoever stands
+  // there can always leave
+  if (coveNoWalk(cv,nx,nz) && (!coveNoWalk(cv,ox,oz) || gN>gO+0.02 && cvPathDist(cv.geo,cvU(cv,nx,nz),cvS(cv,nx,nz))>cvPathDist(cv.geo,cvU(cv,ox,oz),cvS(cv,ox,oz))-0.001)) return false;
   if (gN-Math.max(y,gO)>STEP) return false;
   if (gO-gN>1.4) return false;
   return true; }
@@ -1010,14 +1036,14 @@ function buildCoveChunk(gb,ch,cx,cz,lod){
         for (let i=0;i<nst;i++){ const t=(i+0.3+0.4*rs())/nst, u=Lg.u0+du*len*t+(rs()-0.5)*0.25*-ds, s=Lg.s0+ds*len*t+(rs()-0.5)*0.25*du, [x,z]=W(u,s); if (!own(x,z)) continue;
           if (G.lands.some(P=>Math.hypot(P.u-u,P.s-s)<2.4)) continue;   // the turns are left clear, where the flights above and below meet
           if (G.legs.some(M=>{ if (M.id===Lg.id) return false; const mu=M.u1-M.u0, ms=M.s1-M.s0, tt=clamp(((u-M.u0)*mu+(s-M.s0)*ms)/(mu*mu+ms*ms),0,1); return Math.hypot(u-M.u0-mu*tt,s-M.s0-ms*tt)<1.5; })) continue;
-          const [x2,z2]=W(u+du,s+ds), rot=Math.atan2(x2-x,z2-z)+(rs()-0.5)*0.6, top=lerp(Lg.y0,Lg.y1,t)+0.06+rs()*0.08, w=0.8+rs()*0.4, dp=0.4+rs()*0.3, bot=top-0.3;
+          // a stone set flush with the path's surface, so that it is walked over without a bump
+          const [x2,z2]=W(u+du,s+ds), rot=Math.atan2(x2-x,z2-z)+(rs()-0.5)*0.6, top=lerp(Lg.y0,Lg.y1,t)+0.02, w=1.0+rs()*0.5, dp=0.4+rs()*0.3, bot=top-0.3;
           const cl=GREY_ROCK.clone().lerp(LIMESTONE,0.3+0.4*rs()).multiplyScalar(0.8+rs()*0.15);
-          gb.add(T.sphLo, mat(x,bot,z,w*1.15,(top-bot)*1.6,dp*1.2,rot,(rs()-0.5)*0.1,(rs()-0.5)*0.1), cl, bot, 12);
-          ch.obbs.push({x,z,hw:w/2,hd:dp/2,rot,top}); } }
+          gb.add(T.sphLo, mat(x,bot,z,w*1.15,(top-bot)*1.6,dp*1.2,rot,(rs()-0.5)*0.1,(rs()-0.5)*0.1), cl, bot, 12); } }
       // landings: the two with the longest drop below them get a low wall of rough stones on their downhill side
       const drops=G.lands.map((P,k)=>({P,k,dr:P.y-cvFloor(cv,P.u,P.s-2.2,-3,0,null)})).sort((a,b)=>b.dr-a.dr).slice(0,2);
       for (const {P} of drops){ const rs=rng(Math.round(P.u*101+P.s*37));
-        for (let a=-2.6;a<=-0.5;a+=0.3+rs()*0.15){ const cu=P.u+Math.cos(a)*1.45, cs=P.s+Math.sin(a)*1.45; if (cvOnPath(G,cu,cs) || cvLand(cv,cu,cs)) continue;
+        for (let a=-2.6;a<=-0.5;a+=0.25+rs()*0.12){ const cu=P.u+Math.cos(a)*(CV_PL+0.45), cs=P.s+Math.sin(a)*(CV_PL+0.45); if (cvPathDist(G,cu,cs)<CV_PW+0.35 || cvLand(cv,cu,cs)) continue;
           const [x,z]=W(cu,cs); if (!own(x,z)) continue; const sz=0.3+rs()*0.25, cl=GREY_ROCK.clone().lerp(LIMESTONE,rs()*0.6).multiplyScalar(0.85+rs()*0.15);
           // a low wall of loose stones laid in two or three rough courses
           for (let c=0;c<2+(rs()<0.5?1:0);c++) gb.add(T.sphLo, mat(x+(rs()-0.5)*0.15,P.y-0.15+c*0.24,z+(rs()-0.5)*0.15,sz*1.6,0.32,sz*1.2,rs()*3), cl.clone().multiplyScalar(0.9+rs()*0.2), P.y-0.2, 12); } } }
@@ -4926,9 +4952,9 @@ function createDinghy(parent, opts={}){
     x.fillStyle=O.sail; x.fillRect(0,0,256,512);
     // seams of the cloths, square to the leech, and a darker leech tape
     x.strokeStyle='rgba(120,98,70,0.22)'; x.lineWidth=2; for (let k=1;k<9;k++){ const y=512-k*52; x.beginPath(); x.moveTo(0,y+40); x.lineTo(256,y-10); x.stroke(); }
-    // the number, on the starboard side higher than on the port side, as on a real sail
+    // a number, if one is given, on the starboard side higher than on the port side, as on a real sail
     const sx=(256/2.75)/(512/3.6), cx=back?92:78, cy=back?262:212;
-    x.save(); x.translate(cx,cy); x.scale(back?-sx:sx,1); x.fillStyle=O.mark; x.font='700 86px "Alegreya Sans", "Gill Sans", sans-serif'; x.textAlign='center'; x.textBaseline='middle'; x.fillText(O.number,0,0); x.restore();
+    if (O.number){ x.save(); x.translate(cx,cy); x.scale(back?-sx:sx,1); x.fillStyle=O.mark; x.font='700 86px "Alegreya Sans", "Gill Sans", sans-serif'; x.textAlign='center'; x.textBaseline='middle'; x.fillText(O.number,0,0); x.restore(); }
     const t=new THREE.CanvasTexture(c); t.colorSpace=THREE.SRGBColorSpace; t.anisotropy=4; return t; }
   const sailTexF=sailTex(false), sailTexB=sailTex(true);
 
@@ -5287,7 +5313,7 @@ function dgySound(k,s){ if (!SND.ready) return;
 function dgyMake(H){
   const B=dinghyBerth(H); if (!B) return null; const k=dgyKey(H); let e=dinghies.get(k); if (e) return e;
   const cols=DGY_COLS[Math.floor(hash(H.n,H.sd,863)*DGY_COLS.length)];
-  const D=createDinghy(world,{number:String(1+Math.floor(hash(H.n,H.sd,862)*98)),hull:cols[0],band:cols[1],bottom:cols[2],mark:cols[3],mode:dgyHandling,
+  const D=createDinghy(world,{number:'',hull:cols[0],band:cols[1],bottom:cols[2],mark:cols[3],mode:dgyHandling,
     mooring:JSON.parse(JSON.stringify({x:B.x,z:B.z,head:B.head,stern:B.stern,bow:B.bow})),onSound:(kk,s)=>{ if (D===sailD) dgySound(kk,s); }});
   e={k,H,B,D}; dinghies.set(k,e); return e; }
 function dgyDrop(e){ if (e.D===sailD) return; e.D.dispose(); dinghies.delete(e.k); }
@@ -5312,9 +5338,14 @@ function dinghyBoard(e){
   scene.fog.near=90; scene.fog.far=1500; sky.visible=true; descent.t=ascent.t=-1;
   camera.fov=70; camera.near=0.1; camera.far=3600; camera.updateProjectionMatrix(); glowScale();
   sea.scale.setScalar(1); islandMesh.visible=false; farMesh.visible=farGlow.visible=true; }
-// stepping ashore within 3 m of a quay or a beach; out at sea nothing happens (force: leave the boat wherever it is)
+// stepping ashore within 3 m of a quay or a beach; elsewhere it does not happen (force: leave the boat wherever it is)
 function dinghyAshore(force){
   const D=sailD; let L=D.leave(dgyCtx);
+  // only onto low and gently sloping ground, such as a quay, a beach or a cove's landing: never a cliff, a ledge or a
+  // rock out at sea, from which there would be no way on
+  if (L && !force){ const g=walkGround(L.x,L.z,1e3); let steep=false;
+    for (const [dx,dz] of [[1.2,0],[-1.2,0],[0,1.2],[0,-1.2]]) if (Math.abs(walkGround(L.x+dx,L.z+dz,1e3)-g)>0.7) steep=true;
+    if (g>3 || g<0 || steep || seaDist(L.x,L.z)<-120) L=null; }
   if (!L){ if (!force) return false; D.state.crewed=false; L={x:D.state.x,y:Math.max(0,heightAt(D.state.x,D.state.z)),z:D.state.z,head:D.state.head}; }
   sailD=null; dgyChase=false; player.x=L.x; player.z=L.z; player.y=L.y; player.vy=0; player.holdT=1.5; eyeY=null;
   yaw=L.head+Math.PI; fpPitch=-0.15;
@@ -5328,20 +5359,42 @@ function dinghyHome(){
     camera.updateProjectionMatrix(); glowScale(); sea.scale.setScalar(1); islandMesh.visible=false; farMesh.visible=farGlow.visible=true; }
   if (!e){ dinghyGo(); return; }
   const B=e.B; D.moor(JSON.parse(JSON.stringify({x:B.x,z:B.z,head:B.head,stern:B.stern,bow:B.bow})));
-  player.x=B.quay.x; player.z=B.quay.z;
-  updateChunks(player.x,player.z,1e9);
-  player.y=walkGround(player.x,player.z,4); player.vy=0; player.grounded=true; player.holdT=3; eyeY=null;
-  yaw=Math.atan2(-(B.x-player.x),-(B.z-player.z)); fpPitch=-0.32; descent.t=ascent.t=-1; }
+  dgyTravel(e.H,B); }
 // to the quay beside the dinghy of the nearest harbour, which is built first, as are the blocks round it
 function dinghyGo(){
   if (mode==='coach') mode='street'; if (riding()) leaveTrain('street'); if (mode==='ferry'||ridden) leaveFerry('street');
   if (mode==='above') toggleView();
   const H=dgyHarbourNear(player.x,player.z); if (!H) return;
   const B=dinghyBerth(H), e=dgyMake(H); if (e && e.D!==sailD && !e.D.state.moored) e.D.moor(JSON.parse(JSON.stringify({x:B.x,z:B.z,head:B.head,stern:B.stern,bow:B.bow})));
-  player.x=B.quay.x; player.z=B.quay.z;
-  updateChunks(player.x,player.z,1e9);
-  player.y=walkGround(player.x,player.z,4); player.vy=0; player.grounded=true; player.holdT=3; eyeY=null;
-  yaw=Math.atan2(-(B.x-player.x),-(B.z-player.z)); fpPitch=-0.32; descent.t=ascent.t=-1; }
+  dgyTravel(H,B); }
+// the journey to a berth: the blocks within about 200 m of it are built first, a slice a frame behind the same panel
+// as a new island, while the world waits; then the player is set down on dry, open ground of the quay beside the
+// dinghy, on its topmost walkable surface, looking at her. The rest of the view builds in as it does while walking.
+async function dgyTravel(H,B){
+  if (seeding) return; seeding=true;
+  const what=`Travelling to ${H.name}:`;
+  try{
+    player.x=B.quay.x; player.z=B.quay.z; player.vy=0; player.holdT=3; descent.t=ascent.t=-1;
+    seedShow(0,what); await nextPaint();
+    const near=(LOD0+3)*(LOD0+3); let total=0;
+    for (;;){ updateChunks(player.x,player.z,30,true); const left=queue.filter(q=>q[2]<=near).length; total=Math.max(total,left);
+      if (!left) break; seedShow(0.95*(1-left/Math.max(1,total)),what); await nextPaint(); }
+    const P=dgyArrival(B); player.x=P.x; player.z=P.z; player.y=P.y; player.vy=0; player.grounded=true; player.holdT=3; eyeY=null;
+    yaw=Math.atan2(-(B.x-player.x),-(B.z-player.z)); fpPitch=-0.32;
+    seedShow(1,what); await nextPaint();
+  } finally { seeding=false; seedEl.hidden=true; last=performance.now(); }
+}
+// the nearest point to the berth's quay point, out to 8 m, that is dry ground or paving no lower than the terrain and
+// not inside a wall, with the height of its topmost walkable surface
+function dgyArrival(B){
+  const tries=[[0,0]]; for (const r of [0.8,1.6,2.5,3.5,5,6.5,8]) for (let k=0;k<12;k++){ const a=k/12*Math.PI*2; tries.push([Math.cos(a)*r,Math.sin(a)*r]); }
+  const walls=[]; for (const ch of chunks.values()) if (Math.abs(ch.cx*C+C/2-B.quay.x)<C*1.5 && Math.abs(ch.cz*C+C/2-B.quay.z)<C*1.5)
+    for (const o of ch.obbs) if (o.top===Infinity) walls.push(o);
+  for (const [dx,dz] of tries){ const x=B.quay.x+dx, z=B.quay.z+dz, g=walkGround(x,z,1e3), h=heightAt(x,z);
+    if (g<0.3 || g<h-0.05) continue;
+    if (walls.some(o=>{ const [lu,lv]=obbLocal(o,x,z); return Math.abs(lu)<o.hw+0.35 && Math.abs(lv)<o.hd+0.35; })) continue;
+    return {x,z,y:g}; }
+  return {x:B.quay.x,z:B.quay.z,y:Math.max(walkGround(B.quay.x,B.quay.z,1e3),heightAt(B.quay.x,B.quay.z))}; }
 function updateDinghies(dt,wdt){
   if (SEED!==dgySeed){ dgySeed=SEED; dgyReset(); }
   WIND.update(wdt);
@@ -5396,10 +5449,10 @@ const wispMat=new THREE.ShaderMaterial({uniforms:wispU,transparent:true,depthWri
       float s=position.x, sd=position.y, a=iP.z*6.2832+uTime*1.1;
       vec3 d=normalize(iDir), up=vec3(0.0,1.0,0.0), sx=normalize(cross(d,up));
       vec3 head=(modelMatrix*vec4(iPos,1.0)).xyz;
-      // the ribbon trails upwind of its head, waving more towards its tail, which curls over at the end
-      vec3 wav=up*(sin(s*4.5+a)*0.22*s+0.45*s*s*s*sin(a*0.7))+sx*(cos(s*3.7+a*0.8)*0.3*s+0.3*s*s*s*cos(a*0.6));
+      // the ribbon trails nearly straight upwind of its head, with only a slight ripple towards its tail
+      vec3 wav=up*(sin(s*4.5+a)*0.04*s+0.05*s*s*s*sin(a*0.7))+sx*(cos(s*3.7+a*0.8)*0.05*s+0.04*s*s*s*cos(a*0.6));
       vec3 p=head-d*s*iP.y+wav;
-      vec3 tg=normalize(-d*iP.y+up*(0.99*s*cos(s*4.5+a)+1.35*s*s*sin(a*0.7))+sx*(-1.11*s*sin(s*3.7+a*0.8)+0.9*s*s*cos(a*0.6)));
+      vec3 tg=normalize(-d*iP.y+up*(0.18*s*cos(s*4.5+a)+0.15*s*s*sin(a*0.7))+sx*(-0.185*s*sin(s*3.7+a*0.8)+0.12*s*s*cos(a*0.6)));
       vec3 w=normalize(cross(tg,normalize(cameraPosition-p)));
       p+=w*sd*iP.w*(0.35+0.65*sin(3.1416*s));
       vA=iP.x*(1.0-smoothstep(30.0,46.0,length(p.xz-uFocus.xz))); vS=vec2(s,sd);
@@ -5417,7 +5470,7 @@ function updateWisps(dt,wdt){
   const sailing=!!sailD, fx=sailing?sailD.state.x:player.x, fz=sailing?sailD.state.z:player.z;
   const k=sailing?1:(mode==='street'&&seaDist(player.x,player.z)<30?0.35:0);
   WIND.at(fx,fz,null,wispW);
-  const want=Math.round(WISP_N*Math.min(1,k*smooth((wispW.speed-1.5)/4.5)*(0.75+0.5*wispW.gust)));
+  const want=Math.round(WISP_N*0.3*Math.min(1,k*smooth((wispW.speed-1.5)/4.5)*(0.75+0.5*wispW.gust)));
   let alive=0; for (let i=0;i<WISP_N;i++) alive+=WOn[i];
   if (wdt>0){ wispU.uTime.value+=wdt;
     for (let i=0;i<WISP_N;i++){ if (!WOn[i]) continue; WIND.at(WX[i],WZ[i],null,wispW);
@@ -5429,13 +5482,14 @@ function updateWisps(dt,wdt){
       const a=Math.random()*Math.PI*2, r=5+25*Math.pow(Math.random(),1.2), life=4+Math.random()*4;
       WIND.at(fx,fz,null,wispW); const back=wispW.speed*life*0.5;
       const x=fx+Math.sin(a)*r-wispW.x/Math.max(0.1,wispW.speed)*back, z=fz+Math.cos(a)*r-wispW.z/Math.max(0.1,wispW.speed)*back;
-      WX[i]=x; WZ[i]=z; WY[i]=Math.max(0.35+Math.random()*6.8,heightAt(x,z)+0.6); WA[i]=0; WL[i]=life; WLen[i]=2.5+Math.random()*3; WSeed[i]=Math.random();
+      // at about the height of the sail, from the boom to near the masthead
+      WX[i]=x; WZ[i]=z; WY[i]=Math.max(1.6+Math.random()*3.4,heightAt(x,z)+1.5); WA[i]=0; WL[i]=life; WLen[i]=2.5+Math.random()*3; WSeed[i]=Math.random();
       WStr[i]=0; WDx[i]=wispW.x; WDz[i]=wispW.z; WOn[i]=1; alive++; made++; } }
   let n=0;
   for (let i=0;i<WISP_N;i++){ if (!WOn[i]) continue; const env=Math.pow(Math.sin(Math.PI*Math.min(1,WA[i]/WL[i])),0.8);
     wispPos[n*3]=WX[i]-ORIGIN.x; wispPos[n*3+1]=WY[i]-ORIGIN.y; wispPos[n*3+2]=WZ[i]-ORIGIN.z;
     wispDir[n*3]=WDx[i]; wispDir[n*3+1]=0.04*Math.sin(WSeed[i]*20); wispDir[n*3+2]=WDz[i]+1e-4;
-    wispP[n*4]=0.5*env*WStr[i]*Math.max(k,0.35); wispP[n*4+1]=WLen[i]; wispP[n*4+2]=WSeed[i]; wispP[n*4+3]=0.05+0.03*WSeed[i]; n++; }
+    wispP[n*4]=0.25*env*WStr[i]*Math.max(k,0.35); wispP[n*4+1]=WLen[i]; wispP[n*4+2]=WSeed[i]; wispP[n*4+3]=0.05+0.03*WSeed[i]; n++; }
   wispGeo.instanceCount=n; wisps.visible=n>0; wisps.position.copy(ORIGIN);
   for (const k2 of ['iPos','iDir','iP']) wispGeo.attributes[k2].needsUpdate=true;
   wispU.uBright.value=surfMat.uniforms.uBright.value; wispU.uFocus.value.set(fx-ORIGIN.x,0,fz-ORIGIN.z);
@@ -6963,6 +7017,7 @@ addEventListener('keydown',e=>{ keys[e.code]=true;
   if (e.code==='KeyP' && !e.repeat){ paused=!paused; lastClock=null; }
   if (e.code==='KeyH' && !e.repeat){ helpEl.hidden=!helpEl.hidden; lastCell=null; }
   if (e.code==='KeyI' && !e.repeat) newIsland();
+  if (e.code==='KeyZ' && !e.repeat) crouch=!crouch;
   if (e.code==='PageUp'){ e.preventDefault(); if (!e.repeat) setDrawLvl(1); }
   if (e.code==='PageDown'){ e.preventDefault(); if (!e.repeat) setDrawLvl(-1); }
   if (e.code==='Home'){ e.preventDefault(); if (!e.repeat) setDrawLvl(0); }
@@ -7285,6 +7340,7 @@ async function newIsland(){ if (seeding) return; seeding=true;
 const pk=document.getElementById('placeKind'), pn=document.getElementById('placeName'), pd=document.getElementById('placeDesc'), elevEl=document.getElementById('elev');
 let lastCell=null, lastElev=null, lastClock='';
 function updateHUD(){
+  if (!pk) return;   // the help panel no longer shows where the player is
   const e=Math.round(player.y);
   const hh=Math.floor(hour), mn=Math.floor((hour-hh)*60/5)*5, clock=`${String(hh).padStart(2,'0')}:${String(mn).padStart(2,'0')}`;
   if (e!==lastElev||clock!==lastClock){ lastElev=e; lastClock=clock; elevEl.textContent=`${clock} · `+(paused?'paused · ':'')+(e<=0?'sea level':`${e} m above the sea`); }
@@ -7306,7 +7362,7 @@ function updateHUD(){
 // away from a horizontal band of sharp focus through the player, which reads as a miniature model.
 let tiltShift=false;
 try{ tiltShift=localStorage.getItem('borgo-tilt')==='1'; }catch(_){}
-function setTilt(on){ tiltShift=on; document.getElementById('tiltState').textContent=on?'on':'off'; try{ localStorage.setItem('borgo-tilt',on?'1':'0'); }catch(_){} }
+function setTilt(on){ tiltShift=on;  try{ localStorage.setItem('borgo-tilt',on?'1':'0'); }catch(_){} }
 setTilt(tiltShift);
 const rtScene=new THREE.WebGLRenderTarget(1,1,{type:THREE.HalfFloatType,samples:4});
 const rtBlur=new THREE.WebGLRenderTarget(1,1,{type:THREE.HalfFloatType,depthBuffer:false});
@@ -7353,6 +7409,7 @@ function glowScale(){ glowU.uScale.value=renderer.getPixelRatio()*innerHeight/(2
 function resize(){ const w=innerWidth, h=innerHeight; renderer.setSize(w,h,false); camera.aspect=w/h; camera.updateProjectionMatrix(); glowScale(); }
 addEventListener('resize',resize); resize();
 const camPos=new THREE.Vector3(), camTarget=new THREE.Vector3();
+let crouch=false, crouchK=0;   // Z: crouching at street level, the eye at 0.95 m instead of 1.62 m and the pace slowed
 let paused=false, last=performance.now(), time=0, firstCam=true, eyeY=null, aboveY=null; const perf={t:0,n:0,sum:0,good:0};
 function frame(now){
   // P pauses the world (trains, ferries, boats, the sea, the lighthouses, the cats and the time of day) while the
@@ -7368,12 +7425,20 @@ function frame(now){
   let mx=(keys.KeyD?1:0)-(keys.KeyA?1:0)+joy.x+pad.x, mz=(keys.KeyW?1:0)-(keys.KeyS?1:0)-joy.y-pad.y;
   const ml=Math.hypot(mx,mz), moving=started&&ml>0.05&&!onBoard()&&!sailD;
   player.ox=player.x; player.oz=player.z;
+  crouchK+=((crouch&&mode==='street'?1:0)-crouchK)*(1-Math.exp(-dt*10));
   if (moving){
     if (ml>1){ mx/=ml; mz/=ml; }
-    const fly=mode==='above'&&dist>60, sp=(fly?dist*0.45:4.6)*((keys.ShiftLeft||keys.ShiftRight)?(fly?2.5:1.96):1);
+    const fly=mode==='above'&&dist>60, sp=(fly?dist*0.45:4.6)*((keys.ShiftLeft||keys.ShiftRight)?(fly?2.5:1.96):1)*(fly?1:1-0.55*crouchK);
     const fx=-Math.sin(yaw), fz=-Math.cos(yaw), rx=Math.cos(yaw), rz=-Math.sin(yaw);
     const vx=(fx*mz+rx*mx)*sp, vz=(fz*mz+rz*mx)*sp, ox=player.x, oz=player.z;
     if (fly){ player.x+=vx*dt; player.z+=vz*dt; player.y=Math.max(heightAt(player.x,player.z),0); player.vy=0; eyeY=player.y; }
+    else if (coveAtXZ(ox,oz)){
+      // in a cove the whole step is tried first; where it is refused (the foot of a cliff, the edge of the path, a
+      // wall) the step is turned towards the edge, a little more each time and shortened as it turns, so that the
+      // walker slides along the edge rather than stopping at it
+      const g0=standableAt(ox,oz);
+      for (const a of [0,0.3,-0.3,0.6,-0.6,0.9,-0.9,1.2,-1.2,1.45,-1.45]){ const c=Math.cos(a), sn=Math.sin(a), k=c*dt, nx=ox+(vx*c-vz*sn)*k, nz=oz+(vx*sn+vz*c)*k, g=standableAt(nx,nz);
+        if (g>=-1.0 && coveMoveOk(ox,oz,player.y,g0,nx,nz,g)){ player.x=nx; player.z=nz; break; } } }
     else { const g0=standableAt(ox,oz); player.x+=vx*dt; const g1=standableAt(player.x,player.z);
       if (g1<-1.0 || !coveMoveOk(ox,oz,player.y,g0,player.x,player.z,g1)) player.x=ox;
       const g2=player.x===ox?g0:g1; player.z+=vz*dt; const g3=standableAt(player.x,player.z);
@@ -7444,7 +7509,7 @@ function frame(now){
       scene.fog.near=lerp(ascent.fogN,scene.fog.near,k); scene.fog.far=lerp(ascent.fogF,scene.fog.far,k);
       if (ascent.t>=ascent.dur) ascent.t=-1; }
   } else if (mode==='street') {
-    camera.position.set(player.x,eyeY+1.62+(moving&&player.grounded?Math.sin(now*0.009)*0.03:0),player.z);
+    camera.position.set(player.x,eyeY+lerp(1.62,0.95,crouchK)+(moving&&player.grounded?Math.sin(now*0.009)*0.03:0),player.z);
     camera.rotation.set(fpPitch,yaw,0,'YXZ'); camPos.copy(camera.position);
     // the bird's-eye view widens the near plane with its zoom; street level always restores it, or ground close
     // to the eye on a slope would be clipped away
@@ -7559,7 +7624,7 @@ function frame(now){
      seaLevel      0 in Coast
      boats         [{x,z,heading,speed,length}], heading as in rotation.y (the bow points along sin, cos); a boat
                    may also carry catch (true while it comes home with fish: the nearest gulls join it, up to want,
-                   8-15, ahead of any other boat, and no more than half the flock in all), settle (true once it has berthed: its gulls come down on it or
+                   4-7, ahead of any other boat, and no more than half the flock in all), settle (true once it has berthed: its gulls come down on it or
                    near it) and perches ([{x,y,z}] on its deck and wheelhouse, for settling)
      perches       [{x,y,z}] places a gull may stand: rock tops, quay edges, bollards, ridges
      paused        while true the gulls hold still
@@ -8122,7 +8187,7 @@ function gullCall(e){
   if (time-gullCallT<2.5 || Math.hypot(e.x-player.x,e.z-player.z)>140) return;
   gullCallT=time; sndPlay('gulls','world',[e.x,e.y,e.z],{rate:0.9+Math.random()*0.2});
 }
-const GULLS=createGulls(world,{count:36,scale:1.25,range:260,onCall:gullCall});
+const GULLS=createGulls(world,{count:16,scale:1.25,range:260,onCall:gullCall});
 // places a gull may stand within 320 m of the player, gathered again only when the player has moved 60 m or after
 // ten seconds (so that coves whose cliffs have since been built are included)
 const gullPerch={x:NaN,z:NaN,t:0,list:[]};
@@ -8164,11 +8229,11 @@ function gullBoats(){
     o.x=x; o.z=z; o.heading=heading; o.speed=speed; o.length=length; gullBoatList.push(o); return o; };
   for (const s of sailers) add(s,s.m.position.x,s.m.position.z,s.m.rotation.y,s.sp,6.2);
   for (const F of ferries) if (F.R && F.m.visible) add(F,F.m.position.x,F.m.position.z,F.head,F.v,FL);
-  // the fishing boats: one coming home has its catch aboard (8-15 gulls attend it), and one that has just berthed
+  // the fishing boats: one coming home has its catch aboard (4-7 gulls attend it), and one that has just berthed
   // offers its deck and wheelhouse to them
   for (const f of fleetList){ if (!f.vis || f.phase==='moored') continue;
     const o=add(f,f.x,f.z+f.dz,f.heading,f.speed,f.L,900); if (!o) continue;
-    o.catch=f.phase==='back'; o.settle=f.phase==='settle'; o.want=8+Math.floor(hash(f.H.n,f.q,4815)*8);
+    o.catch=f.phase==='back'; o.settle=f.phase==='settle'; o.want=4+Math.floor(hash(f.H.n,f.q,4815)*4);
     if (o.settle && !o.perches){ const c=Math.cos(f.brot), sn=Math.sin(f.brot);
       o.perches=FISH_PERCH.map(([lx,y,lz])=>({x:f.bx+lx*c+lz*sn,y,z:f.bz-lx*sn+lz*c+f.dz,on:o})); }
     if (!o.settle) o.perches=null; }
@@ -8474,7 +8539,7 @@ window.__village={ goods, glZone, branchesAt, genChunk, coastRoadZ, brZ, brY, he
   findCove(){ const n0=Math.floor(player.x/CV_SP); for (let k=0;k<60;k++) for (const n of [n0+k,n0-k]) for (const sd of SIDES){ const cv=coveInfo(sd,n); if (!cv) continue; const G=cvBuild(cv), A=G.cave, W=(u,s)=>{ const [x,z]=cvL2W(cv,u,s); return {x,z}; };
       return {cv,sd,X:cv.X,name:cv.name,cave:cv.cave,beach:W(cvAxis(cv,cv.Bh-Math.max(cv.Bw,2.5)*0.5),cv.Bh-Math.max(cv.Bw,2.5)*0.5),pathTop:W(G.pathTop.u,G.roadS-CR_HW-0.5),pathFoot:W(G.pathFoot.u,G.pathFoot.s),landing:coveLanding(cv),
         mouth:A&&{...W(A.u+A.au*-1.5,A.s+A.as*-1.5),y:A.fM},inside:A&&{...W(A.u+A.au*A.aMax*0.7,A.s+A.as*A.aMax*0.7)},caves:G.caves.length}; } return null; },
-  coveLanding, coveFns:{cvOnPath,cvLand,cvU,cvS,cvL2W,cvAxis,cvBuild,coveAtXZ,coveCaveCell,cvCaveLocal},
+  coveLanding, coveFns:{cvOnPath,cvLand,cvU,cvS,cvL2W,cvAxis,cvBuild,coveAtXZ,coveCaveCell,cvCaveLocal,coveNoWalk},
   coveInfo, walkGround, coveMoveOk, standableAt, get holdT(){ return player.holdT; },
   findIsland(){ const m0=Math.floor(player.x/ISL); for (let k=0;k<20;k++) for (const m of [m0+k,m0-k]) for (const sd of SIDES){ const I=islandInfo(sd,m); if (I) return I; } return null; },
   player,chunks,get mode(){return mode},toggleView,setYaw:v=>yaw=v,setPitch:v=>pitch=v,setFpPitch:v=>fpPitch=v,setDist:v=>dist=v,keys,heightAt};

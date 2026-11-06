@@ -305,9 +305,9 @@ function createDinghy(parent, opts={}){
     x.fillStyle=O.sail; x.fillRect(0,0,256,512);
     // seams of the cloths, square to the leech, and a darker leech tape
     x.strokeStyle='rgba(120,98,70,0.22)'; x.lineWidth=2; for (let k=1;k<9;k++){ const y=512-k*52; x.beginPath(); x.moveTo(0,y+40); x.lineTo(256,y-10); x.stroke(); }
-    // the number, on the starboard side higher than on the port side, as on a real sail
+    // a number, if one is given, on the starboard side higher than on the port side, as on a real sail
     const sx=(256/2.75)/(512/3.6), cx=back?92:78, cy=back?262:212;
-    x.save(); x.translate(cx,cy); x.scale(back?-sx:sx,1); x.fillStyle=O.mark; x.font='700 86px "Alegreya Sans", "Gill Sans", sans-serif'; x.textAlign='center'; x.textBaseline='middle'; x.fillText(O.number,0,0); x.restore();
+    if (O.number){ x.save(); x.translate(cx,cy); x.scale(back?-sx:sx,1); x.fillStyle=O.mark; x.font='700 86px "Alegreya Sans", "Gill Sans", sans-serif'; x.textAlign='center'; x.textBaseline='middle'; x.fillText(O.number,0,0); x.restore(); }
     const t=new THREE.CanvasTexture(c); t.colorSpace=THREE.SRGBColorSpace; t.anisotropy=4; return t; }
   const sailTexF=sailTex(false), sailTexB=sailTex(true);
 
@@ -804,9 +804,9 @@ function walkAt(x,z){ let h=groundH(x,z);
 /* ================= the dinghy in the testbench ================= */
 const audio={ctx:null,muted:false,bow:null,flap:null,master:null,noise:null};
 const soundLog=[];
-const D=createDinghy(scene,{number:'17',mooring:JSON.parse(JSON.stringify(MOOR)),onSound:(k,s)=>{ soundLog.push([k,+s.toFixed(2),+time.toFixed(2)]); if (soundLog.length>60) soundLog.shift(); sfx(k,s); }});
+const D=createDinghy(scene,{number:'',mooring:JSON.parse(JSON.stringify(MOOR)),onSound:(k,s)=>{ soundLog.push([k,+s.toFixed(2),+time.toFixed(2)]); if (soundLog.length>60) soundLog.shift(); sfx(k,s); }});
 const others=[
-  createDinghy(scene,{number:'9',hull:'#2f5f8f',band:'#f2ede4',bottom:'#7a2f26',mooring:{x:-46,z:-17.4,head:0.04,stern:{x:-46,y:2.05,z:-20.7},bow:{x:-46.6,y:0.1,z:-9}}}),
+  createDinghy(scene,{number:'',hull:'#2f5f8f',band:'#f2ede4',bottom:'#7a2f26',mooring:{x:-46,z:-17.4,head:0.04,stern:{x:-46,y:2.05,z:-20.7},bow:{x:-46.6,y:0.1,z:-9}}}),
   createDinghy(scene,{number:'23',hull:'#f1e6c8',band:'#b5473a',bottom:'#2f5f8f',sail:'#efe2c6',mark:'#b5473a',mooring:{x:-30,z:-17.4,head:-0.05,stern:{x:-28,y:2.05,z:-20.7},bow:{x:-29.2,y:0.1,z:-9}}}),
 ];
 for (const o of others) obstacles.circles.push({x:o.options.mooring.bow.x,z:o.options.mooring.bow.z,r:0.3,top:Infinity});
