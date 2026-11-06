@@ -113,7 +113,7 @@ const hex=h=>new THREE.Color(h);
    the field depends only on position and time, a sudden jump in position (Coast's wrap of the world) is
    harmless. */
 function createWind(opts={}){
-  const O=Object.assign({speed:5,dir:Math.PI/2,gust:0.4,shift:1,scale:36,seed:11,shelter:null,hour:null,onshore:null},opts);
+  const O=Object.assign({speed:5,dir:Math.PI/2,gust:0.4,shift:1,scale:36,seed:11,shelter:null,exposure:null,hour:null,onshore:null},opts);
   const N=64, TAU=Math.PI*2, cl=(v,a,b)=>Math.max(a,Math.min(b,v)), sm=(a,b,x)=>{ const t=cl((x-a)/(b-a),0,1); return t*t*(3-2*t); };
   let sd=(O.seed>>>0)||1;
   const R=()=>{ sd=(sd+0x6D2B79F5)>>>0; let t=sd; t=Math.imul(t^t>>>15,t|1); t^=t+Math.imul(t^t>>>7,t|61); return ((t^t>>>14)>>>0)/4294967296; };
@@ -146,6 +146,7 @@ function createWind(opts={}){
       const sea=2.4*sm(10,13,hr)*sm(19,16.5,hr), land=1.4*(hr>12?sm(21,23,hr):sm(7,5,hr));
       vx+=-Math.sin(on)*sea+Math.sin(on)*land; vz+=-Math.cos(on)*sea+Math.cos(on)*land; }
     if (O.shelter){ const k=1-0.7*cl(O.shelter(x,z)||0,0,1); vx*=k; vz*=k; }
+    if (O.exposure){ const k=O.exposure(x,z)||1; vx*=k; vz*=k; }   // stronger out on the open sea
     const s=Math.hypot(vx,vz), d=s>1e-6?Math.atan2(-vx,-vz):dir;
     if (out){ out.x=vx; out.z=vz; out.speed=s; out.dir=d; out.gust=g; return out; }
     return {x:vx,z:vz,speed:s,dir:d,gust:g};

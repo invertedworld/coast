@@ -171,18 +171,38 @@ function createDolphins(parent, opts={}){
   const ghostCol=hex('#183650'), ghostMat=new THREE.MeshBasicMaterial({color:ghostCol.clone(),transparent:true,opacity:O.ghost,depthWrite:false,
     polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-4});
   ghostMat.onBeforeCompile=sh=>{ patchFlex(sh); sh.uniforms.uSeaY=ghostU.uSeaY;
-    sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nvarying float vDepth; uniform float uSeaY; attribute float aSea;')
+    sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nvarying float vDepth; varying float vLook; uniform float uSeaY; attribute float aSea;')
       .replace('#include <project_vertex>',`vec4 wp=vec4(transformed,1.0);
         #ifdef USE_INSTANCING
           wp=instanceMatrix*wp;
         #endif
         float sy=uSeaY+aSea; wp=modelMatrix*wp; vDepth=sy-wp.y;
         vec3 sp=wp.xyz; if (wp.y<sy && cameraPosition.y>sy){ sp=cameraPosition+(wp.xyz-cameraPosition)*((cameraPosition.y-sy)/(cameraPosition.y-wp.y)); }
-        vec4 mvPosition=viewMatrix*vec4(sp,1.0); gl_Position=projectionMatrix*mvPosition;`);
-    sh.fragmentShader=sh.fragmentShader.replace('#include <common>','#include <common>\nvarying float vDepth;')
-      .replace('vec4 diffuseColor = vec4( diffuse, opacity );','if (vDepth<0.0) discard; vec4 diffuseColor=vec4(diffuse,opacity*exp(-vDepth/2.0)*smoothstep(0.0,0.25,vDepth));'); };
+        vLook=normalize(cameraPosition-sp).y; vec4 mvPosition=viewMatrix*vec4(sp,1.0); gl_Position=projectionMatrix*mvPosition;`);
+    sh.fragmentShader=sh.fragmentShader.replace('#include <common>','#include <common>\nvarying float vDepth; varying float vLook;')
+      // seen at a low angle the surface reflects the sky and hides what is under it; only looking down into the water
+      // does the shape show, and then faintly
+      .replace('vec4 diffuseColor = vec4( diffuse, opacity );','if (vDepth<0.0) discard; float lk=smoothstep(0.3,0.8,vLook); if (lk<0.01) discard; vec4 diffuseColor=vec4(diffuse,opacity*lk*exp(-vDepth/2.0)*smoothstep(0.0,0.25,vDepth));'); };
   ghostMat.customProgramCacheKey=()=>'dolphin-ghost';
   const ghost=new THREE.InstancedMesh(geo,ghostMat,MAXD); ghost.instanceMatrix=body.instanceMatrix; ghost.frustumCulled=false; ghost.count=0; ghost.renderOrder=2;
+  // the parts of the bodies above the water mark the stencil, and the shapes under water are not drawn there, so that
+  // a dolphin out of the water is never seen through to the shape of another one beyond it
+  const maskMat=new THREE.MeshBasicMaterial({colorWrite:false,depthWrite:false,stencilWrite:true,stencilRef:1,
+    stencilFunc:THREE.AlwaysStencilFunc,stencilZPass:THREE.ReplaceStencilOp});
+  maskMat.onBeforeCompile=sh=>{ patchFlex(sh); sh.uniforms.uSeaY=ghostU.uSeaY;
+    sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nvarying float vAbove; uniform float uSeaY; attribute float aSea;')
+      .replace('#include <project_vertex>',`#include <project_vertex>
+        vec4 mw=vec4(transformed,1.0);
+        #ifdef USE_INSTANCING
+          mw=instanceMatrix*mw;
+        #endif
+        mw=modelMatrix*mw; vAbove=mw.y-(uSeaY+aSea);`);
+    sh.fragmentShader=sh.fragmentShader.replace('#include <common>','#include <common>\nvarying float vAbove;')
+      .replace('vec4 diffuseColor = vec4( diffuse, opacity );','if (vAbove<0.0) discard; vec4 diffuseColor=vec4(diffuse,opacity);'); };
+  maskMat.customProgramCacheKey=()=>'dolphin-mask';
+  const mask=new THREE.InstancedMesh(geo,maskMat,MAXD); mask.instanceMatrix=body.instanceMatrix; mask.frustumCulled=false; mask.count=0; mask.renderOrder=1;
+  ghostMat.stencilWrite=true; ghostMat.stencilRef=1; ghostMat.stencilFunc=THREE.NotEqualStencilFunc;
+  ghostMat.stencilFail=ghostMat.stencilZFail=ghostMat.stencilZPass=THREE.KeepStencilOp;
 
   /* ---------- foam rings where the water is broken ---------- */
   const MAXR=240, foamCol=hex('#f4f1e8');
@@ -243,7 +263,7 @@ function createDolphins(parent, opts={}){
   spray.onBeforeRender=(renderer,scene,camera)=>{ renderer.getDrawingBufferSize(_sz); fxU.uScale.value=_sz.y/(2*Math.tan(THREE.MathUtils.degToRad((camera.fov||50)/2))); };
   const PT=[];   // live particles: {x,y,z,vx,vy,vz,age,life,size,a,mist}
   pGeo.setDrawRange(0,0);
-  parent.add(body,ghost,rings,spray);
+  parent.add(body,mask,ghost,rings,spray);
 
   const sound=(k,x,y,z,s)=>{ if (O.onSound) try { O.onSound(k,x,y,z,s); } catch(e){} };
   function ring(x,z,r0,r1,life,str){ if (RG.length>=MAXR) RG.shift(); RG.push({x,z,r0,r1,age:0,life,str,seed:R()}); }
@@ -480,7 +500,7 @@ function createDolphins(parent, opts={}){
     let i=0;
     for (const d of dolphins){ if (d.pod.dormant) continue; _e.set(-d.pitch,d.head,d.roll,'YXZ'); _q.setFromEuler(_e); const sw=seaAt?seaAt(d.x,d.z):0; _p.set(d.x,d.y+sw,d.z); _s.setScalar(d.scale);
       _m.compose(_p,_q,_s); body.setMatrixAt(i,_m); flexA.setXYZ(i,d.flex,d.amp/d.scale,d.curv*d.scale); seaA.setX(i,sw); i++; }
-    body.count=ghost.count=i; body.instanceMatrix.needsUpdate=true; flexA.needsUpdate=true; seaA.needsUpdate=true;
+    body.count=ghost.count=mask.count=i; body.instanceMatrix.needsUpdate=true; flexA.needsUpdate=true; seaA.needsUpdate=true;
     _q.identity();
     RG.forEach((g,i)=>{ const r=lerp(g.r0,g.r1,Math.sqrt(g.age)); _p.set(g.x,seaY(g.x,g.z)+0.02,g.z); _s.set(r,1,r); _m.compose(_p,_q,_s); rings.setMatrixAt(i,_m); ringA.setXYZ(i,g.age,g.seed,g.str); });
     rings.count=RG.length; rings.instanceMatrix.needsUpdate=true; ringA.needsUpdate=true;
@@ -525,16 +545,16 @@ function createDolphins(parent, opts={}){
   function reset(){ RG.length=0; PT.length=0; for (const p of pods){ p.dormant=true; p.retry=0; } if (started) write(); }
   // the world has moved by dz from north to south (Coast repeats every WRAP_Z)
   function shift(dz){ for (const p of pods) p.z+=dz; for (const d of dolphins) d.z+=dz; for (const g of RG) g.z+=dz; for (const q of PT) q.z+=dz; if (started) write(); }
-  function dispose(){ parent.remove(body,ghost,rings,spray); geo.dispose(); ringGeo.dispose(); pGeo.dispose();
-    for (const m of [bodyMat,depthMat,ghostMat,ringMat,sprayMat]) m.dispose(); }
-  return {update,setOptions,trigger,reset,shift,dispose,get dolphins(){ return dolphins; },get pods(){ return pods; },get seeker(){ return seeker; },options:O,meshes:{body,ghost,rings,spray}};
+  function dispose(){ parent.remove(body,mask,ghost,rings,spray); geo.dispose(); ringGeo.dispose(); pGeo.dispose();
+    for (const m of [bodyMat,depthMat,ghostMat,maskMat,ringMat,sprayMat]) m.dispose(); }
+  return {update,setOptions,trigger,reset,shift,dispose,get dolphins(){ return dolphins; },get pods(){ return pods; },get seeker(){ return seeker; },options:O,meshes:{body,mask,ghost,rings,spray}};
 }
 /* ================= end of dolphins ================= */
 
 
 /* ================= testbench scene: renderer, sky, sea, an island, a ferry ================= */
 const canvas=document.getElementById('scene');
-const renderer=new THREE.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance',preserveDrawingBuffer:true});
+const renderer=new THREE.WebGLRenderer({canvas,antialias:true,stencil:true,powerPreference:'high-performance',preserveDrawingBuffer:true});
 renderer.setPixelRatio(Math.min(devicePixelRatio,2));
 renderer.outputColorSpace=THREE.SRGBColorSpace;
 renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.toneMappingExposure=1.0;
