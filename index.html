@@ -5517,7 +5517,7 @@ function dgyNearest(x,z){ let best=null, bd=1e9; for (const e of dinghies.values
 // Y: step ashore while sailing near land, or out at sea return to the quay beside the dinghy's berth; board a dinghy
 // within 6 m; otherwise go to the quay beside the nearest one
 function dinghyKey(){
-  if (sailD){ if (!dinghyAshore(false)) dinghyHome(); return; }
+  if (sailD){ if (!dinghyAshore(false)){ const HB=dgyHarbourAt(sailD.state.x,sailD.state.z); if (HB) dinghyDock(HB); else dinghyHome(); } return; }
   const N=dgyNearest(player.x,player.z);
   if (mode==='street' && N && N.e.D.canBoard(player.x,player.z)){ dinghyBoard(N.e); return; }
   dinghyGo(); }
@@ -5531,14 +5531,39 @@ function dinghyAshore(force){
   const D=sailD; let L=D.leave(dgyCtx);
   // only onto low and gently sloping ground, such as a quay, a beach or a cove's landing: never a cliff, a ledge or a
   // rock out at sea, from which there would be no way on
-  if (L && !force){ const g=walkGround(L.x,L.z,1e3); let steep=false;
-    for (const [dx,dz] of [[1.2,0],[-1.2,0],[0,1.2],[0,-1.2]]) if (Math.abs(walkGround(L.x+dx,L.z+dz,1e3)-g)>0.7) steep=true;
-    if (g>3 || g<0 || steep || seaDist(L.x,L.z)<-120) L=null; }
+  // a quay inside a harbour is always good; elsewhere at least three of the eight points 1.2 m round the landing must
+  // be dry ground within 0.7 m of its height, so that there is somewhere to walk on to (the water beside a quay or a
+  // beach does not count against it)
+  if (L && !force){ const g=walkGround(L.x,L.z,1e3), HB=harbourAt(shoreSide(L.x,L.z),L.x);
+    const inHarbour=HB && Math.abs(L.x-HB.x)<HB.W/2+6 && hbS(HB,L.x,L.z)>-HB.L-6 && hbS(HB,L.x,L.z)<14;
+    let flat=0; for (let k=0;k<8;k++){ const a=k*Math.PI/4, x=L.x+Math.cos(a)*1.2, z=L.z+Math.sin(a)*1.2, h=walkGround(x,z,1e3);
+      if (heightAt(x,z)>0.05 && h>0.05 && Math.abs(h-g)<=0.7) flat++; }
+    if (!inHarbour && (g<0 || g>8 || flat<3 || seaDist(L.x,L.z)<-120)) L=null;
+    // in a harbour the dinghy is moored again on its stern line and buoy at that harbour's berth; if it came from
+    // another harbour, the dinghy that lay here goes to the berth it came from, so that each harbour keeps one
+    if (L && inHarbour && dinghyBerth(HB)) dgyBerthIn(D,HB); }
   if (!L){ if (!force) return false; D.state.crewed=false; L={x:D.state.x,y:Math.max(0,heightAt(D.state.x,D.state.z)),z:D.state.z,head:D.state.head}; }
   sailD=null; dgyChase=false; player.x=L.x; player.z=L.z; player.y=L.y; player.vy=0; player.holdT=1.5; eyeY=null;
   yaw=L.head+Math.PI; fpPitch=-0.15;
   if (mode==='dinghy'){ mode='street'; camera.fov=70; camera.updateProjectionMatrix(); glowScale(); }
   return true; }
+// a dinghy moored at the berth of harbour HB: if it came from another harbour, the dinghy that lay at HB goes to the
+// berth it came from, so that each harbour keeps one; returns HB's entry
+function dgyBerthIn(D,HB){
+  const eS=[...dinghies.values()].find(q=>q.D===D), eH=dgyMake(HB); if (!eH) return null;
+  const cp=B=>JSON.parse(JSON.stringify({x:B.x,z:B.z,head:B.head,stern:B.stern,bow:B.bow}));
+  if (eS && eS!==eH){ const other=eH.D; eH.D=D; eS.D=other; other.moor(cp(eS.B)); }
+  D.moor(cp(eH.B)); return eH; }
+// the harbour whose basin, with a few metres round it, holds (x,z), if it has a berth for a dinghy
+function dgyHarbourAt(x,z){ const HB=harbourAt(shoreSide(x,z),x);
+  return HB && dinghyBerth(HB) && Math.abs(x-HB.x)<HB.W/2+10 && hbS(HB,x,z)>-HB.L-12 && hbS(HB,x,z)<14 ? HB : null; }
+// Y in a harbour where the boat cannot be stepped out of where she lies: she is moored at this harbour's berth and
+// the player stands on the quay beside her
+function dinghyDock(HB){
+  const D=sailD; D.state.crewed=false; sailD=null; dgyChase=false;
+  if (mode==='dinghy'||mode==='above'){ mode='street'; scene.fog.near=90; scene.fog.far=1500; camera.fov=70; camera.near=0.1; camera.far=3600;
+    camera.updateProjectionMatrix(); glowScale(); sea.scale.setScalar(1); islandMesh.visible=false; farMesh.visible=farGlow.visible=true; }
+  const eH=dgyBerthIn(D,HB); dgyTravel(HB,eH?eH.B:dinghyBerth(HB)); }
 // Y out at sea: the dinghy goes back to its own berth and the player stands on the quay beside it
 function dinghyHome(){
   const D=sailD, e=[...dinghies.values()].find(q=>q.D===D);
