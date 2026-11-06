@@ -59,7 +59,8 @@ The panel opened with **H** lists the controls. They are reproduced here for ref
 | Two-finger drag | Pans across the island in the bird's-eye view. |
 | Arrow keys | Turn and tilt the bird's-eye view. |
 | B | Turns tilt-shift on or off in the bird's-eye and chase views. |
-| T | Speeds up time while held. |
+| T | Speeds up time while held, forty times. |
+| Shift + T | Runs time backwards at the same rate while held. The clock, the sun, the stars and everything timed by the clock, such as the fishing boats, go back; the church bells do not strike the hours passed backwards. |
 | P | Pauses the world: the trains, ferries, boats, dolphins, sea, lighthouse beams, cats, gulls and time of day stand still while the player walks, flies and looks about as usual. P again resumes. |
 | R | Rides in the passenger train's cab. R or V again steps off beside the track. |
 | C | Follows the train being ridden, or else the nearer of the passenger and goods trains, from behind. The mouse orbits the camera and + − change its distance. C or V again steps off beside the track. While sailing, C changes between the helm and a view from astern of the dinghy, 11 m off at first, which the mouse carries round her and + − bring nearer or further, between 5 and 80 m; R, G, C and F do not take the player to a train or a ferry until they are ashore. |
@@ -160,7 +161,7 @@ Beyond the rings, a coarse far terrain (`FN = 200` cells of `FS = 22` m) covers 
 
 ### Trees and plants
 
-The island carries seventeen kinds of tree and plant. The cypress, the olive and a round broadleaf are built by `addTree`; the others are built by `addFlora`, which `addTree` calls for any kind listed in `FLORA`:
+The island carries sixteen kinds of tree and plant. The cypress, the olive and a round broadleaf are built by `addTree`; the others are built by `addFlora`, which `addTree` calls for any kind listed in `FLORA`:
 
 | Kind | Form |
 |---|---|
@@ -174,16 +175,15 @@ The island carries seventeen kinds of tree and plant. The cypress, the olive and
 | Canary palm (`palm`) | A stout straight trunk and a full head of 26 arching fronds. |
 | Date palm (`date`) | A taller, slimmer trunk with a slight curve, a sparser head of grey-green fronds, and dates. |
 | Fan palm (`fanpalm`) | A tall slim trunk with a compact head of fan leaves over a brown skirt of dead ones. |
-| Oleander (`oleander`) | A dense upright shrub of dark leaves with pink or white flowers, drawn with the bougainvillea's surface pattern (`SV`). |
-| Prickly pear (`opuntia`) | A clump of up to 18 flat pads, each growing from the rim of the one below, with red fruit on the outermost. |
+| Prickly pear (`opuntia`) | A clump of up to 18 flat grey-green pads, each growing from the rim of the one below. |
 | Agave (`agave`) | A rosette of 16–20 thick blue-grey leaves; three in ten carry a flowering stem 4.5–6.5 m tall branching into yellow flowers. |
-| Maquis (`maquis`) | A low clump of two or three mounds of lentisk, dark and dense, or of rosemary, lower and grey-green. |
+| Maquis (`maquis`) | A low clump of two or three mounds of lentisk, mid-green and dense, or of rosemary, lower and grey-green. |
 
-Each plant draws its variation of size, lean and tint from a random sequence of its own, seeded from its position, so the block's sequence is undisturbed and the plant is identical at every level of detail. Trees lean downhill, which on a coast or a clifftop is towards the sea, unless the ground is nearly level. Trees take a collision circle at the trunk and are recorded in `treeSpots`, which the wind in the trees and the cafés' placement use; oleanders, prickly pears and agaves take a circle round the whole plant, and maquis takes none, as the scrub did before it. Everything is merged into the block's geometry, so no draw calls are added. At full detail a tree has 400–1,050 triangles. At the simplified level, fruit, twigs, the almond's side shoots and the lighter tops of the stone pine's clumps are left out, a prickly pear or an agave becomes one mass of its colour, an oleander's flowers are carried by the pattern on one of its masses, and maquis becomes one mound. In the outlines, prickly pears, agaves and maquis are left out, a palm's head becomes one mass, and the Aleppo pine, holm oak, carob and fig keep every other lobe of their crowns. Each plant takes the same random numbers whether or not a part is drawn, so its shape does not change when its block changes detail. Compared with the vegetation it replaced, a block has about 2 per cent fewer triangles at full detail, 9 per cent more at the simplified level and 1 per cent more in the outlines.
+Each plant draws its variation of size, lean and tint from a random sequence of its own, seeded from its position, so the block's sequence is undisturbed and the plant is identical at every level of detail. Trees lean downhill, which on a coast or a clifftop is towards the sea, unless the ground is nearly level. Trees take a collision circle at the trunk and are recorded in `treeSpots`, which the wind in the trees and the cafés' placement use; prickly pears and agaves take a circle round the whole plant, and maquis takes none, as the scrub did before it. Everything is merged into the block's geometry, so no draw calls are added. At full detail a tree has 400–1,050 triangles. At the simplified level, fruit, twigs, the almond's side shoots and the lighter tops of the stone pine's clumps are left out, a prickly pear or an agave becomes one mass of its colour, and maquis becomes one mound. In the outlines, prickly pears, agaves and maquis are left out, a palm's head becomes one mass, and the Aleppo pine, holm oak, carob and fig keep every other lobe of their crowns. Each plant takes the same random numbers whether or not a part is drawn, so its shape does not change when its block changes detail. Compared with the vegetation it replaced, a block has about 3 per cent fewer triangles at full detail, 9 per cent more at the simplified level and 1 per cent more in the outlines.
 
 Plants are placed by habitat, from the block's seed:
 
-- **Villages.** The trees between the houses are cypress (32 per cent), citrus (18), fig (12), oleander (10), almond (4) and the round broadleaf. In a shore block, by the water, 14 per cent are palms of the three kinds. A third of the larger squares have one or two palms of a single kind at their edge, and a fifth have orange or lemon trees. Half the walled orchards are groves of lemons and oranges with a fig or two; the others mix olives, citrus, figs, almonds and the round broadleaf.
+- **Villages.** The trees between the houses are cypress (32 per cent), citrus (18), fig (12), almond (4) and the round broadleaf. In a shore block, by the water, 14 per cent are palms of the three kinds. A third of the larger squares have one or two palms of a single kind at their edge, and a fifth have orange or lemon trees. Half the walled orchards are groves of lemons and oranges with a fig or two; the others mix olives, citrus, figs, almonds and the round broadleaf.
 - **Olive groves and farms.** The terraced rows of olives remain, with an occasional cypress, carob or almond. A farm's sparser rows are half olives, with almonds, carobs and figs. A fig stands beside each farmhouse and a prickly pear against its wall.
 - **Roadsides and the railway.** One in five of the roads lined with trees has a few stone pines, 13 m apart and leaning over the road, in place of the row of cypresses. In open country, oleanders stand here and there on the inland side of the coast road and beside the railway.
 - **Open rocky country.** Among the limestone outcrops and the scrub, which is partly maquis, grow carob, holm oak, almond, olive, a few Aleppo pines, cypress, prickly pears and agaves.

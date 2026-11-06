@@ -44,7 +44,7 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
 
 <canvas id="scene" tabindex="0" aria-label="Procedurally generated medieval village"></canvas>
 <div class="vignette"></div>
-<div class="loading" id="loading">Laying out the village…</div>
+<div class="loading" id="loading">World building…</div>
 <div class="stats" id="stats" hidden aria-label="Statistics"></div>
 <div class="seeding" id="seeding" hidden><span></span><b><i></i></b></div>
 
@@ -117,6 +117,7 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
     <div class="group"><h3>Time</h3>
       <div class="row"><span><kbd>N</kbd></span><span>Night or day</span></div>
       <div class="row"><span>Hold <kbd>T</kbd></span><span>Speed up time</span></div>
+      <div class="row"><span>Hold <kbd>Shift</kbd><kbd>T</kbd></span><span>Reverse time</span></div>
       <div class="row"><span><kbd>P</kbd></span><span>Pause the world</span></div>
     </div>
     <div class="group"><h3>Island</h3>
@@ -2039,7 +2040,7 @@ function addCafes(gb,ch,P){
    Besides the cypress, the olive and the round broadleaf of addTree, the island grows the trees and plants of a
    Mediterranean coast, each built by addFlora from a few low shapes merged into the block like everything else:
    stone (umbrella) pines, Aleppo pines, holm oaks, carobs, figs, lemons and oranges, almonds, Canary and date palms,
-   fan palms, oleanders, prickly pears, agaves and the low maquis of lentisk and rosemary. Each plant takes its
+   fan palms, prickly pears, agaves and the low maquis of lentisk and rosemary. Each plant takes its
    variation of size, lean and tint from its own random sequence, seeded from where it stands, so the block's own
    sequence is not disturbed and the plant is the same at every level of detail; only the shapes drawn differ. At the
    simplified levels the small parts (twigs, fruit, single leaves and pads) are left out and a plant whose shape
@@ -2080,12 +2081,12 @@ const FLC={
   carob:hex('#3b5a25'), carobBark:hex('#5e4c3e'), fig:hex('#628a34'), figBark:hex('#9c978a'),
   citrus:hex('#355a25'), lemon:hex('#efd23c'), orange:hex('#ec8a26'), almond:hex('#98a676'), almondBark:hex('#4f3f34'),
   frond:hex('#557a32'), dateFrond:hex('#7b8d58'), fan:hex('#64883a'), palmBark:hex('#8c7658'), skirt:hex('#8b7a5c'), dates:hex('#c4782e'),
-  oleLeaf:hex('#3f5a2e'), oleander:['#ea8db2','#db6593','#f3ece4','#f2a6c2','#c94f7c'].map(hex), opuntia:hex('#6f8b4d'), pear:hex('#c74a3a'),
+  opuntia:hex('#6f8b4d'),
   agave:hex('#7d988f'), agave2:hex('#8ea27c'), spike:hex('#8e7c55'), bloom:hex('#d9c049'),
-  lentisk:hex('#4b5d2e'), rosemary:hex('#6e7956'),
+  lentisk:hex('#5d7238'), rosemary:hex('#7f8a62'),
 };
 // the kinds addFlora builds; trees take a collision circle at the trunk and are heard in the wind (treeSpots)
-const FLORA={stonepine:1,aleppo:1,holm:1,carob:1,fig:1,citrus:1,almond:1,palm:1,date:1,fanpalm:1,oleander:0,opuntia:0,agave:0,maquis:0};
+const FLORA={stonepine:1,aleppo:1,holm:1,carob:1,fig:1,citrus:1,almond:1,palm:1,date:1,fanpalm:1,opuntia:0,agave:0,maquis:0};
 function addFlora(gb,ch,x,z,s=1,base,kind,lean){
   if (base===undefined) base=heightAt(x,z)-gb.oy;
   const r=rng(Math.floor(hash(Math.round(x*16),Math.round(z*16),kind.length*131+7)*4294967296)), lod=gb.lod;
@@ -2198,18 +2199,9 @@ function addFlora(gb,ch,x,z,s=1,base,kind,lean){
       gb.add(TV.blade,segM([p2[0],p2[1]+0.3*s,p2[2]],q1,0.12*s,0.06*s),FLC.skirt,null);
       gb.add(TV.blade,segM(q1,q2,1.8*s,0.08*s,0.25),sh(FLC.fan,0.08),null); }
     if (ch) ch.circles.push({x,z,r:0.25*s,top:Infinity});
-  } else if (kind==='oleander'){
-    // a dense upright shrub, its dark leaves thick with pink or white flowers (the bougainvillea's pattern, SV)
-    const c=pick(r,FLC.oleander), n=3+Math.floor(r()*2), lf=sh(FLC.oleLeaf,0.06), tops=[];
-    for (let i=0;i<n;i++){ const a=r()*6.28, rr=(0.3+r()*0.6)*s, hh=(1.6+r()*0.9)*s, w=(1.3+r()*0.6)*s, mx=x+Math.cos(a)*rr, mz=z+Math.sin(a)*rr;
-      // beyond full detail the flowers are carried by the pattern on the first mass
-      const fl=lod>0&&i===0; gb.add(T.sphLo,mat(mx,Y+hh*0.48,mz,w,hh,w*0.92,r()*6.28),fl?sh(c,0.05):lf.clone().multiplyScalar(0.9+r()*0.2),Y,fl?SV:0); tops.push([mx,Y+hh*0.48,mz,w,hh,a]); }
-    if (lod===0) for (const [mx,my,mz,w,hh,a] of tops) for (let j=0;j<3;j++){ const b=a+(j-1)*1.3+r()*0.5, v=0.2+r()*0.6, o=0.4*(1-v*0.45);
-      gb.add(T.sphLo,mat(mx+Math.cos(b)*w*o,my+hh*0.42*v,mz+Math.sin(b)*w*o,w*0.4,hh*0.3,w*0.4,r()*6.28),sh(c,0.05),null,SV); }
-    if (ch) ch.circles.push({x,z,r:0.75*s,top:Infinity});
   } else if (kind==='opuntia'){
-    // prickly pear: chains of flat oval pads, each growing from the rim of the one below, with red fruit on the
-    // outermost; at a distance, one grey-green mass
+    // prickly pear: chains of flat oval pads, each growing from the rim of the one below; at a distance, one
+    // grey-green mass
     if (lod===1) ell(T.sphLo,x,Y+0.6*s,z,2.2*s,1.7*s,2.0*s,sh(FLC.opuntia,0.05),r()*6.28);
     else if (lod>=2) {}   // too small to draw in the outlines
     else { const c=sh(FLC.opuntia,0.05), q=[]; for (let i=0;i<3;i++){ const a=r()*6.28; q.push([x+Math.cos(a)*0.6*s,Y-0.05,z+Math.sin(a)*0.6*s,0]); }
@@ -2220,8 +2212,7 @@ function addFlora(gb,ch,x,z,s=1,base,kind,lean){
         const mx=(px+tx)/2, my=(py+ty)/2, mz=(pz+tz)/2;
         gb.add(T.ico,segM([mx,my,mz],[mx+tx-px,my+ty-py,mz+tz-pz],0.5*s,0.12*s,a+1.57),c.clone().multiplyScalar(0.9+r()*0.2),null);
         made++;
-        if (g<2){ const kids=1+(r()<0.7?1:0); for (let j=0;j<kids;j++){ const e=(j?-1:1)*0.18*s; q.push([tx+ca*e,ty-0.1*s,tz+sa*e,g+1]); } }
-        else if (r()<0.7) for (let j=0;j<2;j++) ell(T.ico,tx+(r()-0.5)*0.25*s,ty+0.02,tz+(r()-0.5)*0.25*s,0.1*s,0.13*s,0.1*s,sh(FLC.pear,0.1)); }
+        if (g<2){ const kids=1+(r()<0.7?1:0); for (let j=0;j<kids;j++){ const e=(j?-1:1)*0.18*s; q.push([tx+ca*e,ty-0.1*s,tz+sa*e,g+1]); } } }
     }
     if (ch) ch.circles.push({x,z,r:0.8*s,top:Infinity});
   } else if (kind==='agave'){
@@ -2247,8 +2238,8 @@ function addFlora(gb,ch,x,z,s=1,base,kind,lean){
 // on a crest, and few), and in open country, on the coast and on the islands; q is a random number from the block
 function villageKind(ch,x,z,q){
   if (ch.kind==='shore'){ const h=hash(Math.round(x),Math.round(z),7405);
-    return q<0.14?(h<0.4?'palm':h<0.7?'fanpalm':'date'):q<0.3?'oleander':q<0.46?'citrus':q<0.6?'cypress':q<0.72?'fig':undefined; }
-  return q<0.32?'cypress':q<0.5?'citrus':q<0.62?'fig':q<0.72?'oleander':q<0.76?'almond':undefined;
+    return q<0.14?(h<0.4?'palm':h<0.7?'fanpalm':'date'):q<0.46?'citrus':q<0.6?'cypress':q<0.72?'fig':undefined; }
+  return q<0.32?'cypress':q<0.5?'citrus':q<0.62?'fig':q<0.66?'almond':undefined;
 }
 function wildKind(ch,x,z,q){
   if (q<0.1 && (ch.pines||0)<3 && hash(ch.cx,ch.cz,7403)<0.5 && onCrest(x,z)){ ch.pines=(ch.pines||0)+1; return 'stonepine'; }
@@ -2257,7 +2248,7 @@ function wildKind(ch,x,z,q){
 function countryKind(ch,x,z,q){
   if (ch.kind==='rocky') return q<0.18?'carob':q<0.34?'holm':q<0.44?'almond':q<0.56?'olive':q<0.62?'aleppo':q<0.7?'opuntia':q<0.78?'cypress':q<0.84?'agave':q<0.92?'maquis':null;
   if (ch.kind==='isle') return q<0.26?'aleppo':q<0.34?'holm':q<0.46?'agave':q<0.54?'cypress':q<0.62?'opuntia':q<0.9?'maquis':null;
-  return q<0.3?'agave':q<0.5?'opuntia':q<0.75?'aleppo':q<0.85?'oleander':null;
+  return q<0.3?'agave':q<0.5?'opuntia':q<0.75?'aleppo':null;
 }
 function addTree(gb,ch,x,z,R,s=1,base,kind){
   if (kind in FLORA) return addFlora(gb,ch,x,z,s,base,kind);
@@ -3584,13 +3575,6 @@ function genChunk(cx,cz,lod=0){
           if (!okPt(x,z,0.9) || railPerp(x,z)<7 || ch.place.some(o=>obbCircleDist(o,x,z)<(pines?2.5:1.4))) continue;
           if (pines){ addFlora(gb,ch,x,z,0.8+R()*0.25,undefined,'stonepine',[-sg,0,0.3]); ch.place.push({x,z,hw:2,hd:2,rot:0}); }
           else { addTree(gb,ch,x,z,R,0.9+R()*0.15,undefined,'cypress'); ch.place.push({x,z,hw:0.9,hd:0.9,rot:0}); } } }
-      // oleanders here and there along the inland side of the coast road and beside the railway
-      for (let x=x0+1+hash(cx,cz,7409)*6; x<x0+C-1; x+=7){
-        for (const sd of SIDES){ const zr=coastRoadZ(sd,x), z=zr+sd*(CR_HW+2.4); if (z<z0||z>=z0+C||hash(Math.round(x),sd,7410)>0.4) continue;
-          if (okPt(x,z,1.5) && railPerp(x,z)>6 && !ch.place.some(o=>obbCircleDist(o,x,z)<1.5)){ addFlora(gb,ch,x,z,0.85+R()*0.3,undefined,'oleander'); ch.place.push({x,z,hw:1,hd:1,rot:0}); } }
-        if (railState(x)==='tunnel') continue;
-        for (const sg of [1,-1]){ const z=railZ(x)+sg*6.6; if (z<z0||z>=z0+C||hash(Math.round(x),sg,7415)>0.25) continue;
-          if (okPt(x,z,1.5) && railPerp(x,z)>5.8 && !ch.place.some(o=>obbCircleDist(o,x,z)<1.5)){ addFlora(gb,ch,x,z,0.85+R()*0.3,undefined,'oleander'); ch.place.push({x,z,hw:1,hd:1,rot:0}); } } }
     }
     if (ch.kind==='olives'||ch.kind==='farm'){
       // rows of olives along the contour, each terrace held up by a low dry-stone wall
@@ -8478,13 +8462,13 @@ function nearbyChunks(){ const pcx=Math.floor(player.x/C), pcz=Math.floor(player
     const ring=Math.max(Math.abs(dx),Math.abs(dz)); if (ring<=1 || ch.reach>(ring-1)*C-2) out.push(ch); }
   return out; }
 /* ---------- climbing: mantling, and sliding on steep roofs ----------
-   A jump lifts the feet 0.87 m (JUMP_V). In the air, running is held to AIR_SP, so that a running jump clears about
-   4 m between roofs of the same height and a walking one about 2.8 m. Jumping at a wall or an edge whose top lies
+   A jump lifts the feet about 0.9 m (JUMP_V). In the air, running is held to AIR_SP, so that a running jump clears
+   about 4 m between roofs of the same height and a walking one about 3 m. Jumping at a wall or an edge whose top lies
    within MANTLE_REACH of the eye, with nothing higher standing on it, climbs onto it over MANTLE_T: the hands take the
    edge and the body is drawn up and over. From the street the top of a wall, a terrace or the eaves of a single
    storey (up to about 3.5 m) can be reached; higher roofs are reached from lower roofs, walls and stairs. A roof
    steeper than ROOF_GRIP cannot be stood on: the player slides down it, faster the steeper it is, and off the eaves. */
-const JUMP_V=5.6, AIR_SP=6.4, MANTLE_REACH=1.2, MANTLE_T=0.5;
+const JUMP_V=5.8, AIR_SP=6.2, MANTLE_REACH=1.2, MANTLE_T=0.5;
 let mantle=null;
 // the highest surface at (x,z) no higher than yhi, or null where something higher stands there
 function topAt(x,z,yhi){
@@ -8502,12 +8486,17 @@ function mantleTry(dx,dz){
   if (mantle || player.grounded || mode!=='street' || (sit&&sit.dir>0) || indoors) return;
   const l=Math.hypot(dx,dz); if (l<0.2) return; dx/=l; dz/=l;
   const reach=player.y+1.62+MANTLE_REACH;
-  for (const ahead of [0.7,0.85,1.0]){ const x=player.x+dx*ahead, z=player.z+dz*ahead, t=topAt(x,z,reach);
-    if (t===null || t<player.y+0.45 || t<0.3) continue;
-    // room to stand: the body's width either side, and the same surface or lower
-    let ok=true; for (const [a,b] of [[0.3,0],[-0.3,0],[0,0.3]]){ const qx=x-dz*a+dx*b, qz=z+dx*a+dz*b, q=topAt(qx,qz,t+0.5); if (q===null || q>t+0.45){ ok=false; break; } }
-    if (!ok) continue;
-    mantle={t:0,x0:player.x,z0:player.z,y0:player.y,x1:x,z1:z,y1:t}; player.vy=0; return; }
+  // the edge: the first surface ahead, beyond the body, that stands well above the feet
+  for (let ahead=0.05; ahead<=1.1; ahead+=0.1){ const ex=player.x+dx*ahead, ez=player.z+dz*ahead, te=topAt(ex,ez,reach);
+    if (te===null) return;   // something higher than the reach stands in the way
+    if (te<player.y+0.45 || te<0.3) continue;
+    // the place to stand, a little beyond the edge: a roof may rise from its eaves, by no more than a step
+    for (const on of [0.45,0.3,0.15]){ const x=ex+dx*on, z=ez+dz*on, t=topAt(x,z,te+STEP); if (t===null || t<te-0.3) continue;
+      // room to stand: the body's width either side, on the same surface or lower
+      let ok=true; for (const [a,b] of [[0.3,0],[-0.3,0],[0,0.3]]){ const qx=x-dz*a+dx*b, qz=z+dx*a+dz*b, q=topAt(qx,qz,t+0.5); if (q===null || q>t+0.45){ ok=false; break; } }
+      if (!ok) continue;
+      mantle={t:0,x0:player.x,z0:player.z,y0:player.y,x1:x,z1:z,y1:t}; player.vy=0; return; }
+    return; }
 }
 // drawn up and over the edge: up first, then forwards
 function mantleStep(dt){
@@ -10183,7 +10172,10 @@ function frame(now){
     p.y=b.y+0.07*Math.sin(time*1.4+b.ph)+W.h; b.m.rotation.z=0.035*Math.sin(time*1.1+b.ph)+0.4*(W.sx*Math.cos(r)-W.sz*Math.sin(r)); b.m.rotation.x=0.022*Math.sin(time*0.8+b.ph*1.7)-0.4*(W.sx*Math.sin(r)+W.sz*Math.cos(r)); }
   updateSailers(wdt); updateTrain(wdt); updateGoods(wdt); updateFerries(wdt); gangwayStep(); coachStep(wdt,turn);
   const tx=Math.round(player.x/2)*2, tz=Math.round(player.z/2)*2, ty=Math.round(player.y);
-  hour=(hour+wdt/HOUR_SEC*(keys.KeyT?40:1))%24; updateDaylight(); updateClocks();
+  // T runs the clock forty times as fast; with Shift it runs back at that rate, and the bells do not strike the hours
+  // passed backwards
+  const back=keys.KeyT&&(keys.ShiftLeft||keys.ShiftRight);
+  hour=(((hour+wdt/HOUR_SEC*(back?-40:keys.KeyT?40:1))%24)+24)%24; if (back) SNDS.hour=Math.floor(hour); updateDaylight(); updateClocks();
   if (mode==='ferry'){
     // walking about the main deck relative to where one looks; the eye rides the ferry's gentle motion
     fe.yaw+=turn*dt*1.8;
