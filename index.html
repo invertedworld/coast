@@ -1527,7 +1527,7 @@ function hipRoof(gb,H,w,d,h,rise,roofC){
    or a spire is a pyramid on the walls' top widened by the same overhang; a flat roof is a slab 0.15 m above the
    walls and 0.125 m beyond them. It gives null outside the roof. roofSlope gives the steepness there (rise over run)
    and the way down, in the house's frame. */
-const ROOF_OH=0.28, ROOF_GRIP=1.0;   // the overhang, and the steepest roof that can be stood on (45 degrees)
+const ROOF_OH=0.28, ROOF_GRIP=0.84;   // the overhang, and the steepest roof that can be stood on (40 degrees)
 function roofAt(R,lu,lv){
   const au=Math.abs(lu), av=Math.abs(lv);
   if (R.kind==='front'||R.kind==='side'){ const sp=R.kind==='front'?R.w/2:R.d/2, a=R.kind==='front'?au:av, b=R.kind==='front'?av:au, len=R.kind==='front'?R.d/2:R.w/2;
@@ -2087,7 +2087,13 @@ const FLC={
 };
 // the kinds addFlora builds; trees take a collision circle at the trunk and are heard in the wind (treeSpots)
 const FLORA={stonepine:1,aleppo:1,holm:1,carob:1,fig:1,citrus:1,almond:1,palm:1,date:1,fanpalm:1,opuntia:0,agave:0,maquis:0};
+// The species that may be placed. A kind not yet approved by Mark is not placed as itself: a tree falls back to the
+// original rounded tree, and a shrub is left out. Kinds are added here only once approved in testbench/trees.html.
+const FLORA_OK=new Set([]);
+const FLORA_SHRUBS=new Set(['agave','opuntia','maquis','oleander']);
 function addFlora(gb,ch,x,z,s=1,base,kind,lean){
+  if (!FLORA_OK.has(kind)){ if (FLORA_SHRUBS.has(kind)) return;
+    return addTree(gb,ch,x,z,rng(Math.floor(hash(Math.round(x*16),Math.round(z*16),977)*4294967296)),s,base,'round'); }
   if (base===undefined) base=heightAt(x,z)-gb.oy;
   const r=rng(Math.floor(hash(Math.round(x*16),Math.round(z*16),kind.length*131+7)*4294967296)), lod=gb.lod;
   const sh=(c,a=0.06)=>c.clone().multiplyScalar(1+(r()-0.5)*2*a), Y=base;
