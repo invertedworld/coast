@@ -12,6 +12,7 @@ The program is contained in `index.html`, apart from the cat in `cat/`. There is
 | `cat/` | The cat from Michi-Neko: The Cat Philosopher's Path by c1t1zen1, under the MIT licence (`cat/LICENSE`). See `cat/README.md`. |
 | `sounds.json` | Maps sound identifiers to audio files (see [Sound](#sound)). |
 | `sounds/` | The audio files that `sounds.json` names. |
+| `publish-site.sh` | Publishes the game to markhammond.me (see [Publishing](#publishing)). |
 | `testbench/seagulls.html` | A stand-alone page for developing the gulls (see [Gulls](#gulls)). |
 
 ## Running the program
@@ -25,6 +26,18 @@ python3 -m http.server 8765 --bind 127.0.0.1
 The scene is then available at <http://127.0.0.1:8765/>. Three.js r160 is loaded from `cdn.jsdelivr.net` and the fonts (Marcellus and Alegreya Sans) from Google Fonts, so an internet connection is required on first load.
 
 When `index.html` has been edited, the browser may serve a cached copy. A query string such as `?v=51` forces a fresh load.
+
+## Publishing
+
+The game is published at markhammond.me from a copy in `play/coast/` of the site's repository (`~/code/markhammond.me`). `publish-site.sh [commit]` exports `index.html`, `sounds.json`, `sounds/` and `cat/` from a commit (by default `HEAD`), points the page at the site's own copies of three.js (`vendor/three/`) and of the fonts (`fonts/`) so that it loads nothing from other sites, and copies the result into `play/coast/`. If that changes anything, it commits `play/coast/` alone on the branch checked out in the site's repository, and pushes that branch to itself and to `master`, from which the site's GitHub Action deploys to Cloudflare within a minute or two. Any other commits on that branch that are not yet on `master` are published with it.
+
+A `pre-push` hook in `.git/hooks/` runs the script whenever `main` is pushed, so pushing the game publishes it. Git does not copy hooks with a repository; on a new clone the hook is installed again with:
+
+```sh
+printf '#!/usr/bin/env bash\nwhile read -r l s r o; do [ "$r" = refs/heads/main ] && [ "$s" != 0000000000000000000000000000000000000000 ] && { "$(git rev-parse --show-toplevel)/publish-site.sh" "$s" || echo "publishing failed" >&2; }; done; exit 0\n' > .git/hooks/pre-push && chmod +x .git/hooks/pre-push
+```
+
+A failure to publish is reported but does not stop the push of this repository. The testbenches and the source recordings in `village sounds/` are not published.
 
 ## Controls
 
