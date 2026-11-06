@@ -2039,14 +2039,17 @@ function addCafes(gb,ch,P){
 /* ================= trees, shrubs and plants =================
    Besides the cypress, the olive and the round broadleaf of addTree, the island grows the trees and plants of a
    Mediterranean coast, each built by addFlora from a few low shapes merged into the block like everything else:
-   stone (umbrella) pines, Aleppo pines, holm oaks, carobs, figs, lemons and oranges, almonds, Canary and date palms,
-   fan palms, prickly pears, agaves and the low maquis of lentisk and rosemary. Each plant takes its
-   variation of size, lean and tint from its own random sequence, seeded from where it stands, so the block's own
-   sequence is not disturbed and the plant is the same at every level of detail; only the shapes drawn differ. At the
-   simplified levels the small parts (twigs, fruit, single leaves and pads) are left out and a plant whose shape
-   depends on them is drawn as one or two masses of the same colours. */
-// a tapering open trunk of six sides, an open branch of five sides, and a blade (an agave's leaf or a palm's frond):
-// a flat diamond, widest a third of the way along, with a little thickness, in eight triangles
+   stone (umbrella) pines, Aleppo pines, holm oaks, carobs, figs, almonds, prickly pears, agaves and the low maquis of
+   lentisk and rosemary.
+   A crown is never one shape: it is built from several overlapping clumps with gaps between them. Each clump is a
+   low sphere made lumpy by pushing its vertices in and out, given a flat normal on every face so that it catches the
+   light in facets, as a mass of leaves does, and shaded across the whole crown from darker beneath to lighter and
+   warmer on top, with a little variation from face to face. Fruit and flowers are many small specks. Each plant takes its variation of size, lean and tint from its own random sequence, seeded from
+   where it stands, so the block's own sequence is not disturbed and the plant is the same at every level of detail:
+   it takes the same random numbers whether or not a part is drawn. At the simplified level the small parts (twigs,
+   fruit, single leaves and pads) are left out, and in the outlines a crown keeps one clump in three, a little larger. */
+// a tapering open trunk of six sides, an open branch of five sides, a blade (an agave's leaf): a flat diamond,
+// widest a third of the way along, with a little thickness, in eight triangles, and a speck of fruit or flower
 function bladeTpl(){
   const V=[[0,0,0],[-.5,.32,0],[0,1,0],[.5,.32,0]], F=[0,.4,.5], B=[0,.4,-.5], P=[];
   for (let i=0;i<4;i++){ const a=V[i], b=V[(i+1)%4]; P.push(...a,...b,...F, ...b,...a,...B); }
@@ -2060,6 +2063,7 @@ const TV={
   trunk:tpl(new THREE.CylinderGeometry(.36,.5,1,6,1,true).translate(0,.5,0),true),
   limb:tpl(new THREE.CylinderGeometry(.5,.5,1,5,1,true).translate(0,.5,0),true),
   blade:bladeTpl(),
+  speck:tpl(new THREE.OctahedronGeometry(.5,0),false),
 };
 // a matrix that carries a template's y axis from p to q, its x axis across (level, then turned by tw about the
 // axis) scaled to w, and its z axis to t
@@ -2075,177 +2079,175 @@ function downhill(x,z){ const gx=heightAt(x+2,z)-heightAt(x-2,z), gz=heightAt(x,
   return l>1e-3?[-gx/l,-gz/l,l/4]:[0,0,0]; }
 // whether (x,z) stands at least as high as the ground 9 m away all round: a crest or the top of a knoll
 function onCrest(x,z){ const h=heightAt(x,z)+0.4; for (let a=0;a<6.28;a+=0.785) if (heightAt(x+Math.cos(a)*9,z+Math.sin(a)*9)>h) return false; return true; }
+// the leaves' colours are of the brightness of the olive and the round broadleaf, never near black
 const FLC={
-  pineTop:hex('#6f8a3a'), pineMid:hex('#4f6a30'), pineUnder:hex('#34492a'), pineBark:hex('#8a5640'),
-  aleppo:hex('#6c7e40'), aleppoBark:hex('#6e5d50'), holm:hex('#3d4b2b'), holmBark:hex('#55504a'),
-  carob:hex('#3b5a25'), carobBark:hex('#5e4c3e'), fig:hex('#628a34'), figBark:hex('#9c978a'),
-  citrus:hex('#355a25'), lemon:hex('#efd23c'), orange:hex('#ec8a26'), almond:hex('#98a676'), almondBark:hex('#4f3f34'),
-  frond:hex('#557a32'), dateFrond:hex('#7b8d58'), fan:hex('#64883a'), palmBark:hex('#8c7658'), skirt:hex('#8b7a5c'), dates:hex('#c4782e'),
-  opuntia:hex('#6f8b4d'),
-  agave:hex('#7d988f'), agave2:hex('#8ea27c'), spike:hex('#8e7c55'), bloom:hex('#d9c049'),
-  lentisk:hex('#5d7238'), rosemary:hex('#7f8a62'),
+  pine:hex('#6f8e3e'), pineBark:hex('#8e5c44'), aleppo:hex('#879a58'), aleppoBark:hex('#7a6a5c'),
+  holm:hex('#5e7440'), holmBark:hex('#5f5850'), carob:hex('#4f7d2f'), carobBark:hex('#6a5646'),
+  fig:hex('#6f9a3c'), figBark:hex('#a7a296'), almond:hex('#93a873'), almondBark:hex('#4f3f34'),
+  opuntia:hex('#6f9248'), pear:hex('#b0304a'), agave:hex('#8db0a2'), agave2:hex('#9fb58c'), spike:hex('#8e7c55'), bloom:hex('#e0c84a'),
+  lentisk:hex('#62803a'), rosemary:hex('#8a9670'), warm:hex('#e9e2a2'),
 };
+// the vertices gb.add has just put in, from float index i0, are pushed in or out along their direction from the
+// clump's middle by a noise of where they stand, so the clump is lumpy; each face then takes a flat normal and a tone
+// from dark beneath to light and warm on top of the whole crown (from y0 to y1), varied a little from face to face.
+// Positions shared by two faces move alike, since the push depends only on the position.
+function foliage(gb,i0,cx,cy,cz,amt,y0,y1,seed,lo=0.76,hi=1.18,tint=null,tk=0){
+  const P=gb.p, N=gb.n, Cc=gb.c, oy=gb.oy; cy+=oy; y0+=oy; y1+=oy;
+  for (let i=i0;i<P.length;i+=3){ const x=P[i], y=P[i+1], z=P[i+2], k=1+amt*(hash(Math.round(x*23),Math.round(y*23)*31+Math.round(z*23),seed)*2-1);
+    P[i]=cx+(x-cx)*k; P[i+1]=cy+(y-cy)*k; P[i+2]=cz+(z-cz)*k; }
+  for (let i=i0;i<P.length;i+=9){
+    const ux=P[i+3]-P[i], uy=P[i+4]-P[i+1], uz=P[i+5]-P[i+2], vx=P[i+6]-P[i], vy=P[i+7]-P[i+1], vz=P[i+8]-P[i+2];
+    let a=uy*vz-uz*vy, b=uz*vx-ux*vz, c=ux*vy-uy*vx; const l=Math.hypot(a,b,c)||1; a/=l; b/=l; c/=l;
+    const mx=(P[i]+P[i+3]+P[i+6])/3, my=(P[i+1]+P[i+4]+P[i+7])/3, mz=(P[i+2]+P[i+5]+P[i+8])/3;
+    const t=clamp((my-y0)/Math.max(0.1,y1-y0),0,1), up=b*0.5+0.5, hv=hash(Math.round(mx*9),Math.round(my*9)*13+Math.round(mz*9),seed+5);
+    const f=lerp(lo,hi,0.5*t+0.5*up)*(0.9+0.2*hv), w=0.2*t*up, ft=tint&&hv>1-tk;
+    for (let k=0;k<3;k++){ const j=i+k*3; N[j]=a; N[j+1]=b; N[j+2]=c;
+      if (ft){ Cc[j]=tint.r; Cc[j+1]=tint.g; Cc[j+2]=tint.b; continue; }
+      Cc[j]=lerp(Cc[j],FLC.warm.r,w)*f; Cc[j+1]=lerp(Cc[j+1],FLC.warm.g,w)*f; Cc[j+2]=lerp(Cc[j+2],FLC.warm.b,w)*f; } }
+}
 // the kinds addFlora builds; trees take a collision circle at the trunk and are heard in the wind (treeSpots)
-const FLORA={stonepine:1,aleppo:1,holm:1,carob:1,fig:1,citrus:1,almond:1,palm:1,date:1,fanpalm:1,opuntia:0,agave:0,maquis:0};
+const FLORA={stonepine:1,aleppo:1,holm:1,carob:1,fig:1,almond:1,opuntia:0,agave:0,maquis:0};
 // The species that may be placed. A kind not yet approved by Mark is not placed as itself: a tree falls back to the
 // original rounded tree, and a shrub is left out. Kinds are added here only once approved in testbench/trees.html.
-const FLORA_OK=new Set([]);
+const FLORA_OK=new Set(['stonepine','aleppo','holm','carob','fig','almond','agave','opuntia','maquis']);
 const FLORA_SHRUBS=new Set(['agave','opuntia','maquis','oleander']);
 function addFlora(gb,ch,x,z,s=1,base,kind,lean){
   if (!FLORA_OK.has(kind)){ if (FLORA_SHRUBS.has(kind)) return;
     return addTree(gb,ch,x,z,rng(Math.floor(hash(Math.round(x*16),Math.round(z*16),977)*4294967296)),s,base,'round'); }
   if (base===undefined) base=heightAt(x,z)-gb.oy;
-  const r=rng(Math.floor(hash(Math.round(x*16),Math.round(z*16),kind.length*131+7)*4294967296)), lod=gb.lod;
+  const r=rng(Math.floor(hash(Math.round(x*16),Math.round(z*16),kind.length*131+7)*4294967296)), lod=gb.lod, seed=Math.floor(r()*1e6);
   const sh=(c,a=0.06)=>c.clone().multiplyScalar(1+(r()-0.5)*2*a), Y=base;
   if (FLORA[kind] && ch) (ch.treeSpots||(ch.treeSpots=[])).push([x,z,s]);
-  // a trunk or branch from p to q, of diameter d at its foot
-  const limb=(p,q,d,c,t=TV.trunk)=>gb.add(t,segM(p,q,d,d),c,base);
+  // a trunk or branch from p to q, of diameter d at its foot; it runs on a little past q, into the next piece, so
+  // that no seam shows where two pieces meet
+  const limb=(p,q,d,c,t=TV.trunk)=>{ const L=Math.hypot(q[0]-p[0],q[1]-p[1],q[2]-p[2])||1, e=1+0.3*d/L; gb.add(t,segM(p,[p[0]+(q[0]-p[0])*e,p[1]+(q[1]-p[1])*e,p[2]+(q[2]-p[2])*e],d,d),c,base); };
   const ell=(t,cx,cy,cz,sx,sy,sz,c,ry=0)=>gb.add(t,mat(cx,cy,cz,sx,sy,sz,ry),c,null);
-  // a lobe of a crown, of which the outlines draw only every other one
-  let nl=0; const lobe=(...a)=>{ if (lod<2 || nl++%2===0) ell(...a); };
+  // one clump of a crown, lumpy and shaded; beyond full detail it is a coarser shape, and in the outlines every other
+  // two clumps in three are left out and the rest grow to fill
+  let nc=0;
+  const clump=(cx,cy,cz,sx,sy,sz,c,y0,y1,o={})=>{ const ry=r()*6.28, k=nc++;
+    if (lod>=2 && !o.keep && k%3) return; const g=lod>=2&&!o.keep?1.35:1, i0=gb.p.length;
+    gb.add(o.t||(lod>=1?T.ico:T.sphLo),mat(cx,cy,cz,sx*g,sy*g,sz*g,ry),c,null);
+    foliage(gb,i0,cx,cy,cz,o.lump??0.15,y0,y1,seed+k,o.lo,o.hi,o.tint,o.tk||0); };
+  // a crown of n clumps over an ellipsoid of half-widths (rx,ry,rz) about (cx,cy,cz), the clumps about w wide and h
+  // tall, kept off the middle so that there are gaps; returns the clumps' middles, for branches to reach
+  const crown=(cx,cy,cz,rx,ry,rz,n,w,h,c,o={})=>{ const out=[], y0=cy-ry-h*0.5, y1=cy+ry+h*0.5, a0=r()*6.28;
+    for (let i=0;i<n;i++){ const f=(i+0.5)/n, el=o.flat?(r()-0.5)*0.6:Math.asin(1-2*f*(o.lower??0.85)), az=a0+i*2.39996+(r()-0.5)*0.5, rad=0.62+r()*0.38;
+      const px=cx+Math.cos(az)*Math.cos(el)*rx*rad, py=cy+Math.sin(el)*ry*rad, pz=cz+Math.sin(az)*Math.cos(el)*rz*rad, q=0.75+r()*0.5;
+      clump(px,py,pz,w*q,h*q*(0.85+r()*0.3),w*q*(0.8+r()*0.4),c.clone().multiplyScalar(0.94+r()*0.12),y0,y1,o); out.push([px,py,pz]); }
+    return out; };
   // which way the tree leans: downhill (on a coast or a clifftop, towards the sea), or as it is told
   let [lx,lz,sl]=lean||downhill(x,z); if (!lean && sl<0.08){ const a=r()*6.28; lx=Math.cos(a); lz=Math.sin(a); }
   if (kind==='stonepine'){
-    // a short, slightly curving reddish trunk that forks under the crown into four or five limbs; the crown is a
-    // broken layer of flattened clumps, each dark beneath and lighter and warmer on top, with gaps between them
-    const H=(3.6+r()*1.8)*s, k=0.1+r()*0.2, d=0.52*s, w=(r()-0.5)*0.6;
-    const p0=[x,Y-0.3,z], p1=[x+lx*H*k*0.4-lz*w,Y+H*0.55,z+lz*H*k*0.4+lx*w], p2=[x+lx*H*k,Y+H,z+lz*H*k];
-    limb(p0,p1,d,FLC.pineBark); limb(p1,p2,d*0.74,FLC.pineBark);
-    const n=4+Math.floor(r()*2), a0=r()*6.28, R0=(2.5+r()*0.9)*s, cy=Y+H+(1.3+r()*0.5)*s;
-    const top=sh(FLC.pineTop,0.05), mid=sh(FLC.pineMid,0.05), und=sh(FLC.pineUnder,0.04);
-    for (let i=0;i<n;i++){ const a=a0+i*6.28/n+(r()-0.5)*0.9, rr=R0*(0.5+r()*0.35), hx=p2[0]+Math.cos(a)*rr+lx*0.6*s, hz=p2[2]+Math.sin(a)*rr+lz*0.6*s, hy=cy+(r()-0.5)*0.9*s;
-      limb(p2,[p2[0]+(hx-p2[0])*0.7,hy-0.5*s,p2[2]+(hz-p2[2])*0.7],0.24*s,FLC.pineBark,TV.limb);
-      const cw=(3.2+r()*1.4)*s, cd=cw*(0.7+r()*0.3), ry=r()*6.28;
-      ell(T.sphLo,hx,hy,hz,cw,(0.95+r()*0.3)*s,cd,i%2?und:und.clone().lerp(mid,0.4),ry);
-      const ox=(r()-0.5)*0.4, oz=(r()-0.5)*0.4, tc=r()<0.5?top:top.clone().lerp(mid,0.3);   // drawn or not, the same numbers are taken
-      if (lod===0) ell(T.sphLo,hx+ox,hy+0.38*s,hz+oz,cw*0.82,0.7*s,cd*0.8,tc,ry+0.5); }
-    // the middle of the crown, a little above the clumps, and now and then a small clump apart from the rest
-    ell(T.sphLo,p2[0]+lx*0.4*s,cy+0.35*s,p2[2]+lz*0.4*s,(3.4+r()*0.8)*s,0.9*s,(3.0+r()*0.8)*s,lod===0?mid:mid.clone().lerp(top,0.3),r()*6.28);
-    if (lod===0 && r()<0.6){ const a=r()*6.28, rr=R0*1.25; ell(T.sphLo,p2[0]+Math.cos(a)*rr,cy-0.6*s,p2[2]+Math.sin(a)*rr,1.6*s,0.6*s,1.4*s,mid,r()*6.28); }
+    // a short, slightly curving reddish-brown trunk that forks into a few limbs under a broad, flat-topped umbrella;
+    // the umbrella is a broken layer of flattened clumps on the limbs' ends, with sky showing between them
+    const H=(3.8+r()*1.8)*s, k=0.08+r()*0.16, d=0.55*s, w=(r()-0.5)*0.6;
+    const p1=[x+lx*H*k*0.4-lz*w,Y+H*0.55,z+lz*H*k*0.4+lx*w], p2=[x+lx*H*k,Y+H,z+lz*H*k];
+    limb([x,Y-0.3,z],p1,d,FLC.pineBark); limb(p1,p2,d*0.74,FLC.pineBark);
+    const nl=4+Math.floor(r()*2), a0=r()*6.28, R0=(3.0+r()*1.0)*s, cy=Y+H+(1.4+r()*0.5)*s, c=sh(FLC.pine,0.05), tips=[];
+    for (let i=0;i<nl;i++){ const a=a0+i*6.28/nl+(r()-0.5)*0.7, rr=R0*(0.45+r()*0.2), q=[p2[0]+Math.cos(a)*rr,cy-0.5*s+(r()-0.5)*0.4*s,p2[2]+Math.sin(a)*rr];
+      limb(p2,q,0.26*s,FLC.pineBark,TV.limb); tips.push([q,a]); }
+    const y0=cy-0.9*s, y1=cy+0.9*s;
+    for (const [q,a] of tips){ const m=3;
+      for (let j=0;j<m;j++){ const b=a+(j-1)*0.8+(r()-0.5)*0.4, rr=(0.3+r()*1.3)*s, cw=(2.5+r()*0.9)*s;
+        const px=q[0]+Math.cos(b)*rr, pz=q[2]+Math.sin(b)*rr, py=cy+(r()-0.4)*0.6*s;
+        if (lod===0 && rr>0.9*s) limb(q,[px,py-0.3*s,pz],0.12*s,FLC.pineBark,TV.limb);
+        clump(px,py,pz,cw,(0.9+r()*0.3)*s,cw*(0.75+r()*0.3),c.clone().multiplyScalar(0.94+r()*0.12),y0,y1,{lump:0.14,lo:0.7,hi:1.22}); } }
+    clump(p2[0],cy+0.35*s,p2[2],(3.2+r()*0.6)*s,0.9*s,(3.0+r()*0.6)*s,c,y0,y1,{keep:true,lo:0.7,hi:1.22});
     if (ch) ch.circles.push({x,z,r:0.32*s,top:Infinity});
   } else if (kind==='aleppo'){
-    // a slender trunk leaning hard over, bending as it goes, with open tufts of pale foliage held out on branches
-    const H=(6.2+r()*2.8)*s, k=0.22+r()*0.3, d=0.4*s, w=(r()-0.5)*0.8*s, pts=[[x,Y-0.3,z]];
+    // a slender grey trunk leaning over and bending as it rises, with an uneven crown in its upper part: broad, flat
+    // masses of foliage held out on short crooked branches, overlapping, with the sky showing through at the edges
+    const H=(6.5+r()*2.8)*s, k=0.2+r()*0.3, d=0.42*s, w=(r()-0.5)*0.9*s, pts=[[x,Y-0.3,z]];
     for (let i=1;i<=3;i++){ const f=i/3, b=k*Math.pow(f,1.3+r()*0.4); pts.push([x+lx*H*b+(-lz*w)*Math.sin(f*3.1),Y+H*f*(1-0.12*k),z+lz*H*b+(lx*w)*Math.sin(f*3.1)]); }
     for (let i=0;i<3;i++) limb(pts[i],pts[i+1],d*(1-i*0.24),FLC.aleppoBark);
-    const n=5+Math.floor(r()*2), c=sh(FLC.aleppo,0.07), at=(f)=>{ const t=f*3, i=Math.min(2,Math.floor(t)), u=t-i, A=pts[i], B=pts[i+1]; return [A[0]+(B[0]-A[0])*u,A[1]+(B[1]-A[1])*u,A[2]+(B[2]-A[2])*u]; };
-    for (let i=0;i<n;i++){ const f=0.5+0.48*(i+r())/n, P=at(f), a=(i*2.5)+r()*0.8, out=(0.7+r()*1.0)*s*(1.25-f*0.5);
-      const q=[P[0]+Math.cos(a)*out+lx*out*0.3,P[1]+(0.2+r()*0.5)*s,P[2]+Math.sin(a)*out+lz*out*0.3];
+    const at=(f)=>{ const t=f*3, i=Math.min(2,Math.floor(t)), u=t-i, A=pts[i], B=pts[i+1]; return [A[0]+(B[0]-A[0])*u,A[1]+(B[1]-A[1])*u,A[2]+(B[2]-A[2])*u]; };
+    const c=sh(FLC.aleppo,0.06), y0=Y+H*0.45, y1=Y+H+1.2*s, nb=4+Math.floor(r()*2);
+    for (let i=0;i<nb;i++){ const f=0.52+0.46*(i+r())/nb, P=at(f), a=i*2.4+r()*0.9, out=(0.7+r()*0.9)*s*(1.3-f*0.6);
+      const q=[P[0]+Math.cos(a)*out+lx*out*0.3,P[1]+(0.3+r()*0.5)*s,P[2]+Math.sin(a)*out+lz*out*0.3];
       limb(P,q,0.15*s,FLC.aleppoBark,TV.limb);
-      const tw=(2.1+r()*1.0)*s*(1.2-f*0.4); lobe(T.sphLo,q[0],q[1]+0.15*s,q[2],tw,tw*(0.45+r()*0.2),tw*(0.75+r()*0.3),c.clone().multiplyScalar(0.86+r()*0.2),r()*6.28); }
-    const tp=pts[3]; ell(T.sphLo,tp[0],tp[1]+0.3*s,tp[2],(1.7+r()*0.7)*s,(1.0+r()*0.4)*s,(1.5+r()*0.6)*s,c.clone().multiplyScalar(1.06),r()*6.28);
+      const m=2; for (let j=0;j<m;j++){ const b=a+(r()-0.5)*1.6, rr=(0.3+r()*0.8)*s, tw=(2.0+r()*0.9)*s;
+        clump(q[0]+Math.cos(b)*rr,q[1]+(r()-0.3)*0.5*s,q[2]+Math.sin(b)*rr,tw,tw*(0.42+r()*0.15),tw*(0.8+r()*0.3),c.clone().multiplyScalar(0.92+r()*0.16),y0,y1,{lump:0.16}); } }
+    const tp=pts[3]; clump(tp[0],tp[1]+0.3*s,tp[2],2.0*s,1.1*s,1.8*s,c,y0,y1,{keep:true,lump:0.18});
     if (ch) ch.circles.push({x,z,r:0.25*s,top:Infinity});
   } else if (kind==='holm'){
-    // a short stout trunk under a dense, dark, rounded crown, a little wider than it is tall
-    const tl=1.6*s, p1=[x+lx*0.3*s,Y+tl+0.6*s,z+lz*0.3*s]; limb([x,Y-0.3,z],p1,0.5*s,FLC.holmBark);
-    const c=sh(FLC.holm,0.06), cy=Y+(3.6+r()*0.6)*s;
-    ell(T.sph,x+lx*0.3*s,cy,z+lz*0.3*s,(4.6+r()*0.8)*s,(3.8+r()*0.6)*s,(4.4+r()*0.8)*s,c);
-    for (let i=0;i<3;i++){ const a=r()*6.28, rr=1.5*s; lobe(T.sphLo,x+Math.cos(a)*rr,cy+(r()-0.3)*1.4*s,z+Math.sin(a)*rr,(2.4+r()*0.6)*s,(2.0+r()*0.5)*s,(2.4+r()*0.6)*s,c.clone().multiplyScalar(i===0?1.12:0.92+r()*0.1),r()*6.28); }
+    // a short stout trunk dividing into three or four limbs under a dense, rounded, dark grey-green crown, a little
+    // wider than it is tall, built of many clumps
+    const p1=[x+lx*0.3*s,Y+1.7*s,z+lz*0.3*s]; limb([x,Y-0.3,z],p1,0.55*s,FLC.holmBark);
+    const cy=Y+(3.9+r()*0.5)*s, ccx=x+lx*0.3*s, ccz=z+lz*0.3*s, c=sh(FLC.holm,0.05);
+    const cl=crown(ccx,cy,ccz,2.1*s,1.5*s,2.0*s,9,2.2*s,1.8*s,c,{lower:0.8});
+    for (let i=0;i<4;i++) limb(p1,[cl[i][0]*0.6+ccx*0.4,cl[i][1]-0.6*s,cl[i][2]*0.6+ccz*0.4],0.26*s,FLC.holmBark,TV.limb);
     if (ch) ch.circles.push({x,z,r:0.3*s,top:Infinity});
   } else if (kind==='carob'){
-    // a short thick trunk and a broad, low, dense dome of glossy dark green that reaches down nearly to the ground
-    limb([x,Y-0.3,z],[x+lx*0.2*s,Y+1.9*s,z+lz*0.2*s],0.6*s,FLC.carobBark);
-    const c=sh(FLC.carob,0.06), cy=Y+(3.0+r()*0.4)*s;
-    ell(T.sph,x,cy,z,(6.4+r()*1.2)*s,(3.4+r()*0.5)*s,(6.0+r()*1.0)*s,c,r()*6.28);
-    const n=4; for (let i=0;i<n;i++){ const a=i*1.57+r()*0.8, rr=2.4*s;
-      lobe(T.sphLo,x+Math.cos(a)*rr,cy-(0.7+r()*0.4)*s,z+Math.sin(a)*rr,(2.8+r()*0.6)*s,(2.0+r()*0.4)*s,(2.6+r()*0.6)*s,c.clone().multiplyScalar(0.9+r()*0.08),r()*6.28); }
-    if (lod===0) ell(T.sphLo,x+(r()-0.5)*s,cy+1.2*s,z+(r()-0.5)*s,3.4*s,1.3*s,3.0*s,c.clone().lerp(FLC.fig,0.18).multiplyScalar(1.08),r()*6.28);   // the sheen on top
+    // a short thick trunk and spreading limbs under a broad, low dome of glossy dark green that hangs nearly to the
+    // ground at its edge; the sheen shows as the lighter faces on top
+    const p1=[x+lx*0.2*s,Y+1.4*s,z+lz*0.2*s]; limb([x,Y-0.3,z],p1,0.65*s,FLC.carobBark);
+    const cy=Y+(3.0+r()*0.4)*s, c=sh(FLC.carob,0.05);
+    const cl=crown(x,cy,z,3.0*s,1.3*s,2.8*s,11,2.4*s,1.7*s,c,{lower:0.95,hi:1.3,lo:0.74});
+    for (let i=0;i<4;i++) limb(p1,[cl[i][0]*0.55+x*0.45,cl[i][1]-0.5*s,cl[i][2]*0.55+z*0.45],0.3*s,FLC.carobBark,TV.limb);
     if (ch) ch.circles.push({x,z,r:0.36*s,top:Infinity});
   } else if (kind==='fig'){
-    // several pale grey stems splay out from the foot under a low, wide, lumpy crown of large bright leaves
-    const ns=2+Math.floor(r()*2), c=sh(FLC.fig,0.07), tops=[];
-    for (let i=0;i<ns;i++){ const a=r()*6.28, q=[x+Math.cos(a)*1.0*s,Y+(1.0+r()*0.3)*s,z+Math.sin(a)*1.0*s]; tops.push(q); limb([x,Y-0.3,z],q,0.28*s,FLC.figBark); }
-    for (let i=0;i<5;i++){ const P=tops[i%ns], a=r()*6.28, rr=(0.7+r()*1.0)*s;
-      lobe(T.sphLo,P[0]+Math.cos(a)*rr,P[1]+(0.5+r()*0.8)*s,P[2]+Math.sin(a)*rr,(2.5+r()*0.8)*s,(1.4+r()*0.4)*s,(2.3+r()*0.8)*s,c.clone().multiplyScalar(0.88+r()*0.22),r()*6.28); }
+    // several smooth pale grey stems splay out from the foot and fork, under a low, wide, open crown of large bright
+    // leaves, coarse in its facets, with the stems showing between the clumps
+    const ns=3+Math.floor(r()*2), c=sh(FLC.fig,0.06), y0=Y+1.0*s, y1=Y+3.8*s;
+    for (let i=0;i<ns;i++){ const a=i*6.28/ns+r()*0.8, q=[x+Math.cos(a)*1.0*s,Y+(1.0+r()*0.3)*s,z+Math.sin(a)*1.0*s]; limb([x,Y-0.3,z],q,0.26*s,FLC.figBark);
+      for (let j=0;j<2;j++){ const b=a+(j-0.5)*0.9+(r()-0.5)*0.3, e=[q[0]+Math.cos(b)*(1.1+r()*0.7)*s,q[1]+(0.6+r()*0.6)*s,q[2]+Math.sin(b)*(1.1+r()*0.7)*s];
+        limb(q,e,0.14*s,FLC.figBark,TV.limb);
+        clump(e[0],e[1]+0.4*s,e[2],(2.5+r()*0.7)*s,(1.6+r()*0.4)*s,(2.3+r()*0.7)*s,c.clone().multiplyScalar(0.92+r()*0.16),y0,y1,{lump:0.12,hi:1.24}); } }
+    clump(x,Y+3.0*s,z,2.6*s,1.4*s,2.4*s,c,y0,y1,{keep:true,lump:0.12,hi:1.24});
     if (ch) ch.circles.push({x,z,r:0.3*s,top:Infinity});
-  } else if (kind==='citrus'){
-    // a small round tree of dark glossy leaves, hung with lemons or oranges
-    const fruit=hash(Math.round(x),Math.round(z),7411)<0.5?FLC.lemon:FLC.orange, c=sh(FLC.citrus,0.06), cy=Y+(1.9+r()*0.3)*s, cw=(2.3+r()*0.4)*s, chh=(2.4+r()*0.4)*s;
-    limb([x,Y-0.3,z],[x,cy-0.6*s,z],0.2*s,FLC.carobBark);
-    ell(T.sph,x,cy,z,cw,chh,cw*(0.92+r()*0.1),c,r()*6.28);
-    ell(T.sphLo,x+(r()-0.5)*0.6*s,cy+0.5*s,z+(r()-0.5)*0.6*s,cw*0.7,chh*0.6,cw*0.7,c.clone().multiplyScalar(1.1),r()*6.28);
-    if (lod===0) for (let i=0;i<16;i++){ const a=r()*6.28, v=-0.55+r()*1.25, ch2=Math.sqrt(1-v*v);
-      ell(T.ico,x+Math.cos(a)*ch2*cw*0.52,cy+v*chh*0.52,z+Math.sin(a)*ch2*cw*0.52,0.22*s,(fruit===FLC.lemon?0.28:0.22)*s,0.22*s,sh(fruit,0.06)); }
-    if (ch) ch.circles.push({x,z,r:0.22*s,top:Infinity});
   } else if (kind==='almond'){
-    // a dark, crooked trunk opening into a vase of thin branches, with sparse tufts of pale grey-green leaves
+    // a dark, crooked trunk opening into a vase of thin branches that carry a rounded, open crown of small, sparse
+    // tufts of pale grey-green leaves, with much sky between them
     const p1=[x+lx*0.3*s,Y+1.1*s,z+lz*0.3*s]; limb([x,Y-0.3,z],p1,0.3*s,FLC.almondBark);
-    const n=3+Math.floor(r()*2), a0=r()*6.28, c=sh(FLC.almond,0.06);
-    for (let i=0;i<n;i++){ const a=a0+i*6.28/n+(r()-0.5)*0.6, rr=(1.3+r()*0.6)*s, q=[p1[0]+Math.cos(a)*rr,p1[1]+(1.6+r()*0.8)*s,p1[2]+Math.sin(a)*rr];
-      limb(p1,q,0.15*s,FLC.almondBark,TV.limb);
-      ell(T.sphLo,q[0],q[1]+0.2*s,q[2],(1.4+r()*0.5)*s,(0.8+r()*0.25)*s,(1.3+r()*0.4)*s,c.clone().multiplyScalar(0.92+r()*0.14),r()*6.28);
-      // a side shoot with a smaller tuft, at full detail only
-      const b=a+(r()<0.5?1:-1)*(0.6+r()*0.4), m=[(p1[0]+q[0])/2+Math.cos(b)*0.7*s,(p1[1]+q[1])/2+0.3*s,(p1[2]+q[2])/2+Math.sin(b)*0.7*s];
-      const t2=[(1.1+r()*0.3)*s,(0.65+r()*0.2)*s,(1.0+r()*0.3)*s,0.9+r()*0.14,r()*6.28];
-      if (lod===0){ limb([(p1[0]+q[0])/2,(p1[1]+q[1])/2,(p1[2]+q[2])/2],m,0.09*s,FLC.almondBark,TV.limb); ell(T.sphLo,m[0],m[1]+0.1*s,m[2],t2[0],t2[1],t2[2],c.clone().multiplyScalar(t2[3]),t2[4]); } }
+    const c=sh(FLC.almond,0.05), cy=Y+3.3*s;
+    const cl=crown(x+lx*0.3*s,cy,z+lz*0.3*s,1.9*s,1.1*s,1.9*s,11,1.15*s,0.75*s,c,{lower:0.9,lump:0.2,lo:0.74});
+    for (let i=0;i<cl.length;i++){ const C0=cl[i]; if (i<5) limb(p1,[C0[0],C0[1]-0.3*s,C0[2]],0.12*s,FLC.almondBark,TV.limb);
+      else if (lod===0){ const P0=cl[i%5]; limb([(p1[0]+P0[0])/2,(p1[1]+P0[1])/2,(p1[2]+P0[2])/2],[C0[0],C0[1]-0.25*s,C0[2]],0.07*s,FLC.almondBark,TV.limb); } }
     if (ch) ch.circles.push({x,z,r:0.18*s,top:Infinity});
-  } else if (kind==='palm'||kind==='date'){
-    // a Canary palm: a stout straight trunk and a full, rounded head of long arching fronds over a swollen top; a
-    // date palm: a taller, slimmer trunk with a slight curve, a sparser head of stiffer grey-green fronds, and dates
-    const cn=kind==='palm', H=(cn?6+r()*2.5:8.5+r()*3)*s, d=(cn?0.8:0.45)*s, bend=cn?0:(0.4+r()*0.6)*s;
-    const p1=[x+lx*bend*0.3,Y+H*0.5,z+lz*bend*0.3], p2=[x+lx*bend,Y+H,z+lz*bend];
-    gb.add(T.cyl8,segM([x,Y-0.3,z],p1,d,d),FLC.palmBark,base); gb.add(T.cyl8,segM(p1,p2,d*0.94,d*0.94),FLC.palmBark,base);
-    ell(T.sphLo,p2[0],p2[1]-(cn?0.1:0.2)*s,p2[2],d*1.5,(cn?1.3:0.9)*s,d*1.5,sh(FLC.palmBark,0.04).multiplyScalar(0.85));
-    if (cn) ell(T.sphLo,p2[0],p2[1]+0.5*s,p2[2],2.6*s,1.5*s,2.6*s,sh(FLC.frond,0.04).multiplyScalar(0.78),r()*6.28);
-    if (lod>=2){ ell(T.ico,p2[0],p2[1]-0.4*s,p2[2],(cn?7:5.5)*s,2.2*s,(cn?7:5.5)*s,sh(cn?FLC.frond:FLC.dateFrond,0.04),r()*6.28); }
-    else { const n=cn?26:15, c=cn?FLC.frond:FLC.dateFrond, L=(cn?3.0:2.6)*s, W=(cn?1.05:0.7)*s;
-      for (let i=0;i<n;i++){ const a=i*2.4+r()*0.3, e=(cn?-0.2:0.1)+(i%4)*(cn?0.3:0.32)+r()*0.25, ca=Math.cos(a), sa=Math.sin(a);
-        const q1=[p2[0]+ca*Math.cos(e)*L,p2[1]+Math.sin(e)*L,p2[2]+sa*Math.cos(e)*L], e2=e-0.75-r()*0.3, q2=[q1[0]+ca*Math.cos(e2)*L*0.95,q1[1]+Math.sin(e2)*L*0.95,q1[2]+sa*Math.cos(e2)*L*0.95];
-        const fc=sh(c,0.08); gb.add(TV.blade,segM([p2[0],p2[1]+0.1*s,p2[2]],q1,W,0.07*s),fc,null); gb.add(TV.blade,segM(q1,q2,W*0.9,0.06*s),fc.clone().multiplyScalar(0.94),null); }
-      if (!cn && lod===0) for (let i=0;i<3;i++){ const a=r()*6.28; ell(T.ico,p2[0]+Math.cos(a)*0.55*s,p2[1]-0.7*s,p2[2]+Math.sin(a)*0.55*s,0.4*s,0.8*s,0.4*s,sh(FLC.dates,0.08)); } }
-    if (ch) ch.circles.push({x,z,r:d*0.55,top:Infinity});
-  } else if (kind==='fanpalm'){
-    // a tall, slim fan palm, its compact head of round fan leaves over a brown skirt of dead ones
-    const H=(9+r()*4)*s, d=0.4*s, p2=[x+lx*0.2*s,Y+H,z+lz*0.2*s];
-    gb.add(T.cyl8,segM([x,Y-0.3,z],p2,d,d),FLC.palmBark,base);
-    gb.add(TV.trunk,mat(p2[0],p2[1]+0.25*s,p2[2],1.2*s,2.1*s,1.2*s,r()*6.28,Math.PI),sh(FLC.skirt,0.06),null);
-    if (lod>=2) ell(T.ico,p2[0],p2[1]+0.5*s,p2[2],3.6*s,2.4*s,3.6*s,sh(FLC.fan,0.05),r()*6.28);
-    else for (let i=0;i<11;i++){ const a=i*2.4+r()*0.3, e=-0.1+(i%3)*0.4+r()*0.25, ca=Math.cos(a), sa=Math.sin(a), Lp=1.0*s;
-      const q1=[p2[0]+ca*Math.cos(e)*Lp,p2[1]+0.3*s+Math.sin(e)*Lp,p2[2]+sa*Math.cos(e)*Lp], e2=e+0.2, q2=[q1[0]+ca*Math.cos(e2)*1.3*s,q1[1]+Math.sin(e2)*1.3*s,q1[2]+sa*Math.cos(e2)*1.3*s];
-      gb.add(TV.blade,segM([p2[0],p2[1]+0.3*s,p2[2]],q1,0.12*s,0.06*s),FLC.skirt,null);
-      gb.add(TV.blade,segM(q1,q2,1.8*s,0.08*s,0.25),sh(FLC.fan,0.08),null); }
-    if (ch) ch.circles.push({x,z,r:0.25*s,top:Infinity});
   } else if (kind==='opuntia'){
-    // prickly pear: chains of flat oval pads, each growing from the rim of the one below; at a distance, one
-    // grey-green mass
-    if (lod===1) ell(T.sphLo,x,Y+0.6*s,z,2.2*s,1.7*s,2.0*s,sh(FLC.opuntia,0.05),r()*6.28);
-    else if (lod>=2) {}   // too small to draw in the outlines
+    // prickly pear: chains of flat oval pads, each growing from the rim of the one below, lighter on their upper
+    // edges, with a few small dark-red fruit on the outermost; at a distance, a lumpy grey-green mass
+    if (lod>=2) {}   // too small to draw in the outlines
+    else if (lod===1){ const i0=gb.p.length; gb.add(T.sphLo,mat(x,Y+0.55*s,z,2.0*s,1.4*s,1.8*s,r()*6.28),sh(FLC.opuntia,0.05),null); foliage(gb,i0,x,Y+0.55*s,z,0.3,Y,Y+1.3*s,seed); }
     else { const c=sh(FLC.opuntia,0.05), q=[]; for (let i=0;i<3;i++){ const a=r()*6.28; q.push([x+Math.cos(a)*0.6*s,Y-0.05,z+Math.sin(a)*0.6*s,0]); }
       let made=0;
       while (q.length && made<18){ const [px,py,pz,g]=q.shift(), a=r()*6.28, tilt=(r()<0.5?-1:1)*(0.2+r()*(0.35+g*0.3)), ca=Math.cos(a), sa=Math.sin(a);
         const L=(0.58+r()*0.12)*s, tx=px+ca*Math.sin(tilt)*L, ty=py+Math.cos(tilt)*L, tz=pz+sa*Math.sin(tilt)*L;
         // the ico is centred on its origin, so the pad is carried from its middle
-        const mx=(px+tx)/2, my=(py+ty)/2, mz=(pz+tz)/2;
-        gb.add(T.ico,segM([mx,my,mz],[mx+tx-px,my+ty-py,mz+tz-pz],0.5*s,0.12*s,a+1.57),c.clone().multiplyScalar(0.9+r()*0.2),null);
+        const mx=(px+tx)/2, my=(py+ty)/2, mz=(pz+tz)/2, i0=gb.p.length;
+        gb.add(T.ico,segM([mx,my,mz],[mx+tx-px,my+ty-py,mz+tz-pz],0.5*s,0.12*s,a+1.57),c.clone().multiplyScalar(0.92+r()*0.16),null);
+        foliage(gb,i0,mx,my,mz,0.04,Y,Y+1.6*s,seed+made,0.78,1.18);
         made++;
-        if (g<2){ const kids=1+(r()<0.7?1:0); for (let j=0;j<kids;j++){ const e=(j?-1:1)*0.18*s; q.push([tx+ca*e,ty-0.1*s,tz+sa*e,g+1]); } } }
+        if (g<2){ const kids=1+(r()<0.7?1:0); for (let j=0;j<kids;j++){ const e=(j?-1:1)*0.18*s; q.push([tx+ca*e,ty-0.1*s,tz+sa*e,g+1]); } }
+        else for (let j=0;j<3;j++){ const u=(j-1)*0.13*s; if (r()<0.6) ell(TV.speck,tx-sa*u*Math.cos(tilt),ty+0.03*s,tz+ca*u*Math.cos(tilt),0.06*s,0.08*s,0.06*s,FLC.pear); } }
     }
     if (ch) ch.circles.push({x,z,r:0.8*s,top:Infinity});
   } else if (kind==='agave'){
-    // a rosette of thick blue-grey leaves, and on some a tall flowering stem branching into a candelabra of yellow
+    // a rosette of thick blue-grey leaves, the inner ones upright and the outer ones arching out, lighter at their
+    // tips; on some a tall flowering stem branches into a candelabra of small yellow flower heads
     const c=r()<0.7?FLC.agave:FLC.agave2, spike=r()<0.3, H=(4.5+r()*2)*s;
-    if (lod===1) ell(T.sphLo,x,Y+0.25*s,z,2.2*s,1.1*s,2.2*s,sh(c,0.05),r()*6.28);
-    else if (lod>=2) {}   // too small to draw in the outlines
-    else { const n=16+Math.floor(r()*5);
+    if (lod===1){ const i0=gb.p.length; gb.add(T.sphLo,mat(x,Y+0.3*s,z,2.2*s,1.2*s,2.2*s,r()*6.28),sh(c,0.05),null); foliage(gb,i0,x,Y+0.3*s,z,0.3,Y,Y+1.2*s,seed); }
+    else if (lod===0){ const n=16+Math.floor(r()*5);
       for (let i=0;i<n;i++){ const a=i*2.4+r()*0.3, e=0.45+(i%4)*0.28+r()*0.2, L=(1.1+r()*0.5)*s*(1-0.1*(i%4));
         gb.add(TV.blade,segM([x,Y-0.1,z],[x+Math.cos(a)*Math.cos(e)*L,Y-0.1+Math.sin(e)*L,z+Math.sin(a)*Math.cos(e)*L],0.36*s,0.16*s,1.5),sh(c,0.07).multiplyScalar(spike?0.9:1),Y-0.1); } }
-    if (spike){ const tp=[x+lx*0.5*s,Y+H,z+lz*0.5*s]; gb.add(TV.limb,segM([x,Y,z],tp,0.16*s,0.16*s),FLC.spike,null);
-      if (lod===0) for (let i=0;i<6;i++){ const f=0.55+i*0.08, P=[x+lx*0.5*s*f,Y+H*f,z+lz*0.5*s*f], a=i*2.3+r(), l=(0.7-i*0.07)*s, q=[P[0]+Math.cos(a)*l,P[1]+0.2*s,P[2]+Math.sin(a)*l];
-        gb.add(TV.limb,segM(P,q,0.07*s,0.07*s),FLC.spike,null); ell(T.ico,q[0],q[1]+0.15*s,q[2],0.5*s,0.35*s,0.5*s,sh(FLC.bloom,0.08)); } }
+    if (spike && lod<2){ const tp=[x+lx*0.5*s,Y+H,z+lz*0.5*s]; gb.add(TV.limb,segM([x,Y,z],tp,0.16*s,0.16*s),FLC.spike,null);
+      for (let i=0;i<6;i++){ const f=0.55+i*0.08, P=[x+lx*0.5*s*f,Y+H*f,z+lz*0.5*s*f], a=i*2.3+r(), l=(0.7-i*0.07)*s, q=[P[0]+Math.cos(a)*l,P[1]+0.2*s,P[2]+Math.sin(a)*l];
+        if (lod===0){ gb.add(TV.limb,segM(P,q,0.07*s,0.07*s),FLC.spike,null); for (let j=0;j<5;j++) ell(TV.speck,q[0]+(r()-0.5)*0.35*s,q[1]+0.1*s+r()*0.2*s,q[2]+(r()-0.5)*0.35*s,0.14*s,0.12*s,0.14*s,sh(FLC.bloom,0.1)); } } }
     if (ch) ch.circles.push({x,z,r:0.7*s,top:Infinity});
   } else if (kind==='maquis'){
-    // a low clump of lentisk (dark and dense) or rosemary (lower, grey-green): a few overlapping mounds
-    const ros=r()<0.4, c=ros?FLC.rosemary:FLC.lentisk, n=lod>=2?0:lod>=1?1:2+Math.floor(r()*2);
-    for (let i=0;i<n;i++){ const a=r()*6.28, rr=i?(0.6+r()*0.6)*s:0, w=(ros?1.2:1.8)*s*(1-i*0.15)*(0.8+r()*0.4), h=(ros?0.6:1.0)*s*(0.85+r()*0.3);
-      const gx=x+Math.cos(a)*rr, gz=z+Math.sin(a)*rr; ell(T.sphLo,gx,(i?heightAt(gx,gz)-gb.oy:Y)+h*0.3,gz,w*(lod>=1?1.3:1),h,w*0.85*(lod>=1?1.3:1),sh(c,0.1),r()*6.28); }
+    // a low, uneven clump of lentisk (mid-green and dense) or rosemary (lower, grey-green): several lumpy mounds
+    const ros=r()<0.4, c=ros?FLC.rosemary:FLC.lentisk, n=lod>=2?0:lod>=1?1:3+Math.floor(r()*2), y0=Y, y1=Y+(ros?0.8:1.3)*s;
+    for (let i=0;i<n;i++){ const a=r()*6.28, rr=i?(0.5+r()*0.6)*s:0, w=(ros?1.0:1.5)*s*(1-i*0.12)*(0.8+r()*0.4), h=(ros?0.6:1.0)*s*(0.85+r()*0.3);
+      const gx=x+Math.cos(a)*rr, gz=z+Math.sin(a)*rr, gy=(i?heightAt(gx,gz)-gb.oy:Y)+h*0.3;
+      const i0=gb.p.length; gb.add(T.sphLo,mat(gx,gy,gz,w*(lod>=1?1.4:1),h,w*0.85*(lod>=1?1.4:1),r()*6.28),sh(c,0.08),null); foliage(gb,i0,gx,gy,gz,0.18,y0,y1,seed+i,0.7,1.15); }
   }
 }
-// which plant grows where: in a village (by the water, palms now and then), on a wild hillside (stone pines only
-// on a crest, and few), and in open country, on the coast and on the islands; q is a random number from the block
+// which plant grows where: in a village, on a wild hillside (stone pines only on a crest, and few), and in open
+// country, on the coast and on the islands; q is a random number from the block
 function villageKind(ch,x,z,q){
-  if (ch.kind==='shore'){ const h=hash(Math.round(x),Math.round(z),7405);
-    return q<0.14?(h<0.4?'palm':h<0.7?'fanpalm':'date'):q<0.46?'citrus':q<0.6?'cypress':q<0.72?'fig':undefined; }
-  return q<0.32?'cypress':q<0.5?'citrus':q<0.62?'fig':q<0.66?'almond':undefined;
+  if (ch.kind==='shore') return q<0.25?'fig':q<0.5?'cypress':undefined;
+  return q<0.34?'cypress':q<0.46?'fig':q<0.5?'almond':undefined;
 }
 function wildKind(ch,x,z,q){
   if (q<0.1 && (ch.pines||0)<3 && hash(ch.cx,ch.cz,7403)<0.5 && onCrest(x,z)){ ch.pines=(ch.pines||0)+1; return 'stonepine'; }
@@ -2253,7 +2255,7 @@ function wildKind(ch,x,z,q){
 }
 function countryKind(ch,x,z,q){
   if (ch.kind==='rocky') return q<0.18?'carob':q<0.34?'holm':q<0.44?'almond':q<0.56?'olive':q<0.62?'aleppo':q<0.7?'opuntia':q<0.78?'cypress':q<0.84?'agave':q<0.92?'maquis':null;
-  if (ch.kind==='isle') return q<0.26?'aleppo':q<0.34?'holm':q<0.46?'agave':q<0.54?'cypress':q<0.62?'opuntia':q<0.9?'maquis':null;
+  if (ch.kind==='isle') return q<0.16?'aleppo':q<0.24?'holm':q<0.38?'agave':q<0.46?'cypress':q<0.56?'opuntia':q<0.9?'maquis':null;
   return q<0.3?'agave':q<0.5?'opuntia':q<0.75?'aleppo':null;
 }
 function addTree(gb,ch,x,z,R,s=1,base,kind){
@@ -3318,9 +3320,8 @@ function genChunk(cx,cz,lod=0){
       ch.obbs.push({x,z,hw:1.15,hd:0.6,rot,top:gb.oy+0.9});   // the counter can be climbed onto
       addFigure(gb,x+Math.sin(rot)*1.3,0,z+Math.cos(rot)*1.3,R,rot+Math.PI);
     }
-    // a third of the squares have a palm or two of one kind, a fifth have orange or lemon trees
-    if (!P.small && !P.peak){ const pk=hash(cx,cz,7401), pkind=pk<0.14?'palm':pk<0.24?'fanpalm':pk<0.32?'date':pk<0.52?'citrus':undefined, ntree=Math.max(pk<0.32?1:0,Math.min(pk<0.32?2:3,Math.floor(R()*3)));
-      for (let s=0;s<ntree;s++){ const a=R()*6.28, r=P.r-(pk<0.32?2.4:1.6); addTree(gb,ch,px+Math.cos(a)*r,pz+Math.sin(a)*r,R,pkind?0.9+R()*0.2:0.75+R()*0.3,0,pkind); } }
+    if (!P.small && !P.peak){ const ntree=Math.floor(R()*3);
+      for (let s=0;s<ntree;s++){ const a=R()*6.28, r=P.r-1.6; addTree(gb,ch,px+Math.cos(a)*r,pz+Math.sin(a)*r,R,0.75+R()*0.3,0); } }
     if (ch.kind==='piazza' && !P.small && !P.peak) addCafes(gb,ch,P);
     if (!P.peak) addPiazzaBenches(gb,ch,P);
     // the stone ring round the great elm is a seat, facing outwards
@@ -3413,13 +3414,12 @@ function genChunk(cx,cz,lod=0){
           for (let q=0;q<nseg;q++){ const m=u0+(q+0.5)*sl, x=gx+(vert?sx:m), z=gz+(vert?m:sz), w=vert?0.5:sl+0.02, d=vert?sl+0.02:0.5, gy=heightAt(x,z);
             gb.add(T.box, mat(x,gy-1,z,w,2.35,d), wallC, gy-1, SS); gb.add(T.box, mat(x,gy+1.35,z,w+0.12,0.12,d+0.12), C_.trim, null);
             ch.obbs.push({x,z,hw:w/2,hd:d/2,rot:0,top:gy+1.47}); } } });   // its coping can be climbed onto
-      // half the orchards are groves of lemons and oranges; the rest mix olives, citrus, figs, almonds and others
-      const citrusGrove=hash(cx,cz,7402)<0.5;
+      // olives and round fruit trees, with a fig or an almond here and there
       for (let x=-gw/2+2; x<=gw/2-1.6; x+=3.4) for (let z=-gd/2+2; z<=gd/2-1.6; z+=3.4)
-        if (R()<0.88){ const tx=gx+x+(R()-0.5)*0.5, tz=gz+z+(R()-0.5)*0.5, sc=0.55+R()*0.2, q=R(), k=citrusGrove?(q<0.72?'citrus':q<0.86?'fig':'olive'):(q<0.3?'olive':q<0.55?'citrus':q<0.7?'fig':q<0.82?'almond':'round');
-          addTree(gb,ch,tx,tz,R,sc*(k==='citrus'?1.45:k==='fig'?1.15:k==='almond'?1.2:1),undefined,k); }
+        if (R()<0.88){ const tx=gx+x+(R()-0.5)*0.5, tz=gz+z+(R()-0.5)*0.5, sc=0.55+R()*0.2, q=R(), k=q<0.4?'olive':q<0.76?'round':q<0.88?'fig':'almond';
+          addTree(gb,ch,tx,tz,R,sc*(k==='fig'?1.1:k==='almond'?1.2:1),undefined,k); }
       if (R()<0.6){ const fx=gx+(R()-0.5)*gw*0.6, fz=gz+(R()-0.5)*gd*0.6; addFigure(gb,fx,heightAt(fx,fz),fz,R,R()*6.28); }
-      ch.name='Orto di '+saint; ch.label='Walled orchard'; ch.desc=citrusGrove?'Lemon and orange trees, with a fig or two, inside a dry-stone wall on the edge of the village.':'Olive, lemon, orange, fig and almond trees inside a dry-stone wall on the edge of the village.';
+      ch.name='Orto di '+saint; ch.label='Walled orchard'; ch.desc='Olive, fig, almond and fruit trees inside a dry-stone wall on the edge of the village.';
     } else ch.kind='quarter';
   }
 
@@ -4182,7 +4182,7 @@ function patchGround(mat){
           float cs=uwCaustic(cp,fw+0.007*dep)*0.65*(0.55+0.45*sbN(_wp.xz*0.15))*smoothstep(0.25,0.95,nw.y)*uwShadow(vWP+vec3(0.0,0.06,0.0))*(1.0-0.6*bedGrass)*uCAmt*smoothstep(0.0,0.25,uSunW.y);
           outgoingLight*=1.0+cs*uwK; }
         #include <opaque_fragment>
-        if (uUnderOn>0.5) gl_FragColor.a=0.5;`);
+        if (uOwnMark>0.5 && uwK>0.0) gl_FragColor.a=0.5;`);   // only in the water's own render, and only for the seabed
     Object.assign(sh.uniforms,UW.uniforms);
   };
   mat.customProgramCacheKey=()=>'ground';
@@ -6391,8 +6391,8 @@ function createDinghy(parent, opts={}){
    Gerstner waves as the sea: inside the critical angle of 48.6 degrees (asin 1/1.333) the sky is refracted into Snell's window,
    and outside it the surface is a mirror of the water beneath, with the exact Fresnel term giving the edge.
    Drifting particles are drawn round the eye. A material may draw its own caustics (the seabed's does, on its
-   smooth and detailed surface, using UW.glsl and UW.uniforms, with uUnderOn telling it when) and write an alpha
-   below 0.75 under the water; the composite then leaves its caustics and its shading of downward faces alone. */
+   smooth and detailed surface, using UW.glsl and UW.uniforms, with uUnderOn telling it when) and, where uOwnMark is
+   raised (only for this module's own drawing under the water), write an alpha below 0.75; the composite then leaves its caustics and its shading of downward faces alone. */
 function createUnderwater(renderer, opts={}){
   const O=Object.assign({shafts:1,sea:null,visibility:28,rayScale:0.5,raySteps:14,sceneScale:1,splitScale:0.6,particles:2400,discRadius:110,seed:5,rays:true,caustics:true},opts);
   const sea=O.sea, N_W=1.333;
@@ -6401,17 +6401,22 @@ function createUnderwater(renderer, opts={}){
 
   /* ---------- the water: attenuation per metre at a visibility of 28 m, and how much of what is lost comes back as haze ---------- */
   const C28=new THREE.Vector3(0.40,0.10,0.072), ALB=new THREE.Vector3(0.05,0.36,0.74);
-  const NC=14;
+  const NC=18;
   const U={uAbs:{value:new THREE.Vector3()},uAlb:{value:ALB.clone()},uSunW:{value:new THREE.Vector3(0,1,0)},uSunCol:{value:new THREE.Color()},
     uSkyCol:{value:new THREE.Color()},uCam:{value:new THREE.Vector3()},uOffW:{value:new THREE.Vector3()},uSurfY:{value:0},uTimeW:{value:0},
     uCAmt:{value:0.7},uCSteep:{value:1},uWGain:{value:2.0},uCW:{value:[...Array(NC)].map(()=>new THREE.Vector4())},uCB:{value:[...Array(NC)].map(()=>new THREE.Vector2())},
-    uShadowMap:{value:null},uShadowM:{value:new THREE.Matrix4()},uHasShadow:{value:0},uUnderOn:{value:0}};
+    uShadowMap:{value:null},uShadowM:{value:new THREE.Matrix4()},uHasShadow:{value:0},uUnderOn:{value:0},uOwnMark:{value:0},uCTime:{value:0}};
   // the ripples that focus the light: short waves of 0.3 to 3 m, about the wind's direction, scaled with the wind
-  const CT=[...Array(NC)].map((_,i)=>{ const L=0.3*Math.pow(10,(i+R())/NC), k=2*Math.PI/L; return {L,k,om:Math.sqrt(9.81*k),off:(R()*2-1)*(0.5+1.1*(1-i/NC)),ph:R()*Math.PI*2,a:Math.pow(L,1.05)*(0.75+R()*0.5)}; });
+  // the ripples: lengths from 0.3 to 3 m, jittered so that no two share a ratio, at headings fanned about the wind's,
+  // each at its own pace about the natural one (the light they focus beats like no one train);
+  // each grows and fades slowly at a rate of its own (over half a minute to a few minutes), so that the net they make never
+  // comes round to the same figure again
+  const CT=[...Array(NC)].map((_,i)=>{ const L=0.3*Math.pow(10,(i+0.15+0.7*R())/NC), k=2*Math.PI/L; return {L,k,om:Math.sqrt(9.81*k)*(0.6+0.8*R()),off:(R()*2-1)*(0.5+1.1*(1-i/NC)),ph:R()*Math.PI*2,a:Math.pow(L,1.05)*(0.75+R()*0.5),
+    mw:0.3+1.2*R(),mp:R()*Math.PI*2}; });
   const GLSL=`
     uniform vec3 uAbs, uAlb, uSunW, uSunCol, uSkyCol, uCam, uOffW; uniform float uSurfY, uTimeW, uCAmt, uCSteep, uWGain;
     uniform vec4 uCW[${NC}]; uniform vec2 uCB[${NC}];
-    uniform sampler2D uShadowMap; uniform mat4 uShadowM; uniform float uHasShadow, uUnderOn;
+    uniform sampler2D uShadowMap; uniform mat4 uShadowM; uniform float uHasShadow, uUnderOn, uOwnMark, uCTime;
     float uwHG(float c,float g){ float g2=g*g; return (1.0-g2)/(12.566*pow(max(1.0+g2-2.0*g*c,1e-4),1.5)); }
     // the sun and the sky that reach a depth: the sun along its refracted path, the sky over a longer mean path
     vec3 uwSun(float y){ float d=max(0.0,uSurfY-y); return uSunCol*exp(-uAbs*d/max(uSunW.y,0.3)); }
@@ -6425,7 +6430,7 @@ function createUnderwater(renderer, opts={}){
     // the Hessian of the ripples, each train smeared by the sun's disc and the pixel
     vec3 uwHess(vec2 p,float smear,int i0,float ts){ vec3 H=vec3(0.0);
       for (int i=0;i<${NC};i++){ if (i<i0) continue; vec4 a=uCW[i]; vec2 b=uCB[i]; float amp=b.x*exp(-0.5*smear*smear*a.z*a.z); if (amp<1e-5) continue;
-        float c=-amp*a.z*a.z*sin(a.z*dot(a.xy,p)-a.w*uTimeW*ts+b.y); H+=vec3(c*a.x*a.x,c*a.y*a.y,c*a.x*a.y); } return H; }
+        float c=-amp*a.z*a.z*sin(a.z*dot(a.xy,p)-a.w*uCTime*ts+b.y); H+=vec3(c*a.x*a.x,c*a.y*a.y,c*a.x*a.y); } return H; }
     // caustics: sunlight refracted by the ripples maps the surface on to the bed, x + K grad h; the brightness is the
     // reciprocal of that map's Jacobian, so the bright net lies where the determinant passes through zero
     float uwCaustic(vec3 P,float fw){ float d=max(0.0,uSurfY-P.y); if (d>40.0) return 0.0;
@@ -6437,7 +6442,7 @@ function createUnderwater(renderer, opts={}){
     // from all but the shortest ripples, drifting at a fraction of the ripples' own speed so that they shimmer slowly.
     // Signed about the mean: the sheets brighten and the gaps between them dim
     float uwShaft(vec3 P){ float d=max(0.0,uSurfY-P.y); vec2 p=P.xz+uOffW.xz+uSunW.xz*d/max(uSunW.y,0.3);
-      vec3 H=uwHess(p,0.05+0.0025*d,${NC>>2},0.35); float K=0.25*max(d,0.6)*uCSteep*1.3, x=1.0+K*H.x, y=1.0+K*H.y, c=K*H.z;
+      vec3 H=uwHess(p,0.05+0.0025*d,${NC>>2},0.8); float K=0.25*max(d,0.6)*uCSteep*1.3, x=1.0+K*H.x, y=1.0+K*H.y, c=K*H.z;
       return clamp(1.0/max(abs(x*y-c*c),0.14)-1.15,-0.7,3.0); }`;
 
   /* ---------- targets ---------- */
@@ -6543,7 +6548,7 @@ function createUnderwater(renderer, opts={}){
       void main(){
         // the ripples tilt the surface too, so that the window writhes as it does in the sea
         vec2 g=vec2(0.0); float fw=max(length(fwidth(vQ)),1e-3);
-        for (int i=0;i<${NC};i++){ vec4 a=uCW[i]; float amp=uCB[i].x*exp(-0.5*fw*fw*a.z*a.z*4.0); g+=a.xy*a.z*amp*cos(a.z*dot(a.xy,vQ)-a.w*uTimeW+uCB[i].y); }
+        for (int i=0;i<${NC};i++){ vec4 a=uCW[i]; float amp=uCB[i].x*exp(-0.5*fw*fw*a.z*a.z*4.0); g+=a.xy*a.z*amp*cos(a.z*dot(a.xy,vQ)-a.w*uCTime+uCB[i].y); }
         vec3 N=normalize(normalize(vN)+vec3(-g.x,0.0,-g.y)*0.7);
         vec3 V=normalize(uCam-vP), Nb=-N; float ci=clamp(dot(Nb,V),0.0,1.0);
         float F=fresnel(ci,${N_W.toFixed(3)});
@@ -6656,7 +6661,7 @@ ${GLSL} uniform float uPx; attribute vec2 aPar; varying float vA;
     return lo>0.0012?'above':hi<-0.0012?'under':'split'; }
 
   /* ---------- state ---------- */
-  const st={rW:[0,0,1,1],rA:[0,0,1,1],wet:0,under:false,dive:false,lens:'above',imm:0,bub:9,time:0,wb:new THREE.Vector3(1,1,1),attached:null};
+  const st={ctime:0,rW:[0,0,1,1],rA:[0,0,1,1],wet:0,under:false,dive:false,lens:'above',imm:0,bub:9,time:0,wb:new THREE.Vector3(1,1,1),attached:null};
   const _v=new THREE.Vector3(), _sz=new THREE.Vector2(), _sw=new THREE.Vector3();
   function setOptions(o){ Object.assign(O,o); U.uAbs.value.copy(C28).multiplyScalar(28/cl(O.visibility,4,80)); U.uCAmt.value=O.caustics?0.7:0; }
   setOptions({});
@@ -6692,8 +6697,13 @@ ${GLSL} uniform float uPx; attribute vec2 aPar; varying float vA;
     SU.uSkyTop.value.copy(ctx.skyTop); SU.uSkyMid.value.copy(ctx.skyMid); SU.uSkyHor.value.copy(ctx.skyHorizon); SU.uSunAir.value.copy(s); SU.uSunAirCol.value.copy(ctx.sunColor).multiplyScalar(0.4);
     SU.uBrightW.value=ctx.bright??1;
     // the ripples follow the wind
+    // the ripples follow the wind: their strength, and the pace of the light they focus, which is about a tenth to a fifth
+    // of the ripples' own and slower where the water is sheltered. The pace is integrated into a clock of its own, so that
+    // a change of wind never makes the pattern jump
     const wu=sea.uniforms.uWind.value, wd=sea.uniforms.uWindDir.value, wa=Math.atan2(wd.y,wd.x), gain=(0.35+0.9*sm(0.5,7,wu))*0.011;
-    for (let i=0;i<NC;i++){ const c=CT[i], a=wa+c.off; U.uCW.value[i].set(Math.cos(a),Math.sin(a),c.k,c.om); U.uCB.value[i].set(c.a*gain,c.ph); }
+    const fe=sea.fieldAt?sea.fieldAt(U.uCam.value.x+(ctx.offset?ctx.offset.x:0),U.uCam.value.z+(ctx.offset?ctx.offset.z:0)):null, shel=fe?cl(fe[1],0,1):1;
+    if (!ctx.paused) st.ctime+=dt*(O.cpace??1)*(0.085+0.1*sm(0.5,9,wu))*(0.55+0.45*shel); U.uCTime.value=st.ctime;
+    for (let i=0;i<NC;i++){ const c=CT[i], a=wa+c.off, sw=1+0.4*Math.sin(st.ctime*c.mw+c.mp); U.uCW.value[i].set(Math.cos(a),Math.sin(a),c.k,c.om); U.uCB.value[i].set(c.a*gain*sw,c.ph); }
     U.uCSteep.value=1.25;
     if (ctx.shadow && ctx.shadow.map){ U.uShadowMap.value=ctx.shadow.map; U.uShadowM.value.copy(ctx.shadow.matrix); U.uHasShadow.value=1; } else U.uHasShadow.value=0;
     // the white balance for the diver's depth, normalised so that it changes the hue and not the brightness
@@ -6725,7 +6735,7 @@ ${GLSL} uniform float uPx; attribute vec2 aPar; varying float vA;
     // the far plane pulled in: nothing beyond the reach of the light is drawn
     const far0=camera.far, seaVis=sea.mesh.visible; camera.far=Math.min(far0,cl(O.visibility,4,80)*2.7+10); camera.updateProjectionMatrix();
     sea.mesh.visible=false;
-    clip(SR,split?st.rW:null); r.setRenderTarget(SR); r.render(scene,camera);
+    clip(SR,split?st.rW:null); U.uOwnMark.value=1; r.setRenderTarget(SR); r.render(scene,camera); U.uOwnMark.value=0;
     sea.mesh.visible=seaVis;
     PU.uPInv.value.copy(camera.projectionMatrixInverse); PU.uCamW.value.copy(camera.matrixWorld);
     camera.far=far0; camera.updateProjectionMatrix();
@@ -6735,7 +6745,8 @@ ${GLSL} uniform float uPx; attribute vec2 aPar; varying float vA;
       if (underRT.width!==_sz.x||underRT.height!==_sz.y) underRT.setSize(_sz.x,_sz.y);
       quad.material=compMat; clip(underRT,st.rW); r.setRenderTarget(underRT); r.render(postScene,postCam);
       // the host's frame above the water, to the screen as it always draws it; then the water laid over it
-      surf.visible=parts.visible=false; drawAbove(null); surf.visible=parts.visible=true;
+      // the host's frame above the water is drawn exactly as it is drawn when the view is wholly above it
+      const uo=U.uUnderOn.value; U.uUnderOn.value=0; surf.visible=parts.visible=false; drawAbove(null); surf.visible=parts.visible=true; U.uUnderOn.value=uo;
       PU.uPInv.value.copy(camera.projectionMatrixInverse); PU.uCamW.value.copy(camera.matrixWorld);
       const ac=r.autoClear; r.autoClear=false; quad.material=mixMat; r.setRenderTarget(null); r.render(postScene,postCam); r.autoClear=ac;
     } else { quad.material=compMat; r.setRenderTarget(null); r.render(postScene,postCam); }
@@ -9844,7 +9855,8 @@ function render(){
 // wholly under the water nothing lies within reach but the water, so the distant terrain, its outline and the sky,
 // which the near far plane would clip, are not drawn at all
 function diveRender(){
-  if (window.__diveNoSplit) return false;   // for tests: the plain frame above the water, to compare with the split's upper half
+  if (window.__diveNoSplit){   // for tests: the plain frame above the water, to compare with the split's upper half
+    const u=UW.uniforms.uUnderOn.value; UW.uniforms.uUnderOn.value=0; try { renderMain(); } finally { UW.uniforms.uUnderOn.value=u; } return true; }
   if (UW.lens!=='under') return UW.render(renderer,scene,camera,diveAbove);
   const v=[farMesh.visible,farGlow.visible,outMesh.visible,sky.visible]; farMesh.visible=farGlow.visible=outMesh.visible=sky.visible=false;
   try { return UW.render(renderer,scene,camera,diveAbove); } finally { [farMesh.visible,farGlow.visible,outMesh.visible,sky.visible]=v; } }

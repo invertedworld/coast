@@ -13,9 +13,11 @@ The program is contained in `index.html`, apart from the cat in `cat/`. There is
 | `sounds.json` | Maps sound identifiers to audio files (see [Sound](#sound)). |
 | `sounds/` | The audio files that `sounds.json` names. |
 | `publish-site.sh` | Publishes the game to markhammond.me (see [Publishing](#publishing)). |
+| `deploy-itch.sh` | Publishes the game to itch.io with butler (see [Publishing](#publishing)). |
 | `testbench/seagulls.html` | A stand-alone page for developing the gulls (see [Gulls](#gulls)). |
 | `testbench/sailing.html` | A stand-alone page for developing the dinghy and the wind, with a harbour, a beach and a cove (see [Sailing](#sailing)). |
 | `testbench/diving.html` | A stand-alone page for developing swimming and diving, with a beach, a rocky point, a short quay, the dinghy and the seabed to 20 m (see [Swimming and diving](#swimming-and-diving)). |
+| `testbench/trees.html` | A stand-alone page for developing the trees and plants, in the game's palette, daylight and fog: each species between an olive and a cypress, seen from 3 m or 15 m at any level of detail, and in groups in a garden, a piazza, open country, a wild hillside and on a clifftop (see [Trees and plants](#trees-and-plants)). |
 
 ## Running the program
 
@@ -40,6 +42,8 @@ printf '#!/usr/bin/env bash\nwhile read -r l s r o; do [ "$r" = refs/heads/main 
 ```
 
 A failure to publish is reported but does not stop the push of this repository. The testbenches and the source recordings in `village sounds/` are not published.
+
+The game is published to itch.io (https://invertedworld.itch.io/coast) by `deploy-itch.sh [commit] [version]`, which exports the same files from a commit, points them at the copies of three.js and the fonts kept in the site's repository (`play/coast/vendor` and `fonts`), and pushes the folder with butler to the `html5` channel of `invertedworld/coast`, the version shown on itch being a UTC timestamp unless one is given. It is run by hand; the itch app's own copy of butler is used when butler is not on the path, and `butler login` is needed once on a new machine.
 
 ## Controls
 
@@ -161,29 +165,31 @@ Beyond the rings, a coarse far terrain (`FN = 200` cells of `FS = 22` m) covers 
 
 ### Trees and plants
 
-The island carries sixteen kinds of tree and plant. The cypress, the olive and a round broadleaf are built by `addTree`; the others are built by `addFlora`, which `addTree` calls for any kind listed in `FLORA`:
+The island carries twelve kinds of tree and plant. The cypress, the olive and a round broadleaf are built by `addTree`; the other nine are built by `addFlora`, which `addTree` calls for any kind listed in `FLORA`:
 
 | Kind | Form |
 |---|---|
-| Stone pine (`stonepine`) | A short, slightly curving reddish-brown trunk, 3.6–5.4 m high, forking into four or five limbs under a broken crown of flattened clumps, each darker beneath and lighter and warmer on top. |
-| Aleppo pine (`aleppo`) | A slender grey trunk leaning 10 to 30 degrees and bending as it rises, with an open crown of pale tufts held out on branches. |
-| Holm oak (`holm`) | A short stout trunk under a dense, dark, rounded crown, a little wider than it is tall. |
-| Carob (`carob`) | A broad, low dome of glossy dark green, reaching nearly to the ground, on a short thick trunk. |
-| Fig (`fig`) | Two or three pale grey stems splaying from the foot under a low, wide crown of bright, coarse lobes. |
-| Lemon and orange (`citrus`) | A small round tree of dark leaves, hung with yellow or orange fruit; the colour of the fruit is decided by the tree's position. |
-| Almond (`almond`) | A dark crooked trunk opening into a vase of thin branches with sparse tufts of pale grey-green leaves. |
-| Canary palm (`palm`) | A stout straight trunk and a full head of 26 arching fronds. |
-| Date palm (`date`) | A taller, slimmer trunk with a slight curve, a sparser head of grey-green fronds, and dates. |
-| Fan palm (`fanpalm`) | A tall slim trunk with a compact head of fan leaves over a brown skirt of dead ones. |
-| Prickly pear (`opuntia`) | A clump of up to 18 flat grey-green pads, each growing from the rim of the one below. |
-| Agave (`agave`) | A rosette of 16–20 thick blue-grey leaves; three in ten carry a flowering stem 4.5–6.5 m tall branching into yellow flowers. |
-| Maquis (`maquis`) | A low clump of two or three mounds of lentisk, mid-green and dense, or of rosemary, lower and grey-green. |
+| Stone pine (`stonepine`) | A short, slightly curving reddish-brown trunk, 3.8–5.6 m high, forking into four or five limbs that carry a broad, flat-topped umbrella of three clumps each, with sky showing between them. |
+| Aleppo pine (`aleppo`) | A slender grey trunk leaning 10 to 30 degrees and bending as it rises, with an uneven crown in its upper part: broad, flat masses of foliage on short crooked branches, overlapping, with the sky showing through at the edges. |
+| Holm oak (`holm`) | A short stout trunk dividing into limbs under a dense, rounded, grey-green crown of nine clumps, a little wider than it is tall. |
+| Carob (`carob`) | A short thick trunk and spreading limbs under a broad, low dome of eleven clumps of glossy green, hanging nearly to the ground at its edge. |
+| Fig (`fig`) | Three or four pale grey stems splaying from the foot and forking under a low, wide, open crown of bright green clumps. |
+| Almond (`almond`) | A dark crooked trunk opening into a vase of thin branches that carry a rounded, open crown of small pale grey-green tufts. |
+| Prickly pear (`opuntia`) | A clump of up to 18 flat grey-green pads, each growing from the rim of the one below, with a few small dark-red fruit on the outermost. |
+| Agave (`agave`) | A rosette of 16–20 thick blue-grey leaves; three in ten carry a flowering stem 4.5–6.5 m tall branching into small yellow flower heads. |
+| Maquis (`maquis`) | A low, uneven clump of three or four mounds of lentisk, mid-green and dense, or of rosemary, lower and grey-green. |
 
-Each plant draws its variation of size, lean and tint from a random sequence of its own, seeded from its position, so the block's sequence is undisturbed and the plant is identical at every level of detail. Trees lean downhill, which on a coast or a clifftop is towards the sea, unless the ground is nearly level. Trees take a collision circle at the trunk and are recorded in `treeSpots`, which the wind in the trees and the cafés' placement use; prickly pears and agaves take a circle round the whole plant, and maquis takes none, as the scrub did before it. Everything is merged into the block's geometry, so no draw calls are added. At full detail a tree has 400–1,050 triangles. At the simplified level, fruit, twigs, the almond's side shoots and the lighter tops of the stone pine's clumps are left out, a prickly pear or an agave becomes one mass of its colour, and maquis becomes one mound. In the outlines, prickly pears, agaves and maquis are left out, a palm's head becomes one mass, and the Aleppo pine, holm oak, carob and fig keep every other lobe of their crowns. Each plant takes the same random numbers whether or not a part is drawn, so its shape does not change when its block changes detail. Compared with the vegetation it replaced, a block has about 3 per cent fewer triangles at full detail, 9 per cent more at the simplified level and 1 per cent more in the outlines.
+A crown is never one shape. It is built from several overlapping clumps with gaps between them. Each clump is a low sphere made lumpy by pushing its vertices in and out by a noise of their position (`foliage`), given a flat normal on every face so that it catches the light in facets, and shaded across the whole crown from darker beneath to lighter and warmer on top, with a little variation from face to face. The leaves are of the brightness of the olive and the round broadleaf. Fruit and flowers are small specks.
+
+Each plant draws its variation of size, lean and tint from a random sequence of its own, seeded from its position, so the block's sequence is undisturbed. It takes the same random numbers whether or not a part is drawn, so it does not change shape when its block changes detail. Trees lean downhill, which on a coast or a clifftop is towards the sea, unless the ground is nearly level. Trees take a collision circle at the trunk and are recorded in `treeSpots`, which the wind in the trees and the cafés' placement use; prickly pears and agaves take a circle round the whole plant, and maquis takes none, as the scrub did before it. Everything is merged into the block's geometry, so no draw calls are added.
+
+At full detail a tree has about 500–1,000 triangles. At the simplified level each clump is a coarser shape of 20 triangles, the fruit, twigs and flowers are left out, and a prickly pear or an agave becomes one mass of its colour and maquis one mound. In the outlines a crown keeps one clump in three, a little larger, and prickly pears, agaves and maquis are left out. Compared with the build in which the new kinds were withdrawn, a block has about 12 per cent more triangles at full detail, which is drawn only within about 100 m, about the same at the simplified level and 2 per cent fewer in the outlines. The settled draw distance is unchanged.
+
+Only the kinds in `FLORA_OK` are placed. A kind that is not in it is replaced by the round broadleaf if it is a tree, and left out if it is a shrub (`FLORA_SHRUBS`). New kinds are developed and shown in `testbench/trees.html`, and added to `FLORA_OK` once approved.
 
 Plants are placed by habitat, from the block's seed:
 
-- **Villages.** The trees between the houses are cypress (32 per cent), citrus (18), fig (12), almond (4) and the round broadleaf. In a shore block, by the water, 14 per cent are palms of the three kinds. A third of the larger squares have one or two palms of a single kind at their edge, and a fifth have orange or lemon trees. Half the walled orchards are groves of lemons and oranges with a fig or two; the others mix olives, citrus, figs, almonds and the round broadleaf.
+- **Villages.** The trees between the houses are cypress (34 per cent), fig (12), almond (4) and the round broadleaf; in a shore block, by the water, fig (25), cypress (25) and the round broadleaf. The larger squares have up to two round broadleaves at their edge. A walled orchard holds olives and round fruit trees, with a fig or an almond here and there.
 - **Olive groves and farms.** The terraced rows of olives remain, with an occasional cypress, carob or almond. A farm's sparser rows are half olives, with almonds, carobs and figs. A fig stands beside each farmhouse and a prickly pear against its wall.
 - **Roadsides.** One in five of the roads lined with trees has a few stone pines, 13 m apart and leaning over the road, in place of the row of cypresses.
 - **Open rocky country.** Among the limestone outcrops and the scrub, which is partly maquis, grow carob, holm oak, almond, olive, a few Aleppo pines, cypress, prickly pears and agaves.

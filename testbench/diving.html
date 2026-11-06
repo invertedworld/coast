@@ -1448,8 +1448,8 @@ function createDolphins(parent, opts={}){
    Gerstner waves as the sea: inside the critical angle of 48.6 degrees (asin 1/1.333) the sky is refracted into Snell's window,
    and outside it the surface is a mirror of the water beneath, with the exact Fresnel term giving the edge.
    Drifting particles are drawn round the eye. A material may draw its own caustics (the seabed's does, on its
-   smooth and detailed surface, using UW.glsl and UW.uniforms, with uUnderOn telling it when) and write an alpha
-   below 0.75 under the water; the composite then leaves its caustics and its shading of downward faces alone. */
+   smooth and detailed surface, using UW.glsl and UW.uniforms, with uUnderOn telling it when) and, where uOwnMark is
+   raised (only for this module's own drawing under the water), write an alpha below 0.75; the composite then leaves its caustics and its shading of downward faces alone. */
 function createUnderwater(renderer, opts={}){
   const O=Object.assign({shafts:1,sea:null,visibility:28,rayScale:0.5,raySteps:14,sceneScale:1,splitScale:0.6,particles:2400,discRadius:110,seed:5,rays:true,caustics:true},opts);
   const sea=O.sea, N_W=1.333;
@@ -1458,17 +1458,22 @@ function createUnderwater(renderer, opts={}){
 
   /* ---------- the water: attenuation per metre at a visibility of 28 m, and how much of what is lost comes back as haze ---------- */
   const C28=new THREE.Vector3(0.40,0.10,0.072), ALB=new THREE.Vector3(0.05,0.36,0.74);
-  const NC=14;
+  const NC=18;
   const U={uAbs:{value:new THREE.Vector3()},uAlb:{value:ALB.clone()},uSunW:{value:new THREE.Vector3(0,1,0)},uSunCol:{value:new THREE.Color()},
     uSkyCol:{value:new THREE.Color()},uCam:{value:new THREE.Vector3()},uOffW:{value:new THREE.Vector3()},uSurfY:{value:0},uTimeW:{value:0},
     uCAmt:{value:0.7},uCSteep:{value:1},uWGain:{value:2.0},uCW:{value:[...Array(NC)].map(()=>new THREE.Vector4())},uCB:{value:[...Array(NC)].map(()=>new THREE.Vector2())},
-    uShadowMap:{value:null},uShadowM:{value:new THREE.Matrix4()},uHasShadow:{value:0},uUnderOn:{value:0}};
+    uShadowMap:{value:null},uShadowM:{value:new THREE.Matrix4()},uHasShadow:{value:0},uUnderOn:{value:0},uOwnMark:{value:0},uCTime:{value:0}};
   // the ripples that focus the light: short waves of 0.3 to 3 m, about the wind's direction, scaled with the wind
-  const CT=[...Array(NC)].map((_,i)=>{ const L=0.3*Math.pow(10,(i+R())/NC), k=2*Math.PI/L; return {L,k,om:Math.sqrt(9.81*k),off:(R()*2-1)*(0.5+1.1*(1-i/NC)),ph:R()*Math.PI*2,a:Math.pow(L,1.05)*(0.75+R()*0.5)}; });
+  // the ripples: lengths from 0.3 to 3 m, jittered so that no two share a ratio, at headings fanned about the wind's,
+  // each at its own pace about the natural one (the light they focus beats like no one train);
+  // each grows and fades slowly at a rate of its own (over half a minute to a few minutes), so that the net they make never
+  // comes round to the same figure again
+  const CT=[...Array(NC)].map((_,i)=>{ const L=0.3*Math.pow(10,(i+0.15+0.7*R())/NC), k=2*Math.PI/L; return {L,k,om:Math.sqrt(9.81*k)*(0.6+0.8*R()),off:(R()*2-1)*(0.5+1.1*(1-i/NC)),ph:R()*Math.PI*2,a:Math.pow(L,1.05)*(0.75+R()*0.5),
+    mw:0.3+1.2*R(),mp:R()*Math.PI*2}; });
   const GLSL=`
     uniform vec3 uAbs, uAlb, uSunW, uSunCol, uSkyCol, uCam, uOffW; uniform float uSurfY, uTimeW, uCAmt, uCSteep, uWGain;
     uniform vec4 uCW[${NC}]; uniform vec2 uCB[${NC}];
-    uniform sampler2D uShadowMap; uniform mat4 uShadowM; uniform float uHasShadow, uUnderOn;
+    uniform sampler2D uShadowMap; uniform mat4 uShadowM; uniform float uHasShadow, uUnderOn, uOwnMark, uCTime;
     float uwHG(float c,float g){ float g2=g*g; return (1.0-g2)/(12.566*pow(max(1.0+g2-2.0*g*c,1e-4),1.5)); }
     // the sun and the sky that reach a depth: the sun along its refracted path, the sky over a longer mean path
     vec3 uwSun(float y){ float d=max(0.0,uSurfY-y); return uSunCol*exp(-uAbs*d/max(uSunW.y,0.3)); }
@@ -1482,7 +1487,7 @@ function createUnderwater(renderer, opts={}){
     // the Hessian of the ripples, each train smeared by the sun's disc and the pixel
     vec3 uwHess(vec2 p,float smear,int i0,float ts){ vec3 H=vec3(0.0);
       for (int i=0;i<${NC};i++){ if (i<i0) continue; vec4 a=uCW[i]; vec2 b=uCB[i]; float amp=b.x*exp(-0.5*smear*smear*a.z*a.z); if (amp<1e-5) continue;
-        float c=-amp*a.z*a.z*sin(a.z*dot(a.xy,p)-a.w*uTimeW*ts+b.y); H+=vec3(c*a.x*a.x,c*a.y*a.y,c*a.x*a.y); } return H; }
+        float c=-amp*a.z*a.z*sin(a.z*dot(a.xy,p)-a.w*uCTime*ts+b.y); H+=vec3(c*a.x*a.x,c*a.y*a.y,c*a.x*a.y); } return H; }
     // caustics: sunlight refracted by the ripples maps the surface on to the bed, x + K grad h; the brightness is the
     // reciprocal of that map's Jacobian, so the bright net lies where the determinant passes through zero
     float uwCaustic(vec3 P,float fw){ float d=max(0.0,uSurfY-P.y); if (d>40.0) return 0.0;
@@ -1494,7 +1499,7 @@ function createUnderwater(renderer, opts={}){
     // from all but the shortest ripples, drifting at a fraction of the ripples' own speed so that they shimmer slowly.
     // Signed about the mean: the sheets brighten and the gaps between them dim
     float uwShaft(vec3 P){ float d=max(0.0,uSurfY-P.y); vec2 p=P.xz+uOffW.xz+uSunW.xz*d/max(uSunW.y,0.3);
-      vec3 H=uwHess(p,0.05+0.0025*d,${NC>>2},0.35); float K=0.25*max(d,0.6)*uCSteep*1.3, x=1.0+K*H.x, y=1.0+K*H.y, c=K*H.z;
+      vec3 H=uwHess(p,0.05+0.0025*d,${NC>>2},0.8); float K=0.25*max(d,0.6)*uCSteep*1.3, x=1.0+K*H.x, y=1.0+K*H.y, c=K*H.z;
       return clamp(1.0/max(abs(x*y-c*c),0.14)-1.15,-0.7,3.0); }`;
 
   /* ---------- targets ---------- */
@@ -1600,7 +1605,7 @@ function createUnderwater(renderer, opts={}){
       void main(){
         // the ripples tilt the surface too, so that the window writhes as it does in the sea
         vec2 g=vec2(0.0); float fw=max(length(fwidth(vQ)),1e-3);
-        for (int i=0;i<${NC};i++){ vec4 a=uCW[i]; float amp=uCB[i].x*exp(-0.5*fw*fw*a.z*a.z*4.0); g+=a.xy*a.z*amp*cos(a.z*dot(a.xy,vQ)-a.w*uTimeW+uCB[i].y); }
+        for (int i=0;i<${NC};i++){ vec4 a=uCW[i]; float amp=uCB[i].x*exp(-0.5*fw*fw*a.z*a.z*4.0); g+=a.xy*a.z*amp*cos(a.z*dot(a.xy,vQ)-a.w*uCTime+uCB[i].y); }
         vec3 N=normalize(normalize(vN)+vec3(-g.x,0.0,-g.y)*0.7);
         vec3 V=normalize(uCam-vP), Nb=-N; float ci=clamp(dot(Nb,V),0.0,1.0);
         float F=fresnel(ci,${N_W.toFixed(3)});
@@ -1713,7 +1718,7 @@ ${GLSL} uniform float uPx; attribute vec2 aPar; varying float vA;
     return lo>0.0012?'above':hi<-0.0012?'under':'split'; }
 
   /* ---------- state ---------- */
-  const st={rW:[0,0,1,1],rA:[0,0,1,1],wet:0,under:false,dive:false,lens:'above',imm:0,bub:9,time:0,wb:new THREE.Vector3(1,1,1),attached:null};
+  const st={ctime:0,rW:[0,0,1,1],rA:[0,0,1,1],wet:0,under:false,dive:false,lens:'above',imm:0,bub:9,time:0,wb:new THREE.Vector3(1,1,1),attached:null};
   const _v=new THREE.Vector3(), _sz=new THREE.Vector2(), _sw=new THREE.Vector3();
   function setOptions(o){ Object.assign(O,o); U.uAbs.value.copy(C28).multiplyScalar(28/cl(O.visibility,4,80)); U.uCAmt.value=O.caustics?0.7:0; }
   setOptions({});
@@ -1749,8 +1754,13 @@ ${GLSL} uniform float uPx; attribute vec2 aPar; varying float vA;
     SU.uSkyTop.value.copy(ctx.skyTop); SU.uSkyMid.value.copy(ctx.skyMid); SU.uSkyHor.value.copy(ctx.skyHorizon); SU.uSunAir.value.copy(s); SU.uSunAirCol.value.copy(ctx.sunColor).multiplyScalar(0.4);
     SU.uBrightW.value=ctx.bright??1;
     // the ripples follow the wind
+    // the ripples follow the wind: their strength, and the pace of the light they focus, which is about a tenth to a fifth
+    // of the ripples' own and slower where the water is sheltered. The pace is integrated into a clock of its own, so that
+    // a change of wind never makes the pattern jump
     const wu=sea.uniforms.uWind.value, wd=sea.uniforms.uWindDir.value, wa=Math.atan2(wd.y,wd.x), gain=(0.35+0.9*sm(0.5,7,wu))*0.011;
-    for (let i=0;i<NC;i++){ const c=CT[i], a=wa+c.off; U.uCW.value[i].set(Math.cos(a),Math.sin(a),c.k,c.om); U.uCB.value[i].set(c.a*gain,c.ph); }
+    const fe=sea.fieldAt?sea.fieldAt(U.uCam.value.x+(ctx.offset?ctx.offset.x:0),U.uCam.value.z+(ctx.offset?ctx.offset.z:0)):null, shel=fe?cl(fe[1],0,1):1;
+    if (!ctx.paused) st.ctime+=dt*(O.cpace??1)*(0.085+0.1*sm(0.5,9,wu))*(0.55+0.45*shel); U.uCTime.value=st.ctime;
+    for (let i=0;i<NC;i++){ const c=CT[i], a=wa+c.off, sw=1+0.4*Math.sin(st.ctime*c.mw+c.mp); U.uCW.value[i].set(Math.cos(a),Math.sin(a),c.k,c.om); U.uCB.value[i].set(c.a*gain*sw,c.ph); }
     U.uCSteep.value=1.25;
     if (ctx.shadow && ctx.shadow.map){ U.uShadowMap.value=ctx.shadow.map; U.uShadowM.value.copy(ctx.shadow.matrix); U.uHasShadow.value=1; } else U.uHasShadow.value=0;
     // the white balance for the diver's depth, normalised so that it changes the hue and not the brightness
@@ -1782,7 +1792,7 @@ ${GLSL} uniform float uPx; attribute vec2 aPar; varying float vA;
     // the far plane pulled in: nothing beyond the reach of the light is drawn
     const far0=camera.far, seaVis=sea.mesh.visible; camera.far=Math.min(far0,cl(O.visibility,4,80)*2.7+10); camera.updateProjectionMatrix();
     sea.mesh.visible=false;
-    clip(SR,split?st.rW:null); r.setRenderTarget(SR); r.render(scene,camera);
+    clip(SR,split?st.rW:null); U.uOwnMark.value=1; r.setRenderTarget(SR); r.render(scene,camera); U.uOwnMark.value=0;
     sea.mesh.visible=seaVis;
     PU.uPInv.value.copy(camera.projectionMatrixInverse); PU.uCamW.value.copy(camera.matrixWorld);
     camera.far=far0; camera.updateProjectionMatrix();
@@ -1792,7 +1802,8 @@ ${GLSL} uniform float uPx; attribute vec2 aPar; varying float vA;
       if (underRT.width!==_sz.x||underRT.height!==_sz.y) underRT.setSize(_sz.x,_sz.y);
       quad.material=compMat; clip(underRT,st.rW); r.setRenderTarget(underRT); r.render(postScene,postCam);
       // the host's frame above the water, to the screen as it always draws it; then the water laid over it
-      surf.visible=parts.visible=false; drawAbove(null); surf.visible=parts.visible=true;
+      // the host's frame above the water is drawn exactly as it is drawn when the view is wholly above it
+      const uo=U.uUnderOn.value; U.uUnderOn.value=0; surf.visible=parts.visible=false; drawAbove(null); surf.visible=parts.visible=true; U.uUnderOn.value=uo;
       PU.uPInv.value.copy(camera.projectionMatrixInverse); PU.uCamW.value.copy(camera.matrixWorld);
       const ac=r.autoClear; r.autoClear=false; quad.material=mixMat; r.setRenderTarget(null); r.render(postScene,postCam); r.autoClear=ac;
     } else { quad.material=compMat; r.setRenderTarget(null); r.render(postScene,postCam); }
@@ -2547,7 +2558,7 @@ function habitatAt(x,z){ const d=SEA-groundH(x,z), s=z-shoreZ(x);
           float cs=uwCaustic(cp,fw+0.007*dep)*0.65*(0.55+0.45*sbN(vWp.xz*0.15))*smoothstep(0.25,0.95,nw.y)*uwShadow(vWp+vec3(0.0,0.06,0.0))*(1.0-0.6*bedGrass)*uCAmt*smoothstep(0.0,0.25,uSunW.y);
           outgoingLight*=1.0+cs*uwK; }
         #include <opaque_fragment>
-        if (uUnderOn>0.5) gl_FragColor.a=0.5;   // tells the water's composite that this surface has drawn its own caustics`);
+        if (uOwnMark>0.5 && uwK>0.0) gl_FragColor.a=0.5;   // tells the water's composite, and only it, that this surface has drawn its own caustics`);
   };
   m.customProgramCacheKey=()=>'seabed2';
   const mesh=new THREE.Mesh(g,m); mesh.receiveShadow=true; scene.add(mesh); }
