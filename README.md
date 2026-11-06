@@ -15,6 +15,7 @@ The program is contained in `index.html`, apart from the cat in `cat/`. There is
 | `publish-site.sh` | Publishes the game to markhammond.me (see [Publishing](#publishing)). |
 | `testbench/seagulls.html` | A stand-alone page for developing the gulls (see [Gulls](#gulls)). |
 | `testbench/sailing.html` | A stand-alone page for developing the dinghy and the wind, with a harbour, a beach and a cove (see [Sailing](#sailing)). |
+| `testbench/diving.html` | A stand-alone page for developing swimming and diving, with a beach, a rocky point, a short quay, the dinghy and the seabed to 20 m (see [Swimming and diving](#swimming-and-diving)). |
 
 ## Running the program
 
@@ -48,9 +49,10 @@ The panel opened with **H** lists the controls. They are reproduced here for ref
 |---|---|
 | W A S D | Walk |
 | Shift | Run |
-| Space | Jump |
+| Space | Jumps. Jumping at a wall, a ledge or the eaves of a roof whose top is within reach climbs onto it. See [Roofs and climbing](#roofs-and-climbing). |
 | Z | Crouches, or stands up again. Crouching at street level lowers the eye from 1.62 m to 0.95 m and slows walking and running to 45 per cent. |
 | Mouse | Look. A click captures the mouse and Esc releases it. |
+| X | Sits down on the nearest free seat within 1.5 m that the player is turned towards, or stands up again. A step with W A S D also stands the player up. See [Sitting](#sitting). |
 | Q E | Turn |
 | V | Switches between street level and the bird's-eye view. The bird's-eye view always opens at a low height (`dist = 45`), whatever the zoom was before. Moving over lower ground does not bring the view down; it rises only to keep clear of higher ground. While riding a train or a ferry, V steps off. |
 | + − | Zoom the bird's-eye view in and out. − at street level changes to the bird's-eye view. A pinch also zooms. |
@@ -66,6 +68,14 @@ The panel opened with **H** lists the controls. They are reproduced here for ref
 | Y | Within 6 m of a dinghy at street level, boards it. Elsewhere, takes the player to the quay beside the dinghy of the nearest harbour, leaving any train or ferry first and coming down from the bird's-eye view. While sailing, Y steps ashore when the boat lies within 3 m of a quay, a mole or a beach. Anywhere in a harbour the player comes ashore on its quay, and the dinghy is moored again at that harbour's berth on its stern line and buoy; if it came from another harbour, the dinghy that lay there goes to the berth it came from, so that every harbour keeps one. Out at sea, away from any harbour, Y returns the dinghy to its own berth and puts the player on the quay beside it, from the helm, the view from astern or the bird's-eye view. |
 | A D (sailing) | Steer: A turns the bow to port and D to starboard. The tiller moves the opposite way, as on a real boat. |
 | W S (sailing) | Paddle forward or astern at up to 0.6 m/s while the boat is nearly stopped. S also lets the sail fly. |
+| Walking into the sea | Wades in from any shore that shelves, and swims once the water reaches the chest. |
+| W A S D (in the water) | Swim along the view. At the surface the head rides the waves; under the water the swimmer moves where the view points. |
+| Looking down and swimming forward | Dives from the surface. |
+| C (in the water) | Dives while held. In the water C does not follow the train. |
+| Space (in the water) | Rises while held; near the surface the head comes out of the water. |
+| Shift (in the water) | Swims faster, at the cost of more breath. |
+| J | Jumps into the sea from the edge of a quay, a mole or a moored boat that is being faced, over the side of the dinghy the view faces, or from the rail of a ferry. A ferry under way sails on. |
+| Swimming to a beach or a ladder | Climbs out: the swimmer finds the bottom and wades ashore, or climbs a quay's ladder, or on to any ledge less than about 1 m above the water. |
 | Walking into a door | Opens it. A door swings away from the side it is pushed from, as far as it is pushed, and closes again about a second after nobody stands in its sweep. |
 | N | Changes to night (22:00), or back to day (10:00) if it is night. The clock runs on from there. |
 | I | Generates a new island from a random seed. |
@@ -77,7 +87,7 @@ The panel opened with **H** lists the controls. They are reproduced here for ref
 | O | Shows or hides an overlay with the frame rate, the frame time and the slowest frame of the last half second, the draw distance, the number of blocks at each level of detail, the draw calls, the triangles and the player's position. |
 | H | Shows or hides the help panel. |
 
-A game controller is supported through the Gamepad API. The left stick moves and the right stick looks. A jumps, B switches the view, X boards the ferry, Y rides in the cab and LB follows the train. Within 6 m of a dinghy, or while sailing, Y stands for the Y key instead, and a press of the right stick always does. At the helm the left stick steers and paddles and the triggers trim the sail, in place of zooming. RB sets tilt-shift, the triggers zoom, a press of the left stick switches between running and walking, the D-pad turns and tilts, Back mutes and Start shows the panel. The sticks have a wide dead zone, and after any change of view the left stick is ignored until it has returned to the centre.
+A game controller is supported through the Gamepad API. The left stick moves and the right stick looks. A jumps, B switches the view, X boards the ferry, Y rides in the cab and LB follows the train. Within 6 m of a dinghy, or while sailing, Y stands for the Y key instead, and a press of the right stick always does. At the helm the left stick steers and paddles and the triggers trim the sail, in place of zooming. In the water the left stick swims, A and the right trigger rise and the left trigger dives. RB sets tilt-shift, the triggers zoom, a press of the left stick switches between running and walking, the D-pad turns and tilts, Back mutes and Start shows the panel. At street level, in a coach and aboard a ferry, where the D-pad's down has nothing to tilt, it stands for the X key and sits or stands; in the bird's-eye view it tilts the view as before. Every other button already has a use, and the D-pad's down was the only one free in the places where one sits. The sticks have a wide dead zone, and after any change of view the left stick is ignored until it has returned to the centre.
 
 On a touch screen, a touch on the left part of the screen places a virtual joystick there for walking, and a drag elsewhere looks round.
 
@@ -148,11 +158,49 @@ Beyond the rings, a coarse far terrain (`FN = 200` cells of `FS = 22` m) covers 
 - **Squares.** Squares are levelled into the hillside and are part of the height function. A square is not placed where levelling it would leave a cliff. Each has a feature: a clock tower, a well, a tiered fountain, a market cross or a great elm. A belvedere replaces the houses where the hill falls away, with a balustrade, benches and a stair down where one fits.
 - **Stepped streets.** Steps follow steep streets. No step is built where the ground at its middle or at either end is less than 0.2 m above sea level, so that steps never stand over water or across a mole.
 
+### Trees and plants
+
+The island carries seventeen kinds of tree and plant. The cypress, the olive and a round broadleaf are built by `addTree`; the others are built by `addFlora`, which `addTree` calls for any kind listed in `FLORA`:
+
+| Kind | Form |
+|---|---|
+| Stone pine (`stonepine`) | A short, slightly curving reddish-brown trunk, 3.6–5.4 m high, forking into four or five limbs under a broken crown of flattened clumps, each darker beneath and lighter and warmer on top. |
+| Aleppo pine (`aleppo`) | A slender grey trunk leaning 10 to 30 degrees and bending as it rises, with an open crown of pale tufts held out on branches. |
+| Holm oak (`holm`) | A short stout trunk under a dense, dark, rounded crown, a little wider than it is tall. |
+| Carob (`carob`) | A broad, low dome of glossy dark green, reaching nearly to the ground, on a short thick trunk. |
+| Fig (`fig`) | Two or three pale grey stems splaying from the foot under a low, wide crown of bright, coarse lobes. |
+| Lemon and orange (`citrus`) | A small round tree of dark leaves, hung with yellow or orange fruit; the colour of the fruit is decided by the tree's position. |
+| Almond (`almond`) | A dark crooked trunk opening into a vase of thin branches with sparse tufts of pale grey-green leaves. |
+| Canary palm (`palm`) | A stout straight trunk and a full head of 26 arching fronds. |
+| Date palm (`date`) | A taller, slimmer trunk with a slight curve, a sparser head of grey-green fronds, and dates. |
+| Fan palm (`fanpalm`) | A tall slim trunk with a compact head of fan leaves over a brown skirt of dead ones. |
+| Oleander (`oleander`) | A dense upright shrub of dark leaves with pink or white flowers, drawn with the bougainvillea's surface pattern (`SV`). |
+| Prickly pear (`opuntia`) | A clump of up to 18 flat pads, each growing from the rim of the one below, with red fruit on the outermost. |
+| Agave (`agave`) | A rosette of 16–20 thick blue-grey leaves; three in ten carry a flowering stem 4.5–6.5 m tall branching into yellow flowers. |
+| Maquis (`maquis`) | A low clump of two or three mounds of lentisk, dark and dense, or of rosemary, lower and grey-green. |
+
+Each plant draws its variation of size, lean and tint from a random sequence of its own, seeded from its position, so the block's sequence is undisturbed and the plant is identical at every level of detail. Trees lean downhill, which on a coast or a clifftop is towards the sea, unless the ground is nearly level. Trees take a collision circle at the trunk and are recorded in `treeSpots`, which the wind in the trees and the cafés' placement use; oleanders, prickly pears and agaves take a circle round the whole plant, and maquis takes none, as the scrub did before it. Everything is merged into the block's geometry, so no draw calls are added. At full detail a tree has 400–1,050 triangles. At the simplified level, fruit, twigs, the almond's side shoots and the lighter tops of the stone pine's clumps are left out, a prickly pear or an agave becomes one mass of its colour, an oleander's flowers are carried by the pattern on one of its masses, and maquis becomes one mound. In the outlines, prickly pears, agaves and maquis are left out, a palm's head becomes one mass, and the Aleppo pine, holm oak, carob and fig keep every other lobe of their crowns. Each plant takes the same random numbers whether or not a part is drawn, so its shape does not change when its block changes detail. Compared with the vegetation it replaced, a block has about 2 per cent fewer triangles at full detail, 9 per cent more at the simplified level and 1 per cent more in the outlines.
+
+Plants are placed by habitat, from the block's seed:
+
+- **Villages.** The trees between the houses are cypress (32 per cent), citrus (18), fig (12), oleander (10), almond (4) and the round broadleaf. In a shore block, by the water, 14 per cent are palms of the three kinds. A third of the larger squares have one or two palms of a single kind at their edge, and a fifth have orange or lemon trees. Half the walled orchards are groves of lemons and oranges with a fig or two; the others mix olives, citrus, figs, almonds and the round broadleaf.
+- **Olive groves and farms.** The terraced rows of olives remain, with an occasional cypress, carob or almond. A farm's sparser rows are half olives, with almonds, carobs and figs. A fig stands beside each farmhouse and a prickly pear against its wall.
+- **Roadsides and the railway.** One in five of the roads lined with trees has a few stone pines, 13 m apart and leaning over the road, in place of the row of cypresses. In open country, oleanders stand here and there on the inland side of the coast road and beside the railway.
+- **Open rocky country.** Among the limestone outcrops and the scrub, which is partly maquis, grow carob, holm oak, almond, olive, a few Aleppo pines, cypress, prickly pears and agaves.
+- **Wild hillsides.** Aleppo pines and holm oaks, with cypress, olives and a few carobs, and clumps of maquis between the rocks. Stone pines grow there only on a crest, at most three to a block, and in half the blocks none.
+- **Stone pines elsewhere.** In three blocks in ten of rocky country and of the islands, and in about one in five of the coast, a lone stone pine or a group of two or three stands on the highest ground of the block, which is a crest, a knoll or a headland.
+- **The coast and the coves.** Agaves, prickly pears, Aleppo pines leaning seaward and a few oleanders. The occasional pine along the top of a cove's cliffs is an Aleppo pine, or one time in five a stone pine, and some of the clifftop scrub is agave or prickly pear.
+- **Offshore islands.** Mostly maquis, with Aleppo pines, agaves, prickly pears, cypress and a few holm oaks.
+
+The far terrain darkens about half of its points on the hills above 80 m towards the holm oak's green, by up to a third and less with height, for the stands of pine and oak on the lower slopes.
+
 ### Harbours
 
 Harbours are placed in slots of `HARB = 220` m along each shore. A harbour has a quay wall along the shore inside the basin and two walkable moles, a straight mole and a cross mole, with a parapet on the seaward side and rock armour at the seaward foot. The entrance always opens on to the sea, however the coast curves. A lighthouse stands at the head of the straight mole and a harbour light on the other.
 
 Boats are moored stern-to along the quay and a few swing at anchor in the basin. Moored boats keep the ferry channel clear. Each harbour also has a berth for a sailing dinghy (`dinghyBerth`), stern-to at one of the quay's bollards with its bow line to a white buoy in the basin, clear of the ferry channel and with water under the whole hull; the harbour's other boats are kept off it (see [Sailing](#sailing)).
+
+An iron ladder runs up the quay wall beside the dinghy's berth, and another up the basin's face of each mole where water lies beneath it, so that a swimmer can climb out. Each is listed in its block's `ladders` as a way out (its foot in the water, its top, the place stepped out to and the heading from the water to the wall). Placing them draws no random numbers, so the harbour is laid out as before, and the moored boats are kept clear of the quay's ladder.
 
 At a ferry port the cross mole has an opening in its parapet where the gangway lands, a ticket kiosk and a timetable board. Where the gangway opening lies within 4 m of the harbour light, the light is moved to the harbour-side edge of the mole tip.
 
@@ -299,11 +347,90 @@ A pod within 170 m of a ferry or sailing boat moving faster than 3 m/s may join 
 
 Each dolphin is a low-poly body 2.6 m long with a dark grey back, paler flanks and a pale belly, and is drawn with instancing. A vertex shader bends the body with a wave that runs towards the flukes, and curves it along the arc of a surfacing or a leap. A dolphin under water is drawn a second time as a faint dark shape, projected along the line of sight on to the surface and fading with depth, so that hulls and quays above the water still hide it. The shape shows only when the water is looked down into: at a low angle the surface reflects the sky and hides it entirely. It is never drawn where a part of a dolphin above the water stands in front of it. Rings and patches of foam mark the places where the surface is broken, and spray and mist are drawn as points. All of these are drawn after the sea.
 
-A new island (**I**) places every pod afresh in its waters, and the north–south repeat moves the dolphins, foam and spray with the player through `wrapHooks`. The dolphins stand still while the world is paused. The module's `onSound(kind, x, y, z, strength)` hook is called for a breath, a leap and a splash; no sample is assigned to it yet. `window.__village.findDolphins()` gives the middle of the nearest pod, its distance from the player and what each of its members is doing.
+A new island (**I**) places every pod afresh in its waters, and the north–south repeat moves the dolphins, foam and spray with the player through `wrapHooks`. The dolphins stand still while the world is paused. The module's `onSound(kind, x, y, z, strength)` hook is called for a breath, a leap and a splash. The splash, as a dolphin falls back into the sea after a leap, plays `sounds/splash.mp3` where it lands, louder the faster it falls; the breath and the leap have no sound yet. `window.__village.findDolphins()` gives the middle of the nearest pod, its distance from the player and what each of its members is doing.
+
+### Swimming and diving
+
+The sea may be entered anywhere it can be reached. The code is in three blocks that are the same in `testbench/diving.html`, where they may be examined on their own, and a section that joins them to the game (`swimming and diving in Coast`).
+
+- `createSwimmer(opts)` carries the player in the water (mode `swim`).
+- `createUnderwater(renderer, opts)` draws the water from inside it.
+- `createSeabedLife(parent, opts)` makes the seabed's life round the swimmer.
+
+**Getting in.**
+
+- **Walking in.** A walker wading in from a shore that shelves becomes a swimmer once the water is 0.75 m deep. Between 1.5 m and 1.05 m of water the eye passes smoothly between standing height and just above the surface, and the pace between wading and swimming, so walking in and walking out are one movement.
+- **Stepping off.** A deliberate step forward off a quay, a mole or a moored boat towards deep water straight ahead drops the player into the sea, as does a jump (Space) out over the edge. Sliding sideways along an edge or turning on the spot does not.
+- **J.** J jumps in from the edge of a quay or mole being faced, over the side of the dinghy the view faces (the dinghy is left drifting), or from the rail of a ferry. A ferry under way sails on, and the swimmer keeps half of her speed on entering the water.
+- **The entry.** Every entry is a short fall, a splash, a moment under the water with bubbles, and a rise to the surface unless the swimmer swims off.
+
+**At the surface.** The head floats about 5 cm above a smoothed surface, so that the steeper crests wash up across the lower part of the view, but the eye itself never goes under while at the surface.
+
+**Diving.** The swimmer dives by looking down more than about 24 degrees while swimming forward, or by holding C.
+
+- **Going down.** A dive is decisive. The swimmer goes down to 1.35 m below the trough of the waves before the controls return, and stays in the underwater state until surfacing.
+- **Surfacing.** The swimmer surfaces by rising to within 0.3 m of the surface (Space, swimming up, or the breath running out). The head then comes out and floats.
+- **Movement.** Under the water the swimmer moves along the view against a drag that grows with the square of the speed, with a lag on the thrust, so that letting go coasts gently to rest. A free diver is buoyant near the surface and a little heavy below about 12 m.
+
+**Breath.** A breath lasts 75 s, and less while sprinting. No meter or text is shown. From about 40 per cent the view narrows and darkens at its edges, and a heartbeat grows louder and quicker. At the end of the breath the swimmer is carried gently up to the surface, and never further. At the surface the breath recovers in about 14 s.
+
+**Getting out.** There are three ways out, and the player is never trapped in the water:
+
+- swimming to a shore that shelves, where the swimmer finds the bottom, wades and walks out;
+- climbing a harbour's ladder (see [Harbours](#harbours)), by swimming to its foot facing it;
+- climbing on to any ledge less than about 0.95 m above the water.
+
+**The view.** The view follows where the camera's near plane, the lens, stands against the waves. Over the few centimetres of the near plane the surface is taken as its tangent plane at the eye, with a capillary wobble of a few millimetres.
+
+- **Above the water.** The frame is drawn as before.
+- **Under the water.** The frame is drawn through the underwater passes.
+- **Split view.** Where the waterline crosses the lens, both views are drawn and joined along it, with a thin bright meniscus, a little bending of the view just below it and a few droplets above. The second view is drawn only while the waterline crosses the lens.
+
+**Under the water.** The scene is drawn into a half-float target with its depth, with the far plane pulled in to about 86 m so that everything further is culled.
+
+- **The water.** A last pass applies the water: the light reaching each depth with the red absorbed first, the extinction and the light scattered along the line of sight (sampled one mean free path from the eye), a white balance that fades with range, and an exposure that adapts to depth and to the hour. The visibility is about 28 m.
+- **Light shafts.** Shafts are marched at half resolution through the sun's shadow map and the sheets of light focused by the ripples, faint and seen mostly looking up or towards the sun.
+- **The surface from below.** The surface is drawn from below by its own mesh on the sea's waves. Inside the critical angle of 48.6 degrees it shows the sky (Snell's window), and outside it is a mirror of the water beneath, with the exact Fresnel term at the edge.
+- **Going under.** A wash of bubbles rises past the eye and the frame fades in briefly from the colour of the surface. The sea mesh is hidden under the water, the dolphins' faint shapes on the surface are not drawn, and the sea's depth pass is skipped while the lens is wholly under.
+
+**The seabed.** While the view is under the water the ground's shader paints the seabed by habitat (`SEABED_GLSL`):
+
+- **Habitats.** Rock lies where the bed is steep, Posidonia meadows between 3 and 19 m in patches, and sand elsewhere, with noisy borders a few metres wide.
+- **Sand.** Rippled sand with grain, mottling and flecks.
+- **Meadows.** A dark meadow floor with sand patches and leaf litter.
+- **Rock.** Rock with encrusting patches and crevices.
+- **Caustics.** Drawn on the ground's own smooth surface, strongest on upward faces, softer and fainter with depth, gone in shadow and thinner under the grass.
+- **Matching the life.** The habitat's noise is an integer hash computed alike on the CPU (`seabedHabitat`) and the GPU (`sbHab`), so the meadow's floor lies where its leaves are planted.
+
+**The seabed's life.** The life is made from the seed in cells of 8 m within 40 m of the swimmer, and refilled only when the swimmer enters another cell. Each kind is one instanced mesh:
+
+- boulders and slabs;
+- Posidonia, with the rocks' weed sharing its mesh;
+- sea urchins, starfish, sponges, gorgonian fans and amphorae.
+
+The fish are generated in groups in cells of 24 m and keep away from the swimmer:
+
+- shoals of small silver fish;
+- damselfish (*Chromis chromis*) over the rock;
+- two-banded bream along the bottom;
+- now and then a dusky grouper by a boulder.
+
+About a third of each coast's 600 m stretches have a small wreck on the sand 16 to 19 m down, clear of harbours and ferry crossings, with an amphora or two near it (`diveProps`).
+
+**Sound.** Under the water the sounds of the air are muffled and lowered, and Reef's underwater ambience (`underwater`) comes up, as far as the lens is under. Every entry plays `splash` at the entry point, louder and deeper the harder the entry.
+
+**Cost.** On land, aboard and in the bird's-eye view none of this is updated or drawn. The ground's seabed shading runs only while the view is under the water. The programs and targets of the water are prepared when the game starts, so that the first dive does not stall.
+
+**Pausing and moving about.**
+
+- **P.** The player swims on while the world is paused.
+- **The north–south join.** The swimmer crosses it with the player.
+- **A new island (I).** The player leaves the water first.
+- **R, F, G and Y.** These bring the player out of the water where they are before going on.
 
 ### Walking and collision
 
-The player stands on the highest walkable surface at their position, given by the walkable-surface function (terrain, steps, terraces, moles, platforms and decks). A step up may be at most `STEP = 0.8` m. The player cannot walk into water deeper than 1 m. Buildings and objects are oriented boxes; the collision code pushes the player out along the shortest axis, and treats a position exactly at an obstacle's centre as lying on the positive side, so that the player is never left inside an obstacle.
+The player stands on the highest walkable surface at their position, given by the walkable-surface function (terrain, steps, terraces, moles, platforms and decks). A step up may be at most `STEP = 0.8` m. A walker wading into the sea becomes a swimmer once the water is 0.75 m deep (see [Swimming and diving](#swimming-and-diving)). Deeper water stops a walker, except for a deliberate step forward off an edge towards water that lies straight ahead, or a jump out over it. Buildings and objects are oriented boxes; the collision code pushes the player out along the shortest axis, and treats a position exactly at an obstacle's centre as lying on the positive side, so that the player is never left inside an obstacle.
 
 In a cove the ground for walking is given by `walkGround`. Near a cliff it is the clifftop for a walker above half the cliff's height and the foot for one below, so the line of the cliff is a sudden step. Inside the walkable cave, below 1.9 m above its floor, the floor of the cave is the ground, within a band that keeps the eye clear of the walls and a ceiling at least 2.35 m high. Each step is checked by `coveMoveOk`: it may rise no more than `STEP` and fall no more than 1.4 m, and where the ravine's floor is steeper than 0.6 it may be walked only on the path, within `CV_PW = 1.2` m of its line and `CV_PL = 1.8` m of a turn. A walker who is on that steep slope off the path may still go down it, or back towards the path. In a cove the whole step is tried first; where it is refused, the step is turned towards the edge in stages of 0.3 rad, up to 1.45 rad either way, and shortened by the cosine of the angle, so that the walker slides along the foot of a cliff or the side of the path instead of stopping. The cliffs therefore cannot be climbed or stepped off, and the beach, the shelf and the cave are reached on foot only by the path, or from the sea. `reachable` follows the same rules.
 
@@ -321,6 +448,36 @@ In the blocks at full detail every house, barn and cottage with walls at least 2
 - **Lighthouses.** A lighthouse on the coast is built at full detail with its doorway cut from the tapering tower (`lhTube`). A stair of stone treads winds round a newel, 20 to the turn, up through the floor of the gallery into the lantern, whose glazed door, turned away from the stairwell, leads out onto the gallery. Lighthouses on rocks at sea cannot be reached and stay closed.
 - **The ferry.** The saloon has rows of seats and a bar, and the wheelhouse a console, the wheel and a chart table. Their doors and walls are worked in the ferry's deck plan (`ferryInside`). Both are lit as a house's rooms are, by sixteen lights given in the ship's own frame (`FERRY_LIGHTS`) and placed in the world each time the cabins are drawn: daylight through the saloon's window bands, three lights a side, through its end windows and through the wheelhouse's windows, falling off across the cabin and with the angle to the window; and the ceiling lamps, which glow and light the cabins warmly towards evening. The walls are lined on the inside so that they take this light, and shading is baked into the colours: darker low down, into the corners, under the seats and towards the edges of the ceiling. Each ferry has its own material, sharing the rooms' program, so the cabins cost no more draw calls.
 
+### Roofs and climbing
+
+The roofs of the houses, barns, cottages, towers and station buildings may be walked on, and the player may climb up to them and jump from one to the next.
+
+- **The surface.** Each house's obstacle carries its roof (`ob.roof`: its kind, the height of the top of the walls, its rise and the walls' width and depth), and `roofAt` gives the height of the roof's outer surface at any point, from the same dimensions that `gableRoof` and `hipRoof` build it from: on a gable, the tiles 0.19 m out from the slope and 0.28 m beyond the walls; on a hipped roof or a spire, a pyramid on the top of the walls widened by the same overhang; on a flat roof, a slab 0.15 m above the walls. Once the player's feet are within 0.3 m of the top of a house's walls, the house is its roof: it holds the player off only where the roof stands more than a step (`STEP = 0.8` m) above their feet, and elsewhere its surface is the ground. A roof can therefore be walked up to its ridge and down the far side, and stepped across from one roof to a neighbour at much the same height. Below that height the house is its walls, or its rooms, as before, so that standing on a roof never puts the player inside a house, and nothing inside a house reaches up through its roof.
+- **Steep roofs.** A roof steeper than 45° (`ROOF_GRIP = 1`, rise over run) cannot be stood on. The player slides down it at 2 m/s and more, faster the steeper it is, and over the eaves. Most gable roofs (36° to 44°) can be walked; the steeper hipped roofs and every spire cannot.
+- **Chimneys and parapets.** A chimney is an obstacle on its roof, 0.6 m square, from the top of the walls to its own top. The merlons of a crenellated tower stand as obstacles 1 m high round its flat roof, too high to step over.
+- **The jump.** A jump lifts the feet 0.87 m (`JUMP_V = 5.6` m/s), a little more than a person could, so that the game is forgiving. In the air, running is held to 6.4 m/s (`AIR_SP`), so that a running jump clears about 4 m between roofs of the same height and a walking jump about 2.8 m. A jump that falls short drops the player to the street; there is no damage, and the landing sound plays if `sounds.json` names one.
+- **Mantling.** Jumping at a wall, a ledge or the eaves of a roof while pressing towards it climbs onto it, if its top lies no more than `MANTLE_REACH = 1.2` m above the eye and there is room to stand there (`mantleTry`, `topAt`). The body is drawn up and over the edge in half a second (`MANTLE_T`). From the street this reaches about 3.7 m: garden and field walls, terraces, the market stalls, the kiosks and the eaves of a single storey. A building of two storeys is reached from a lower roof, a wall or a stair beside it. Mantling does not happen indoors.
+
+### Sitting
+
+Every seat in the game may be sat on: the chairs of the rooms' tables and the bedrooms' chairs, the benches of the station building, the pews of a church, the chairs of the cafés on the piazzas, the benches round the piazzas, on the belvederes, on the station platforms and on the harbour quays, the stone ring round a great elm, the loungers on the beaches, the seats of the coaches and the seats of the ferry's saloon.
+
+- **Seats.** A seat is recorded where its furniture is built, as the middle of its top, the direction in which a sitter faces, its height above the floor and its kind (`seatOf`, `addSeat`). The seats of a block at full detail are held in `ch.seats`, those of a room in `D.seats` once the room is built, and those of a coach and of the ferry's saloon in `COACH_SEATS` and `FERRY_SEATS`, in the vehicle's own frame. A bench offers two places, a pew one place every 0.6 m and a coach's bench a place by the window and one by the aisle. Nothing is searched while the player walks; the lists are read only when **X** is pressed.
+- **Sitting down.** **X** chooses, among the seats within 1.5 m (1.9 m for a lounger, which is reached from either end) on the player's own floor, the nearest one towards which the player is turned, within about 63° of the line of sight. A seat within 0.45 m of a cat is taken. Indoors only the room's own seats are offered, and outdoors no seat is offered through the wall of a building.
+- **The seated view.** Over 0.4 s the eye eases from where it was to the sitter's eye, 0.7 m above the seat and slightly behind its middle, which is 1.15 m above the floor on a chair, and turns to the direction in which the seat faces. On a lounger the eye is 0.8 m above the sand towards the head of the lounger, looking out to sea and raised a little, as of someone lying back. The mouse and **Q E** then look about within 120° either way of that direction, and up and down within a comfortable range.
+- **Standing up.** **X** again, or a step with **W A S D**, stands the player up beside the seat, and the eye eases back to standing height over 0.4 s. The place is the first of several round the seat (in front, to either side, then behind) at which the collision code leaves the player where they are and the floor lies at the seat's own floor; if none is free, it is the place where the player stood before sitting down. The player is therefore never put inside furniture or a wall.
+- **Seats that move.** A seat in a coach or on the ferry is held in the vehicle's frame, so that the sitter is carried with the train or the ship, through the ferry's pitch and roll. Standing up in a coach puts the player in the aisle beside the seat, and on the ferry in the saloon's aisle; when the train stands at a station or the ferry lies at a landing, the player walks off as usual. A change of view, such as **V**, **F** or **R**, or a new island, ends the sitting at once.
+- **Sound.** The sounds `sit_down` and `stand_up` are played at the seat. There is not yet a suitable recording, so they are silent until `sounds.json` names one.
+
+### Sunbeds and parasols
+
+Some of the mainland's beaches are let out with rows of loungers and parasols (`beachStretch`, `buildBeachFurniture`). The beaches are taken in stretches of `BCH_SP = 150` m along each shore. A stretch is furnished where the sand runs at least 11.5 m up from the water's edge all along it, clear of the coast road's parapet, where it lies clear of harbours, coves and their paths, ferry crossings, lighthouses, stations and the railway, and where a draw from the seed allows it: seven stretches in ten beside a village and one in four elsewhere. No boat is pulled up on a furnished stretch.
+
+- **Layout.** The furnished part of a stretch is 24 to 46 m long. Its loungers stand in pairs, with a parasol between each pair, in two rows parallel to the shore, or three where the sand is deep enough, every 3.6 m along a row and 3.7 m between rows. The first row stands about 5.6 m from the water's edge, so that a band of open sand is left along the sea. The loungers lie with their feet to the sea and the back raised at the landward end, and the gaps between them are wide enough to walk through. About one parasol in five is furled, and here and there a single lounger stands under a parasol.
+- **Appearance.** Each stretch has one scheme: white or wooden frames, cushions in one of seven colours, plain or striped with white, and parasols striped in the same colour and white, or in about three cases in ten of straw. Three stretches in five have a small kiosk at the back of the beach, with an awning in the same colours, where it fits.
+- **Cost and detail.** Everything is merged into the geometry of the block that holds it, and so costs no extra draw calls, and the parasols cast shadows with the rest of the block. At full detail the loungers have legs and cushions, striped cushions in four bands; in the simplified blocks each lounger is a frame, a back and one cushion, the poles and the furled parasols are left out and the open canopies remain; the outline blocks carry none of it.
+- **Collision.** Each pair of loungers with its parasol is one obstacle 2 m square, and the kiosk another.
+
 ### Time of day, lighting and shadows
 
 A full day lasts twelve minutes. The sun rises over the south sea at 06:00 and sets over the north sea at 18:00. One light casts shadows: the sun by day and the moon, opposite the sun, by night. The star field turns about the same axis as the sun and the moon.
@@ -329,7 +486,7 @@ The shadow map is a square centred on the player and moved in 2 m steps. Where t
 
 ### Shading
 
-The building and ground shaders add procedural surface patterns according to the `surf` attribute: plaster, roof tiles, stone, wood, brick, bougainvillea bracts and natural rock, the last with faint beds, pitting and grain for the cliffs, caves and boulders of the coves. The sea has layers of ripples, each of which fades out as its wavelength approaches the size of a pixel, beneath the waves described under [The sea](#the-sea). Fountains have animated water sheets, jets, arcs and spreading rings.
+The building and ground shaders add procedural surface patterns according to the `surf` attribute: plaster, roof tiles, stone, wood, brick, bougainvillea bracts and natural rock, the last with faint beds, pitting and grain for the cliffs, caves and boulders of the coves. The sea has layers of ripples, each of which fades out as its wavelength approaches the size of a pixel, beneath the waves described under [The sea](#the-sea). The fountains' bowls and basins are hollow, and the water stands in them just below the lip. In a tiered fountain a jet of about a metre rises from the finial and falls back into the upper bowl, and a thin sheet spills over the lip of each bowl and falls almost vertically, within a few centimetres of the stone, into the pool below. A small fountain has four spouts, each pouring a round stream into its basin. The falling water is drawn with fine streaks of smooth noise that run down at the speed of the fall; a sheet divides into separate streams as it falls and breaks into drops near the bottom. Each pool is a gently rippling surface that reflects the sky and the sun, with rings spreading from where the water lands and foam and a small splash of drops at that point. The stone just below each lip is darkened and wet. Fine detail settles to its average where it would be smaller than a pixel. By night the water is darker than the lit stone and catches a little warm lamplight. All the moving water of a block is one mesh with one shared material, and blocks drawn at lower detail have fewer segments and no splashes or wet stone.
 
 ### Cameras
 
@@ -362,7 +519,7 @@ A gull circles on a thermal, banked into the turn at the angle a coordinated tur
 
 Perches are gathered by `gullPerches` within 320 m of the player, again whenever the player has moved 60 m and every 10 s: the coping and bollards of the harbour quays and the parapets of the moles, from `harbourInfo`; the rocks that carry a lighthouse, from `seaRockInfo`; the stacks and landing of each cove once it is built; and the first dry ground above the water along the rest of the shore. Thermals are placed only along the shore, and a flying gull keeps within about 70 m of the shoreline: beyond about 40 m inland (`seaDist`) a pull towards the sea begins and grows smoothly towards that limit, and it starts sooner in an onshore wind. Land perches more than 40 m from the water are not used. The gulls fly in the global wind (`WIND`), which `updateDinghies` passes to them through `gullWind` each frame.
 
-The flock stands still while the world is paused, moves with the world when it repeats from north to south (`wrapHooks`), and is placed afresh round the player when a new island is generated. A gull's call goes to the sound `gulls`, at most one every 2.5 s and only from gulls within 140 m. For automated checks, `window.__gulls` holds the flock (`G`), its context (`ctx`) and a switch (`on`) that removes the gulls entirely.
+The flock stands still while the world is paused, moves with the world when it repeats from north to south (`wrapHooks`), and is placed afresh round the player when a new island is generated. A gull's call goes to the sound `gulls`, at most one every 2.5 s and only from gulls within 140 m; each call is one of five recordings cut from a single field recording (`sounds/gulls-1.mp3` to `gulls-5.mp3`), three single cries and two longer passages of calling, chosen at random. For automated checks, `window.__gulls` holds the flock (`G`), its context (`ctx`) and a switch (`on`) that removes the gulls entirely.
 
 The gulls were developed in `testbench/seagulls.html`, a page with a beach, a quay, a boat and controls for the number of gulls, the wind, the time of day and the view, served from the repository root like the game. Its `createGulls` block is the same as the game's.
 
@@ -377,6 +534,7 @@ Sounds are routed to four buses: `world`, `train`, `ferry` and `player`. Each bu
 - **Inside a coach,** the world is cut at 900 Hz and the train at 1,100 Hz. **In the cab,** the cut-offs are 1,400 Hz and 1,800 Hz.
 - **In a tunnel,** a generated convolution reverb is used, consisting of early reflections and a 2.8 s tail that darkens over time. The world outside is attenuated as the listener moves into the bore.
 - **In a sea cave,** the same reverb is used, but the world outside is not attenuated.
+- **Under the water,** the `world`, `train` and `ferry` buses are cut towards 500 Hz and lowered by up to 70 per cent, as far as the camera's lens is under the water, and the `underwater` ambience is mixed in to the same degree on the `player` bus. The heart, the dive, the surfacing and the gasp at the end of a long breath are made by the engine on the `player` bus and are not muffled.
 - **Occlusion.** A train inside a tunnel, heard from outside, is quieter and low-passed.
 
 ### What the engine plays
@@ -393,9 +551,9 @@ Sounds are routed to four buses: `world`, `train`, `ferry` and `player`. Each bu
   - The clock striking the hour, followed shortly afterwards by the church bell.
 - **Footsteps.** A loop for the surface underfoot plays while the player walks, faster while running. The surface (pavement, sand, soil or grass) is read from the ground mesh. Grass uses the soil loop, the pebbles of a sea cave the sand loop and the cliffs' bare rock the pavement loop, and the decks of a ferry and the floor of a coach use the pavement loop. A separate sound plays on landing from a jump.
 - **Train.** Run and idle loops at the locomotive, and a rumble from the point on the train nearest the listener. A bridge loop plays on viaducts and a rail joint every 18 m under each bogie. Separate sounds play for starting, stopping, brakes, the doors opening and closing, and the horn on departure and before a tunnel.
-- **Ferry.** Run and idle loops at the stern, and the wake at the bow. Separate sounds play for the horn, starting, stopping, the gangway, the gates and the fenders.
+- **Ferry.** Run and idle loops at the stern, and the wake at the bow. Separate sounds play for the horn, starting, stopping, the gangway, the gates and the fenders. The horn sounds only as the ferry is about to leave, 3 s before it casts off from a landing, and it echoes from the hills (`hornWithEchoes`): twelve bearings from the ship are searched outwards to 2.5 km for the first ground more than 25 m above the sea, and the three nearest slopes send the horn back, fainter and duller, from where they stand, delayed by the extra distance the sound travels out to them and back to the listener.
 - **Goods train.** Its engine at the leading shunter, a start, a horn and the clatter of the couplings as it sets off, a stop, and rail joints (`goods_run`, `goods_idle`, `goods_start`, `goods_stop`, `goods_horn`, `goods_buffer`). Until they have recordings of their own they borrow the train's, through `SOUND_ALIAS`.
-- **Dinghy.** Sailing is heard only as the water along the hull: the bow wave (`bow_wave`) grows louder and higher in pitch as the boat gathers way. The sail's flapping, the gybe and the knock of the hull are silent.
+- **Dinghy.** Sailing is heard as the water along the hull, the bow wave (`bow_wave`) growing louder and higher in pitch as the boat gathers way; as the wind across the boat (`sail_wind`, a recording made to loop seamlessly), silent below 1.5 m/s of apparent wind and full by about 10 m/s, a little higher as it freshens; and as the sail flapping when it luffs (`sail_flap`, a recording made to loop seamlessly), louder the more it shakes. As the sail comes over in a tack or a gybe a short burst of flapping plays (`sail_over`, the strongest 1.4 s of the same recording), louder the harder she comes round. The knock of the hull is silent.
 - **Buildings.** `door_open` plays when a door begins to open and `door_close` when it shuts. Indoors, and in the ferry's saloon and wheelhouse, the world outside is muffled, less so while the door stands open. A church adds the tunnel's reverb.
 
 ### Recordings
@@ -422,8 +580,17 @@ The full list of 48 sound identifiers, with the category, type, channels, placem
 | `ferry-wake.mp3` | `ferry_wake` |
 | `bow-wave.mp3` | `bow_wave` |
 | `cat-mew-1.mp3` to `cat-mew-4.mp3` | `cat_mew`, one chosen at random each time |
+| `cicadas.mp3` | `amb_cicadas`. Made to loop seamlessly by cross-fading its last second into its first. |
+| `gulls-1.mp3` to `gulls-5.mp3` | `gulls`, one chosen at random each time: three single cries and two longer passages, cut from one recording with short fades. |
+| `splash.mp3` | `splash`: a dolphin falling back into the sea, and the player entering the water, louder and deeper the harder the entry. |
+| `sail-flap.mp3` | `sail_flap`. Made to loop seamlessly by cross-fading its last half-second into its first. |
+| `sail-over.mp3` | `sail_over`: the strongest 1.4 s of the flapping recording, with fades, for the sail coming over in a tack or a gybe. |
+| `sail-wind.mp3` | `sail_wind`. Made to loop seamlessly by cross-fading its last second into its first. |
+| `ferry-horn.mp3` | `ferry_horn` |
+| `door-open.mp3` | `door_open`, for the doors of houses and of the ferry. The silence at either end of the recording is cut, so that the creak starts as the door moves. |
+| `underwater.mp3` | `underwater`: the sea heard from under the water, the ambience from Reef, looping without a gap. It is mixed in as far as the camera's lens is under the water (see [Swimming and diving](#swimming-and-diving)). |
 
-The remaining identifiers, among them the dawn bed, cicadas, crickets, wind, gulls, the clock bell, cafés, boats, the train's horn, brakes and rumble, and the ferry's horn, are silent. While there is no dawn bed, the day bed does not dip at dawn.
+The remaining identifiers, among them the dawn bed, crickets, wind, the clock bell, cafés, the closing of doors, boats and the train's horn, brakes and rumble, are silent. While there is no dawn bed, the day bed does not dip at dawn.
 
 Each identifier has a level `g` and, for positioned sounds, a reference distance `ref` in metres, both set in `SOUND_DEF`. These levels are provisional and will need to be balanced against the real recordings.
 
@@ -462,6 +629,10 @@ node --check /tmp/m.mjs
 | `walkGround(x,z,y)`, `coveMoveOk(...)`, `standableAt(x,z)`, `coveFns` | The walking rules of the coves and the cove's internal functions, for tests. |
 | `reachable(x0,z0,y0,goal,lim)` | A breadth-first walkability search that follows the player's own rules for step height, body radius and deep water. It is used to confirm that no landing point is a trap. |
 | `tunnelK` | How far the listener is inside a tunnel bore. |
+| `sit`, `sitKey`, `sitFind`, `sitStand`, `sitSpotOk`, `COACH_SEATS`, `FERRY_SEATS` | The present sitting, if any; sitting down or standing up as **X** does; the seat that **X** would choose; whether the player may stand at a place; the seats of a coach and of the ferry's saloon. |
+| `beachStretch(sd,n,any)` | The loungers of stretch `n` of a shore, or `null`; with `any`, whether the stretch would take them, leaving out the draw. |
+| `swimmer`, `UW`, `seabedLife`, `swimDebug` | The swimmer, the water seen from inside, the seabed's life, and the swimmer's state with the lens against the waves. |
+| `swimAt(x,z,y,under)`, `jumpKey()`, `swimLeaveHere()`, `diveProps(x,z,r)` | Putting the player in the water at a point, at the surface or under it; J; leaving the water; the wrecks and amphorae placed round a point. |
 
 Setting `window.__freeCam = {p: Vector3, t: Vector3}` places the camera at `p` looking at `t`, overriding the normal camera. Setting it to `null` releases it.
 

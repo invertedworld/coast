@@ -20,5 +20,20 @@
     "sounds/cat-mew-2.mp3",
     "sounds/cat-mew-3.mp3",
     "sounds/cat-mew-4.mp3"
-  ]
+  ],
+  "splash": "sounds/splash.mp3",
+  "underwater": "sounds/underwater.mp3",
+  "gulls": [
+    "sounds/gulls-1.mp3",
+    "sounds/gulls-2.mp3",
+    "sounds/gulls-3.mp3",
+    "sounds/gulls-4.mp3",
+    "sounds/gulls-5.mp3"
+  ],
+  "sail_flap": "sounds/sail-flap.mp3",
+  "sail_wind": "sounds/sail-wind.mp3",
+  "amb_cicadas": "sounds/cicadas.mp3",
+  "ferry_horn": "sounds/ferry-horn.mp3",
+  "door_open": "sounds/door-open.mp3",
+  "sail_over": "sounds/sail-over.mp3"
 }
