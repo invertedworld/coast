@@ -103,7 +103,8 @@ const hex=h=>new THREE.Color(h);
            70 per cent), hour() -> 0..24 and onshore(x,z) -> the heading the sea lies in, seen from the shore (both
            needed for the sea breeze by day and the land breeze at night)
    W.update(dt)       advances time; call it once per frame unless paused
-   W.at(x,z[,t])      {x,z: the air's velocity (where it blows towards), speed, dir (from, as opts.dir), gust (0..1)}
+   W.at(x,z[,t[,out]]) {x,z: the air's velocity (where it blows towards), speed, dir (from, as opts.dir), gust (0..1)};
+                      out, when given, is filled and returned instead of a new object
    W.set(o)           changes options      W.uniforms   {uGustTex, uGust, uGustAmt} for the sea shader (see the sea)
    W.gustField(x,z)   the raw value of the gust field (0..1)
 
@@ -136,8 +137,8 @@ function createWind(opts={}){
   function gustField(x,z,o=off){ const dx=-Math.sin(O.dir), dz=-Math.cos(O.dir), S=O.scale;
     const al=x*dx+z*dz-o, ac=-x*dz+z*dx;
     return 0.62*samp(al/S,ac/(S*0.75))+0.38*samp(al/(S*0.5)+17.3,ac/(S*0.42)+5.1); }
-  function at(x,z,t){
-    const tt=t===undefined?time:t, o=off+O.speed*0.85*(tt-time);
+  function at(x,z,t,out){
+    const tt=t===undefined||t===null?time:t, o=off+O.speed*0.85*(tt-time);
     const G=gustField(x,z,o), g=sm(0.56,0.75,G), l=sm(0.44,0.26,G);
     const sp=O.speed*(1+O.gust*(0.6*g-0.28*l)), dir=dirAt(tt)+O.gust*0.1*(g-0.5);
     let vx=-Math.sin(dir)*sp, vz=-Math.cos(dir)*sp;
@@ -145,8 +146,9 @@ function createWind(opts={}){
       const sea=2.4*sm(10,13,hr)*sm(19,16.5,hr), land=1.4*(hr>12?sm(21,23,hr):sm(7,5,hr));
       vx+=-Math.sin(on)*sea+Math.sin(on)*land; vz+=-Math.cos(on)*sea+Math.cos(on)*land; }
     if (O.shelter){ const k=1-0.7*cl(O.shelter(x,z)||0,0,1); vx*=k; vz*=k; }
-    const s=Math.hypot(vx,vz);
-    return {x:vx,z:vz,speed:s,dir:s>1e-6?Math.atan2(-vx,-vz):dir,gust:g};
+    const s=Math.hypot(vx,vz), d=s>1e-6?Math.atan2(-vx,-vz):dir;
+    if (out){ out.x=vx; out.z=vz; out.speed=s; out.dir=d; out.gust=g; return out; }
+    return {x:vx,z:vz,speed:s,dir:d,gust:g};
   }
   function writeU(){ U.uGust.value.set(-Math.sin(O.dir),-Math.cos(O.dir),off,O.scale); U.uGustAmt.value=O.gust; }
   function update(dt){ if (dt>0){ time+=dt; off=(off+O.speed*0.85*dt)%PERIOD(); } writeU(); }
@@ -245,7 +247,7 @@ function createDinghy(parent, opts={}){
       // the transom
       const tc=[0,(kAt(0)+shAt(0))/2,ZS];
       for (let k=0;k<12;k++){ const s0=k/12, s1=(k+1)/12, a=P(0,s0), b=P(0,s1); g.tri(tc,a,b,[0,0.1,ZS+1],s0>=0.84?K.band:s1<=0.36?K.bot:K.hull);
-        const ai=[a[0]*0.94,a[1],ZS+0.03], bi=[b[0]*0.94,b[1],ZS+0.03]; if (s0>=0.15) g.tri([0,tc[1],ZS+0.03],ai,bi,[0,0.1,ZS-1],K.inner); }
+        const ai=[a[0]*0.965,a[1],ZS+0.03], bi=[b[0]*0.965,b[1],ZS+0.03]; g.tri([0,tc[1],ZS+0.03],ai,bi,[0,0.1,ZS-1],K.inner); }
     }
     // transom capping and the horse for the mainsheet
     { const a=sec(0,1), y=a[1]+0.02; g.seg([a[0],y,ZS+0.01],[-a[0],y,ZS+0.01],0.06,0.05,K.varn);

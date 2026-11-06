@@ -14,6 +14,7 @@ The program is contained in `index.html`, apart from the cat in `cat/`. There is
 | `sounds/` | The audio files that `sounds.json` names. |
 | `publish-site.sh` | Publishes the game to markhammond.me (see [Publishing](#publishing)). |
 | `testbench/seagulls.html` | A stand-alone page for developing the gulls (see [Gulls](#gulls)). |
+| `testbench/sailing.html` | A stand-alone page for developing the dinghy and the wind, with a harbour, a beach and a cove (see [Sailing](#sailing)). |
 
 ## Running the program
 
@@ -50,7 +51,7 @@ The panel opened with **H** lists the controls. They are reproduced here for ref
 | Space | Jump |
 | Mouse | Look. A click captures the mouse and Esc releases it. |
 | Q E | Turn |
-| V | Switches between street level and the bird's-eye view. The bird's-eye view always opens at a low height (`dist = 45`), whatever the zoom was before. While riding a train or a ferry, V steps off. |
+| V | Switches between street level and the bird's-eye view. The bird's-eye view always opens at a low height (`dist = 45`), whatever the zoom was before. Moving over lower ground does not bring the view down; it rises only to keep clear of higher ground. While riding a train or a ferry, V steps off. |
 | + − | Zoom the bird's-eye view in and out. − at street level changes to the bird's-eye view. A pinch also zooms. |
 | Two-finger drag | Pans across the island in the bird's-eye view. |
 | Arrow keys | Turn and tilt the bird's-eye view. |
@@ -58,9 +59,12 @@ The panel opened with **H** lists the controls. They are reproduced here for ref
 | T | Speeds up time while held. |
 | P | Pauses the world: the trains, ferries, boats, dolphins, sea, lighthouse beams, cats, gulls and time of day stand still while the player walks, flies and looks about as usual. P again resumes. |
 | R | Rides in the passenger train's cab. R or V again steps off beside the track. |
-| C | Follows the train being ridden, or else the nearer of the passenger and goods trains, from behind. The mouse orbits the camera and + − change its distance. C or V again steps off beside the track. |
+| C | Follows the train being ridden, or else the nearer of the passenger and goods trains, from behind. The mouse orbits the camera and + − change its distance. C or V again steps off beside the track. While sailing, C changes between the helm and a view from 11 m astern of the dinghy, which the mouse carries round her; R, G, C and F do not take the player to a train or a ferry until they are ashore. |
 | G | Rides in the cab of the goods train working the nearest goods line, setting it to work there if none is near. G or V again steps off beside the track. |
 | F | Boards the nearest ferry wherever it is. F or V again steps ashore, or at the next landing if the ferry is under way. |
+| Y | Within 6 m of a dinghy at street level, boards it. Elsewhere, takes the player to the quay beside the dinghy of the nearest harbour, leaving any train or ferry first and coming down from the bird's-eye view. While sailing, Y steps ashore when the boat lies within 3 m of a quay, a mole or a beach; out at sea it returns the dinghy to its berth and puts the player on the quay beside it, from the helm, the view from astern or the bird's-eye view. |
+| A D (sailing) | Steer: A turns the bow to port and D to starboard. The tiller moves the opposite way, as on a real boat. |
+| W S (sailing) | Paddle forward or astern at up to 0.6 m/s while the boat is nearly stopped. S also lets the sail fly. |
 | Walking into a door | Opens it. A door swings away from the side it is pushed from, as far as it is pushed, and closes again about a second after nobody stands in its sweep. |
 | N | Changes to night (22:00), or back to day (10:00) if it is night. The clock runs on from there. |
 | I | Generates a new island from a random seed. |
@@ -72,7 +76,7 @@ The panel opened with **H** lists the controls. They are reproduced here for ref
 | O | Shows or hides an overlay with the frame rate, the frame time and the slowest frame of the last half second, the draw distance, the number of blocks at each level of detail, the draw calls, the triangles and the player's position. |
 | H | Shows or hides the help panel. |
 
-A game controller is supported through the Gamepad API. The left stick moves and the right stick looks. A jumps, B switches the view, X boards the ferry, Y rides in the cab and LB follows the train. RB sets tilt-shift, the triggers zoom, a press of the left stick switches between running and walking, the D-pad turns and tilts, Back mutes and Start shows the panel. The sticks have a wide dead zone, and after any change of view the left stick is ignored until it has returned to the centre.
+A game controller is supported through the Gamepad API. The left stick moves and the right stick looks. A jumps, B switches the view, X boards the ferry, Y rides in the cab and LB follows the train. Within 6 m of a dinghy, or while sailing, Y stands for the Y key instead, and a press of the right stick always does. At the helm the left stick steers and paddles and the triggers trim the sail, in place of zooming. RB sets tilt-shift, the triggers zoom, a press of the left stick switches between running and walking, the D-pad turns and tilts, Back mutes and Start shows the panel. The sticks have a wide dead zone, and after any change of view the left stick is ignored until it has returned to the centre.
 
 On a touch screen, a touch on the left part of the screen places a virtual joystick there for walking, and a drag elsewhere looks round.
 
@@ -147,7 +151,7 @@ Beyond the rings, a coarse far terrain (`FN = 200` cells of `FS = 22` m) covers 
 
 Harbours are placed in slots of `HARB = 220` m along each shore. A harbour has a quay wall along the shore inside the basin and two walkable moles, a straight mole and a cross mole, with a parapet on the seaward side and rock armour at the seaward foot. The entrance always opens on to the sea, however the coast curves. A lighthouse stands at the head of the straight mole and a harbour light on the other.
 
-Boats are moored stern-to along the quay and a few swing at anchor in the basin. Moored boats keep the ferry channel clear.
+Boats are moored stern-to along the quay and a few swing at anchor in the basin. Moored boats keep the ferry channel clear. Each harbour also has a berth for a sailing dinghy (`dinghyBerth`), stern-to at one of the quay's bollards with its bow line to a white buoy in the basin, clear of the ferry channel and with water under the whole hull; the harbour's other boats are kept off it (see [Sailing](#sailing)).
 
 At a ferry port the cross mole has an opening in its parapet where the gangway lands, a ticket kiosk and a timetable board. Where the gangway opening lies within 4 m of the harbour light, the light is moved to the harbour-side edge of the mole tip.
 
@@ -227,6 +231,42 @@ Each island with a crossing has a stone jetty with a T-shaped head, a kiosk and 
 
 Sailing boats keep a set distance offshore. `sailClear(sd, x)` gives the distance needed at x to clear any harbour's moles with 12 m to spare. Each boat looks 20 m and 40 m ahead and eases outward at up to 3 m/s where the next harbour reaches further out. A nearby ferry makes a boat bear away from it and reduce its speed.
 
+### Fishing boats
+
+One to three of the trawlers moored in each harbour are fishing boats (`fishBoats`). Their berths are chosen from the quay's mooring slots by hash, clear of the dinghy's berth, the ferry crossings and the shore, and `buildHarbour` leaves those slots for the fleet to draw, so that a berth stands empty while its boat is out.
+
+Each boat works the same day. It leaves its berth between 02:00 and about 05:20, motors out through the harbour mouth (between the head of the cross mole and the other mole) and 450 m straight out to sea, and then makes for its fishing ground, 1.2–2 km from the shore on its own side, among and just past the near offshore islands. The ground is kept 150 m clear of the islands, the lighthouse rocks and the ferry crossings; of the places tried (five along the coast at each of five distances out), it is the one nearest the boat's own distance and bearing whose course leaves time in the day to fish. The course passes the islands and the lighthouse rocks on whichever side is shorter (`fishRoute`). At the ground the boat trawls round a circle of 150–250 m radius at 1 m/s for one to three hours, then turns for home and berths stern-to between about 14:30 and 17:15, making the last 16 m astern.
+
+The boat moves at 1.8 m/s in the harbour and 5 m/s under way, a trawler's real speed. Since a game hour lasts 75 s, 5 m/s is 375 m to the game hour, and a passage of 1.3–2.1 km takes four to six and a quarter game hours each way; the day's timetable is set from the length of the boat's own course, with at least an hour's fishing, departure no earlier than 02:00 and the return by 18:00 at the latest. The speeds are held in `FISH`.
+
+Where a boat is follows from the clock alone: `fishPlan` works out its courses and hours once, and `fishState` gives its position and heading at any hour. A boat is therefore at sea whether or not anyone is near, stands still while the world is paused, hurries with T and jumps with N. The boats of the harbours within 4.5 km of the player are listed; a boat under way or fishing is drawn within 2.6 km and a moored one within 700 m, so that a boat seen on the horizon from a headland is where it should be. Across the north–south join a boat is drawn on the player's side. The fleet is listed afresh when a new island is generated. The engine of the nearest boat under way within 220 m is the ferry's engine sound, quieter and a little faster. For automated checks, `window.__fleet` holds the list of boats, `fishPlan`, `fishState`, `update` and the hour, which may be set.
+
+A boat on its way home has its catch aboard: 8–15 of the nearest gulls within 450 m gather behind and above it, dive at its wake again and again, and come down on its deck and wheelhouse, on the quay beside it or on the water once it has berthed (see [Gulls](#gulls)).
+
+### Sailing
+
+Each harbour within 400 m of the player has a dinghy at its berth, and **Y** sails it. The dinghy is an original design about 4 m long and 1.5 m in the beam, in the manner of a Mediterranean harbour dinghy: clinker-planked and painted in the island's colours, with a varnished gunwale, thwarts and foredeck, a short wooden mast, a boom and a cream mainsail bearing a number, a daggerboard, a rudder and a tiller with an extension. The colours and the number are drawn from the harbour's seed.
+
+The code is in two blocks that are the same in `testbench/sailing.html`, where they may be examined on their own:
+
+- `createWind(opts)` gives one wind over the whole sea. `at(x,z)` returns the air's velocity, its speed and the heading it comes from. The prevailing wind, between 4.2 and 6.4 m/s from between south-south-west and north-west, is drawn from the seed, and its direction wanders by up to 20°. Gusts are patches of a noise field carried downwind at 0.85 times the wind's speed; the sea shader samples the same field, so that the gusts show as darker, rougher ripples (`seaGust`, aligned under the floating origin through `QORIGIN`). `windShelter` cuts the wind by up to 60 per cent inside a harbour and up to 50 per cent in a cove. A sea breeze of up to 2.4 m/s blows onshore from late morning until evening, and a land breeze of up to 1.4 m/s offshore at night. The gulls fly in the same wind, through `gullWind`.
+- `createDinghy(parent, opts)` builds a dinghy and sails it. Its speed through the water approaches a target taken from the true wind angle: nothing within about 35° of the wind, 0.40 times the wind's speed at 45°, 0.60 times on a beam reach and 0.40 dead downwind. The boat gains way with a time constant of 2.4 s and loses it with one of 5 s, so a tack carries her through the wind. Rudder authority grows with speed, though she still turns slowly at rest. There is some leeway, more at low speed or with the daggerboard raised in shallow water. She heels with the side force, up to about 20° in a gust, which costs speed, and she never capsizes. The boom swings across slowly on a tack and slams across on a gybe, once the wind is 8° by the lee.
+
+The sail trims itself (the assisted setting). A realistic setting, in which W and S and the triggers sheet the sail in and out and mistrim costs speed, is available through `window.__village.setHandling('realistic')`.
+
+The player can never be stuck:
+
+- In irons the boat always falls off within about four seconds, and holding the tiller over chooses the side and shortens this.
+- When she is nearly stopped, W and S paddle at up to 0.6 m/s and A and D still turn her.
+- Grounding, where the water under the hull is less than 0.3 m deep, and contact with moles, quays, rocks and other boats push her out along the contact, never pinning her. On a gentle beach the bow slides up until it is clear of the water and she stops without rebounding.
+- If the player has been giving input for 4 s and the boat has moved less than 0.5 m, a watchdog eases her out to the nearest water at least 1.5 m deep.
+
+While sailing the view is in the first person from the helm (mode `dinghy`), with the tiller, the boom, the sail and the masthead pennant in sight. The eye moves out to the windward gunwale as the boat heels, and across to the new windward side in about a second on a tack or a gybe. The camera follows the heel and pitch at three quarters of their amount. V rises to the bird's-eye view over the boat and returns to the helm.
+
+No readout of the wind or of the boat's speed is shown on the screen. While sailing, up to 72 wind wisps (`updateWisps`) drift past the boat: thin white ribbons 2.5–5.5 m long that wave and curl at their tails and fade in and out at both ends. They are carried over the ground by the true wind at its own speed, so that the boat's motion reads against them and their direction follows the wind's shifts and the sea and land breezes. They appear 5–30 m from the boat, from just above the water to above the masthead, and are seen from the helm, from astern and from the bird's-eye view. Their number and brightness follow the wind where they are: more and brighter in a gust, few and faint in a harbour or a cove, and none below about 1.5 m/s. At street level a few drift along the shore within 30 m of the water. They are one instanced mesh drawn after the sea, positioned relative to `ORIGIN`, stand still while the world is paused and move with the world across the north–south join.
+
+The boat being sailed carries the player across the north–south join (`wrapHooks`), and the other dinghies are rebuilt at their berths afterwards. A dinghy left away from its berth stays where it was left until the player is 1.5 km from it; the next **Y** to that harbour moors it again. The dinghies stand still while the world is paused. A dinghy draws a cap at its gunwale that writes only depth, after the opaque objects and before the sea, so that the transparent sea is not drawn inside the open boat. `window.__village` holds `dinghyKey`, `dinghies`, `sailD`, `wispInfo`, `WIND`, `dinghyBerth`, `dgyHarbourNear` and `setHandling` for automated checks.
+
 ### Dolphins
 
 Pods of bottlenose dolphins swim in the open sea. The module `createDolphins(parent, opts)` returns an object with `update(dt, ctx)`, `setOptions(o)`, `trigger(kind, pod)`, `reset()`, `shift(dz)` and `dispose()`. It is self-contained, and the same block is used in `testbench/dolphins.html`, where it may be examined on its own with a ferry, an island and a control panel.
@@ -278,6 +318,7 @@ The building and ground shaders add procedural surface patterns according to the
 - **Cab.** On the track 1.2 m ahead of the locomotive's nose, at the driver's eye height, with the whole train drawn behind; the mouse looks round, so the locomotive can be seen by looking back.
 - **Chase.** Behind and above the train, orbited with the mouse and kept clear of the ground. While the train is underground, the camera follows the hillside above it.
 - **Ferry.** Walking about the decks, with the eye following the ferry's motion.
+- **Dinghy.** At the helm, sitting out to windward, with the eye following the boat's heel and pitch.
 
 **Tilt-shift.** The scene is rendered off-screen and blurred horizontally and vertically, with a radius that grows away from a horizontal band of sharp focus through the player, so that the view resembles a miniature model.
 
@@ -293,13 +334,13 @@ A cat pauses for 2–9 s, then sets off at 1.1 m/s for somewhere 4–18 m away, 
 
 ### Gulls
 
-A flock of 90 yellow-legged gulls lives round the player. A gull has a white head and body, a grey mantle and grey wings with a white trailing edge, black wing tips, a yellow bill with a red spot and yellow legs; about one in seven is a brown immature bird. The gulls are drawn at 1.25 times life size, about 0.75 m long with a wingspan of 1.75 m, so that they can be made out at a distance.
+A flock of 36 yellow-legged gulls lives round the player. A gull has a white head and body, a grey mantle and grey wings with a white trailing edge, black wing tips, a yellow bill with a red spot and yellow legs; about one in seven is a grey-brown immature bird. The gulls are drawn at 1.25 times life size, about 0.75 m long with a wingspan of 1.75 m, so that they can be made out at a distance.
 
 The gull code is one block, `createGulls`, which returns an object with `update(dt, ctx)`; the game calls it from `updateGulls` in the frame loop. All the gulls are one `InstancedMesh` in `world`, placed at `ORIGIN` with each bird relative to it, and are drawn in a single draw call. The body is fixed geometry, and the wings are posed in the vertex shader from four numbers per bird (the angle at the shoulder, the angle at the wrist, the sweep of the hand and how far the wing is folded), so that the shadow pass poses them in the same way.
 
-A gull circles on a thermal, banked into the turn at the angle a coordinated turn requires, and flaps in short bursts or when it must climb. It glides from one thermal to another, follows a sailing boat or a ferry, or comes down to stand on a perch or to sit on the sea, where it bobs and drifts. A slow boat is circled from a point astern; a ferry, which moves too fast to be circled, is kept pace with from a place astern and to one side. Gulls that are close together steer apart. A gull that is standing faces into the wind and now and then raises its wings. It takes off when the player comes within 6–12 m of it, or when a boat comes close on the water, and those standing near it take off a moment later. As the light fails the gulls come down to roost on the perches and the sea, and stay there until morning.
+A gull circles on a thermal, banked into the turn at the angle a coordinated turn requires, and flaps in short bursts or when it must climb. It glides from one thermal to another, follows a sailing boat or a ferry, or comes down to stand on a perch or to sit on the sea, where it bobs and drifts. A slow boat is circled from a point astern; a ferry, which moves too fast to be circled, is kept pace with from a place astern and to one side. Gulls that are close together steer apart. A gull that is standing faces into the wind and now and then raises its wings. It takes off when the player comes within 6–12 m of it, or when a boat comes close on the water, and those standing near it take off a moment later. A fishing boat coming home with its catch (`catch` on its record) takes precedence over every other boat: the nearest gulls join it up to its quota (`want`, 8–15), and no more than half the flock at once for all such boats together, keep closer and lower behind it and dive at its wake every few seconds; when it has berthed (`settle`) they come down on its deck and wheelhouse (`perches`), on the quay beside it or on the water. As the light fails the gulls come down to roost on the perches and the sea, and stay there until morning.
 
-Perches are gathered by `gullPerches` within 320 m of the player, again whenever the player has moved 60 m and every 10 s: the coping and bollards of the harbour quays and the parapets of the moles, from `harbourInfo`; the rocks that carry a lighthouse, from `seaRockInfo`; the stacks and landing of each cove once it is built; and the first dry ground above the water along the rest of the shore. Thermals are placed only along the shore, and a flying gull keeps within about 70 m of the shoreline: beyond about 40 m inland (`seaDist`) a pull towards the sea begins and grows smoothly towards that limit, and it starts sooner in an onshore wind. Land perches more than 40 m from the water are not used. The gulls fly in still air until there is a global wind; `gullWind` is the place to supply it.
+Perches are gathered by `gullPerches` within 320 m of the player, again whenever the player has moved 60 m and every 10 s: the coping and bollards of the harbour quays and the parapets of the moles, from `harbourInfo`; the rocks that carry a lighthouse, from `seaRockInfo`; the stacks and landing of each cove once it is built; and the first dry ground above the water along the rest of the shore. Thermals are placed only along the shore, and a flying gull keeps within about 70 m of the shoreline: beyond about 40 m inland (`seaDist`) a pull towards the sea begins and grows smoothly towards that limit, and it starts sooner in an onshore wind. Land perches more than 40 m from the water are not used. The gulls fly in the global wind (`WIND`), which `updateDinghies` passes to them through `gullWind` each frame.
 
 The flock stands still while the world is paused, moves with the world when it repeats from north to south (`wrapHooks`), and is placed afresh round the player when a new island is generated. A gull's call goes to the sound `gulls`, at most one every 2.5 s and only from gulls within 140 m. For automated checks, `window.__gulls` holds the flock (`G`), its context (`ctx`) and a switch (`on`) that removes the gulls entirely.
 
@@ -334,6 +375,7 @@ Sounds are routed to four buses: `world`, `train`, `ferry` and `player`. Each bu
 - **Train.** Run and idle loops at the locomotive, and a rumble from the point on the train nearest the listener. A bridge loop plays on viaducts and a rail joint every 18 m under each bogie. Separate sounds play for starting, stopping, brakes, the doors opening and closing, and the horn on departure and before a tunnel.
 - **Ferry.** Run and idle loops at the stern, and the wake at the bow. Separate sounds play for the horn, starting, stopping, the gangway, the gates and the fenders.
 - **Goods train.** Its engine at the leading shunter, a start, a horn and the clatter of the couplings as it sets off, a stop, and rail joints (`goods_run`, `goods_idle`, `goods_start`, `goods_stop`, `goods_horn`, `goods_buffer`). Until they have recordings of their own they borrow the train's, through `SOUND_ALIAS`.
+- **Dinghy.** The bow wave (`bow_wave`) grows louder and higher in pitch as the boat gathers way, the sail flaps when it luffs (`sail_flap`), the boom bangs across in a gybe (`gybe_bang`) and the hull knocks on touching the bottom or a wall (`hull_knock`). The last three have no recordings; `synthSailSounds` makes them when sound starts, unless `sounds.json` names files for them.
 - **Buildings.** `door_open` plays when a door begins to open and `door_close` when it shuts. Indoors, and in the ferry's saloon and wheelhouse, the world outside is muffled, less so while the door stands open. A church adds the tunnel's reverb.
 
 ### Recordings
@@ -358,6 +400,7 @@ The full list of 48 sound identifiers, with the category, type, channels, placem
 | `train-door.mp3` | `train_doors_open`, `train_doors_close`. The first 1.15 s of the recording are cut, so that the slide sounds while the doors move. |
 | `ferry-engine.mp3` | `ferry_run`, `ferry_idle` |
 | `ferry-wake.mp3` | `ferry_wake` |
+| `bow-wave.mp3` | `bow_wave` |
 | `cat-mew-1.mp3` to `cat-mew-4.mp3` | `cat_mew`, one chosen at random each time |
 
 The remaining identifiers, among them the dawn bed, cicadas, crickets, wind, gulls, the clock bell, cafés, boats, the train's horn, brakes and rumble, and the ferry's horn, are silent. While there is no dawn bed, the day bed does not dip at dawn.

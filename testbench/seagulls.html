@@ -26,7 +26,7 @@
 <body>
 <canvas id="c"></canvas>
 <div id="panel">
-  <div class="row"><label for="n">Gulls</label><input id="n" type="range" min="10" max="200" step="1" value="80"><output id="nV">80</output></div>
+  <div class="row"><label for="n">Gulls</label><input id="n" type="range" min="10" max="200" step="1" value="36"><output id="nV">36</output></div>
   <div class="row"><label for="w">Wind</label><input id="w" type="range" min="0" max="12" step="0.5" value="4"><output id="wV">4 m/s</output></div>
   <div class="row"><label for="wd">Wind from</label><input id="wd" type="range" min="0" max="355" step="5" value="250"><output id="wdV">250°</output></div>
   <div class="row"><label for="h">Time</label><input id="h" type="range" min="5" max="21.5" step="0.05" value="10"><output id="hV">10:00</output></div>
@@ -36,7 +36,7 @@
       <option value="perched">Perched gull</option><option value="following">Following gull</option>
     </select><button id="next">Next gull</button></div>
   <div class="row two"><button id="calls">Calls off</button><button id="reset">Player home</button></div>
-  <div class="row two"><button id="tracks">Tracks off</button><span></span></div>
+  <div class="row two"><button id="tracks">Tracks off</button><button id="catch">Catch off</button></div>
   <div class="stats" id="stats"></div>
 </div>
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"}}</script>
@@ -51,7 +51,7 @@ const hex=h=>new THREE.Color(h);
 
 /* ================= seagulls =================
    Yellow-legged gulls (Larus michahellis): white head and body, mid-grey mantle and wings with a white trailing
-   edge, black wing tips, a yellow bill with a red spot and yellow legs. About one in seven is a brown immature bird.
+   edge, black wing tips, a yellow bill with a red spot and yellow legs. About one in seven is a grey-brown immature bird.
 
    createGulls(parent, opts) adds one InstancedMesh to parent and returns
      { mesh, birds, thermals, update(dt, ctx), setCount(n), count, birdPosition(i, out), modeOf(i), shift(dx, dz),
@@ -67,7 +67,10 @@ const hex=h=>new THREE.Color(h);
      wind          {x,z} in m/s, the direction the air moves
      groundHeight  (x,z) => height of whatever is underfoot (terrain, quays, rocks); below seaLevel is sea
      seaLevel      0 in Coast
-     boats         [{x,z,heading,speed,length}], heading as in rotation.y (the bow points along sin, cos)
+     boats         [{x,z,heading,speed,length}], heading as in rotation.y (the bow points along sin, cos); a boat
+                   may also carry catch (true while it comes home with fish: the nearest gulls join it, up to want,
+                   8-15, ahead of any other boat, and no more than half the flock in all), settle (true once it has berthed: its gulls come down on it or
+                   near it) and perches ([{x,y,z}] on its deck and wheelhouse, for settling)
      perches       [{x,y,z}] places a gull may stand: rock tops, quay edges, bollards, ridges
      paused        while true the gulls hold still
      origin        optional {x,y,z} of the floating origin; the mesh is placed there and instances relative to it
@@ -195,13 +198,13 @@ function createGulls(parent, opts={}){
   const mesh=new THREE.InstancedMesh(geo,mat,MAX);
   mesh.customDepthMaterial=depth; mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   mesh.frustumCulled=false; mesh.castShadow=opts.shadows??true; mesh.receiveShadow=false; mesh.count=0;
-  const ADULT=new THREE.Color(1,1,1), JUV=new THREE.Color('#b29c84');
+  const ADULT=new THREE.Color(1,1,1), JUV=new THREE.Color('#a29d97');   // a cool grey-brown: a warm tan turned orange in low sun
   for (let i=0;i<MAX;i++) mesh.setColorAt(i,ADULT);
   parent.add(mesh);
 
   /* ---------- state ---------- */
   const birds=[], thermals=[], taken=new Set();
-  let t=0, lastCtx=null, want=Math.min(opts.count??80,MAX);
+  let t=0, lastCtx=null, want=Math.min(opts.count??80,MAX), catchT=0;
   const ground=(ctx,x,z)=>ctx.groundHeight?ctx.groundHeight(x,z):-10;
   const sea=ctx=>ctx.seaLevel??0;
   const day=ctx=>ctx.daylight??1;
@@ -279,9 +282,10 @@ function createGulls(parent, opts={}){
       freq:2.6+R()*0.6,baseFreq:0,burst:0,nextBurst:2+R()*8,fold:0,legs:0,size:0.92+R()*0.16,juv:R()<0.14,
       th:null,orbR:20,top:30,timer:10,tx:0,ty:0,tz:0,perch:null,landPhase:0,minD:1e9,ax:0,az:0,boat:null,rejoin:false,
       fBack:6,fSide:0,fAlt:8,fDir:1,diveT:20,scareR:6+R()*6,flush:-1,raise:0,nextRaise:15+R()*40,callT:5+R()*40,
-      age:0,psiT:0,bob:0,sx:0,sy:0,sz:0,extra:0,y0:0,flare:0,shT:R()*0.5,inl:0,seaX:0,seaZ:0,seaOK:false};
+      age:0,psiT:0,bob:0,sx:0,sy:0,sz:0,extra:0,y0:0,flare:0,swoop:0,swoopT:0,sb:0,ss:0,shT:R()*0.5,inl:0,seaX:0,seaZ:0,seaOK:false};
   }
-  function setMode(b,m){ b.mode=m; b.age=0; }
+  // a gull that goes off to a thermal has done with any boat it followed
+  function setMode(b,m){ b.mode=m; b.age=0; if (m===SOAR||m===GLIDE){ b.boat=null; b.rejoin=false; } }
   function freePerch(b){ if (b.perch) taken.delete(b.perch); b.perch=null; }
   function startSoar(b,T,ctx){
     setMode(b,SOAR); b.th=T||nearestThermal(b); b.orbR=b.th.r*(0.7+R()*0.5); b.top=b.th.top*(0.6+R()*0.5); b.timer=25+R()*60;
@@ -290,6 +294,15 @@ function createGulls(parent, opts={}){
   function startFollow(b,B){
     setMode(b,FOLLOW); b.boat=B; b.fBack=2+R()*10; b.fSide=(R()-0.5)*8; b.fAlt=3.5+R()*8; b.fDir=R()<0.5?1:-1;
     b.orbR=5+R()*5; b.timer=60+R()*150; b.diveT=8+R()*30;
+    // a boat with a catch is crowded closer and lower, and its wake is dived at far more often
+    if (B.catch){ b.fBack=3+R()*12; b.fAlt=4+R()*9; b.orbR=4+R()*5; b.diveT=2+R()*8; }
+  }
+  // a boat that has berthed: its gulls come down on its deck and wheelhouse, on the quay beside it or on the water
+  function settleNear(b,ctx,B){
+    b.boat=null; b.rejoin=false; let P=null;
+    if (B.perches && R()<0.5) for (const q of B.perches) if (!taken.has(q)){ P=q; break; }
+    if (!P){ let bd=35; for (const q of ctx.perches||[]){ if (taken.has(q)||!perchOK(ctx,q)) continue; const d=Math.hypot(q.x-B.x,q.z-B.z)+R()*6; if (d<bd){ bd=d; P=q; } } }
+    startLand(b,ctx,P||waterSpot(ctx,B.x,B.z,6,40)||undefined);
   }
   function startLand(b,ctx,P){
     freePerch(b); P=P||pickPerch(b,ctx); b.perch=P; if (!P.water) taken.add(P);
@@ -395,6 +408,19 @@ function createGulls(parent, opts={}){
     const nearPlayer=thermals.some(T=>Math.hypot(T.x-p.x,T.z-p.z)<RANGE);
     separate();
     const followers=birds.reduce((n,b)=>n+(b.mode===FOLLOW),0);
+    // a boat coming home with its catch draws a crowd: the nearest gulls within 450 m join it, up to its quota
+    catchT-=h;
+    if (catchT<=0 && !roost){ catchT=1;
+      const cap=Math.round(birds.length*0.5); let busy=0;   // two boats coming in together still draw a modest crowd
+      for (const b of birds) if (b.boat && b.boat.catch && (b.mode===FOLLOW||b.rejoin)) busy++;
+      for (const B of boats){ if (!B.catch) continue;
+        let have=0; for (const b of birds) if (b.boat===B && (b.mode===FOLLOW||b.rejoin)) have++;
+        while (have<(B.want||10) && busy<cap){
+          let best=null, bd=450;
+          for (const b of birds){ if ((b.boat&&b.boat.catch)||b.mode===LAND||b.mode===TAKEOFF) continue; const d=Math.hypot(b.x-B.x,b.z-B.z); if (d<bd){ bd=d; best=b; } }
+          if (!best) break;
+          if (best.mode===PERCH){ best.boat=B; best.rejoin=true; startTakeoff(best,ctx,false); } else startFollow(best,B);
+          have++; busy++; } } }
     for (const b of birds){
       b.age+=h;
       if (b.mode<=FOLLOW){
@@ -403,12 +429,12 @@ function createGulls(parent, opts={}){
         b.callT-=h; if (b.callT<=0){ b.callT=20+R()*70; if (onCall && R()<light) onCall({x:b.x,y:b.y,z:b.z,kind:R()<0.6?'long':'mew'}); }
         // a bird that has strayed far from the player is brought back towards it
         const dp=Math.hypot(b.x-p.x,b.z-p.z);
-        if (dp>RANGE*2 && nearPlayer){ spawn(b,ctx); continue; }
+        if (dp>RANGE*(b.boat&&b.boat.catch?5:2) && nearPlayer){ spawn(b,ctx); continue; }
         if (dp>RANGE*1.2 && b.mode!==GLIDE && b.mode!==FOLLOW) startGlide(b,nearestThermal({x:p.x,z:p.z}));
         if (roost && b.mode!==FOLLOW && R()<h*0.08) startLand(b,ctx);
         // a boat passing close by draws gulls after it, now and then
         else if (!roost && b.mode!==FOLLOW && followers<birds.length*0.3 && R()<h*0.04)
-          for (const B of boats) if (Math.hypot(B.x-b.x,B.z-b.z)<150){ startFollow(b,B); break; }
+          for (const B of boats) if (!B.catch && Math.hypot(B.x-b.x,B.z-b.z)<150){ startFollow(b,B); break; }
       }
       b.flare=0; b.extra=0;
       switch (b.mode){
@@ -435,6 +461,7 @@ function createGulls(parent, opts={}){
         break; }
       case FOLLOW: {
         const B=b.boat; if (!B||!boats.includes(B)){ startSoar(b,nearestThermal(b),ctx); break; }
+        if (B.settle){ settleNear(b,ctx,B); break; }
         const fx=Math.sin(B.heading), fz=Math.cos(B.heading), L=(B.length||8)/2, v=B.speed||0;
         // circle a point that hangs behind the stern and moves with the boat, a little ahead of where it is now
         const cx=B.x-fx*(L+b.fBack)+fz*b.fSide+fx*v*1.5, cz=B.z-fz*(L+b.fBack)-fx*b.fSide+fz*v*1.5;
@@ -454,9 +481,20 @@ function createGulls(parent, opts={}){
         }
         fly(b,ctx,h,dx,dz,b.fAlt+1.5*Math.sin(t*0.37+b.ph2),spd,0.4,1.7,false);
         b.timer-=h; b.diveT-=h;
-        if (b.diveT<=0){ b.diveT=10+R()*35;
-          if (R()<0.5){ const P={x:B.x-fx*(L+6+R()*16)+fz*(R()-0.5)*6,y:sea(ctx),z:B.z-fz*(L+6+R()*16)-fx*(R()-0.5)*6,water:true};
+        // a gull attending a boat with a catch swoops at its wake: down steeply onto a point a few metres astern,
+        // which moves with the boat, feet down to touch the water, and back up to its place
+        if (b.swoop>0){ b.swoopT+=h;
+          const wx=B.x-fx*b.sb+fz*b.ss, wz=B.z-fz*b.sb-fx*b.ss, down=b.swoop===1;
+          fly(b,ctx,h,wx-b.x,wz-b.z,sea(ctx)+(down?0.3:0.6),Math.max(7,v+3),0,2.2,true);
+          b.legs+=((down?1:0)-b.legs)*ease(5,h); b.extra=down?0:1;
+          if (down && (b.y<sea(ctx)+0.9 || b.swoopT>4.5)){ b.swoop=2; b.swoopT=0; }
+          else if (!down && b.swoopT>0.5){ b.swoop=0; b.legs=0; }
+          break; }
+        if (b.diveT<=0){ b.diveT=B.catch?4+R()*8:10+R()*35;
+          if (B.catch){ if (R()<0.7){ b.swoop=1; b.swoopT=0; b.sb=L+3+R()*10; b.ss=(R()-0.5)*6; } }
+          else if (R()<0.5){ const P={x:B.x-fx*(L+6+R()*16)+fz*(R()-0.5)*6,y:sea(ctx),z:B.z-fz*(L+6+R()*16)-fx*(R()-0.5)*6,water:true};
             if (ground(ctx,P.x,P.z)<sea(ctx)-1){ b.rejoin=true; startLand(b,ctx,P); break; } } }
+        if (B.catch && !roost) b.timer=Math.max(b.timer,30);
         if (b.timer<=0||roost){ b.boat=null; b.rejoin=false; if (roost) startLand(b,ctx); else startSoar(b,nearestThermal(b),ctx); }
         break; }
       case LAND: {
@@ -475,7 +513,7 @@ function createGulls(parent, opts={}){
             b.x+=dx*k; b.z+=dz*k; b.y+=dy*k; b.sp+=(1.5-b.sp)*ease(3,h); b.vy=0; b.flap+=(1-b.flap)*ease(4,h);
             b.ph+=TAU*b.freq*h; b.bank*=1-ease(4,h); b.pitch+=(0.35-b.pitch)*ease(4,h); b.yawRate=0;
             if (d>0.3) b.psi=wrap(b.psi+cl(wrap(Math.atan2(dx,dz)-b.psi),-1,1)*ease(3,h));
-            if (D<0.06){ setMode(b,PERCH); b.sp=0; b.vy=0; b.x=P.x; b.z=P.z; b.y=gy; b.psiT=b.psi; b.timer=b.rejoin?3+R()*8:(roost?1e9:25+R()*110); }
+            if (D<0.06){ setMode(b,PERCH); b.sp=0; b.vy=0; b.x=P.x; b.z=P.z; b.y=gy; b.psiT=b.psi; b.timer=b.rejoin?(b.boat&&b.boat.catch?1.2+R()*2.5:3+R()*8):(roost?1e9:25+R()*110); }
             break;
           }
           fly(b,ctx,h,dx,dz,gy+d*0.25,cl(1.2+d*0.33,1.2,9.5),0,2.4,true);
@@ -502,6 +540,7 @@ function createGulls(parent, opts={}){
         const dp=Math.hypot(b.x-p.x,b.z-p.z,b.y-(p.y??0));
         let go=dp<b.scareR*(water?1.3:1);
         for (const B of boats) if (water && Math.hypot(B.x-b.x,B.z-b.z)<(B.length||8)*0.5+6) go=true;
+        if (P.on && P.on.speed>0.3) go=true;   // standing on a boat that is getting under way
         if (b.flush>0){ b.flush-=h; if (b.flush<=0){ b.flush=-1; go=true; } }
         if (go){
           startTakeoff(b,ctx,true);
@@ -522,7 +561,8 @@ function createGulls(parent, opts={}){
         break; }
       }
       if (b.mode<=FOLLOW||b.mode===TAKEOFF) b.fold+=(0-b.fold)*ease(6,h);
-      if (b.mode<=FOLLOW) b.legs+=(0-b.legs)*ease(3,h);
+      if (b.mode<=FOLLOW && !b.swoop) b.legs+=(0-b.legs)*ease(3,h);
+      if (b.mode!==FOLLOW) b.swoop=0;
     }
   }
 
@@ -778,7 +818,7 @@ function gullCall(e){
     f.connect(g); g.connect(pan);
   }
 }
-const gulls=createGulls(scene,{count:80,range:170,onCall:gullCall});
+const gulls=createGulls(scene,{count:36,range:170,onCall:gullCall});
 
 /* ---------- tracks: where every gull has been over the last minute, and the inland limit ---------- */
 const TRACK_N=120, trackPos=new Float32Array(256*TRACK_N*3), trackCol=new Float32Array(256*TRACK_N*3);
@@ -842,6 +882,8 @@ function setView(v){ view=v; $('view').value=v;
 function setTracks(on){ tracks.visible=on; if (on&&!limitLine) buildLimitLine(); if (limitLine) limitLine.visible=on;
   $('tracks').classList.toggle('on',on); $('tracks').textContent=on?'Tracks on':'Tracks off'; }
 $('tracks').onclick=()=>setTracks(!tracks.visible);
+// a boat coming home with its catch: up to twelve gulls crowd round it
+$('catch').onclick=()=>{ boat.catch=!boat.catch; boat.want=12; $('catch').classList.toggle('on',boat.catch); $('catch').textContent=boat.catch?'Catch on':'Catch off'; };
 $('view').onchange=()=>setView($('view').value);
 $('next').onclick=()=>{ if (view==='overview') setView('flying'); else setView(view); };
 

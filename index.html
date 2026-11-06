@@ -89,11 +89,12 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
       <div class="row"><span><kbd>2-finger drag</kbd></span><span>Pan quickly across the island in the bird’s-eye view</span></div>
       <div class="row"><span><kbd>B</kbd></span><span>Tilt-shift in the bird’s-eye and chase views: <span id="tiltState">off</span></span></div>
     </div>
-    <div class="group"><h3>Train and ferry</h3>
+    <div class="group"><h3>Train, ferry and dinghy</h3>
       <div class="row"><span><kbd>R</kbd></span><span>Ride in front of the passenger train. R or V again steps off beside the track</span></div>
-      <div class="row"><span><kbd>C</kbd></span><span>Follow the train being ridden, or else the nearer one, from behind. The mouse moves the camera round it and <kbd>+</kbd><kbd>−</kbd> change the distance. C or V again steps off beside the track</span></div>
+      <div class="row"><span><kbd>C</kbd></span><span>Follow the train being ridden, or else the nearer one, from behind. The mouse moves the camera round it and <kbd>+</kbd><kbd>−</kbd> change the distance. C or V again steps off beside the track. Sailing, C changes between the helm and a view from astern of the dinghy</span></div>
       <div class="row"><span><kbd>G</kbd></span><span>Ride in front of the goods train. G or V again steps off beside the track</span></div>
       <div class="row"><span><kbd>F</kbd></span><span>Board the nearest ferry wherever it is. While it lies at a landing it may also be boarded by its gangway. On board, W A S D walk about the decks and the mouse looks round. F or V again steps ashore, or at the next landing while the ferry is under way</span></div>
+      <div class="row"><span><kbd>Y</kbd></span><span>Go to the quay beside the nearest harbour’s dinghy. Within 6 m of a dinghy, board it. Aboard, A and D steer, W and S paddle when she is nearly stopped and the mouse looks round; V shows the boat from above. Y again steps ashore within 3 m of a quay or a beach, or out at sea returns to the quay beside the dinghy’s berth</span></div>
     </div>
     <div class="group"><h3>Buildings</h3>
       <div class="row"><span>Walk into a door</span><span>Houses, barns, churches, towers, the station, the keeper’s cottage and the ferry’s saloon and wheelhouse may be entered. A door swings open when it is walked into, from either side, and closes again behind</span></div>
@@ -113,7 +114,7 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
       <div class="row"><span><kbd>H</kbd></span><span>Show or hide this panel</span></div>
     </div>
     <div class="group"><h3>Controller</h3>
-      <p>The left stick moves and the right stick looks. A jumps, B switches the view, X boards the ferry, Y rides with the train and LB follows it. RB sets tilt-shift, the triggers zoom, pressing the left stick switches between running and walking, the D-pad turns and tilts, Back mutes and Start shows this panel</p>
+      <p>The left stick moves and the right stick looks. A jumps, B switches the view, X boards the ferry, Y rides with the train and LB follows it. Within reach of a dinghy, or while sailing, Y stands for the Y key, as a press of the right stick always does; at the helm the left stick steers and paddles and the triggers trim the sail. RB sets tilt-shift, the triggers zoom, pressing the left stick switches between running and walking, the D-pad turns and tilts, Back mutes and Start shows this panel</p>
     </div>
   </div>
 </aside>
@@ -2305,6 +2306,26 @@ function buildStation(gb,ch,R,S){
 }
 
 /* ================= harbour ================= */
+/* The berth of a harbour's sailing dinghy: stern-to at the quay, its stern line made fast to one of the quay's
+   bollards and its bow line to a buoy in the basin. The bollards nearest a point drawn from the harbour's seed are
+   tried in turn; a berth must keep clear of the ferry channel and have water under the whole hull and the buoy.
+   The boats moored by buildHarbour are kept off it. The dinghy reaches DGY_AFT abaft its middle (rudder included)
+   and DGY_FORE forward, and DGY_HALF to either side. */
+const DGY_AFT=2.36, DGY_FORE=2.06, DGY_HALF=0.8, dgyBerths=new Map();
+function dinghyBerth(H){
+  const k=H.n*4+H.sd; if (dgyBerths.has(k)) return dgyBerths.get(k);
+  const S=H.sd, head=S>0?Math.PI:0, want=H.x+(hash(H.n,S,861)-0.5)*H.W*0.5, xs=[];
+  for (let x=H.x-H.W/2+1.8; x<H.x+H.W/2-1.8; x+=2) if (Math.round(x)%6===0 && Math.abs(x-H.x)<H.W/2-5) xs.push(x);
+  xs.sort((a,b)=>Math.abs(a-want)-Math.abs(b-want));
+  let B=null;
+  for (const x of xs){ const cz=coastZ(S,x), z=cz-S*(0.9+DGY_AFT), bz=z-S*(DGY_FORE+5.5);
+    if (nearFerryRoute(x,z,16) || nearFerryRoute(x,bz,12)) continue;
+    let ok=heightAt(x,bz)<-1;
+    for (const v of [-DGY_AFT,0,DGY_FORE]) for (const u of [-DGY_HALF,0,DGY_HALF]) if (heightAt(x+u,z-S*v)>-0.6) ok=false;
+    if (!ok) continue;
+    B={H,x,z,head,stern:{x,y:1.95,z:cz+S*0.75},bow:{x,y:0.12,z:bz},quay:{x:x+S*1.3,z:cz+S*0.5}}; break; }
+  dgyBerths.set(k,B); return B;
+}
 function buildHarbour(gb,ch,R,H){
   const stone=shade(C_.stone,R,0.03), top=1.6, dark=hex('#3d3a3a');
   // quay wall along the shore inside the basin
@@ -2368,12 +2389,21 @@ function buildHarbour(gb,ch,R,H){
     gb.add(T.cone, mat(x,top+3.2,z,0.9,0.5,0.9), dark, null);
     ch.circles.push({x,z,r:0.6,top:Infinity}); }
   // boats moored stern-to along the quay, and a couple swinging in the basin
+  // (the dinghy's berth, and the line from it to its buoy, are left clear)
+  const DB=dinghyBerth(H);
   for (let x=H.x-H.W/2+5; x<H.x+H.W/2-4; x+=4.4){
     if (R()<0.28) continue;
     const idx=Math.floor(R()*BOATS.length), z=coastZ(S,x)-S*(0.9+BOATS[idx].aft);   // the rudder 20 cm off the quay's face
-    placeBoat(ch,idx,x+(R()-0.5)*0.4,0,z,(S>0?Math.PI:0)+(R()-0.5)*0.12,true);
+    const xb=x+(R()-0.5)*0.4, rb=(S>0?Math.PI:0)+(R()-0.5)*0.12;
+    if (DB && Math.abs(xb-DB.x)<BOATS[idx].half+DGY_HALF+0.7) continue;
+    if (fishBerthAt(H,x)) continue;   // a fishing boat's berth: the fleet draws the boat, and leaves the berth empty while it is out
+    placeBoat(ch,idx,xb,0,z,rb,true);
   }
-  for (let q=0;q<2;q++){ const x=H.x+(R()-0.5)*H.W*0.5, z=coastZ(S,H.x)-S*H.L*0.55+(R()-0.5)*6; placeBoat(ch,Math.floor(R()*BOATS.length),x,0,z,R()*6.28,true); }
+  for (let q=0;q<2;q++){ const x=H.x+(R()-0.5)*H.W*0.5, z=coastZ(S,H.x)-S*H.L*0.55+(R()-0.5)*6, idx=Math.floor(R()*BOATS.length), rb=R()*6.28;
+    if (DB && Math.abs(x-DB.x)<BOATS[idx].fore+DGY_HALF+1.5 && S*(DB.z-z)>-BOATS[idx].fore-2 && S*(z-DB.bow.z)>-BOATS[idx].fore-2) continue;
+    placeBoat(ch,idx,x,0,z,rb,true); }
+  // the dinghy's mooring buoy
+  if (DB) gb.add(T.sph, mat(DB.bow.x,-0.16,DB.bow.z,0.6,0.52,0.6), C_.white, null);
 }
 
 /* ---------- the lighthouse tower, which can be climbed ----------
@@ -3707,11 +3737,19 @@ surfMat.uniforms.uTime=seaUniforms.uTime; fountMat.uniforms.uTime=seaUniforms.uT
 /* ---------- sea ---------- */
 const seaMat=new THREE.MeshPhongMaterial({color:hex('#2c6ead'),specular:hex('#121a22'),shininess:50,transparent:true,opacity:0.93,
   polygonOffset:true,polygonOffsetFactor:-1,polygonOffsetUnits:-2});  // where sea and shore tie in depth, the sea is drawn
+// the gusts of the wind (createWind), as darker patches of rougher ripples. uGust holds the direction the wind blows
+// towards, the offset along it and the size of a gust; the offsets along and across the wind (uGust.z, uGustC) are
+// set each frame for the quantised origin QORIGIN, so that q+QORIGIN, the true position, is what is sampled
+const seaGust={uGustTex:{value:null},uGust:{value:new THREE.Vector4(0,1,0,36)},uGustC:{value:0},uGustAmt:{value:0}};
 seaMat.onBeforeCompile=(sh)=>{
-  sh.uniforms.uTime=seaUniforms.uTime; sh.uniforms.uOrig=origU;
+  sh.uniforms.uTime=seaUniforms.uTime; sh.uniforms.uOrig=origU; Object.assign(sh.uniforms,seaGust);
   sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nvarying vec3 vSeaP;').replace('#include <project_vertex>','#include <project_vertex>\nvSeaP=(modelMatrix*vec4(transformed,1.0)).xyz;');
   sh.fragmentShader=sh.fragmentShader.replace('#include <common>',`#include <common>
     varying vec3 vSeaP; uniform float uTime; uniform vec3 uOrig;
+    uniform sampler2D uGustTex; uniform vec4 uGust; uniform float uGustC, uGustAmt;
+    float gsamp(vec2 p){ return texture2D(uGustTex,(p+0.5)/64.0).r; }
+    float gustG(vec2 q){ vec2 d=uGust.xy; float a=dot(q,d)-uGust.z, c=-q.x*d.y+q.y*d.x+uGustC, S=uGust.w;
+      return 0.62*gsamp(vec2(a/S,c/(S*0.75)))+0.38*gsamp(vec2(a/(S*0.5)+17.3,c/(S*0.42)+5.1)); }
     float sh2(vec2 p){ return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453); }
     float sn2(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
       return mix(mix(sh2(i),sh2(i+vec2(1.0,0.0)),f.x),mix(sh2(i+vec2(0.0,1.0)),sh2(i+vec2(1.0,1.0)),f.x),f.y); }
@@ -3726,7 +3764,8 @@ seaMat.onBeforeCompile=(sh)=>{
       { // layered value noise drifting in different directions: irregular ripples with no repeating stripes
         vec2 q=vSeaP.xz+uOrig.xz; float t=uTime, e=0.4;
         vec2 dq=fwidth(q); float px=max(dq.x,dq.y);
-        float k=1.0-smoothstep(80.0,700.0,length(vSeaP-cameraPosition));
+        float g=smoothstep(0.56,0.75,gustG(q))*uGustAmt; diffuseColor.rgb*=1.0-0.26*g;
+        float k=(1.0-smoothstep(80.0,700.0,length(vSeaP-cameraPosition)))*(1.0+1.2*g);
         float wx=seaWaves(q+vec2(e,0.0),t,px)-seaWaves(q-vec2(e,0.0),t,px);
         float wz=seaWaves(q+vec2(0.0,e),t,px)-seaWaves(q-vec2(0.0,e),t,px);
         normal=normalize(normal+(viewMatrix*vec4(-wx*1.5*k,0.0,-wz*1.5*k,0.0)).xyz); }`);
@@ -4661,6 +4700,7 @@ function updateDolphins(wdt){
   const B=dlCtx.boats; B.length=0;
   for (const F of ferries){ if (!F.R || !F.m.visible) continue; const b=dlBoat(F,FL,FB); b.x=F.m.position.x; b.z=F.m.position.z; b.head=F.head; b.v=F.v; B.push(b); }
   for (const s of sailers){ const b=dlBoat(s,7,2.4); b.x=s.m.position.x; b.z=s.m.position.z; b.head=s.m.rotation.y; b.v=s.sp; B.push(b); }
+  if (sailD){ const S=sailD.state, b=dlBoat(sailD,4,1.5); b.x=S.x; b.z=S.z; b.head=S.head; b.v=Math.max(0,S.u); B.push(b); }
   dolphins.update(wdt,dlCtx);
   // window.__village is made once the main loop has started, so the helper is added to it when it first exists
   if (window.__village && !window.__village.findDolphins){ window.__village.findDolphins=findDolphins; window.__village.dolphins=dolphins; }
@@ -4672,6 +4712,735 @@ function findDolphins(){ let best=null;
     if (!best || dist<best.dist) best={x,z,dist,head:p.head,mode:p.mode,size:n,states:p.members.map(d=>d.state)}; }
   return best; }
 
+/* ================= wind =================
+   One wind over the whole sea, for Coast. Everything below this line and above the matching closing line is
+   self-contained and may be pasted into index.html as it stands; it needs only THREE.
+
+   const W=createWind(opts)
+     opts: speed (m/s, 5), dir (radians, the heading the wind comes FROM, in Coast's convention where a heading h
+           points along (sin h, cos h); north is -z, so a wind from the north has dir = PI), gust (0..1, 0.4),
+           shift (0..1, 1: the direction wanders by up to 20 degrees), scale (m, 36, the size of a gust),
+           seed, shelter(x,z) -> 0..1 (1 where fully sheltered, as in a harbour or a cove; the wind there is cut by
+           70 per cent), hour() -> 0..24 and onshore(x,z) -> the heading the sea lies in, seen from the shore (both
+           needed for the sea breeze by day and the land breeze at night)
+   W.update(dt)       advances time; call it once per frame unless paused
+   W.at(x,z[,t[,out]]) {x,z: the air's velocity (where it blows towards), speed, dir (from, as opts.dir), gust (0..1)};
+                      out, when given, is filled and returned instead of a new object
+   W.set(o)           changes options      W.uniforms   {uGustTex, uGust, uGustAmt} for the sea shader (see the sea)
+   W.gustField(x,z)   the raw value of the gust field (0..1)
+
+   The gusts are a field of value noise carried downwind at 0.85 times the wind speed. The same texture is
+   sampled by the sea shader, so that the darker ripple patches on the water are where the gusts are. Because
+   the field depends only on position and time, a sudden jump in position (Coast's wrap of the world) is
+   harmless. */
+function createWind(opts={}){
+  const O=Object.assign({speed:5,dir:Math.PI/2,gust:0.4,shift:1,scale:36,seed:11,shelter:null,hour:null,onshore:null},opts);
+  const N=64, TAU=Math.PI*2, cl=(v,a,b)=>Math.max(a,Math.min(b,v)), sm=(a,b,x)=>{ const t=cl((x-a)/(b-a),0,1); return t*t*(3-2*t); };
+  let sd=(O.seed>>>0)||1;
+  const R=()=>{ sd=(sd+0x6D2B79F5)>>>0; let t=sd; t=Math.imul(t^t>>>15,t|1); t^=t+Math.imul(t^t>>>7,t|61); return ((t^t>>>14)>>>0)/4294967296; };
+  let a=new Float32Array(N*N).map(()=>R());
+  for (let pass=0;pass<2;pass++){ const b=new Float32Array(N*N);
+    for (let j=0;j<N;j++) for (let i=0;i<N;i++){ let s=0; for (let dj=-1;dj<=1;dj++) for (let di=-1;di<=1;di++) s+=a[((j+dj+N)%N)*N+(i+di+N)%N]; b[j*N+i]=s/9; }
+    a=b; }
+  let mn=1, mx=0; for (const v of a){ mn=Math.min(mn,v); mx=Math.max(mx,v); }
+  const bytes=new Uint8Array(N*N*4), val=new Float32Array(N*N);
+  for (let k=0;k<N*N;k++){ const q=Math.round((a[k]-mn)/(mx-mn)*255); val[k]=q/255; bytes[k*4]=bytes[k*4+1]=bytes[k*4+2]=q; bytes[k*4+3]=255; }
+  const tex=new THREE.DataTexture(bytes,N,N,THREE.RGBAFormat);
+  tex.wrapS=tex.wrapT=THREE.RepeatWrapping; tex.magFilter=tex.minFilter=THREE.LinearFilter; tex.generateMipmaps=false; tex.needsUpdate=true;
+  // bilinear, with the lattice on whole texels, as the GPU samples the texture at (p+0.5)/N
+  const samp=(px,pz)=>{ const fx=Math.floor(px), fz=Math.floor(pz), tx=px-fx, tz=pz-fz;
+    const i0=((fx%N)+N)%N, j0=((fz%N)+N)%N, i1=(i0+1)%N, j1=(j0+1)%N;
+    return (val[j0*N+i0]*(1-tx)+val[j0*N+i1]*tx)*(1-tz)+(val[j1*N+i0]*(1-tx)+val[j1*N+i1]*tx)*tz; };
+  let time=0, off=0;
+  const PERIOD=()=>O.scale*N;   // the field repeats along the wind every scale*N metres, so the offset is kept below it
+  const U={uGustTex:{value:tex},uGust:{value:new THREE.Vector4(0,1,0,O.scale)},uGustAmt:{value:O.gust}};
+  const dirAt=t=>O.dir+O.shift*0.349*(0.6*Math.sin(TAU*t/173+0.3)+0.4*Math.sin(TAU*t/67+2.1));
+  function gustField(x,z,o=off){ const dx=-Math.sin(O.dir), dz=-Math.cos(O.dir), S=O.scale;
+    const al=x*dx+z*dz-o, ac=-x*dz+z*dx;
+    return 0.62*samp(al/S,ac/(S*0.75))+0.38*samp(al/(S*0.5)+17.3,ac/(S*0.42)+5.1); }
+  function at(x,z,t,out){
+    const tt=t===undefined||t===null?time:t, o=off+O.speed*0.85*(tt-time);
+    const G=gustField(x,z,o), g=sm(0.56,0.75,G), l=sm(0.44,0.26,G);
+    const sp=O.speed*(1+O.gust*(0.6*g-0.28*l)), dir=dirAt(tt)+O.gust*0.1*(g-0.5);
+    let vx=-Math.sin(dir)*sp, vz=-Math.cos(dir)*sp;
+    if (O.hour && O.onshore){ const hr=O.hour(), on=O.onshore(x,z);
+      const sea=2.4*sm(10,13,hr)*sm(19,16.5,hr), land=1.4*(hr>12?sm(21,23,hr):sm(7,5,hr));
+      vx+=-Math.sin(on)*sea+Math.sin(on)*land; vz+=-Math.cos(on)*sea+Math.cos(on)*land; }
+    if (O.shelter){ const k=1-0.7*cl(O.shelter(x,z)||0,0,1); vx*=k; vz*=k; }
+    const s=Math.hypot(vx,vz), d=s>1e-6?Math.atan2(-vx,-vz):dir;
+    if (out){ out.x=vx; out.z=vz; out.speed=s; out.dir=d; out.gust=g; return out; }
+    return {x:vx,z:vz,speed:s,dir:d,gust:g};
+  }
+  function writeU(){ U.uGust.value.set(-Math.sin(O.dir),-Math.cos(O.dir),off,O.scale); U.uGustAmt.value=O.gust; }
+  function update(dt){ if (dt>0){ time+=dt; off=(off+O.speed*0.85*dt)%PERIOD(); } writeU(); }
+  function set(o){ Object.assign(O,o); writeU(); }
+  writeU();
+  return {at,update,set,gustField,uniforms:U,options:O,get time(){ return time; }};
+}
+/* ================= end of wind ================= */
+
+/* ================= dinghy =================
+   A sailing dinghy for Coast: 4 m long and 1.5 m in the beam, clinker-built, with one mainsail on a short mast.
+   Everything below this line and above the matching closing line is self-contained and may be pasted into
+   index.html as it stands; it needs only THREE.
+
+   const D=createDinghy(parent, opts)    parent: the group the meshes join (in Coast, `world`)
+     opts: x, z, head (heading: the bow points along (sin head, cos head)), number ('17'), mode ('assisted' or
+           'realistic'), colours (hull, band, bottom, inner, varnish, wood, sail, mark, pennant),
+           mooring {x,z,head, stern:{x,y,z}, bow:{x,y,z}} (the lines run to these points; the boat is held
+           there until boarded), onSound(kind, strength): kind 'gybe', 'ground' or 'tack'
+   D.update(dt, ctx)
+     ctx: wind (from createWind), depthAt(x,z) (depth of water, positive at sea; in Coast -heightAt),
+          surfaceAt(x,z) (height of the sea surface at this moment), obstacles {obbs:[{x,z,hw,hd,rot}],
+          circles:[{x,z,r}]} as Coast's blocks hold them, boats [{x,z,head,len,beam}],
+          input {steer: -1 port .. +1 starboard, trim: +1 sheets in .. -1 eases, paddle: -1 .. +1},
+          walkAt(x,z) (the height a walker would stand at, or null; used by leave), paused
+   D.board()            puts the player aboard and casts off      D.leave(ctx) -> {x,y,z,head} or null
+   D.landing(ctx)       the place leave() would use, or null       D.canBoard(x,z) (within 6 m)
+   D.eye(camera, yaw, pitch)   puts a camera (sharing the parent) at the helm, looking yaw/pitch relative to the bow
+   D.setMode(m)   D.moor(m)   D.shift(dx,dz) (moves the boat and its history, for a wrap of the world)
+   D.polar(degrees) -> target speed as a fraction of the true wind speed      D.state   D.mesh   D.info
+   D.dispose()
+
+   Local axes of the boat: +z towards the bow, +x to port, y up, the waterline at y = 0. */
+function createDinghy(parent, opts={}){
+  const O=Object.assign({number:'17',hull:'#f2ede4',band:'#2f5f8f',bottom:'#b5473a',inner:'#ebe1cf',varnish:'#c0884a',wood:'#9b7652',
+    sail:'#f3ebd9',mark:'#2f5f8f',pennant:'#c4544b',rope:'#d8cdb4',mode:'assisted',x:0,z:0,head:0,mooring:null,onSound:null},opts);
+  const TAU=Math.PI*2, D2R=Math.PI/180;
+  const cl=(v,a,b)=>Math.max(a,Math.min(b,v)), sm=(a,b,x)=>{ const t=cl((x-a)/(b-a),0,1); return t*t*(3-2*t); };
+  const lp=(a,b,t)=>a+(b-a)*t, wrap=a=>Math.atan2(Math.sin(a),Math.cos(a)), sg=v=>v<0?-1:1, col=c=>new THREE.Color(c);
+  const sound=(k,s)=>{ if (O.onSound) try { O.onSound(k,s); } catch(e){} };
+
+  /* ---------- the lines of the hull ----------
+     t runs from the transom (0) to the stem (1); s round each section from the keel (0) to the sheer (1). */
+  const LEN=4.0, ZS=-2.0, ZM=1.04;
+  const bAt=t=>t<0.45?0.56+0.19*Math.sin(t/0.45*Math.PI/2):0.75*Math.cos(Math.pow((t-0.45)/0.55,1.25)*Math.PI/2);
+  const shAt=t=>0.39+(t<0.4?0.04*Math.pow((0.4-t)/0.4,2):0)+(t>0.45?0.19*Math.pow((t-0.45)/0.55,2):0);
+  const kAt=t=>-0.22+(t<0.3?0.10*Math.pow(1-t/0.3,2):0)+(t>0.7?0.52*Math.pow((t-0.7)/0.3,2):0);
+  const zAt=t=>ZS+t*LEN;
+  const sec=(t,s)=>{ const b=bAt(t), k=kAt(t), h=shAt(t); return [b*Math.pow(Math.sin(s*Math.PI/2),0.75),k+(h-k)*Math.pow(s,1.5),zAt(t)]; };
+  const secN=(t,s)=>{ const a=sec(t,Math.max(0,s-0.01)), b=sec(t,Math.min(1,s+0.01)), dx=b[0]-a[0], dy=b[1]-a[1], l=Math.hypot(dx,dy)||1; return [dy/l,-dx/l]; };
+  const sAtY=(t,y)=>{ const k=kAt(t), h=shAt(t); return y<=k?0:Math.pow(cl((y-k)/(h-k),0,1),2/3); };
+  const halfBeam=lz=>bAt(cl((lz-ZS)/LEN,0,1))*0.98;
+
+  /* ---------- a small geometry builder: flat-shaded triangles with colours, faced away from a hint point ---------- */
+  const BOX=new THREE.BoxGeometry(1,1,1);
+  class GB{ constructor(){ this.p=[]; this.c=[]; }
+    tri(a,b,c,hint,k){ const ux=b[0]-a[0],uy=b[1]-a[1],uz=b[2]-a[2],vx=c[0]-a[0],vy=c[1]-a[1],vz=c[2]-a[2];
+      const nx=uy*vz-uz*vy, ny=uz*vx-ux*vz, nz=ux*vy-uy*vx; if (nx*nx+ny*ny+nz*nz<1e-14) return;
+      const cx=(a[0]+b[0]+c[0])/3-hint[0], cy=(a[1]+b[1]+c[1])/3-hint[1], cz=(a[2]+b[2]+c[2])/3-hint[2];
+      if (nx*cx+ny*cy+nz*cz<0){ const t=b; b=c; c=t; }
+      this.p.push(a[0],a[1],a[2],b[0],b[1],b[2],c[0],c[1],c[2]); for (let i=0;i<3;i++) this.c.push(k.r,k.g,k.b); }
+    quad(a,b,c,d,hint,k){ this.tri(a,b,c,hint,k); this.tri(a,c,d,hint,k); }
+    geo(g,m,k){ const gg=g.index?g.toNonIndexed():g.clone(); gg.applyMatrix4(m); const p=gg.attributes.position.array;
+      for (let i=0;i<p.length;i++) this.p.push(p[i]); for (let i=0;i<p.length/3;i++) this.c.push(k.r,k.g,k.b); gg.dispose(); }
+    box(x,y,z,w,h,d,k,ry=0,rx=0,rz=0){ this.geo(BOX,new THREE.Matrix4().compose(new THREE.Vector3(x,y,z),new THREE.Quaternion().setFromEuler(new THREE.Euler(rx,ry,rz,'YXZ')),new THREE.Vector3(w,h,d)),k); }
+    seg(p,q,w,h,k){ const dx=q[0]-p[0], dy=q[1]-p[1], dz=q[2]-p[2], len=Math.hypot(dx,dy,dz);
+      this.box((p[0]+q[0])/2,(p[1]+q[1])/2,(p[2]+q[2])/2,w,h,len+0.01,k,Math.atan2(dx,dz),-Math.atan2(dy,Math.hypot(dx,dz))); }
+    cyl(p,q,r0,r1,k,n=8){ const d=new THREE.Vector3(q[0]-p[0],q[1]-p[1],q[2]-p[2]), len=d.length(); const g=new THREE.CylinderGeometry(r1,r0,len,n);
+      this.geo(g,new THREE.Matrix4().compose(new THREE.Vector3((p[0]+q[0])/2,(p[1]+q[1])/2,(p[2]+q[2])/2),new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0),d.normalize()),new THREE.Vector3(1,1,1)),k); g.dispose(); }
+    build(){ const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.Float32BufferAttribute(this.p,3)); g.setAttribute('color',new THREE.Float32BufferAttribute(this.c,3)); g.computeVertexNormals(); return g; }
+  }
+  const K={hull:col(O.hull),band:col(O.band),bot:col(O.bottom),inner:col(O.inner),varn:col(O.varnish),wood:col(O.wood),dark:col('#2b2b35'),metal:col('#8d8f93')};
+  const darker=(c,f)=>c.clone().multiplyScalar(f);
+
+  function buildHull(){
+    const g=new GB(), NT=26, SB=[0,0.2,0.36,0.52,0.68,0.84,1], SC=[K.bot,K.bot,K.hull,K.hull,K.hull,K.band], LAP=0.016;
+    const ts=[]; for (let i=0;i<=NT;i++){ const u=i/NT; ts.push(u<0.8?u:0.8+(u-0.8)*(1-0.15*(u-0.8)/0.2)); } ts[NT]=1;
+    for (const sx of [1,-1]){
+      const P=(t,s,lap=0)=>{ const p=sec(t,s); if (lap){ const n=secN(t,s); p[0]+=n[0]*lap; p[1]+=n[1]*lap; } p[0]*=sx; return p; };
+      for (let i=0;i<NT;i++){ const t0=ts[i], t1=ts[i+1], tm=(t0+t1)/2, hint=[0,(kAt(tm)+shAt(tm))/2,zAt(tm)-0.6*sm(0.6,1,tm)];
+        // the strakes, each lapping over the one below it
+        // each face is turned outwards along the section's own normal, which stays right where the hull narrows to the stem
+        const inward=(sMid)=>{ const n=secN(tm,sMid), c=sec(tm,sMid); return [sx*(c[0]-n[0]),c[1]-n[1],c[2]]; };
+        for (let j=0;j<6;j++){ const lap=j>0?LAP:0, sMid=(SB[j]+SB[j+1])/2;
+          g.quad(P(t0,SB[j],lap),P(t1,SB[j],lap),P(t1,SB[j+1]),P(t0,SB[j+1]),inward(sMid),SC[j]);
+          if (j>0) g.quad(P(t0,SB[j]),P(t1,SB[j]),P(t1,SB[j],LAP),P(t0,SB[j],LAP),inward(SB[j]),darker(SC[j],0.72)); }
+        // the inside, painted, above the floorboards
+        if (t1<0.985){ const far=[sx*6,0.25,hint[2]], IN=(t,s)=>{ const p=sec(t,s); return [sx*Math.max(0,p[0]*0.965-0.014),p[1],p[2]]; };
+          for (let k=0;k<7;k++){ const s0=k/7, s1=(k+1)/7; g.quad(IN(t0,s0),IN(t1,s0),IN(t1,s1),IN(t0,s1),far,k<2?darker(K.wood,0.7):k===6?darker(K.inner,0.96):K.inner); } }
+        // the gunwale and the rubbing strake, varnished
+        const a=P(t0,1), b=P(t1,1);
+        g.seg([a[0],a[1]+0.02,a[2]],[b[0],b[1]+0.02,b[2]],0.06,0.05,K.varn);
+        if (t1<0.97){ const n0=secN(t0,0.93), n1=secN(t1,0.93), c0=P(t0,0.93), c1=P(t1,0.93);
+          g.seg([c0[0]+sx*n0[0]*0.03,c0[1],c0[2]],[c1[0]+sx*n1[0]*0.03,c1[1],c1[2]],0.04,0.045,darker(K.varn,0.85)); }
+      }
+      // the transom
+      const tc=[0,(kAt(0)+shAt(0))/2,ZS];
+      for (let k=0;k<12;k++){ const s0=k/12, s1=(k+1)/12, a=P(0,s0), b=P(0,s1); g.tri(tc,a,b,[0,0.1,ZS+1],s0>=0.84?K.band:s1<=0.36?K.bot:K.hull);
+        const ai=[a[0]*0.965,a[1],ZS+0.03], bi=[b[0]*0.965,b[1],ZS+0.03]; g.tri([0,tc[1],ZS+0.03],ai,bi,[0,0.1,ZS-1],K.inner); }
+    }
+    // transom capping and the horse for the mainsheet
+    { const a=sec(0,1), y=a[1]+0.02; g.seg([a[0],y,ZS+0.01],[-a[0],y,ZS+0.01],0.06,0.05,K.varn);
+      g.seg([0.36,y+0.02,ZS+0.06],[0.36,y+0.1,ZS+0.06],0.02,0.02,K.metal); g.seg([-0.36,y+0.02,ZS+0.06],[-0.36,y+0.1,ZS+0.06],0.02,0.02,K.metal);
+      g.seg([0.36,y+0.1,ZS+0.06],[-0.36,y+0.1,ZS+0.06],0.018,0.018,K.metal); }
+    // floorboards in three slats
+    { const y=-0.085;
+      for (let i=0;i<14;i++){ const t0=0.06+i*0.052, t1=t0+0.052; const w0=sec(t0,sAtY(t0,y))[0]*0.94, w1=sec(t1,sAtY(t1,y))[0]*0.94;
+        for (const [f0,f1] of [[-1,-0.36],[-0.32,0.32],[0.36,1]]) g.quad([w0*f0,y,zAt(t0)],[w0*f1,y,zAt(t0)],[w1*f1,y,zAt(t1)],[w1*f0,y,zAt(t1)],[0,-1,zAt(t0)],i%2?K.wood:darker(K.wood,0.95)); } }
+    // thwarts, stern sheets and foredeck
+    const thwart=(t,dz,k=K.varn)=>{ const y=shAt(t)-0.11, w=2*sec(t,sAtY(t,y))[0]*0.97; g.box(0,y,zAt(t),w,0.035,dz,k); g.box(0,y-0.05,zAt(t),0.05,0.1,dz*0.6,darker(k,0.85)); };
+    thwart(0.53,0.22); thwart(0.765,0.18);
+    { const y=0.25; for (const t of [0.03,0.1,0.17]){ const w=2*sec(t,sAtY(t,y))[0]*0.96; g.box(0,y,zAt(t),w,0.03,0.13,K.varn); } }
+    { const y0=0.01; for (let i=0;i<6;i++){ const t0=0.86+i*0.14/6, t1=t0+0.14/6, a=sec(t0,1), b=sec(t1,1), ya=a[1]-0.012, yb=b[1]-0.012;
+        g.quad([a[0]*0.99,ya,a[2]],[-a[0]*0.99,ya,a[2]],[-b[0]*0.99,yb,b[2]],[b[0]*0.99,yb,b[2]],[0,y0,a[2]],i%2?K.varn:darker(K.varn,0.95)); }
+      const t=0.86, a=sec(t,1); g.box(0,a[1]+0.01,zAt(t),2*a[0]*0.98,0.05,0.04,darker(K.varn,0.85)); }
+    // a bulkhead closing the bow under the foredeck
+    { const t=0.86, z=zAt(t), y0=-0.09, s0=sAtY(t,y0), pts=[]; for (let k=0;k<=8;k++){ const p=sec(t,s0+(1-s0)*k/8); pts.push([p[0]*0.96,p[1],z]); }
+      const c=[0,(y0+shAt(t))/2,z]; for (let k=0;k<8;k++) for (const sx of [1,-1]) g.tri(c,[sx*pts[k][0],pts[k][1],z],[sx*pts[k+1][0],pts[k+1][1],z],[0,0.1,z+1],K.inner);
+      g.tri(c,[pts[8][0],pts[8][1],z],[-pts[8][0],pts[8][1],z],[0,0.1,z+1],K.inner); }
+    // stem, keel band and the case of the daggerboard
+    { const pts=[]; for (let i=0;i<=8;i++){ const t=0.9+i*0.0125; pts.push(sec(t,0)); } pts.push([0,shAt(1)+0.05,ZS+LEN+0.01]);
+      for (let i=0;i<pts.length-1;i++) g.seg([0,pts[i][1]-0.02,pts[i][2]+0.03],[0,pts[i+1][1]-0.02,pts[i+1][2]+0.03],0.06,0.06,pts[i][1]<0.08?K.bot:K.varn);
+      for (let i=0;i<14;i++){ const a=sec(0.03+i*0.062,0), b=sec(0.03+(i+1)*0.062,0); g.seg([0,a[1]-0.045,a[2]],[0,b[1]-0.045,b[2]],0.05,0.04,K.bot); } }
+    g.box(0,0.08,zAt(0.5),0.075,0.42,0.46,K.varn); g.box(0,0.3,zAt(0.5),0.11,0.02,0.5,darker(K.varn,0.85));
+    // the mast, stepped on the keel through the forward thwart, with a truck at its head
+    g.cyl([0,-0.12,ZM],[0,4.9,ZM],0.052,0.034,K.varn,8); g.box(0,4.92,ZM,0.07,0.04,0.07,K.dark);
+    g.cyl([0,shAt(0.765)-0.05,ZM],[0,shAt(0.765)+0.06,ZM],0.075,0.07,darker(K.varn,0.8),8);
+    // pintles and a cleat on each quarter for the mooring lines
+    for (const y of [0.05,0.28]) g.box(0,y,ZS-0.02,0.07,0.03,0.05,K.metal);
+    for (const sx of [1,-1]){ const p=sec(0.08,1); g.box(sx*p[0]*0.85,p[1]+0.06,zAt(0.08),0.04,0.03,0.14,K.metal); }
+    { const p=sec(0.93,1); g.box(0,p[1]+0.04,zAt(0.93),0.03,0.03,0.12,K.metal); }
+    return g.build();
+  }
+  function buildRudder(){   // about the pivot on the transom
+    const g=new GB();
+    g.box(0,-0.36,-0.17,0.026,0.86,0.28,K.hull); g.box(0,-0.36,-0.03,0.04,0.86,0.05,K.varn);
+    g.box(0,0.08,-0.07,0.075,0.3,0.2,K.varn);
+    g.seg([0,0.17,0.02],[0,0.14,1.42],0.04,0.05,K.varn); g.box(0,0.14,1.42,0.05,0.06,0.06,K.dark);
+    return g.build(); }
+  function buildBoard(){ const g=new GB(); g.box(0,-0.375,0,0.022,1.15,0.3,K.varn); g.box(0,0.23,0,0.05,0.06,0.32,K.dark); return g.build(); }
+  function buildBoom(){ const g=new GB(); g.cyl([0,0,0.04],[0,0,-2.56],0.034,0.028,K.varn,6); g.box(0,0,0.04,0.08,0.08,0.08,K.metal); g.box(0,-0.03,-2.45,0.05,0.06,0.05,K.metal); return g.build(); }
+
+  /* ---------- the sail: a grid set afresh each frame for its belly, twist and flapping ---------- */
+  const NU=8, NV=10, SH=3.55;
+  const lzAt=v=>-(0.06+2.44*(1-v))-0.2*Math.pow(Math.sin(Math.PI*v),1.1)*(1-0.4*v);
+  const yvAt=v=>0.06+v*(SH-0.06);
+  const sailGeo=new THREE.BufferGeometry();
+  const sPos=new Float32Array((NU+1)*(NV+1)*3), sUv=new Float32Array((NU+1)*(NV+1)*2), sIdx=[];
+  for (let j=0;j<=NV;j++) for (let i=0;i<=NU;i++){ const v=j/NV, u=i/NU, k=j*(NU+1)+i, z=lp(-0.04,lzAt(v),u); sUv[k*2]=-z/2.75; sUv[k*2+1]=yvAt(v)/3.6; }
+  for (let j=0;j<NV;j++) for (let i=0;i<NU;i++){ const a=j*(NU+1)+i, b=a+1, c=a+NU+1, d=c+1; sIdx.push(a,b,d,a,d,c); }
+  sailGeo.setAttribute('position',new THREE.BufferAttribute(sPos,3).setUsage(THREE.DynamicDrawUsage)); sailGeo.setAttribute('uv',new THREE.BufferAttribute(sUv,2)); sailGeo.setIndex(sIdx);
+  sailGeo.boundingSphere=new THREE.Sphere(new THREE.Vector3(0,1.8,-1.2),3.2);
+  function sailTex(back){ const c=document.createElement('canvas'); c.width=256; c.height=512; const x=c.getContext('2d');
+    x.fillStyle=O.sail; x.fillRect(0,0,256,512);
+    // seams of the cloths, square to the leech, and a darker leech tape
+    x.strokeStyle='rgba(120,98,70,0.22)'; x.lineWidth=2; for (let k=1;k<9;k++){ const y=512-k*52; x.beginPath(); x.moveTo(0,y+40); x.lineTo(256,y-10); x.stroke(); }
+    // the number, on the starboard side higher than on the port side, as on a real sail
+    const sx=(256/2.75)/(512/3.6), cx=back?92:78, cy=back?262:212;
+    x.save(); x.translate(cx,cy); x.scale(back?-sx:sx,1); x.fillStyle=O.mark; x.font='700 86px "Alegreya Sans", "Gill Sans", sans-serif'; x.textAlign='center'; x.textBaseline='middle'; x.fillText(O.number,0,0); x.restore();
+    const t=new THREE.CanvasTexture(c); t.colorSpace=THREE.SRGBColorSpace; t.anisotropy=4; return t; }
+  const sailTexF=sailTex(false), sailTexB=sailTex(true);
+
+  /* ---------- the pennant at the masthead ---------- */
+  const penGeo=new THREE.BufferGeometry(), pPos=new Float32Array(10*3);
+  penGeo.setAttribute('position',new THREE.BufferAttribute(pPos,3).setUsage(THREE.DynamicDrawUsage)); penGeo.setIndex([0,1,3,0,3,2,2,3,5,2,5,4,4,5,7,4,7,6,6,7,9,6,9,8]);
+  penGeo.boundingSphere=new THREE.Sphere(new THREE.Vector3(0,0,0.25),0.5);
+
+  /* ---------- the meshes ---------- */
+  const matV=new THREE.MeshLambertMaterial({vertexColors:true,flatShading:true});
+  const matSailF=new THREE.MeshLambertMaterial({map:sailTexF,side:THREE.FrontSide,flatShading:true});
+  const matSailB=new THREE.MeshLambertMaterial({map:sailTexB,side:THREE.BackSide,flatShading:true});
+  const matPen=new THREE.MeshLambertMaterial({color:col(O.pennant),side:THREE.DoubleSide,flatShading:true});
+  const matRope=new THREE.MeshLambertMaterial({color:col(O.rope)}), matLine=new THREE.MeshLambertMaterial({color:col('#3a3a40')});
+  const mesh=new THREE.Group(); mesh.rotation.order='YXZ';
+  const hull=new THREE.Mesh(buildHull(),matV); hull.castShadow=hull.receiveShadow=true; mesh.add(hull);
+  const rudder=new THREE.Group(); rudder.position.set(0,0.32,ZS-0.04); const rudM=new THREE.Mesh(buildRudder(),matV); rudM.castShadow=true; rudder.add(rudM); mesh.add(rudder);
+  const boardM=new THREE.Mesh(buildBoard(),matV); boardM.position.set(0,0,zAt(0.5)); mesh.add(boardM);
+  const boom=new THREE.Group(); boom.position.set(0,1.15,ZM-0.05); const boomM=new THREE.Mesh(buildBoom(),matV); boomM.castShadow=true; boom.add(boomM);
+  const sailF=new THREE.Mesh(sailGeo,matSailF), sailB=new THREE.Mesh(sailGeo,matSailB); sailF.castShadow=true; boom.add(sailF,sailB); mesh.add(boom);
+  const pennant=new THREE.Group(); pennant.position.set(0,4.95,ZM); pennant.add(new THREE.Mesh(penGeo,matPen)); mesh.add(pennant);
+  // a cap at the gunwale that writes depth only, drawn after the opaque pass and before the sea (renderOrder 1 in
+  // Coast), so that the transparent sea is not drawn inside the open boat
+  const capGeo=(()=>{ const P=[]; let prev=null; for (let i=0;i<=24;i++){ const t=i/24, a=sec(t,1), y=a[1]-0.02, cur=[[a[0]*0.99,y,a[2]],[-a[0]*0.99,y,a[2]]];
+      if (prev) P.push(...prev[0],...cur[0],...cur[1],...prev[0],...cur[1],...prev[1]); prev=cur; }
+    const tz=sec(0,1); P.push(tz[0],tz[1]-0.02,ZS, -tz[0],tz[1]-0.02,ZS, 0,kAt(0),ZS);
+    const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.Float32BufferAttribute(P,3)); return g; })();
+  const matCap=new THREE.MeshBasicMaterial({colorWrite:false,depthWrite:true,transparent:true,side:THREE.DoubleSide});
+  const cap=new THREE.Mesh(capGeo,matCap); cap.renderOrder=0.5; mesh.add(cap);
+  const unit=new THREE.BoxGeometry(1,1,1);
+  const sheet=new THREE.Mesh(unit,matLine), ext=new THREE.Mesh(unit,matLine); mesh.add(sheet,ext);
+  const moorLines=[new THREE.Mesh(unit,matRope),new THREE.Mesh(unit,matRope)]; for (const m of moorLines){ m.castShadow=true; parent.add(m); }
+  parent.add(mesh);
+  const _a=new THREE.Vector3(), _b=new THREE.Vector3(), _d=new THREE.Vector3(), _up=new THREE.Vector3(0,1,0), _z=new THREE.Vector3(0,0,1);
+  function setSeg(m,p,q,w){ _d.subVectors(q,p); const l=_d.length(); m.position.addVectors(p,q).multiplyScalar(0.5); m.scale.set(w,w,Math.max(l,1e-3));
+    if (l>1e-6) m.quaternion.setFromUnitVectors(_z,_d.multiplyScalar(1/l)); }
+
+  /* ---------- state ---------- */
+  const S={x:O.x,z:O.z,head:O.head,u:0,v:0,yawRate:0,rud:0,heel:0,heelV:0,boom:0.3,boomV:0,bs:1,camber:-1,delta:0.3,sheet:0.5,
+    luff:1,flap:0,stall:0,twa:0,awa:0,tws:0,aws:0,target:0,eff:1,polar:0,ironsT:0,inIrons:false,gybing:false,
+    crewed:false,moored:!!O.mooring,aground:false,contact:false,lastContactT:-99,mode:O.mode,
+    heave:0,wPitch:0,wRoll:0,lift:0,board:1,camPitch:0,camRoll:0,eyeSide:1,rescue:null,inputT:0,hist:[],histT:0,t:0,
+    events:{gybes:0,tacks:0,rescues:0,groundings:0}};
+  const info={x:S.x,z:S.z,head:S.head,len:LEN,beam:1.5,v:0};
+  function moor(m){ O.mooring=m||null; if (!m) return; S.x=m.x; S.z=m.z; S.head=m.head; S.u=S.v=S.yawRate=0; S.heel=S.heelV=0; S.moored=true; S.crewed=false; S.rescue=null; S.hist.length=0; }
+  if (O.mooring) moor(O.mooring);
+
+  const POLAR=[[0,0],[30,0],[36,0.06],[40,0.2],[45,0.4],[52,0.49],[60,0.54],[75,0.585],[90,0.6],[105,0.6],[120,0.575],[135,0.525],[150,0.465],[165,0.42],[180,0.4]];
+  function polar(deg){ deg=Math.min(180,Math.abs(deg)); for (let k=1;k<POLAR.length;k++) if (deg<=POLAR[k][0]){ const [a,pa]=POLAR[k-1], [b,pb]=POLAR[k]; return lp(pa,pb,(deg-a)/(b-a)); } return 0.4; }
+
+  // points round the hull, local (x,z), for grounding and contact
+  const HP=[[0,1.95],[0.38,1.45],[-0.38,1.45],[0.66,0.7],[-0.66,0.7],[0.74,-0.3],[-0.74,-0.3],[0.62,-1.3],[-0.62,-1.3],[0.48,-1.98],[-0.48,-1.98],[0,0.45],[0,-1.0]];
+  const PERIM=11;
+  let ctxNow={};
+  const depth=(x,z)=>{ const d=ctxNow.depthAt?ctxNow.depthAt(x,z):100; return Number.isFinite(d)?d:100; };
+  const toW=(lx,lz)=>{ const c=Math.cos(S.head), s=Math.sin(S.head); return [S.x+c*lx+s*lz, S.z-s*lx+c*lz]; };
+  const toL=(x,z)=>{ const c=Math.cos(S.head), s=Math.sin(S.head), dx=x-S.x, dz=z-S.z; return [dx*c-dz*s, dx*s+dz*c]; };
+  const obbAx=o=>{ const c=Math.cos(o.rot||0), s=Math.sin(o.rot||0); return [c,-s,s,c]; };   // as Coast's obbAxes
+
+  /* ---------- contact with the bottom, walls, obstacles and other boats: the boat is always pushed out ---------- */
+  function contacts(h){
+    let px=0, pz=0, nx=0, nz=0, n=0, soft=0, hard=0, tq=0, bowLift=0, sev=0;
+    const add=(wx,wz,ex,ez,isHard)=>{ px+=ex; pz+=ez; const l=Math.hypot(ex,ez)||1; nx+=ex/l; nz+=ez/l; n++; if (isHard) hard++; else soft++;
+      const rx=wx-S.x, rz=wz-S.z; tq+=(rz*ex-rx*ez)/Math.max(1,rx*rx+rz*rz); };
+    for (let k=0;k<HP.length;k++){ const [lx,lz]=HP[k], [wx,wz]=toW(lx,lz), d=depth(wx,wz), pen=0.3-d;
+      if (k===0) bowLift=cl(pen,0,0.34);
+      if (pen<=0) continue;
+      const e=0.5, gx=(depth(wx+e,wz)-depth(wx-e,wz))/(2*e), gz=(depth(wx,wz+e)-depth(wx,wz-e))/(2*e), gl=Math.hypot(gx,gz);
+      if (gl<1e-3) continue;
+      const slope=gl, horiz=Math.min(1.2,pen/Math.max(slope,0.05)), isHard=slope>0.35;
+      // on a gentle beach the bow may slide up until it is 0.02 m clear of the water before it is held
+      const amt=isHard?horiz:Math.max(0,horiz-0.32/slope); if (!isHard) sev=Math.max(sev,pen/0.32);
+      add(wx,wz,gx/gl*amt,gz/gl*amt,isHard); if (!isHard && amt===0){ nx+=gx/gl; nz+=gz/gl; n++; soft++; }
+    }
+    const ob=ctxNow.obstacles||{}, boxes=(ob.obbs||[]).slice(), circs=ob.circles||[];
+    for (const b of (ctxNow.boats||[])) if (b!==info) boxes.push({x:b.x,z:b.z,hw:(b.beam||1.5)/2,hd:(b.len||4)/2,rot:b.head});
+    for (const o of boxes){ if (Math.abs(o.x-S.x)>o.hw+o.hd+3 || Math.abs(o.z-S.z)>o.hw+o.hd+3) continue;
+      const [ax,az,bx,bz]=obbAx(o);
+      for (let k=0;k<PERIM;k++){ const [wx,wz]=toW(HP[k][0],HP[k][1]), dx=wx-o.x, dz=wz-o.z, lu=dx*ax+dz*az, lv=dx*bx+dz*bz;
+        const eu=o.hw-Math.abs(lu), ev=o.hd-Math.abs(lv); if (eu<=0||ev<=0) continue;
+        if (eu<ev){ const s=lu>=0?1:-1; add(wx,wz,ax*s*eu,az*s*eu,true); } else { const s=lv>=0?1:-1; add(wx,wz,bx*s*ev,bz*s*ev,true); } }
+      // corners of the obstacle within the hull
+      for (const [cu,cv] of [[1,1],[1,-1],[-1,1],[-1,-1]]){ const wx=o.x+ax*cu*o.hw+bx*cv*o.hd, wz=o.z+az*cu*o.hw+bz*cv*o.hd, [lx,lz]=toL(wx,wz);
+        if (Math.abs(lz)>=2) continue; const hb=halfBeam(lz); if (Math.abs(lx)>=hb) continue;
+        const el=hb-Math.abs(lx), eL=2-Math.abs(lz), c=Math.cos(S.head), s=Math.sin(S.head);
+        if (el<eL){ const q=-(lx>=0?1:-1)*el; add(wx,wz,c*q,-s*q,true); } else { const q=-(lz>=0?1:-1)*eL; add(wx,wz,s*q,c*q,true); } } }
+    for (const C of circs){ if (Math.abs(C.x-S.x)>C.r+3 || Math.abs(C.z-S.z)>C.r+3) continue;
+      for (let k=0;k<PERIM;k++){ const [wx,wz]=toW(HP[k][0],HP[k][1]), dx=wx-C.x, dz=wz-C.z, d=Math.hypot(dx,dz);
+        if (d<C.r){ const e=C.r-d, ux=d>1e-4?dx/d:Math.sin(S.head), uz=d>1e-4?dz/d:Math.cos(S.head); add(wx,wz,ux*e,uz*e,true); } }
+      const [lx,lz]=toL(C.x,C.z); if (Math.abs(lz)<2){ const hb=halfBeam(lz)+C.r; if (Math.abs(lx)<hb){ const q=-(lx>=0?1:-1)*(hb-Math.abs(lx)), c=Math.cos(S.head), s=Math.sin(S.head); add(C.x,C.z,c*q,-s*q,true); } } }
+    S.lift+=(bowLift-S.lift)*(1-Math.exp(-h*6));
+    const was=S.contact; S.contact=n>0; S.aground=soft>0;
+    if (!n) return;
+    S.lastContactT=S.t;
+    // velocity in the world, with the part into the contact removed; walls give back a little, beaches nothing
+    const f=[Math.sin(S.head),Math.cos(S.head)], p=[Math.cos(S.head),-Math.sin(S.head)];
+    let vx=f[0]*S.u+p[0]*S.v, vz=f[1]*S.u+p[1]*S.v; const nl=Math.hypot(nx,nz);
+    if (!was && Math.hypot(vx,vz)>0.4){ sound('ground',cl(Math.hypot(vx,vz)/3,0,1)); S.events.groundings++; }
+    if (nl>1e-6){ const ux=nx/nl, uz=nz/nl, vn=vx*ux+vz*uz;
+      // on a beach the way is taken off more strongly the further the bow has run up, so she slides up and stops
+      if (vn<0){ if (hard){ vx-=1.15*vn*ux; vz-=1.15*vn*uz; } else { const k=1-Math.exp(-h*12*Math.min(1.5,sev*sev)); vx-=vn*ux*k; vz-=vn*uz*k; } } }
+    if (soft && !hard){ const k=Math.exp(-h*1.2*Math.min(1,sev)); vx*=k; vz*=k; }
+    S.u=vx*f[0]+vz*f[1]; S.v=vx*p[0]+vz*p[1];
+    // positions: walls at once (no more than 0.3 m a step), beaches gently
+    const pl=Math.hypot(px,pz), lim=hard?0.3:h*3; if (pl>lim){ px*=lim/pl; pz*=lim/pl; }
+    S.x+=px; S.z+=pz;
+    if (hard) S.head+=cl(tq*0.5,-0.02,0.02);
+  }
+
+  // the nearest water at least 1.5 m deep with room round it, for the watchdog
+  function clearAt(x,z){ if (depth(x,z)<1.5) return false;
+    for (let k=0;k<8;k++){ const a=k*TAU/8; if (depth(x+Math.sin(a)*2.4,z+Math.cos(a)*2.4)<0.7) return false; }
+    const ob=ctxNow.obstacles||{};
+    for (const o of (ob.obbs||[])){ const [ax,az,bx,bz]=obbAx(o), dx=x-o.x, dz=z-o.z; if (Math.abs(dx*ax+dz*az)<o.hw+2.6 && Math.abs(dx*bx+dz*bz)<o.hd+2.6) return false; }
+    for (const C of (ob.circles||[])) if (Math.hypot(x-C.x,z-C.z)<C.r+2.6) return false;
+    for (const b of (ctxNow.boats||[])) if (b!==info && Math.hypot(x-b.x,z-b.z)<(b.len||4)/2+2.6) return false;
+    return true; }
+  function rescue(){
+    for (let r=1.5;r<=80;r+=1) for (let k=0;k<32;k++){ const a=k*TAU/32, x=S.x+Math.sin(a)*r, z=S.z+Math.cos(a)*r;
+      if (clearAt(x,z)){ const away=Math.atan2(x-S.x,z-S.z);
+        S.rescue={x0:S.x,z0:S.z,h0:S.head,x1:x,z1:z,h1:S.head+wrap(away-S.head)*(r>2.5?0.6:0),t:0,dur:1.6}; S.u=S.v=S.yawRate=0; S.events.rescues++; S.hist.length=0; S.inputT=0; return true; } }
+    return false; }
+
+  /* ---------- one step of the sailing ---------- */
+  function step(h,inp){
+    S.t+=h;
+    const W=ctxNow.wind?ctxNow.wind.at(S.x,S.z):{x:0,z:-4,speed:4,dir:0};
+    const f=[Math.sin(S.head),Math.cos(S.head)], p=[Math.cos(S.head),-Math.sin(S.head)];
+    const crewed=S.crewed && !S.rescue;
+    const Vx=crewed?f[0]*S.u+p[0]*S.v:0, Vz=crewed?f[1]*S.u+p[1]*S.v:0, Ax=W.x-Vx, Az=W.z-Vz;
+    S.tws=W.speed; S.aws=Math.hypot(Ax,Az);
+    S.twa=wrap(W.dir-S.head); S.awa=S.aws>1e-4?wrap(Math.atan2(-Ax,-Az)-S.head):S.twa;
+    const A=Math.abs(S.awa)/D2R, T=Math.abs(S.twa)/D2R, side=S.awa>=0?1:-1;
+    // which side the boom lies: across at once on a tack, on a run only once the wind is 8 degrees by the lee
+    if (side!==S.bs){
+      if (A<100){ S.bs=side; if (crewed){ S.events.tacks++; sound('tack',0.3); } }
+      else if (A<172 || !crewed){ S.bs=side; if (crewed && Math.abs(S.boom)>0.35){ S.gybing=true; } }
+    }
+    // trim: the boom angle and how well the sail draws
+    const dOpt=cl(A-21,5,85);
+    let delta, ease=0;
+    // unmanned, or paddling astern in the assisted setting, the sheet is let go and the sail flies
+    const letFly=!crewed || (S.mode==='assisted' && (inp.paddle||0)<-0.1);
+    if (letFly) delta=Math.min(85,Math.max(0,A-1));
+    else if (S.mode==='assisted') delta=dOpt;
+    else delta=Math.min(5+S.sheet*80,85,Math.max(0,A-2));
+    const aoa=A-delta, luffA=1-sm(3,14,aoa), luffNoGo=1-sm(31,41,T);
+    S.stall=(crewed&&S.mode!=='assisted')?sm(32,60,aoa)*(1-sm(95,135,A)):0;
+    let luff=letFly?1:Math.max(luffA,luffNoGo);
+    const sideF=Math.sin(cl(A*1.5,0,180)*D2R);
+    let heelMag=Math.min(0.6,0.0068*S.aws*S.aws*sideF*(1-0.85*luff)*(1+0.35*S.stall));
+    if (crewed && S.mode==='assisted' && heelMag>0.36){ ease=heelMag-0.36; delta=Math.min(85,delta+ease*60); luff=Math.max(luff,Math.min(0.6,ease*1.5)); heelMag=0.36+ease*0.4; }
+    if (!crewed) heelMag=0;
+    S.luff=luff; S.delta=delta*D2R;
+    S.eff=letFly?0.03:(1-luffA*0.95)*(1-0.5*S.stall);
+    // heel: a damped spring towards the heel the side force gives
+    const heelT=side*heelMag;
+    S.heelV+=(14*(heelT-S.heel)-5*S.heelV)*h; S.heel+=S.heelV*h; S.heel=cl(S.heel,-0.7,0.7);
+    if (!crewed){
+      S.u*=Math.exp(-h*2); S.v*=Math.exp(-h*2); S.yawRate=0;
+    } else {
+      // speed through the water: towards the polar's target, quicker to gain way than to lose it
+      const heelLoss=1-0.35*sm(0.25,0.55,Math.abs(S.heel));
+      S.polar=polar(T);
+      let uT=S.tws*S.polar*S.eff*heelLoss;
+      if (T<30 && luff>0.5) uT=-0.25*sm(30,10,T)*S.tws/5;   // head to wind she is blown slowly astern
+      S.target=uT;
+      const tau=S.u<uT?2.4:5.0;
+      S.u+=(uT-S.u)*(1-Math.exp(-h/tau));
+      // a slow paddle or scull when nearly stopped
+      const pd=cl(inp.paddle||0,-1,1), pg=1-sm(0.35,0.9,Math.abs(S.u));
+      if (pd) S.u+=(0.6*pd-S.u)*1.2*h*pg*Math.abs(pd);
+      S.u-=Math.abs(S.rud)*0.08*S.u*h;
+      // leeway: more when slow, more with the board raised
+      const vT=-side*(0.09*Math.abs(S.u)*(2-S.board)+0.14*sm(1,6,S.aws)*(1-sm(0,1.5,Math.abs(S.u)))*(1-luffNoGo*0.5));
+      S.v+=(vT-S.v)*(1-Math.exp(-h/1.2));
+      // the rudder, whose authority grows with speed; it still turns her slowly at rest
+      S.rud+=cl((inp.steer||0)-S.rud,-2.6*h,2.6*h);
+      const auth=0.10+0.30*Math.min(Math.abs(S.u),2.6);
+      let yawCmd=-S.rud*auth;
+      // in irons she always falls off within a few seconds; holding the tiller over chooses the side and speeds it
+      if (T<44 && S.u<0.55) S.ironsT+=h; else S.ironsT=Math.max(0,S.ironsT-2*h);
+      S.inIrons=S.ironsT>0.6;
+      // (fall +1 turns the bow to starboard; the tiller, when held over, decides the side, else the wind does)
+      if (S.inIrons){ const fall=Math.abs(S.rud)>0.1?(S.rud>0?1:-1):Math.abs(S.twa)>0.03?(S.twa>0?1:-1):S.bs;
+        yawCmd=-fall*(0.12+0.10*Math.min(S.ironsT,3)+0.3*Math.abs(S.rud)); }
+      S.yawRate+=(yawCmd-S.yawRate)*(1-Math.exp(-h/0.35));
+      // realistic trim
+      if (S.mode!=='assisted') S.sheet=cl(S.sheet-(inp.trim||0)*0.45*h,0,1);
+    }
+    if (crewed){ S.head=wrap(S.head+S.yawRate*h);
+      const f2=[Math.sin(S.head),Math.cos(S.head)], p2=[Math.cos(S.head),-Math.sin(S.head)];
+      S.x+=(f2[0]*S.u+p2[0]*S.v)*h; S.z+=(f2[1]*S.u+p2[1]*S.v)*h; }
+    // the boom swings towards its angle; in a gybe it slams across
+    const phiT=S.bs*S.delta, k=S.gybing?38:10, c=S.gybing?2.2:6;
+    S.boomV+=(k*(phiT-S.boom)-c*S.boomV)*h; S.boom+=S.boomV*h;
+    if (S.mode!=='assisted' && crewed){ const lim=(5+S.sheet*80)*D2R+0.05; if (Math.abs(S.boom)>lim){ S.boom=sg(S.boom)*lim; S.boomV*=-0.2; } }
+    if (S.gybing && sg(S.boom)===S.bs && Math.abs(S.boom)>=Math.abs(phiT)*0.9){
+      const str=cl(Math.abs(S.boomV)/5*sm(1,7,S.aws),0.15,1);
+      S.gybing=false; S.boomV*=-0.3; S.heelV+=S.bs*1.1*str; S.yawRate+=(S.awa>=0?1:-1)*0.18*str; S.u*=0.93;
+      S.events.gybes++; sound('gybe',str); }
+    S.camber+=(-S.bs-S.camber)*(1-Math.exp(-h*3.5));
+    S.flap=luff*sm(0.5,6,S.aws)*(crewed?1:0.45);
+    // contact, never pinning the boat
+    if (crewed){ contacts(h);
+      // the watchdog: steady input and less than half a metre gained in 4 s brings her out to deep water
+      const active=Math.abs(inp.steer||0)>0.15||Math.abs(inp.paddle||0)>0.15||Math.abs(inp.trim||0)>0.15;
+      S.inputT=active?S.inputT+h:Math.max(0,S.inputT-h*0.5);
+      S.histT-=h; if (S.histT<=0){ S.histT=0.25; S.hist.push([S.x,S.z,S.head,S.t]); if (S.hist.length>17) S.hist.shift(); }
+      if (S.inputT>=4 && S.hist.length>=17){ const o=S.hist[0], mv=Math.hypot(S.x-o[0],S.z-o[1]), rot=Math.abs(wrap(S.head-o[2]));
+        if (mv<0.5 && (S.t-S.lastContactT<4 || rot<0.3)) rescue(); }
+    } else { S.contact=false; S.aground=false; if (!S.moored) contacts(h); }
+  }
+
+  /* ---------- pose and the moving parts ---------- */
+  const _q1=new THREE.Quaternion(), _q2=new THREE.Quaternion(), _e=new THREE.Euler(0,0,0,'YXZ'), _v=new THREE.Vector3();
+  function hike(){ return sm(0.04,0.32,Math.abs(S.heel)); }
+  function eyeLocal(out){ const k=hike(); return out.set(S.eyeSide*(0.2+0.46*k),0.62+0.08*k,-1.45); }   // low enough to see under the foot of the sail
+  function write(dt){
+    const sf=ctxNow.surfaceAt;
+    if (sf){ const hb=sf(...toW(0,1.8)), hs=sf(...toW(0,-1.8)), hp=sf(...toW(0.65,0)), hq=sf(...toW(-0.65,0)), k=1-Math.exp(-dt*5);
+      S.heave+=((hb+hs+hp+hq)/4-S.heave)*k; S.wPitch+=((hs-hb)/3.6-S.wPitch)*k; S.wRoll+=((hp-hq)/1.3-S.wRoll)*k; }
+    const pitch=S.wPitch-0.012*S.u-S.lift*0.12, roll=S.heel+S.wRoll;
+    mesh.position.set(S.x,S.heave+S.lift*0.35-0.02*Math.abs(S.heel),S.z); mesh.rotation.set(pitch,S.head,roll,'YXZ');
+    const kc=1-Math.exp(-dt*4); S.camPitch+=(pitch-S.camPitch)*kc; S.camRoll+=(roll-S.camRoll)*kc;
+    // the helm sits out on the windward side, crossing over in about a second on a tack or gybe
+    if (!S.inIrons){ const ws=S.twa>=0?1:-1; S.eyeSide+=cl(ws-S.eyeSide,-2*dt,2*dt); }
+    rudder.rotation.y=S.rud*0.6;
+    const dB=depth(S.x,S.z); S.board+=(cl((dB-0.35)/0.95,0.15,1)-S.board)*(1-Math.exp(-dt*3)); boardM.position.y=(1-S.board)*0.8;
+    boom.rotation.y=S.boom;
+    // the sail
+    const tw=(0.1+0.12*sm(0.3,1.2,S.delta))*S.bs, t=S.t, A=S.aws, lf=S.flap>0.02?S.luff:0;
+    for (let j=0;j<=NV;j++){ const v=j/NV, y=yvAt(v), z1=lzAt(v), chord=-z1, dep=0.105*sm(0,0.25,v)*(1-0.35*v)*(1-0.85*S.luff), ang=tw*v, ca=Math.cos(ang), sa=Math.sin(ang);
+      for (let i=0;i<=NU;i++){ const u=i/NU, kk=(j*(NU+1)+i)*3; let z=lp(-0.04,z1,u), x=S.camber*dep*chord*Math.sin(Math.PI*Math.pow(u,0.85));
+        if (lf>0) x+=lf*(0.06+0.008*A)*(S.crewed?1:0.5)*chord*Math.pow(u,0.9)*Math.sin(t*(12+1.1*A)-u*7-v*3)*(0.55+0.45*v);
+        sPos[kk]=x*ca+z*sa; sPos[kk+1]=y; sPos[kk+2]=-x*sa+z*ca; } }
+    sailGeo.attributes.position.needsUpdate=true;
+    // the pennant streams downwind of the apparent wind
+    pennant.rotation.y=S.awa+Math.PI;
+    for (let i=0;i<5;i++){ const z=i*0.11, h=0.045*(1-i/4.5), w=Math.sin(t*(9+A)-i*1.6)*0.025*i*sm(0.3,3,A), dr=-0.04*i*(1-sm(1,4,A));
+      pPos[i*6]=w; pPos[i*6+1]=h+dr; pPos[i*6+2]=z; pPos[i*6+3]=w; pPos[i*6+4]=-h+dr; pPos[i*6+5]=z; }
+    penGeo.attributes.position.needsUpdate=true;
+    // the mainsheet from the boom end to the horse, and the tiller extension to the helm's hand
+    _a.set(0,-0.03,-2.45).applyEuler(boom.rotation).add(boom.position); _b.set(-_a.x*0.25,shAt(0)+0.12,ZS+0.06);
+    setSeg(sheet,_a,_b,0.012); sheet.visible=true;
+    _a.set(0,0.14,1.42).applyEuler(rudder.rotation).add(rudder.position);
+    if (S.crewed){ const k=hike(); _b.set(S.eyeSide*(0.16+0.4*k),0.5+0.08*k,-1.12); setSeg(ext,_a,_b,0.016); ext.visible=true; }
+    else { _b.set(_a.x,_a.y+0.02,_a.z-0.5); setSeg(ext,_a,_b,0.016); }
+    // mooring lines
+    const M=O.mooring;
+    for (let i=0;i<2;i++){ const m=moorLines[i], end=M&&(i?M.bow:M.stern); m.visible=!!(S.moored&&end);
+      if (m.visible){ _a.set(0,shAt(i?0.93:0.08)+0.06,i?zAt(0.93):zAt(0.04)); mesh.updateMatrix(); _a.applyMatrix4(mesh.matrix); _b.set(end.x,end.y,end.z); setSeg(m,_a,_b,0.022); } }
+    Object.assign(info,{x:S.x,z:S.z,head:S.head,v:S.crewed?S.u:0});
+  }
+
+  function update(dt,ctx={}){
+    ctxNow=ctx;
+    if (ctx.paused || !(dt>0)){ write(0); return; }
+    dt=Math.min(dt,0.1);
+    const inp=ctx.input||{};
+    if (S.moored && O.mooring){ S.x=O.mooring.x; S.z=O.mooring.z; S.head=O.mooring.head; }
+    if (S.rescue){ const R=S.rescue; R.t+=dt; const k=smoothT(R.t/R.dur); S.x=lp(R.x0,R.x1,k); S.z=lp(R.z0,R.z1,k); S.head=lp(R.h0,R.h1,k); S.u=S.v=S.yawRate=0; if (R.t>=R.dur) S.rescue=null; }
+    const n=Math.ceil(dt*120-1e-6), h=dt/n;
+    for (let i=0;i<n;i++) step(h,inp);
+    write(dt);
+  }
+  const smoothT=t=>{ t=cl(t,0,1); return t*t*(3-2*t); };
+
+  function canBoard(x,z){ return Math.hypot(x-S.x,z-S.z)<=6; }
+  function board(){ S.crewed=true; S.moored=false; S.u=Math.max(0,S.u); S.inputT=0; S.hist.length=0; S.eyeSide=S.twa>=0?1:-1; S.lastContactT=S.t; }
+  // a place on dry land (a quay or a beach) within 3 m of the hull, nearest first
+  function landing(ctx=ctxNow){
+    const walk=ctx.walkAt; if (!walk) return null;
+    let best=null;
+    for (let k=0;k<48;k++){ const a=k*TAU/48, sx=Math.sin(a), sz=Math.cos(a), re=1/Math.sqrt((sx/0.75)**2+(sz/2.0)**2);
+      for (let d=0.15;d<=3;d+=0.15){ if (best && d>=best.d) break; const [wx,wz]=toW(sx*(re+d),sz*(re+d)), y=walk(wx,wz);
+        if (y!==null && y!==undefined && y>0.2 && y<2.6){ best={x:wx,z:wz,y,d,head:Math.atan2(wx-S.x,wz-S.z)}; break; } } }
+    return best; }
+  function leave(ctx=ctxNow){ if (!S.crewed) return null; const L=landing(ctx); if (!L) return null;
+    S.crewed=false; S.u=S.v=S.yawRate=0; S.rud=0; return {x:L.x,y:L.y,z:L.z,head:L.head}; }
+  function eye(cam,yaw=0,pitch=0){
+    mesh.updateMatrix(); eyeLocal(_v).applyMatrix4(mesh.matrix); cam.position.copy(_v);
+    _q1.setFromEuler(_e.set(S.camPitch*0.75,S.head,S.camRoll*0.75,'YXZ')); _q2.setFromEuler(_e.set(pitch,yaw+Math.PI,0,'YXZ'));
+    cam.quaternion.copy(_q1).multiply(_q2); }
+  function shift(dx,dz){ S.x+=dx; S.z+=dz; for (const p of S.hist){ p[0]+=dx; p[1]+=dz; }
+    if (S.rescue){ S.rescue.x0+=dx; S.rescue.x1+=dx; S.rescue.z0+=dz; S.rescue.z1+=dz; }
+    const M=O.mooring; if (M){ M.x+=dx; M.z+=dz; for (const e of [M.stern,M.bow]) if (e){ e.x+=dx; e.z+=dz; } } write(0); }
+  function setMode(m){ S.mode=m==='realistic'?'realistic':'assisted'; }
+  function dispose(){ parent.remove(mesh); for (const m of moorLines) parent.remove(m);
+    for (const g of [capGeo,hull.geometry,rudM.geometry,boardM.geometry,boomM.geometry,sailGeo,penGeo,unit]) g.dispose();
+    for (const m of [matCap,matV,matSailF,matSailB,matPen,matRope,matLine]) m.dispose(); sailTexF.dispose(); sailTexB.dispose(); }
+  write(0);
+  return {mesh,state:S,info,update,board,leave,landing,canBoard,eye,moor,shift,setMode,polar,dispose,options:O,POLAR};
+}
+/* ================= end of dinghy ================= */
+
+/* ================= sailing in Coast: the wind, and a dinghy moored in each harbour =================
+   One wind blows over the whole sea. Its prevailing direction and strength are drawn from the seed; it is cut down
+   inside harbours and coves, a sea breeze joins it by day and a land breeze by night, and its gusts darken the
+   ripples on the sea. Each harbour within reach of the player keeps a dinghy at its berth (dinghyBerth). Y takes
+   the player to the quay beside the nearest one, boards a dinghy within 6 m, and steps ashore from it within 3 m of
+   a quay or a beach. While sailing the mode is 'dinghy': the eye is at the helm, the mouse looks round, A and D
+   steer, W and S paddle when she is nearly stopped, and V rises to the bird's-eye view over the boat. */
+function windShelter(x,z){
+  let s=0;
+  for (const sd of SIDES){ const o=sd*(coastZ(sd,x)-z); if (o<-30 || o>140) continue;
+    const H=harbourAt(sd,x); if (!H) continue;
+    const Ho=sd*(coastZ(sd,H.x)-H.zo), ax=Math.abs(x-H.x);
+    s=Math.max(s,0.85*smooth((H.W/2+6-ax)/8)*smooth((Ho+8-o)/10)); }
+  const cv=coveAtXZ(x,z);
+  if (cv){ const u=cvU(cv,x,z), w=cvS(cv,x,z); if (Math.abs(u-cvAxis(cv,w))<40) s=Math.max(s,0.75*smooth((w+cv.R)/Math.max(10,cv.R))); }
+  return s; }
+const windBase=()=>({speed:4.2+2.2*hash(SEED,3,971),dir:Math.PI-(205+110*hash(SEED,4,972))*Math.PI/180});
+const WIND=createWind({...windBase(),gust:0.45,shift:1,seed:(SEED*31+7)>>>0,shelter:windShelter,hour:()=>hour,onshore:(x,z)=>shoreSide(x,z)>0?Math.PI:0});
+seaGust.uGustTex.value=WIND.uniforms.uGustTex.value;
+// the height of the sea surface for the boat's pitch and roll: a low swell of three trains, less in shelter
+function dgySea(x,z){ const A=(0.45+WIND.options.speed/10)*(1-0.7*windShelter(x,z)), t=time;
+  return A*(0.05*Math.sin(0.45*(x*0.8+z*0.6)-1.35*t)+0.035*Math.sin(0.7*(-x*0.3+z*0.95)-1.75*t+1.3)+0.025*Math.sin(1.05*(x*0.95-z*0.31)-2.1*t+2.6)); }
+// where a walker stepping out of the boat would stand: the ground, a quay or a mole; null at a wall or in deep water
+function dgyWalkAt(x,z){
+  let g=walkGround(x,z,2.6); const cx=Math.floor(x/C), cz=Math.floor(z/C);
+  for (let j=-1;j<=1;j++) for (let i=-1;i<=1;i++){ const ch=chunks.get(key(cx+i,cz+j)); if (!ch) continue;
+    for (const o of ch.obbs){ if (Math.abs(o.x-x)>o.hw+o.hd+1 || Math.abs(o.z-z)>o.hw+o.hd+1) continue; const [lu,lv]=obbLocal(o,x,z);
+      if (o.top===Infinity){ if (o.bot===undefined && Math.abs(lu)<o.hw+0.35 && Math.abs(lv)<o.hd+0.35) return null; continue; }
+      if (o.top<=2.6 && Math.abs(lu)<=o.hw && Math.abs(lv)<=o.hd) g=Math.max(g,o.top); }
+    for (const c of ch.circles){ const d=Math.hypot(x-c.x,z-c.z); if (c.top===Infinity){ if (d<c.r+0.35) return null; } else if (c.top<=2.6 && d<=c.r) g=Math.max(g,c.top); } }
+  return g<-1?null:g; }
+// what the sailed boat can strike near (x,z): solid things standing out of the water, and the other boats
+const BOAT_OF_GEO=new Map(BOATS.map(B=>[B.geo,B]));
+function dgyGather(x,z,O,list){
+  O.obbs.length=0; O.circles.length=0; list.length=0;
+  const cx=Math.floor(x/C), cz=Math.floor(z/C);
+  for (let j=-1;j<=1;j++) for (let i=-1;i<=1;i++){ const ch=chunks.get(key(cx+i,cz+j)); if (!ch) continue;
+    for (const o of ch.obbs){ if (o.top!==Infinity && o.top<0.25) continue; if (o.bot!==undefined && o.bot>1.0) continue;
+      if (Math.abs(o.x-x)>o.hw+o.hd+14 || Math.abs(o.z-z)>o.hw+o.hd+14) continue; O.obbs.push(o); }
+    for (const c of ch.circles){ if (c.top!==Infinity && c.top<0.25) continue; if (Math.abs(c.x-x)>c.r+14 || Math.abs(c.z-z)>c.r+14) continue; O.circles.push(c); }
+    for (const b of ch.boats){ if (!b.floating) continue; const B=BOAT_OF_GEO.get(b.m.geometry); if (!B) continue; const p=b.m.position, h=b.m.rotation.y, m=(B.fore-B.aft)/2;
+      if (Math.abs(p.x-x)>20 || Math.abs(p.z-z)>20) continue;
+      list.push({x:p.x+Math.sin(h)*m,z:p.z+Math.cos(h)*m,head:h,len:B.fore+B.aft,beam:2*B.half}); } }
+  for (const e of dinghies.values()) if (e.D!==sailD) list.push(e.D.info);
+  for (const s of sailers){ const p=s.m.position; if (Math.abs(p.x-x)<30 && Math.abs(p.z-z)<30) list.push({x:p.x,z:p.z,head:s.m.rotation.y,len:6.2,beam:2.3}); }
+  for (const F of ferries){ if (!F.R || !F.m.visible) continue; const p=F.m.position; if (Math.abs(p.x-x)<40 && Math.abs(p.z-z)<40) list.push({x:p.x,z:p.z,head:F.head,len:FL,beam:FB}); }
+}
+const DGY_COLS=[['#f2ede4','#2f5f8f','#b5473a','#2f5f8f'],['#2f5f8f','#f2ede4','#7a2f26','#b5473a'],['#f1e6c8','#b5473a','#2f5f8f','#b5473a'],
+  ['#7fb3cf','#f4efe4','#b5473a','#2f5f8f'],['#3f7a5c','#e8d9b5','#7a2f26','#2f5f8f'],['#f3efe6','#c97a3c','#2f5f8f','#7a2f26']];
+const dinghies=new Map();   // harbour key -> {H,B,D}
+let sailD=null, dgyScan=0, dgySeed=SEED, dgyHandling='assisted';
+const dgyLook={yaw:0,pitch:-0.1};
+let dgyChase=false;   // sailing, viewed from astern (C) instead of from the helm
+const dgyCtx={wind:WIND,depthAt:(x,z)=>-heightAt(x,z),surfaceAt:dgySea,obstacles:{obbs:[],circles:[]},boats:[],input:{steer:0,trim:0,paddle:0},walkAt:dgyWalkAt,paused:false};
+const dgyIdle={wind:WIND,depthAt:(x,z)=>-heightAt(x,z),surfaceAt:dgySea,obstacles:{obbs:[],circles:[]},boats:[],input:{},walkAt:dgyWalkAt,paused:false};
+const dgyKey=H=>H.n*4+H.sd;
+function dgySound(k,s){ if (!SND.ready) return;
+  if (k==='gybe') sndPlay('gybe_bang','player',null,{gain:0.4+0.8*s});
+  else if (k==='ground') sndPlay('hull_knock','player',null,{gain:0.3+0.7*s}); }
+function dgyMake(H){
+  const B=dinghyBerth(H); if (!B) return null; const k=dgyKey(H); let e=dinghies.get(k); if (e) return e;
+  const cols=DGY_COLS[Math.floor(hash(H.n,H.sd,863)*DGY_COLS.length)];
+  const D=createDinghy(world,{number:String(1+Math.floor(hash(H.n,H.sd,862)*98)),hull:cols[0],band:cols[1],bottom:cols[2],mark:cols[3],mode:dgyHandling,
+    mooring:JSON.parse(JSON.stringify({x:B.x,z:B.z,head:B.head,stern:B.stern,bow:B.bow})),onSound:(kk,s)=>{ if (D===sailD) dgySound(kk,s); }});
+  e={k,H,B,D}; dinghies.set(k,e); return e; }
+function dgyDrop(e){ if (e.D===sailD) return; e.D.dispose(); dinghies.delete(e.k); }
+function dgyReset(){ if (sailD) dinghyAshore(true); for (const e of [...dinghies.values()]) dgyDrop(e); dgyBerths.clear(); WIND.set(windBase()); }
+// the harbour with a berth nearest (x,z), searching outwards along the coast as findHarbour does
+function dgyHarbourNear(x,z){
+  let best=null, bd=1e18, found=-1; const n0=Math.floor(x/HARB);
+  for (let d=0;d<80;d++){ for (const sd of SIDES) for (const n of d?[n0+d,n0-d]:[n0]){ const H=harbourInfo(sd,n); if (!H || !dinghyBerth(H)) continue;
+      const B=dinghyBerth(H), dd=Math.hypot(B.x-x,B.z-z); if (dd<bd){ bd=dd; best=H; } }
+    if (best && found<0) found=d; if (found>=0 && d>=found+2) break; }
+  return best; }
+function dgyNearest(x,z){ let best=null, bd=1e9; for (const e of dinghies.values()){ const d=Math.hypot(e.D.state.x-x,e.D.state.z-z); if (d<bd){ bd=d; best=e; } } return best&&{e:best,d:bd}; }
+// Y: step ashore while sailing near land, or out at sea return to the quay beside the dinghy's berth; board a dinghy
+// within 6 m; otherwise go to the quay beside the nearest one
+function dinghyKey(){
+  if (sailD){ if (!dinghyAshore(false)) dinghyHome(); return; }
+  const N=dgyNearest(player.x,player.z);
+  if (mode==='street' && N && N.e.D.canBoard(player.x,player.z)){ dinghyBoard(N.e); return; }
+  dinghyGo(); }
+function dinghyBoard(e){
+  sailD=e.D; e.D.setMode(dgyHandling); e.D.board(); mode='dinghy'; dgyChase=false; dgyLook.yaw=0; dgyLook.pitch=-0.1;
+  scene.fog.near=90; scene.fog.far=1500; sky.visible=true; descent.t=ascent.t=-1;
+  camera.fov=70; camera.near=0.1; camera.far=3600; camera.updateProjectionMatrix(); glowScale();
+  sea.scale.setScalar(1); islandMesh.visible=false; farMesh.visible=farGlow.visible=true; }
+// stepping ashore within 3 m of a quay or a beach; out at sea nothing happens (force: leave the boat wherever it is)
+function dinghyAshore(force){
+  const D=sailD; let L=D.leave(dgyCtx);
+  if (!L){ if (!force) return false; D.state.crewed=false; L={x:D.state.x,y:Math.max(0,heightAt(D.state.x,D.state.z)),z:D.state.z,head:D.state.head}; }
+  sailD=null; dgyChase=false; player.x=L.x; player.z=L.z; player.y=L.y; player.vy=0; player.holdT=1.5; eyeY=null;
+  yaw=L.head+Math.PI; fpPitch=-0.15;
+  if (mode==='dinghy'){ mode='street'; camera.fov=70; camera.updateProjectionMatrix(); glowScale(); }
+  return true; }
+// Y out at sea: the dinghy goes back to its own berth and the player stands on the quay beside it
+function dinghyHome(){
+  const D=sailD, e=[...dinghies.values()].find(q=>q.D===D);
+  D.state.crewed=false; sailD=null; dgyChase=false;
+  if (mode==='dinghy'||mode==='above'){ mode='street'; scene.fog.near=90; scene.fog.far=1500; camera.fov=70; camera.near=0.1; camera.far=3600;
+    camera.updateProjectionMatrix(); glowScale(); sea.scale.setScalar(1); islandMesh.visible=false; farMesh.visible=farGlow.visible=true; }
+  if (!e){ dinghyGo(); return; }
+  const B=e.B; D.moor(JSON.parse(JSON.stringify({x:B.x,z:B.z,head:B.head,stern:B.stern,bow:B.bow})));
+  player.x=B.quay.x; player.z=B.quay.z;
+  updateChunks(player.x,player.z,1e9);
+  player.y=walkGround(player.x,player.z,4); player.vy=0; player.grounded=true; player.holdT=3; eyeY=null;
+  yaw=Math.atan2(-(B.x-player.x),-(B.z-player.z)); fpPitch=-0.32; descent.t=ascent.t=-1; }
+// to the quay beside the dinghy of the nearest harbour, which is built first, as are the blocks round it
+function dinghyGo(){
+  if (mode==='coach') mode='street'; if (riding()) leaveTrain('street'); if (mode==='ferry'||ridden) leaveFerry('street');
+  if (mode==='above') toggleView();
+  const H=dgyHarbourNear(player.x,player.z); if (!H) return;
+  const B=dinghyBerth(H), e=dgyMake(H); if (e && e.D!==sailD && !e.D.state.moored) e.D.moor(JSON.parse(JSON.stringify({x:B.x,z:B.z,head:B.head,stern:B.stern,bow:B.bow})));
+  player.x=B.quay.x; player.z=B.quay.z;
+  updateChunks(player.x,player.z,1e9);
+  player.y=walkGround(player.x,player.z,4); player.vy=0; player.grounded=true; player.holdT=3; eyeY=null;
+  yaw=Math.atan2(-(B.x-player.x),-(B.z-player.z)); fpPitch=-0.32; descent.t=ascent.t=-1; }
+function updateDinghies(dt,wdt){
+  if (SEED!==dgySeed){ dgySeed=SEED; dgyReset(); }
+  WIND.update(wdt);
+  { const U=WIND.uniforms.uGust.value; seaGust.uGust.value.set(U.x,U.y,U.z-(QORIGIN.x*U.x+QORIGIN.z*U.y),U.w); seaGust.uGustC.value=-QORIGIN.x*U.y+QORIGIN.z*U.x; seaGust.uGustAmt.value=WIND.options.gust; }
+  gullWind=WIND.at(player.x,player.z,null,gullWindO);
+  // a dinghy at each harbour within 400 m; those far away are taken away again (one left away from its berth is kept
+  // until the player is 1.5 km from it)
+  dgyScan-=dt; if (dgyScan<=0){ dgyScan=0.5;
+    const n0=Math.floor(player.x/HARB);
+    for (let n=n0-2;n<=n0+2;n++) for (const sd of SIDES){ const H=harbourInfo(sd,n); if (!H) continue; const B=dinghyBerth(H); if (B && Math.hypot(B.x-player.x,B.z-player.z)<400) dgyMake(H); }
+    for (const e of [...dinghies.values()]){ if (e.D===sailD) continue; const S=e.D.state, d=Math.hypot(S.x-player.x,S.z-player.z); if (d>(S.moored?700:1500)) dgyDrop(e); } }
+  // the input at the helm: A and D steer, W and S paddle when she is nearly stopped (and trim the sail in the
+  // realistic setting), the triggers trim, Q and E turn the head
+  const I=dgyCtx.input;
+  if (sailD && started){ const ws=(keys.KeyW?1:0)-(keys.KeyS?1:0)-pad.y-joy.y;
+    I.steer=clamp((keys.KeyD?1:0)-(keys.KeyA?1:0)+pad.x+joy.x,-1,1); I.paddle=clamp(ws,-1,1);
+    I.trim=clamp((sailD.state.mode==='realistic'?ws:0)+pad.rt-pad.lt,-1,1);
+    if (mode==='dinghy') dgyLook.yaw+=((keys.KeyQ?1:0)-(keys.KeyE?1:0))*dt*1.8; }
+  else { I.steer=I.trim=I.paddle=0; }
+  dgyCtx.paused=dgyIdle.paused=paused;
+  if (sailD) dgyGather(sailD.state.x,sailD.state.z,dgyCtx.obstacles,dgyCtx.boats);
+  for (const e of dinghies.values()){ const S=e.D.state, far=Math.hypot(S.x-player.x,S.z-player.z)>250;
+    if (e.D===sailD) e.D.update(dt,dgyCtx); else if (!far) e.D.update(dt,dgyIdle); e.D.mesh.visible=!far||e.D===sailD; }
+  if (sailD){ const S=sailD.state; player.x=S.x; player.z=S.z; player.y=Math.max(0,S.heave)+0.4; player.vy=0; player.grounded=true; eyeY=player.y; }
+  updateWisps(dt,wdt);
+  if (window.__village && !window.__village.dinghyKey){ Object.assign(window.__village,{dinghyKey,dinghies,WIND,dinghyBerth,dgyHarbourNear,dgyLook,wispInfo:()=>{ let a=0; for (let i=0;i<wispGeo.instanceCount;i++) a+=wispP[i*4]; return {n:wispGeo.instanceCount,meanAlpha:wispGeo.instanceCount?a/wispGeo.instanceCount:0}; },
+    setHandling(m){ dgyHandling=m==='realistic'?'realistic':'assisted'; if (sailD) sailD.setMode(dgyHandling); }});
+    Object.defineProperty(window.__village,'sailD',{get:()=>sailD}); }
+}
+wrapHooks.push(d=>{ if (sailD) sailD.shift(0,d); for (const e of [...dinghies.values()]) dgyDrop(e); });
+/* ---------- wind wisps: streaks of moving air that drift past the boat ----------
+   Up to WISP_N thin white ribbons, each a few metres long, carried over the ground by the true wind (WIND.at) at the
+   wind's own speed, so that the boat's motion reads against them and their direction follows the wind's shifts.
+   They appear 5 to 30 m from the boat, from just above the water to above the masthead: more and brighter where the
+   wind is strong or gusting, few in shelter and none below about 1.5 m/s. At street level a few drift along the
+   shore. One mesh draws them all, after the sea; each ribbon waves and curls in the vertex shader and is turned to
+   face the camera, and fades in and out at both ends. Positions are kept relative to ORIGIN, nothing is allocated
+   per frame, they stand still while the world is paused, and the north-south repeat moves them with the player. */
+const WISP_N=72, WISP_SEG=16;
+const wispGeo=new THREE.InstancedBufferGeometry();
+{ const P=[], I=[]; for (let i=0;i<=WISP_SEG;i++){ const s=i/WISP_SEG; P.push(s,-1,0, s,1,0); if (i<WISP_SEG){ const a=i*2; I.push(a,a+1,a+3,a,a+3,a+2); } }
+  wispGeo.setAttribute('position',new THREE.Float32BufferAttribute(P,3)); wispGeo.setIndex(I); }
+const wispPos=new Float32Array(WISP_N*3), wispDir=new Float32Array(WISP_N*3), wispP=new Float32Array(WISP_N*4);
+wispGeo.setAttribute('iPos',new THREE.InstancedBufferAttribute(wispPos,3).setUsage(THREE.DynamicDrawUsage));
+wispGeo.setAttribute('iDir',new THREE.InstancedBufferAttribute(wispDir,3).setUsage(THREE.DynamicDrawUsage));
+wispGeo.setAttribute('iP',new THREE.InstancedBufferAttribute(wispP,4).setUsage(THREE.DynamicDrawUsage));
+wispGeo.instanceCount=0;
+const wispU={uTime:{value:0},uBright:{value:1},uFocus:{value:new THREE.Vector3()}};
+const wispMat=new THREE.ShaderMaterial({uniforms:wispU,transparent:true,depthWrite:false,side:THREE.DoubleSide,
+  vertexShader:`attribute vec3 iPos, iDir; attribute vec4 iP; uniform float uTime; uniform vec3 uFocus; varying float vA; varying vec2 vS;
+    void main(){
+      float s=position.x, sd=position.y, a=iP.z*6.2832+uTime*1.1;
+      vec3 d=normalize(iDir), up=vec3(0.0,1.0,0.0), sx=normalize(cross(d,up));
+      vec3 head=(modelMatrix*vec4(iPos,1.0)).xyz;
+      // the ribbon trails upwind of its head, waving more towards its tail, which curls over at the end
+      vec3 wav=up*(sin(s*4.5+a)*0.22*s+0.45*s*s*s*sin(a*0.7))+sx*(cos(s*3.7+a*0.8)*0.3*s+0.3*s*s*s*cos(a*0.6));
+      vec3 p=head-d*s*iP.y+wav;
+      vec3 tg=normalize(-d*iP.y+up*(0.99*s*cos(s*4.5+a)+1.35*s*s*sin(a*0.7))+sx*(-1.11*s*sin(s*3.7+a*0.8)+0.9*s*s*cos(a*0.6)));
+      vec3 w=normalize(cross(tg,normalize(cameraPosition-p)));
+      p+=w*sd*iP.w*(0.35+0.65*sin(3.1416*s));
+      vA=iP.x*(1.0-smoothstep(30.0,46.0,length(p.xz-uFocus.xz))); vS=vec2(s,sd);
+      gl_Position=projectionMatrix*viewMatrix*vec4(p,1.0); }`,
+  fragmentShader:`uniform float uBright; varying float vA; varying vec2 vS;
+    void main(){ float e=smoothstep(0.0,0.3,vS.x)*(1.0-smoothstep(0.5,1.0,vS.x))*(1.0-vS.y*vS.y), a=vA*e; if (a<0.003) discard;
+      gl_FragColor=vec4(vec3(0.97,0.98,1.0)*(0.3+0.7*uBright),a);
+      #include <colorspace_fragment>
+    }`});
+const wisps=new THREE.Mesh(wispGeo,wispMat); wisps.frustumCulled=false; wisps.renderOrder=3; world.add(wisps);
+const WX=new Float64Array(WISP_N), WY=new Float32Array(WISP_N), WZ=new Float64Array(WISP_N), WA=new Float32Array(WISP_N), WL=new Float32Array(WISP_N),
+  WLen=new Float32Array(WISP_N), WSeed=new Float32Array(WISP_N), WStr=new Float32Array(WISP_N), WDx=new Float32Array(WISP_N), WDz=new Float32Array(WISP_N), WOn=new Uint8Array(WISP_N);
+const wispW={x:0,z:0,speed:0,dir:0,gust:0}, gullWindO={x:0,z:0,speed:0,dir:0,gust:0};
+function updateWisps(dt,wdt){
+  const sailing=!!sailD, fx=sailing?sailD.state.x:player.x, fz=sailing?sailD.state.z:player.z;
+  const k=sailing?1:(mode==='street'&&seaDist(player.x,player.z)<30?0.35:0);
+  WIND.at(fx,fz,null,wispW);
+  const want=Math.round(WISP_N*Math.min(1,k*smooth((wispW.speed-1.5)/4.5)*(0.75+0.5*wispW.gust)));
+  let alive=0; for (let i=0;i<WISP_N;i++) alive+=WOn[i];
+  if (wdt>0){ wispU.uTime.value+=wdt;
+    for (let i=0;i<WISP_N;i++){ if (!WOn[i]) continue; WIND.at(WX[i],WZ[i],null,wispW);
+      WX[i]+=wispW.x*wdt; WZ[i]+=wispW.z*wdt; WA[i]+=wdt; WDx[i]=wispW.x; WDz[i]=wispW.z;
+      WStr[i]+=(smooth((wispW.speed-1.2)/4)*(0.65+0.7*wispW.gust)-WStr[i])*Math.min(1,wdt*2);
+      if (WA[i]>WL[i] || Math.hypot(WX[i]-fx,WZ[i]-fz)>48){ WOn[i]=0; alive--; } }
+    // new wisps are placed upwind of where they will pass, so that they drift through the ring round the boat
+    for (let i=0, made=0;i<WISP_N && alive<want && made<4;i++){ if (WOn[i]) continue;
+      const a=Math.random()*Math.PI*2, r=5+25*Math.pow(Math.random(),1.2), life=4+Math.random()*4;
+      WIND.at(fx,fz,null,wispW); const back=wispW.speed*life*0.5;
+      const x=fx+Math.sin(a)*r-wispW.x/Math.max(0.1,wispW.speed)*back, z=fz+Math.cos(a)*r-wispW.z/Math.max(0.1,wispW.speed)*back;
+      WX[i]=x; WZ[i]=z; WY[i]=Math.max(0.35+Math.random()*6.8,heightAt(x,z)+0.6); WA[i]=0; WL[i]=life; WLen[i]=2.5+Math.random()*3; WSeed[i]=Math.random();
+      WStr[i]=0; WDx[i]=wispW.x; WDz[i]=wispW.z; WOn[i]=1; alive++; made++; } }
+  let n=0;
+  for (let i=0;i<WISP_N;i++){ if (!WOn[i]) continue; const env=Math.pow(Math.sin(Math.PI*Math.min(1,WA[i]/WL[i])),0.8);
+    wispPos[n*3]=WX[i]-ORIGIN.x; wispPos[n*3+1]=WY[i]-ORIGIN.y; wispPos[n*3+2]=WZ[i]-ORIGIN.z;
+    wispDir[n*3]=WDx[i]; wispDir[n*3+1]=0.04*Math.sin(WSeed[i]*20); wispDir[n*3+2]=WDz[i]+1e-4;
+    wispP[n*4]=0.5*env*WStr[i]*Math.max(k,0.35); wispP[n*4+1]=WLen[i]; wispP[n*4+2]=WSeed[i]; wispP[n*4+3]=0.05+0.03*WSeed[i]; n++; }
+  wispGeo.instanceCount=n; wisps.visible=n>0; wisps.position.copy(ORIGIN);
+  for (const k2 of ['iPos','iDir','iP']) wispGeo.attributes[k2].needsUpdate=true;
+  wispU.uBright.value=surfMat.uniforms.uBright.value; wispU.uFocus.value.set(fx-ORIGIN.x,0,fz-ORIGIN.z);
+}
+wrapHooks.push(d=>{ for (let i=0;i<WISP_N;i++) WZ[i]+=d; });
 /* ================= boats under sail along the coast ================= */
 const sailers=[];
 // how far offshore a boat must keep at x to stay clear of any harbour's moles, with 12 m to spare
@@ -5856,6 +6625,7 @@ const SOUND_DEF={
   train_doors_open:{g:0.7,ref:3}, train_doors_close:{g:0.7,ref:3},
   ferry_start:{g:1,ref:15}, ferry_run:{g:1,ref:15}, ferry_stop:{g:1,ref:15}, ferry_idle:{g:0.7,ref:8}, ferry_wake:{g:0.9,ref:10},
   ferry_horn:{g:1,ref:80}, ferry_gangway:{g:0.8,ref:5}, ferry_gate:{g:0.6,ref:3}, ferry_fender:{g:0.7,ref:4},
+  bow_wave:{g:0.8}, sail_flap:{g:0.5}, gybe_bang:{g:0.9}, hull_knock:{g:0.8},
 };
 const SND={asked:{}, ready:false, buf:{}, last:{}, master:null, rev:null, revOut:null, bus:{}, cut:{}, gmul:{}, send:{}, voices:[], t:{}};
 // sounds without recordings of their own borrow those of a like sound until they have them
@@ -5884,6 +6654,7 @@ async function startAudio(){
     let man={}; try{ const r=await fetch('sounds.json',{cache:'no-cache'}); if (r.ok) man=await r.json(); }catch(_){}
     await Promise.all(Object.entries(man).map(async([id,v])=>{ const files=(Array.isArray(v)?v:[v]).filter(Boolean);
       SND.buf[id]=(await Promise.all(files.map(async f=>{ try{ return await ctx.decodeAudioData(await (await fetch(f)).arrayBuffer()); }catch(err){ console.warn('Sound file unavailable:',f); return null; } }))).filter(Boolean); }));
+    synthSailSounds(ctx);
     SND.ready=true;
   }catch(err){ console.warn('Sound unavailable:',err); }
 }
@@ -6073,7 +6844,7 @@ function sndUpdate(dt){
   if (player.grounded && !SNDS.grounded && SNDS.vy<-4 && fx===player.x) sndPlay('land','player',null,{gain:quiet*clamp(-SNDS.vy/8,0.5,1.4)});
   SNDS.grounded=player.grounded; SNDS.vy=player.vy;
 
-  sndTrain(dt); sndGoods(dt); sndFerries(dt);
+  sndTrain(dt); sndGoods(dt); sndFerries(dt); sndDinghy(dt);
 }
 
 /* the train: engine at the locomotive, the rolling rumble at the nearest point on the train, a click as each
@@ -6131,6 +6902,27 @@ function sndGoods(dt){
       SNDS.gJ[b++]=_bv.x; } } } else SNDS.gJ=[];
   SNDS.gWait=g.wait; SNDS.gV=g.v;
 }
+/* sailing: the bow wave from its recording, louder and higher as the boat gathers way; the sail's flapping when it
+   luffs, the boom slamming across in a gybe and the hull touching ground, which have no recordings and are made
+   here (synthSailSounds) unless sounds.json names files for them */
+function synthSailSounds(ctx){
+  const sr=ctx.sampleRate, mk=(sec,f)=>{ const b=ctx.createBuffer(1,Math.floor(sr*sec),sr), d=b.getChannelData(0); f(d,sr); let pk=0; for (const v of d) pk=Math.max(pk,Math.abs(v)); for (let i=0;i<d.length;i++) d[i]*=0.8/(pk||1); return [b]; };
+  // flapping: rustling noise beaten in irregular pulses about six times a second, as a loop of two seconds
+  if (!SND.buf.sail_flap||!SND.buf.sail_flap.length) SND.buf.sail_flap=mk(2,(d,sr)=>{ let lp=0, bp=0; const N=d.length;
+    for (let i=0;i<N;i++){ const t=i/sr, w=Math.sin(2*Math.PI*6*t+0.6*Math.sin(2*Math.PI*1*t)), env=Math.pow(Math.max(0,w),3)+0.15;
+      const n=Math.random()*2-1; lp+=(n-lp)*0.35; bp+=(lp-bp)*0.08; d[i]=(lp-bp)*env*Math.min(1,i/400,(N-i)/400); } });
+  // the boom slamming across: a sharp crack over a deep thud
+  if (!SND.buf.gybe_bang||!SND.buf.gybe_bang.length) SND.buf.gybe_bang=mk(0.6,(d,sr)=>{ let lp=0;
+    for (let i=0;i<d.length;i++){ const t=i/sr, n=Math.random()*2-1; lp+=(n-lp)*0.25; d[i]=lp*Math.exp(-t*28)*1.2+Math.sin(2*Math.PI*(95-60*t)*t)*Math.exp(-t*9)*0.9; } });
+  // the hull touching the bottom or a wall: a dull knock
+  if (!SND.buf.hull_knock||!SND.buf.hull_knock.length) SND.buf.hull_knock=mk(0.45,(d,sr)=>{ let lp=0;
+    for (let i=0;i<d.length;i++){ const t=i/sr, n=Math.random()*2-1; lp+=(n-lp)*0.06; d[i]=lp*Math.exp(-t*14)*2+Math.sin(2*Math.PI*70*t)*Math.exp(-t*16)*0.8; } });
+}
+function sndDinghy(dt){
+  const S=sailD&&sailD.state, on=!!S&&!paused, u=on?Math.abs(S.u):0;
+  sndVoice(sv('dgyBow','bow_wave','player',false),dt,on?0.9*smooth((u-0.15)/3.05):0,0,0,0,clamp(0.7+0.13*u,0.6,1.5));
+  sndVoice(sv('dgyFlap','sail_flap','player',false),dt,on?0.9*S.flap:0,0,0,0,clamp(0.85+0.05*(S?S.aws:0),0.8,1.3));
+}
 /* the ferries: engine at the stern, the wake at the bow, horn, gangway, gates and fenders */
 const _sfv=new THREE.Vector3();
 function sndFerries(dt){
@@ -6157,10 +6949,16 @@ function sndFerries(dt){
 }
 addEventListener('keydown',e=>{ keys[e.code]=true;
   if (e.code==='KeyV' && !e.repeat) toggleView();
+  // sailing, C changes between the helm and a view from astern of the dinghy, and the train and ferry keys wait until
+  // the player is ashore
+  if (sailD && ['KeyR','KeyC','KeyF','KeyG'].includes(e.code)){
+    if (e.code==='KeyC' && !e.repeat && mode==='dinghy'){ dgyChase=!dgyChase; dgyLook.yaw=0; dgyLook.pitch=dgyChase?0.25:0; } }
+  else {
   if (e.code==='KeyR' && !e.repeat) toggleTrain();
   if (e.code==='KeyC' && !e.repeat) toggleChase();
   if (e.code==='KeyF' && !e.repeat) toggleFerry();
-  if (e.code==='KeyG' && !e.repeat) toggleGoods();
+  if (e.code==='KeyG' && !e.repeat) toggleGoods(); }
+  if (e.code==='KeyY' && !e.repeat) dinghyKey();
   if (e.code==='KeyB') setTilt(!tiltShift);
   if (e.code==='KeyP' && !e.repeat){ paused=!paused; lastClock=null; }
   if (e.code==='KeyH' && !e.repeat){ helpEl.hidden=!helpEl.hidden; lastCell=null; }
@@ -6176,13 +6974,15 @@ addEventListener('keydown',e=>{ keys[e.code]=true;
   if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault(); });
 addEventListener('keyup',e=>{ keys[e.code]=false; });
 /* ---------- game controller (standard mapping): sticks move and look, buttons stand in for keys ---------- */
-const pad={x:0,y:0,held:new Set(),armed:true,mode:null};
-const PAD_KEYS={0:'Space',1:'KeyV',2:'KeyF',3:'KeyR',4:'KeyC',5:'KeyB',6:'Minus',7:'Equal',8:'KeyM',9:'KeyH',12:'ArrowUp',13:'ArrowDown',14:'ArrowLeft',15:'ArrowRight'};
+const pad={x:0,y:0,lt:0,rt:0,held:new Set(),armed:true,mode:null,yCode:null};
+// Y (3) rides with the train, except while sailing or within reach of a dinghy, when it stands for the Y key; a press
+// of the right stick (11) always does. While sailing the triggers trim the sail instead of zooming
+const PAD_KEYS={0:'Space',1:'KeyV',2:'KeyF',4:'KeyC',5:'KeyB',6:'Minus',7:'Equal',8:'KeyM',9:'KeyH',11:'KeyY',12:'ArrowUp',13:'ArrowDown',14:'ArrowLeft',15:'ArrowRight'};
 let padRun=false, padL3=false;   // pressing the left stick switches between running and walking
 const padKey=(code,down)=>dispatchEvent(new KeyboardEvent(down?'keydown':'keyup',{code}));
 function pollPad(dt){
   const gp=[...(navigator.getGamepads?navigator.getGamepads():[])].find(g=>g&&g.connected);
-  if (!gp){ pad.x=pad.y=0; for (const c of pad.held) padKey(c,false); pad.held.clear(); if (padRun){ padRun=false; padKey('ShiftLeft',false); } return; }
+  if (!gp){ pad.x=pad.y=pad.lt=pad.rt=0; if (pad.yCode){ padKey(pad.yCode,false); pad.yCode=null; } for (const c of pad.held) padKey(c,false); pad.held.clear(); if (padRun){ padRun=false; padKey('ShiftLeft',false); } return; }
   { const b=gp.buttons[10], on=!!b&&b.pressed; if (on && !padL3){ padRun=!padRun; padKey('ShiftLeft',padRun); } padL3=on; }
   // a wide dead zone, so a stick resting slightly off centre does not creep the player along
   const DZ=0.26, dz=(x,y)=>{ const m=Math.hypot(x,y); if (m<DZ) return [0,0]; const k=Math.min(1,(m-DZ)/(1-DZ))/m; return [x*k,y*k]; };
@@ -6192,7 +6992,12 @@ function pollPad(dt){
   [pad.x,pad.y]=pad.armed?dz(lx,ly):[0,0];
   const [rx,ry]=dz(gp.axes[2]||0,gp.axes[3]||0);
   if (rx||ry) look(rx*Math.abs(rx)*dt*1100, ry*Math.abs(ry)*dt*800);
-  for (const [i,code] of Object.entries(PAD_KEYS)){ const b=gp.buttons[i]; if (!b) continue; const on=b.pressed||b.value>0.5;
+  const sailing=!!sailD, helm=mode==='dinghy';
+  pad.lt=helm&&gp.buttons[6]?gp.buttons[6].value:0; pad.rt=helm&&gp.buttons[7]?gp.buttons[7].value:0;
+  { const b=gp.buttons[3], on=!!b&&(b.pressed||b.value>0.5);
+    if (on && !pad.yCode){ const N=dgyNearest(player.x,player.z); pad.yCode=sailing||(N&&N.d<=6)?'KeyY':'KeyR'; padKey(pad.yCode,true); }
+    else if (!on && pad.yCode){ padKey(pad.yCode,false); pad.yCode=null; } }
+  for (const [i,code] of Object.entries(PAD_KEYS)){ const b=gp.buttons[i]; if (!b) continue; if (helm && (i==='6'||i==='7')) continue; const on=b.pressed||b.value>0.5;
     if (on && !pad.held.has(code)){ pad.held.add(code); padKey(code,true); }
     else if (!on && pad.held.has(code)){ pad.held.delete(code); padKey(code,false); } }
 }
@@ -6379,7 +7184,7 @@ function tunnelLight(dt,on){
   scene.fog.color.lerp(_c2.set('#0c0a08'),tunnelK); scene.background.copy(scene.fog.color);
   if (tunnelK>0.001) _c1.copy(skyU.uMid.value).lerp(_c2,tunnelK).getRGB(FOG_MID);
 }
-function look(dx,dy){ if (mode==='coach'){ co.yaw-=dx*0.0026; co.pitch=clamp(co.pitch-dy*0.0026,-1.1,1.1); return; } if (mode==='ferry'){ fe.yaw-=dx*0.0026; fe.pitch=clamp(fe.pitch-dy*0.0026,-1.1,1.1); return; } if (mode==='chase'){ chase.yaw-=dx*0.004; chase.pitch=clamp(chase.pitch+dy*0.003,0.02,1.3); return; } if (mode==='train'){ tYaw=clamp(tYaw-dx*0.0026,-2.6,2.6); tPitch=clamp(tPitch-dy*0.0026,-1,1); return; } if (mode==='above'){ yaw-=dx*0.005; pitch=clamp(pitch+dy*0.004,0.25,1.35); } else { yaw-=dx*0.0026; fpPitch=clamp(fpPitch-dy*0.0026,-1.2,1.2); } }
+function look(dx,dy){ if (mode==='dinghy'){ dgyLook.yaw-=dx*0.0026; dgyLook.pitch=clamp(dgyLook.pitch-dy*0.0026,-1.1,1.1); return; } if (mode==='coach'){ co.yaw-=dx*0.0026; co.pitch=clamp(co.pitch-dy*0.0026,-1.1,1.1); return; } if (mode==='ferry'){ fe.yaw-=dx*0.0026; fe.pitch=clamp(fe.pitch-dy*0.0026,-1.1,1.1); return; } if (mode==='chase'){ chase.yaw-=dx*0.004; chase.pitch=clamp(chase.pitch+dy*0.003,0.02,1.3); return; } if (mode==='train'){ tYaw=clamp(tYaw-dx*0.0026,-2.6,2.6); tPitch=clamp(tPitch-dy*0.0026,-1,1); return; } if (mode==='above'){ yaw-=dx*0.005; pitch=clamp(pitch+dy*0.004,0.25,1.35); } else { yaw-=dx*0.0026; fpPitch=clamp(fpPitch-dy*0.0026,-1.2,1.2); } }
 // bird's-eye: two-finger drag pans, pinch zooms; a classic mouse wheel still zooms
 function panView(dx,dy){ const k=dist*0.0016, fx=-Math.sin(yaw), fz=-Math.cos(yaw), rx=Math.cos(yaw), rz=-Math.sin(yaw);
   player.x+=(rx*dx+fx*dy)*k; player.z+=(rz*dx+fz*dy)*k; player.y=Math.max(heightAt(player.x,player.z),0); player.vy=0; eyeY=player.y; }
@@ -6441,6 +7246,9 @@ function leaveTrain(to){
 }
 function toggleView(){
   if (mode==='coach') return;
+  // sailing, the bird's-eye view follows the boat, and returns to the helm
+  if (sailD){ if (mode==='dinghy'){ startAscent(dgyLook.pitch); mode='above'; dist=45; scene.fog.near=160; scene.fog.far=1800; camera.fov=31; camera.updateProjectionMatrix(); glowScale(); yaw=sailD.state.head+Math.PI+dgyLook.yaw; aboveY=null; firstCam=true; if (document.pointerLockElement) document.exitPointerLock(); }
+    else { ascent.t=-1; mode='dinghy'; camera.fov=70; camera.updateProjectionMatrix(); glowScale(); } return; }
   if (riding()){ leaveTrain('street'); return; }
   // aboard a ferry the bird's-eye view follows the passenger on deck, and returns to the deck
   if (ridden){ if (mode==='ferry'){ startAscent(fe.pitch); mode='above'; dist=45; scene.fog.near=160; scene.fog.far=1800; camera.fov=31; camera.updateProjectionMatrix(); glowScale(); yaw=ridden.head+Math.PI+fe.yaw; firstCam=true; }
@@ -6558,7 +7366,7 @@ function frame(now){
     const zk=((keys.Minus||keys.NumpadSubtract)?1:0)-((keys.Equal||keys.NumpadAdd)?1:0);
     if (zk) dist=clamp(dist*Math.exp(zk*dt*1.8),7,60000); }
   let mx=(keys.KeyD?1:0)-(keys.KeyA?1:0)+joy.x+pad.x, mz=(keys.KeyW?1:0)-(keys.KeyS?1:0)-joy.y-pad.y;
-  const ml=Math.hypot(mx,mz), moving=started&&ml>0.05&&!onBoard();
+  const ml=Math.hypot(mx,mz), moving=started&&ml>0.05&&!onBoard()&&!sailD;
   player.ox=player.x; player.oz=player.z;
   if (moving){
     if (ml>1){ mx/=ml; mz/=ml; }
@@ -6574,7 +7382,7 @@ function frame(now){
       if (player.x===ox && player.z===oz){ const nx=ox+vx*dt, nz=oz+vz*dt, g4=standableAt(nx,nz); if (g4>=-1.0 && coveMoveOk(ox,oz,player.y,g0,nx,nz,g4)){ player.x=nx; player.z=nz; } } }
     player.face=Math.atan2(vx,vz);
   }
-  if (!onBoard() && !(mode==='above'&&dist>60)){
+  if (!onBoard() && !sailD && !(mode==='above'&&dist>60)){
   if (started && keys.Space && player.grounded){ player.vy=5.2; player.grounded=false; }
   playerRadius(dt); doorsStep(dt);
   const ground=collide();
@@ -6590,6 +7398,7 @@ function frame(now){
   if (player.y<ground) player.y=ground;
   eyeY = (eyeY===null||Math.abs(eyeY-player.y)>3) ? player.y : eyeY+(player.y-eyeY)*(1-Math.exp(-dt*14));
   }
+  updateDinghies(dt,wdt);
   wrapWorld();
   if (updateOrigin()){ doorsDirty=true; roomScan=0; setChurchU(); for (const D of rooms) setRoomLights(D); maskDirty=true; beams.t=0; rebuildFar(player.x,player.z); }
   updateChunks(player.x,player.z,6); updateFades(dt); updateTiles(); roomsUpdate(dt);
@@ -6608,11 +7417,12 @@ function frame(now){
     const m=ridden.m; m.updateMatrix(); _cvv.set(fe.lx,fe.ey,fe.lz).applyMatrix4(m.matrix);
     player.x=_cvv.x; player.z=_cvv.z; player.y=_cvv.y; eyeY=player.y; }
   if (mode==='above'){
-    // the view keeps its height while the player moves, and settles onto the ground under them once they stop;
-    // it never strays so far from the ground that the player leaves the picture
+    // the view keeps its height over lower ground, whether the player moves or stops; it rises only to keep clear of
+    // higher ground, and is never more than half the zoom distance below the ground beneath the player
     if (aboveY===null || firstCam) aboveY=eyeY;
-    if (!moving) aboveY+=(eyeY-aboveY)*(1-Math.exp(-dt*1.5));
-    aboveY=clamp(aboveY,eyeY-dist*0.5,eyeY+dist*0.5);
+    // the height follows the ground up, to keep clear of it, but never comes down by itself over lower ground
+    if (!moving && eyeY>aboveY) aboveY+=(eyeY-aboveY)*(1-Math.exp(-dt*1.5));
+    aboveY=Math.max(aboveY,eyeY-dist*0.5);
     camTarget.set(player.x,aboveY+1.2,player.z);
     const desired=new THREE.Vector3(player.x+Math.sin(yaw)*Math.cos(pitch)*dist, aboveY+1.2+Math.sin(pitch)*dist, player.z+Math.cos(yaw)*Math.cos(pitch)*dist);
     desired.y=Math.max(desired.y,heightAt(desired.x,desired.z)+3);
@@ -6647,6 +7457,18 @@ function frame(now){
       camera.fov=lerp(descent.fov,70,k); camera.far=lerp(descent.far,3600,k); camera.updateProjectionMatrix(); glowScale();
       scene.fog.near=lerp(descent.fogN,90,k); scene.fog.far=lerp(descent.fogF,1500,k);
       if (descent.t>=descent.dur) descent.t=-1; }
+  } else if (mode==='dinghy' && sailD && dgyChase){
+    // from astern: the camera stands 11 m off the boat, and the mouse carries it round her and up and down
+    const B=sailD.mesh.position, a=sailD.state.head+Math.PI+dgyLook.yaw, p=clamp(dgyLook.pitch,0.04,1.2), D=11;
+    const want=new THREE.Vector3(B.x+Math.sin(a)*Math.cos(p)*D, 1.6+Math.sin(p)*D, B.z+Math.cos(a)*Math.cos(p)*D);
+    want.y=Math.max(want.y,heightAt(want.x,want.z)+1.5);
+    if (firstCam||camPos.distanceTo(want)>40) camPos.copy(want); else camPos.lerp(want,1-Math.exp(-dt*6));
+    camera.position.copy(camPos); camTarget.set(B.x,B.y+1.6,B.z); camLookAt(camTarget);
+    if (camera.far!==3600 || camera.near!==0.1){ camera.far=3600; camera.near=0.1; camera.updateProjectionMatrix(); sea.scale.setScalar(1); scene.fog.near=90; scene.fog.far=1500; islandMesh.visible=false; farMesh.visible=farGlow.visible=true; }
+  } else if (mode==='dinghy' && sailD){
+    // at the helm: the eye is carried by the boat, sitting out to windward as she heels
+    sailD.eye(camera,dgyLook.yaw,dgyLook.pitch); camPos.copy(camera.position);
+    if (camera.far!==3600 || camera.near!==0.1){ camera.far=3600; camera.near=0.1; camera.updateProjectionMatrix(); sea.scale.setScalar(1); scene.fog.near=90; scene.fog.far=1500; islandMesh.visible=false; farMesh.visible=farGlow.visible=true; }
   }
   firstCam=false;
   sky.position.copy(camera.position);
@@ -6708,6 +7530,7 @@ function frame(now){
   updateBeams(wdt);
   updateDolphins(wdt);
   updateCats(wdt);
+  updateFleet(dt);
   updateGulls(dt);
   updateShadowFrame();
   updateHUD();
@@ -6718,7 +7541,7 @@ function frame(now){
 
 /* ================= seagulls =================
    Yellow-legged gulls (Larus michahellis): white head and body, mid-grey mantle and wings with a white trailing
-   edge, black wing tips, a yellow bill with a red spot and yellow legs. About one in seven is a brown immature bird.
+   edge, black wing tips, a yellow bill with a red spot and yellow legs. About one in seven is a grey-brown immature bird.
 
    createGulls(parent, opts) adds one InstancedMesh to parent and returns
      { mesh, birds, thermals, update(dt, ctx), setCount(n), count, birdPosition(i, out), modeOf(i), shift(dx, dz),
@@ -6734,7 +7557,10 @@ function frame(now){
      wind          {x,z} in m/s, the direction the air moves
      groundHeight  (x,z) => height of whatever is underfoot (terrain, quays, rocks); below seaLevel is sea
      seaLevel      0 in Coast
-     boats         [{x,z,heading,speed,length}], heading as in rotation.y (the bow points along sin, cos)
+     boats         [{x,z,heading,speed,length}], heading as in rotation.y (the bow points along sin, cos); a boat
+                   may also carry catch (true while it comes home with fish: the nearest gulls join it, up to want,
+                   8-15, ahead of any other boat, and no more than half the flock in all), settle (true once it has berthed: its gulls come down on it or
+                   near it) and perches ([{x,y,z}] on its deck and wheelhouse, for settling)
      perches       [{x,y,z}] places a gull may stand: rock tops, quay edges, bollards, ridges
      paused        while true the gulls hold still
      origin        optional {x,y,z} of the floating origin; the mesh is placed there and instances relative to it
@@ -6862,13 +7688,13 @@ function createGulls(parent, opts={}){
   const mesh=new THREE.InstancedMesh(geo,mat,MAX);
   mesh.customDepthMaterial=depth; mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   mesh.frustumCulled=false; mesh.castShadow=opts.shadows??true; mesh.receiveShadow=false; mesh.count=0;
-  const ADULT=new THREE.Color(1,1,1), JUV=new THREE.Color('#b29c84');
+  const ADULT=new THREE.Color(1,1,1), JUV=new THREE.Color('#a29d97');   // a cool grey-brown: a warm tan turned orange in low sun
   for (let i=0;i<MAX;i++) mesh.setColorAt(i,ADULT);
   parent.add(mesh);
 
   /* ---------- state ---------- */
   const birds=[], thermals=[], taken=new Set();
-  let t=0, lastCtx=null, want=Math.min(opts.count??80,MAX);
+  let t=0, lastCtx=null, want=Math.min(opts.count??80,MAX), catchT=0;
   const ground=(ctx,x,z)=>ctx.groundHeight?ctx.groundHeight(x,z):-10;
   const sea=ctx=>ctx.seaLevel??0;
   const day=ctx=>ctx.daylight??1;
@@ -6946,9 +7772,10 @@ function createGulls(parent, opts={}){
       freq:2.6+R()*0.6,baseFreq:0,burst:0,nextBurst:2+R()*8,fold:0,legs:0,size:0.92+R()*0.16,juv:R()<0.14,
       th:null,orbR:20,top:30,timer:10,tx:0,ty:0,tz:0,perch:null,landPhase:0,minD:1e9,ax:0,az:0,boat:null,rejoin:false,
       fBack:6,fSide:0,fAlt:8,fDir:1,diveT:20,scareR:6+R()*6,flush:-1,raise:0,nextRaise:15+R()*40,callT:5+R()*40,
-      age:0,psiT:0,bob:0,sx:0,sy:0,sz:0,extra:0,y0:0,flare:0,shT:R()*0.5,inl:0,seaX:0,seaZ:0,seaOK:false};
+      age:0,psiT:0,bob:0,sx:0,sy:0,sz:0,extra:0,y0:0,flare:0,swoop:0,swoopT:0,sb:0,ss:0,shT:R()*0.5,inl:0,seaX:0,seaZ:0,seaOK:false};
   }
-  function setMode(b,m){ b.mode=m; b.age=0; }
+  // a gull that goes off to a thermal has done with any boat it followed
+  function setMode(b,m){ b.mode=m; b.age=0; if (m===SOAR||m===GLIDE){ b.boat=null; b.rejoin=false; } }
   function freePerch(b){ if (b.perch) taken.delete(b.perch); b.perch=null; }
   function startSoar(b,T,ctx){
     setMode(b,SOAR); b.th=T||nearestThermal(b); b.orbR=b.th.r*(0.7+R()*0.5); b.top=b.th.top*(0.6+R()*0.5); b.timer=25+R()*60;
@@ -6957,6 +7784,15 @@ function createGulls(parent, opts={}){
   function startFollow(b,B){
     setMode(b,FOLLOW); b.boat=B; b.fBack=2+R()*10; b.fSide=(R()-0.5)*8; b.fAlt=3.5+R()*8; b.fDir=R()<0.5?1:-1;
     b.orbR=5+R()*5; b.timer=60+R()*150; b.diveT=8+R()*30;
+    // a boat with a catch is crowded closer and lower, and its wake is dived at far more often
+    if (B.catch){ b.fBack=3+R()*12; b.fAlt=4+R()*9; b.orbR=4+R()*5; b.diveT=2+R()*8; }
+  }
+  // a boat that has berthed: its gulls come down on its deck and wheelhouse, on the quay beside it or on the water
+  function settleNear(b,ctx,B){
+    b.boat=null; b.rejoin=false; let P=null;
+    if (B.perches && R()<0.5) for (const q of B.perches) if (!taken.has(q)){ P=q; break; }
+    if (!P){ let bd=35; for (const q of ctx.perches||[]){ if (taken.has(q)||!perchOK(ctx,q)) continue; const d=Math.hypot(q.x-B.x,q.z-B.z)+R()*6; if (d<bd){ bd=d; P=q; } } }
+    startLand(b,ctx,P||waterSpot(ctx,B.x,B.z,6,40)||undefined);
   }
   function startLand(b,ctx,P){
     freePerch(b); P=P||pickPerch(b,ctx); b.perch=P; if (!P.water) taken.add(P);
@@ -7062,6 +7898,19 @@ function createGulls(parent, opts={}){
     const nearPlayer=thermals.some(T=>Math.hypot(T.x-p.x,T.z-p.z)<RANGE);
     separate();
     const followers=birds.reduce((n,b)=>n+(b.mode===FOLLOW),0);
+    // a boat coming home with its catch draws a crowd: the nearest gulls within 450 m join it, up to its quota
+    catchT-=h;
+    if (catchT<=0 && !roost){ catchT=1;
+      const cap=Math.round(birds.length*0.5); let busy=0;   // two boats coming in together still draw a modest crowd
+      for (const b of birds) if (b.boat && b.boat.catch && (b.mode===FOLLOW||b.rejoin)) busy++;
+      for (const B of boats){ if (!B.catch) continue;
+        let have=0; for (const b of birds) if (b.boat===B && (b.mode===FOLLOW||b.rejoin)) have++;
+        while (have<(B.want||10) && busy<cap){
+          let best=null, bd=450;
+          for (const b of birds){ if ((b.boat&&b.boat.catch)||b.mode===LAND||b.mode===TAKEOFF) continue; const d=Math.hypot(b.x-B.x,b.z-B.z); if (d<bd){ bd=d; best=b; } }
+          if (!best) break;
+          if (best.mode===PERCH){ best.boat=B; best.rejoin=true; startTakeoff(best,ctx,false); } else startFollow(best,B);
+          have++; busy++; } } }
     for (const b of birds){
       b.age+=h;
       if (b.mode<=FOLLOW){
@@ -7070,12 +7919,12 @@ function createGulls(parent, opts={}){
         b.callT-=h; if (b.callT<=0){ b.callT=20+R()*70; if (onCall && R()<light) onCall({x:b.x,y:b.y,z:b.z,kind:R()<0.6?'long':'mew'}); }
         // a bird that has strayed far from the player is brought back towards it
         const dp=Math.hypot(b.x-p.x,b.z-p.z);
-        if (dp>RANGE*2 && nearPlayer){ spawn(b,ctx); continue; }
+        if (dp>RANGE*(b.boat&&b.boat.catch?5:2) && nearPlayer){ spawn(b,ctx); continue; }
         if (dp>RANGE*1.2 && b.mode!==GLIDE && b.mode!==FOLLOW) startGlide(b,nearestThermal({x:p.x,z:p.z}));
         if (roost && b.mode!==FOLLOW && R()<h*0.08) startLand(b,ctx);
         // a boat passing close by draws gulls after it, now and then
         else if (!roost && b.mode!==FOLLOW && followers<birds.length*0.3 && R()<h*0.04)
-          for (const B of boats) if (Math.hypot(B.x-b.x,B.z-b.z)<150){ startFollow(b,B); break; }
+          for (const B of boats) if (!B.catch && Math.hypot(B.x-b.x,B.z-b.z)<150){ startFollow(b,B); break; }
       }
       b.flare=0; b.extra=0;
       switch (b.mode){
@@ -7102,6 +7951,7 @@ function createGulls(parent, opts={}){
         break; }
       case FOLLOW: {
         const B=b.boat; if (!B||!boats.includes(B)){ startSoar(b,nearestThermal(b),ctx); break; }
+        if (B.settle){ settleNear(b,ctx,B); break; }
         const fx=Math.sin(B.heading), fz=Math.cos(B.heading), L=(B.length||8)/2, v=B.speed||0;
         // circle a point that hangs behind the stern and moves with the boat, a little ahead of where it is now
         const cx=B.x-fx*(L+b.fBack)+fz*b.fSide+fx*v*1.5, cz=B.z-fz*(L+b.fBack)-fx*b.fSide+fz*v*1.5;
@@ -7121,9 +7971,20 @@ function createGulls(parent, opts={}){
         }
         fly(b,ctx,h,dx,dz,b.fAlt+1.5*Math.sin(t*0.37+b.ph2),spd,0.4,1.7,false);
         b.timer-=h; b.diveT-=h;
-        if (b.diveT<=0){ b.diveT=10+R()*35;
-          if (R()<0.5){ const P={x:B.x-fx*(L+6+R()*16)+fz*(R()-0.5)*6,y:sea(ctx),z:B.z-fz*(L+6+R()*16)-fx*(R()-0.5)*6,water:true};
+        // a gull attending a boat with a catch swoops at its wake: down steeply onto a point a few metres astern,
+        // which moves with the boat, feet down to touch the water, and back up to its place
+        if (b.swoop>0){ b.swoopT+=h;
+          const wx=B.x-fx*b.sb+fz*b.ss, wz=B.z-fz*b.sb-fx*b.ss, down=b.swoop===1;
+          fly(b,ctx,h,wx-b.x,wz-b.z,sea(ctx)+(down?0.3:0.6),Math.max(7,v+3),0,2.2,true);
+          b.legs+=((down?1:0)-b.legs)*ease(5,h); b.extra=down?0:1;
+          if (down && (b.y<sea(ctx)+0.9 || b.swoopT>4.5)){ b.swoop=2; b.swoopT=0; }
+          else if (!down && b.swoopT>0.5){ b.swoop=0; b.legs=0; }
+          break; }
+        if (b.diveT<=0){ b.diveT=B.catch?4+R()*8:10+R()*35;
+          if (B.catch){ if (R()<0.7){ b.swoop=1; b.swoopT=0; b.sb=L+3+R()*10; b.ss=(R()-0.5)*6; } }
+          else if (R()<0.5){ const P={x:B.x-fx*(L+6+R()*16)+fz*(R()-0.5)*6,y:sea(ctx),z:B.z-fz*(L+6+R()*16)-fx*(R()-0.5)*6,water:true};
             if (ground(ctx,P.x,P.z)<sea(ctx)-1){ b.rejoin=true; startLand(b,ctx,P); break; } } }
+        if (B.catch && !roost) b.timer=Math.max(b.timer,30);
         if (b.timer<=0||roost){ b.boat=null; b.rejoin=false; if (roost) startLand(b,ctx); else startSoar(b,nearestThermal(b),ctx); }
         break; }
       case LAND: {
@@ -7142,7 +8003,7 @@ function createGulls(parent, opts={}){
             b.x+=dx*k; b.z+=dz*k; b.y+=dy*k; b.sp+=(1.5-b.sp)*ease(3,h); b.vy=0; b.flap+=(1-b.flap)*ease(4,h);
             b.ph+=TAU*b.freq*h; b.bank*=1-ease(4,h); b.pitch+=(0.35-b.pitch)*ease(4,h); b.yawRate=0;
             if (d>0.3) b.psi=wrap(b.psi+cl(wrap(Math.atan2(dx,dz)-b.psi),-1,1)*ease(3,h));
-            if (D<0.06){ setMode(b,PERCH); b.sp=0; b.vy=0; b.x=P.x; b.z=P.z; b.y=gy; b.psiT=b.psi; b.timer=b.rejoin?3+R()*8:(roost?1e9:25+R()*110); }
+            if (D<0.06){ setMode(b,PERCH); b.sp=0; b.vy=0; b.x=P.x; b.z=P.z; b.y=gy; b.psiT=b.psi; b.timer=b.rejoin?(b.boat&&b.boat.catch?1.2+R()*2.5:3+R()*8):(roost?1e9:25+R()*110); }
             break;
           }
           fly(b,ctx,h,dx,dz,gy+d*0.25,cl(1.2+d*0.33,1.2,9.5),0,2.4,true);
@@ -7169,6 +8030,7 @@ function createGulls(parent, opts={}){
         const dp=Math.hypot(b.x-p.x,b.z-p.z,b.y-(p.y??0));
         let go=dp<b.scareR*(water?1.3:1);
         for (const B of boats) if (water && Math.hypot(B.x-b.x,B.z-b.z)<(B.length||8)*0.5+6) go=true;
+        if (P.on && P.on.speed>0.3) go=true;   // standing on a boat that is getting under way
         if (b.flush>0){ b.flush-=h; if (b.flush<=0){ b.flush=-1; go=true; } }
         if (go){
           startTakeoff(b,ctx,true);
@@ -7189,7 +8051,8 @@ function createGulls(parent, opts={}){
         break; }
       }
       if (b.mode<=FOLLOW||b.mode===TAKEOFF) b.fold+=(0-b.fold)*ease(6,h);
-      if (b.mode<=FOLLOW) b.legs+=(0-b.legs)*ease(3,h);
+      if (b.mode<=FOLLOW && !b.swoop) b.legs+=(0-b.legs)*ease(3,h);
+      if (b.mode!==FOLLOW) b.swoop=0;
     }
   }
 
@@ -7251,7 +8114,7 @@ function createGulls(parent, opts={}){
    harbour walls, the rocks and the beaches, riding on the sea and following the boats and ferries. They keep within
    70 m of the shoreline (seaDist), take off as the player comes near and settle to roost at dusk. */
 // the wind the gulls fly in, {x,z} in m/s, the direction the air moves; null leaves them in still air.
-// Hook: set this to the global wind once the sailing work provides one.
+// updateDinghies sets it each frame to the global wind (WIND) where the player is.
 let gullWind=null;
 let gullCallT=0;
 // a call from one gull, through the existing 'gulls' sound; calls are spaced and only near ones are heard
@@ -7259,7 +8122,7 @@ function gullCall(e){
   if (time-gullCallT<2.5 || Math.hypot(e.x-player.x,e.z-player.z)>140) return;
   gullCallT=time; sndPlay('gulls','world',[e.x,e.y,e.z],{rate:0.9+Math.random()*0.2});
 }
-const GULLS=createGulls(world,{count:90,scale:1.25,range:260,onCall:gullCall});
+const GULLS=createGulls(world,{count:36,scale:1.25,range:260,onCall:gullCall});
 // places a gull may stand within 320 m of the player, gathered again only when the player has moved 60 m or after
 // ten seconds (so that coves whose cliffs have since been built are included)
 const gullPerch={x:NaN,z:NaN,t:0,list:[]};
@@ -7296,11 +8159,20 @@ function gullPerches(){
 const gullBoatRec=new Map(), gullBoatList=[];
 function gullBoats(){
   gullBoatList.length=0;
-  const add=(key,x,z,heading,speed,length)=>{ if (Math.hypot(x-player.x,z-player.z)>600) return;
+  const add=(key,x,z,heading,speed,length,r=600)=>{ if (Math.hypot(x-player.x,z-player.z)>r) return null;
     let o=gullBoatRec.get(key); if (!o){ o={}; gullBoatRec.set(key,o); }
-    o.x=x; o.z=z; o.heading=heading; o.speed=speed; o.length=length; gullBoatList.push(o); };
+    o.x=x; o.z=z; o.heading=heading; o.speed=speed; o.length=length; gullBoatList.push(o); return o; };
   for (const s of sailers) add(s,s.m.position.x,s.m.position.z,s.m.rotation.y,s.sp,6.2);
   for (const F of ferries) if (F.R && F.m.visible) add(F,F.m.position.x,F.m.position.z,F.head,F.v,FL);
+  // the fishing boats: one coming home has its catch aboard (8-15 gulls attend it), and one that has just berthed
+  // offers its deck and wheelhouse to them
+  for (const f of fleetList){ if (!f.vis || f.phase==='moored') continue;
+    const o=add(f,f.x,f.z+f.dz,f.heading,f.speed,f.L,900); if (!o) continue;
+    o.catch=f.phase==='back'; o.settle=f.phase==='settle'; o.want=8+Math.floor(hash(f.H.n,f.q,4815)*8);
+    if (o.settle && !o.perches){ const c=Math.cos(f.brot), sn=Math.sin(f.brot);
+      o.perches=FISH_PERCH.map(([lx,y,lz])=>({x:f.bx+lx*c+lz*sn,y,z:f.bz-lx*sn+lz*c+f.dz,on:o})); }
+    if (!o.settle) o.perches=null; }
+  if (sailD){ const S=sailD.state; add(sailD,S.x,S.z,S.head,Math.max(0,S.u),4); }
   return gullBoatList;
 }
 const gullCtx={player,daylight:1,wind:undefined,groundHeight:(x,z)=>walkGround(x,z,1e3),seaLevel:0,shoreDist:seaDist,boats:gullBoatList,perches:[],paused:false,origin:ORIGIN};
@@ -7318,6 +8190,176 @@ function updateGulls(dt){
 wrapHooks.push(d=>{ GULLS.shift(0,d); gullPerch.x=NaN; });
 // for automated checks: the flock, its context, and a switch that removes the gulls entirely
 window.__gulls={G:GULLS,ctx:gullCtx,get on(){ return gullsOn; },set on(v){ gullsOn=v; GULLS.mesh.visible=v; }};
+
+/* ================= the fishing fleet =================
+   One to three of the trawlers in each harbour are fishing boats. Each leaves its berth before dawn, motors out
+   through the harbour mouth and past the offshore islands to its fishing ground 3.0-3.8 km from the island's middle
+   line, works there slowly, and comes home in the afternoon to the same berth, which stays empty while it is out.
+   Where a boat is follows from the clock alone (fishPlan, fishState), so it is at sea whether or not anyone is
+   near, and holds still while the world is paused, hurries with T and jumps with N. The boats of the harbours
+   within FISH.near of the player are listed; those within sight are drawn. A boat coming home carries catch:true
+   for the gulls. */
+// speeds in m/s: in the harbour, under way and while fishing
+const FISH={vHarb:1.8, vWay:5, vFish:1.0, near:4500, showWay:2600, showMoored:700};
+const FISH_TRAWLERS=[5,6,7];
+const fishCache=new Map();
+// the fishing boats of a harbour and their berths, the same whenever they are asked for
+function fishBoats(H){
+  const key=SEED+':'+H.sd+':'+H.n; { const L=fishCache.get(key); if (L) return L; }
+  const L=[], S=H.sd, DB=dinghyBerth(H), rot=S>0?Math.PI:0, c=Math.cos(rot), s=Math.sin(rot), slots=[];
+  for (let x=H.x-H.W/2+5, q=0; x<H.x+H.W/2-4; x+=4.4, q++) slots.push({x,q,r:hash(H.n*31+q,S>0?3:4,4811)});
+  slots.sort((a,b)=>a.r-b.r);
+  const want=1+Math.floor(hash(H.n,S>0?5:6,4812)*2.6);
+  for (const sl of slots){ if (L.length>=want) break;
+    const idx=FISH_TRAWLERS[Math.floor(hash(H.n*31+sl.q,S>0?7:8,4813)*3)], Bt=BOATS[idx], x=sl.x, z=coastZ(S,x)-S*(0.9+Bt.aft);
+    if (DB && Math.abs(x-DB.x)<Bt.half+DGY_HALF+0.7) continue;
+    if (nearFerryRoute(x,z,16)) continue;
+    // the hull, with 15 cm to spare, clear of the quay and the shore, as placeBoat requires
+    const hw=Bt.half+0.15, va=-Bt.aft-0.15, vf=Bt.fore+0.15, vm=(va+vf)/2; let ok=true;
+    for (const [u,v] of [[-hw,va],[hw,va],[-hw,vf],[hw,vf],[0,va],[0,vf],[-hw,vm],[hw,vm]]) if (heightAtExact(x+c*u+s*v,z-s*u+c*v)>-0.2){ ok=false; break; }
+    if (!ok) continue;
+    L.push({key:key+':'+sl.q,H,q:sl.q,idx,L:BOATS[idx].L,bx:x,bz:z,brot:rot,ph:hash(H.n,sl.q,4814)*6.28,plan:null,x,z,heading:rot,speed:0,phase:'moored',dz:0,rec:null});
+  }
+  if (fishCache.size>4000) fishCache.clear();
+  fishCache.set(key,L); return L;
+}
+// whether a slot on a harbour's quay is a fishing boat's berth (buildHarbour leaves it for the fleet to draw)
+function fishBerthAt(H,x){ return fishBoats(H).some(f=>Math.abs(f.bx-x)<0.01); }
+// a course from a to b round the obstacles (islands, lighthouse rocks), as a list of points after a: an obstacle in
+// the way is passed on whichever side gives the shorter course, by a waypoint clear of every other obstacle and of the
+// mainland; an obstacle that holds either end is disregarded
+function fishRoute(a,b,obs,depth=0){
+  let hit=null, ht=2;
+  for (const o of obs){ if (Math.hypot(a[0]-o.x,a[1]-o.z)<o.r || Math.hypot(b[0]-o.x,b[1]-o.z)<o.r) continue;
+    const dx=b[0]-a[0], dz=b[1]-a[1], l2=dx*dx+dz*dz||1, t=clamp(((o.x-a[0])*dx+(o.z-a[1])*dz)/l2,0,1);
+    if (Math.hypot(o.x-a[0]-dx*t,o.z-a[1]-dz*t)<o.r && t<ht){ ht=t; hit=o; } }
+  if (!hit||depth>3) return [b];
+  const o=hit, dx=b[0]-a[0], dz=b[1]-a[1], l=Math.hypot(dx,dz)||1, nx=-dz/l, nz=dx/l;
+  let best=null, bl=Infinity;
+  for (const sg of [1,-1]){ const w=[o.x+nx*sg*(o.r+80),o.z+nz*sg*(o.r+80)];
+    if (obs.some(q=>q!==o && Math.hypot(w[0]-q.x,w[1]-q.z)<q.r) || seaDist(w[0],w[1])>-150) continue;
+    const r=[...fishRoute(a,w,obs,depth+1),...fishRoute(w,b,obs,depth+1)];
+    let len=0, p=a; for (const q of r){ len+=Math.hypot(q[0]-p[0],q[1]-p[1]); p=q; }
+    if (len<bl){ bl=len; best=r; } }
+  return best||[b];
+}
+// a course sampled every 15 m or less, with the speed at each piece: 1.8 m/s in the harbour and 5 m/s under way, easing
+// away from rest and back to it; times are in seconds of the world's clock
+function fishLine(pts,harbA,harbB){
+  const X=[pts[0][0]], Z=[pts[0][1]], D=[0], Tm=[0]; let d=0, t=0;
+  const total=pts.reduce((s,p,i)=>i?s+Math.hypot(p[0]-pts[i-1][0],p[1]-pts[i-1][1]):0,0);
+  for (let i=1;i<pts.length;i++){ const [ax,az]=pts[i-1], [bx,bz]=pts[i], len=Math.hypot(bx-ax,bz-az), n=Math.max(1,Math.ceil(len/15));
+    const harb=i<=harbA || i>pts.length-1-harbB;
+    for (let k=1;k<=n;k++){ const x=lerp(ax,bx,k/n), z=lerp(az,bz,k/n), ds=len/n, mx=lerp(ax,bx,(k-0.5)/n), mz=lerp(az,bz,(k-0.5)/n);
+      const dm=d+ds/2;
+      let v=harb?FISH.vHarb:FISH.vWay;
+      v*=Math.max(0.3,Math.min(1,dm/25,(total-dm)/25));
+      d+=ds; t+=ds/v; X.push(x); Z.push(z); D.push(d); Tm.push(t); } }
+  return {X,Z,D,Tm,T:t,len:d};
+}
+function fishAt(line,ts,out){
+  const Tm=line.Tm; if (ts<=0){ out[0]=line.X[0]; out[1]=line.Z[0]; out[2]=0; return out; }
+  if (ts>=line.T){ const n=Tm.length-1; out[0]=line.X[n]; out[1]=line.Z[n]; out[2]=line.len; return out; }
+  let lo=0, hi=Tm.length-1; while (hi-lo>1){ const m=(lo+hi)>>1; if (Tm[m]<=ts) lo=m; else hi=m; }
+  const f=(ts-Tm[lo])/(Tm[hi]-Tm[lo]); out[0]=lerp(line.X[lo],line.X[hi],f); out[1]=lerp(line.Z[lo],line.Z[hi],f); out[2]=lerp(line.D[lo],line.D[hi],f); return out;
+}
+// a boat's day: its courses out and home and the hours it leaves, reaches its ground, turns for home and berths
+function fishPlan(f){
+  if (f.plan) return f.plan;
+  const H=f.H, S=H.sd, hh=i=>hash(H.n*31+f.q,(S>0?11:12)+i*2,4820);
+  // the mouth: between the head of the cross mole and the other mole
+  const raX=H.x+H.side*H.W/2, tipX=raX-H.side*H.W*0.55, oaX=H.x-H.side*H.W/2, xm=(tipX+oaX)/2, zr=H.zo+S*2;
+  const harbOut=[[f.bx,f.bz],[f.bx,f.bz-S*8],[xm,zr+S*7],[xm,H.zo-S*40]];
+  const P4=[xm+(hh(0)-0.5)*200,H.zo-S*450];
+  // the obstacles on this side: the offshore islands and the lighthouse rocks
+  const obs=[], x0=Math.min(xm,xm-900), x1=Math.max(xm,xm+900);
+  for (let m=Math.floor((x0-ISL)/ISL);m<=Math.floor((x1+ISL)/ISL);m++){ const I=islandInfo(S,m); if (I) obs.push({x:I.x,z:I.z,r:I.ext+120}); }
+  for (let n=Math.floor((x0-RK_SP)/RK_SP);n<=Math.floor((x1+RK_SP)/RK_SP);n++){ const K=seaRockInfo(S,n); if (K) obs.push({x:K.x,z:K.z,r:K.r+60}); }
+  // the ground, 1.2-2 km from the shore among and just past the near islands, clear of the islands, the lighthouse
+  // rocks and the ferry crossings; of the places tried, the one nearest the boat's own distance and bearing whose
+  // course (at 5 m/s, 375 m to the game hour) leaves time in the day to fish
+  const D0=1500+500*hh(2), pref=(hh(1)-0.5)*1600, lead=fishRoute(harbOut[3],P4,obs), maxLen=(6.3*HOUR_SEC-45)*FISH.vWay;
+  let G=null, toG=null, best=Infinity;
+  for (const Dg of [2000,1750,1500,1350,1200]) for (const xo of [-800,-400,0,400,800]){ const xG=xm+xo, zG=coastZ(S,xG)-S*Dg;
+    if (obs.some(o=>Math.hypot(o.x-xG,o.z-zG)<o.r+150) || nearFerryRoute(xG,zG,150)) continue;
+    const r=fishRoute(P4,[xG,zG],obs); let len=500, a=P4; for (const p of r){ len+=Math.hypot(p[0]-a[0],p[1]-a[1]); a=p; }
+    if (len>maxLen) continue;
+    const sc=Math.abs(Dg-D0)*0.6+Math.abs(xo-pref)*0.3+len*0.1; if (sc<best){ best=sc; G=[xG,zG]; toG=r; } }
+  if (!G){ G=[xm,coastZ(S,xm)-S*1200]; toG=fishRoute(P4,G,obs); }
+  const xG=G[0], zG=G[1];
+  const outPts=[...harbOut,...lead,...toG];
+  const out=fishLine(outPts,3,0);
+  // the trawling circle at the ground, which passes through G
+  const Rc=150+100*hh(3), a0=hh(4)*6.283, dir=hh(7)<0.5?1:-1, Cx=xG+Rc*Math.cos(a0), Cz=zG+Rc*Math.sin(a0);
+  const loop=ts=>{ const a=a0+Math.PI+dir*ts*FISH.vFish/Rc; return [Cx+Rc*Math.cos(a),Cz+Rc*Math.sin(a),a]; };
+  // the hours: home between 14:30 and 17:00 after one and a half to three hours' fishing, leaving between 02:00 and
+  // 05:30; a long course shortens the fishing, to an hour at least, and then comes home later, by 18:00
+  const taW=14.5+2.5*hh(5), fishH=1.5+1.5*hh(6), estBack=out.T/HOUR_SEC;
+  const td=clamp(taW-fishH-out.T/HOUR_SEC-estBack,2.0,5.5), tG=td+out.T/HOUR_SEC, tr=Math.max(tG+1,taW-estBack);
+  const Q=loop((tr-tG)*HOUR_SEC);
+  const backPts=[[Q[0],Q[1]],...fishRoute(Q,P4,obs),...fishRoute(P4,harbOut[3],obs),harbOut[2],[f.bx,f.bz-S*16],[f.bx,f.bz]];
+  const back=fishLine(backPts,0,3), ta=tr+back.T/HOUR_SEC;
+  // the last piece of the way home is made astern, so that the boat lies stern-to as it did
+  f.plan={td,tG,tr,ta,out,back,loop,astern:back.len-16};
+  return f.plan;
+}
+const _fa=[0,0,0], _fb=[0,0,0];
+// where a boat is at hour h, and which way it heads
+function fishState(f,h){
+  const P=fishPlan(f);
+  if (h<P.td || h>=P.ta){ f.x=f.bx; f.z=f.bz; f.heading=f.brot; f.speed=0; f.phase=h>=P.ta&&h<P.ta+0.4?'settle':'moored'; return f; }
+  let line=null, ts=0;
+  if (h<P.tG){ line=P.out; ts=(h-P.td)*HOUR_SEC; f.phase='out'; }
+  else if (h>=P.tr){ line=P.back; ts=(h-P.tr)*HOUR_SEC; f.phase='back'; }
+  if (line){
+    fishAt(line,ts,_fa); f.x=_fa[0]; f.z=_fa[1];
+    fishAt(line,ts-0.5,_fb); const ax=_fb[0], az=_fb[1]; fishAt(line,ts+0.5,_fb);
+    f.speed=Math.hypot(_fb[0]-ax,_fb[1]-az);
+    if (line===P.back && _fa[2]>P.astern) f.heading=f.brot;
+    else { fishAt(line,ts-3,_fb); const bx=_fb[0], bz=_fb[1]; fishAt(line,ts+3,_fb); if (Math.hypot(_fb[0]-bx,_fb[1]-bz)>0.2) f.heading=Math.atan2(_fb[0]-bx,_fb[1]-bz); }
+  } else {
+    const q=P.loop((h-P.tG)*HOUR_SEC); f.x=q[0]; f.z=q[1]; f.speed=FISH.vFish; f.phase='fish';
+    const q2=P.loop((h-P.tG)*HOUR_SEC+2); f.heading=Math.atan2(q2[0]-q[0],q2[1]-q[1]);
+  }
+  return f;
+}
+let fleetList=[], fleetKey='', fishVoice=null;
+const fleetMeshes=new Map();
+function updateFleet(dt){
+  // the fishing boats of the harbours within reach, listed again as the player moves along the coast
+  const fk=SEED+':'+Math.round(player.x/400);
+  if (fk!==fleetKey){ fleetKey=fk; fleetList=[];
+    for (let n=Math.floor((player.x-FISH.near)/HARB);n<=Math.floor((player.x+FISH.near)/HARB);n++) for (const sd of SIDES){ const H=harbourInfo(sd,n); if (H) fleetList.push(...fishBoats(H)); } }
+  const shown=new Set(); let plans=0, near=null, nd=220;
+  for (const f of fleetList){
+    f.vis=false;
+    if (Math.abs(f.H.x-player.x)>FISH.showWay+1000) continue;
+    if (!f.plan){ if (plans>=4) continue; plans++; }   // no more than four courses are worked out in one frame
+    fishState(f,hour);
+    // across the north-south join the boat is seen where it lies on the player's side
+    f.dz=WRAP_Z*Math.round((player.z-f.z)/WRAP_Z);
+    // drawn by its distance from the camera, which in the bird's-eye view may be far from the player
+    const z=f.z+f.dz, d=Math.hypot(f.x-player.x,z-player.z), dc=Math.hypot(f.x-camera.position.x,z-camera.position.z);
+    f.dist=d; if (dc>(f.speed>0||f.phase==='fish'?FISH.showWay:FISH.showMoored)) continue;
+    f.vis=true; shown.add(f.key);
+    let m=fleetMeshes.get(f.key);
+    if (!m){ m=new THREE.Mesh(BOATS[f.idx].geo,matB); m.rotation.order='YXZ'; m.castShadow=true; m.receiveShadow=true; world.add(m); fleetMeshes.set(f.key,m); }
+    // the boats rise and fall on the sea as the moored ones do, and sit a little by the stern under way
+    m.position.set(f.x,0.05*Math.sin(time*1.2+f.ph),z);
+    m.rotation.set(0.03*Math.sin(time*0.9+f.ph)-Math.min(0.03,f.speed*0.006),f.heading,0.04*Math.sin(time*0.7+f.ph));
+    if (f.speed>0.3 && d<nd){ nd=d; near=f; }
+  }
+  for (const [k,m] of fleetMeshes) if (!shown.has(k)){ world.remove(m); fleetMeshes.delete(k); }
+  // the engine of the nearest boat under way: the ferry's engine, quieter and a little faster
+  if (!fishVoice && SND.ready && audioCtx) fishVoice=mkVoice('ferry_run','ferry',true);
+  if (fishVoice){ if (near) sndVoice(fishVoice,dt,0.35,near.x,1.2,near.z+near.dz,1.25); else sndVoice(fishVoice,dt,0,_sl.x,_sl.y,_sl.z); }
+}
+// across the join the boats need nothing more than to be listed again
+wrapHooks.push(()=>{ fleetKey=''; });
+// the deck and wheelhouse of a trawler, where gulls may stand once it has berthed (in the boat's own frame)
+const FISH_PERCH=[[0,2.86,-1.3],[0.6,2.86,-1.9],[-0.6,2.86,-0.7],[0,1.8,4.1],[0.85,1.2,-4.3],[-0.85,1.2,-4.3]];
+// for automated checks
+window.__fleet={get list(){ return fleetList; },fishPlan,fishState,FISH,update:updateFleet,get hour(){ return hour; },set hour(v){ hour=v; }};
 
 /* ================= statistics overlay (O): frame rate, draw distance and what is being drawn ================= */
 const statsEl=document.getElementById('stats'); let statsT=0, statsN=0, statsSum=0, statsWorst=0, statsLast=performance.now();

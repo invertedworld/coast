@@ -14,6 +14,7 @@
   "ferry_run": "sounds/ferry-engine.mp3",
   "ferry_idle": "sounds/ferry-engine.mp3",
   "ferry_wake": "sounds/ferry-wake.mp3",
+  "bow_wave": "sounds/bow-wave.mp3",
   "cat_mew": [
     "sounds/cat-mew-1.mp3",
     "sounds/cat-mew-2.mp3",
