@@ -1,0 +1,901 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coast · gulls</title>
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Alegreya+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#9fc0dc;font-family:'Alegreya Sans',system-ui,sans-serif;}
+  canvas{display:block;width:100%;height:100%;touch-action:none;}
+  #panel{position:fixed;top:12px;right:12px;width:260px;padding:12px 14px;border-radius:10px;
+    background:rgba(250,246,238,0.88);color:#2b2b35;font-size:15px;box-shadow:0 2px 14px rgba(0,0,0,0.15);}
+  #panel .row{display:grid;grid-template-columns:78px 1fr 58px;align-items:center;gap:6px;margin:5px 0;}
+  #panel .row.two{grid-template-columns:1fr 1fr;}
+  #panel label{color:#555}
+  #panel output{text-align:right;font-variant-numeric:tabular-nums;}
+  #panel input[type=range]{width:100%;accent-color:#2f5f8f;}
+  #panel button,#panel select{font:inherit;font-size:14px;padding:4px 6px;border:1px solid #c9bda9;border-radius:6px;background:#fffaf2;color:#2b2b35;cursor:pointer;}
+  #panel button.on{background:#2f5f8f;color:#fff;border-color:#2f5f8f;}
+  #panel .stats{margin-top:8px;font-size:13px;color:#555;font-variant-numeric:tabular-nums;}
+  @media (max-width:520px){ #panel{left:12px;right:12px;width:auto;top:auto;bottom:12px;} }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="panel">
+  <div class="row"><label for="n">Gulls</label><input id="n" type="range" min="10" max="200" step="1" value="80"><output id="nV">80</output></div>
+  <div class="row"><label for="w">Wind</label><input id="w" type="range" min="0" max="12" step="0.5" value="4"><output id="wV">4 m/s</output></div>
+  <div class="row"><label for="wd">Wind from</label><input id="wd" type="range" min="0" max="355" step="5" value="250"><output id="wdV">250°</output></div>
+  <div class="row"><label for="h">Time</label><input id="h" type="range" min="5" max="21.5" step="0.05" value="10"><output id="hV">10:00</output></div>
+  <div class="row two"><button id="pause">Pause</button><button id="walk">Walk to gulls</button></div>
+  <div class="row two"><select id="view">
+      <option value="overview">Overview</option><option value="flying">Flying gull</option>
+      <option value="perched">Perched gull</option><option value="following">Following gull</option>
+    </select><button id="next">Next gull</button></div>
+  <div class="row two"><button id="calls">Calls off</button><button id="reset">Player home</button></div>
+  <div class="row two"><button id="tracks">Tracks off</button><span></span></div>
+  <div class="stats" id="stats"></div>
+</div>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"}}</script>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js';
+
+const lerp=(a,b,t)=>a+(b-a)*t;
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const smooth=t=>{ t=clamp(t,0,1); return t*t*(3-2*t); };
+const hex=h=>new THREE.Color(h);
+
+/* ================= seagulls =================
+   Yellow-legged gulls (Larus michahellis): white head and body, mid-grey mantle and wings with a white trailing
+   edge, black wing tips, a yellow bill with a red spot and yellow legs. About one in seven is a brown immature bird.
+
+   createGulls(parent, opts) adds one InstancedMesh to parent and returns
+     { mesh, birds, thermals, update(dt, ctx), setCount(n), count, birdPosition(i, out), modeOf(i), shift(dx, dz),
+       reset(), shoreDistance(x, z), inland, dispose() }.
+   opts:  count (80), max (256), scale (1), range (240 m), shadows (true), random (Math.random),
+          inland (70 m): how far inland of the shoreline a flying gull may go; a steering force towards the sea
+            begins at a little over half that distance and grows smoothly to the limit,
+          perchInland (40 m): land perches further than this from the water are not used,
+          onCall({x,y,z,kind}) where kind is 'long', 'alarm' or 'mew'.
+   ctx, passed to every update:
+     player        {x,y,z} of the player (feet); gulls perched within a few metres of it take off
+     daylight      0 at night to 1 by day; below about 0.35 the gulls settle to roost
+     wind          {x,z} in m/s, the direction the air moves
+     groundHeight  (x,z) => height of whatever is underfoot (terrain, quays, rocks); below seaLevel is sea
+     seaLevel      0 in Coast
+     boats         [{x,z,heading,speed,length}], heading as in rotation.y (the bow points along sin, cos)
+     perches       [{x,y,z}] places a gull may stand: rock tops, quay edges, bollards, ridges
+     paused        while true the gulls hold still
+     origin        optional {x,y,z} of the floating origin; the mesh is placed there and instances relative to it
+     shoreDist     optional (x,z) => distance inland from the shoreline in metres (0 or less at sea); without it the
+                   distance is found by sampling groundHeight in rings round the point
+   The wings are posed in the vertex shader from four numbers per bird (shoulder and wrist angles, the sweep of the
+   hand and how far the wings are folded), so a frame costs one draw call and a few hundred floats. */
+function createGulls(parent, opts={}){
+  const MAX=opts.max??256, SCALE=opts.scale??1, RANGE=opts.range??240, INLAND=opts.inland??70, PERCH_IN=opts.perchInland??40, R=opts.random??Math.random, onCall=opts.onCall??null;
+  const TAU=Math.PI*2, cl=(v,a,b)=>Math.max(a,Math.min(b,v)), ease=(k,h)=>1-Math.exp(-k*h);
+  const wrap=a=>{ a=(a+Math.PI)%TAU; if (a<0) a+=TAU; return a-Math.PI; };
+  const SOAR=0, GLIDE=1, FOLLOW=2, LAND=3, PERCH=4, TAKEOFF=5, MODES=['soar','glide','follow','land','perch','takeoff'];
+
+  /* ---------- geometry: one bird, +z forward, +y up, in metres; aSeg 0 body, 1 arm, 2 hand, 3 legs ---------- */
+  function buildGeometry(){
+    const P=[], N=[], C=[], S=[], c=h=>new THREE.Color(h);
+    const WHITE=c('#f4f2ed'), MANTLE=c('#a2abb5'), BLACK=c('#24242a'), BILL=c('#f0c23a'), RED=c('#c9362b'),
+      LEG=c('#e3c04c'), EYE=c('#1d1d22'), UNDER=c('#eef0f0'), UNDERTIP=c('#4a4b52');
+    function tri(a,b,cc,col,seg,hint){
+      const ux=b[0]-a[0], uy=b[1]-a[1], uz=b[2]-a[2], vx=cc[0]-a[0], vy=cc[1]-a[1], vz=cc[2]-a[2];
+      let nx=uy*vz-uz*vy, ny=uz*vx-ux*vz, nz=ux*vy-uy*vx; const l=Math.hypot(nx,ny,nz); if (l<1e-12) return;
+      const mx=(a[0]+b[0]+cc[0])/3-hint[0], my=(a[1]+b[1]+cc[1])/3-hint[1], mz=(a[2]+b[2]+cc[2])/3-hint[2];
+      if (nx*mx+ny*my+nz*mz<0){ const t=b; b=cc; cc=t; nx=-nx; ny=-ny; nz=-nz; }
+      for (const p of [a,b,cc]){ P.push(p[0],p[1],p[2]); N.push(nx/l,ny/l,nz/l); C.push(col.r,col.g,col.b); S.push(seg); }
+    }
+    const quad=(a,b,cc,d,col,seg,hint)=>{ tri(a,b,cc,col,seg,hint); tri(a,cc,d,col,seg,hint); };
+    function box(cx,cy,cz,sx,sy,sz,col,seg){
+      const v=(i,j,k)=>[cx+i*sx/2,cy+j*sy/2,cz+k*sz/2], h=[cx,cy,cz];
+      for (const [a,b,cc,d] of [[v(-1,-1,1),v(1,-1,1),v(1,1,1),v(-1,1,1)],[v(-1,-1,-1),v(1,-1,-1),v(1,1,-1),v(-1,1,-1)],
+        [v(-1,1,-1),v(1,1,-1),v(1,1,1),v(-1,1,1)],[v(-1,-1,-1),v(1,-1,-1),v(1,-1,1),v(-1,-1,1)],
+        [v(1,-1,-1),v(1,1,-1),v(1,1,1),v(1,-1,1)],[v(-1,-1,-1),v(-1,1,-1),v(-1,1,1),v(-1,-1,1)]]) quad(a,b,cc,d,col,seg,h);
+    }
+    // body, head and bill lofted through eight-sided rings: [z, half width, half height, centre height]
+    const ST=[[-0.33,0.052,0.008,0.035],[-0.22,0.058,0.022,0.03],[-0.10,0.074,0.06,0.006],[0.03,0.082,0.075,0],
+      [0.12,0.06,0.06,0.02],[0.17,0.046,0.05,0.06],[0.215,0.043,0.047,0.075],[0.252,0.027,0.031,0.069],
+      [0.262,0.013,0.017,0.066],[0.298,0.009,0.013,0.061],[0.324,0.006,0.011,0.054]];
+    const K=8, rings=ST.map(([z,w,h,y])=>Array.from({length:K},(_,k)=>{ const a=k/K*TAU; return [w*Math.sin(a),y+h*Math.cos(a),z]; }));
+    for (let i=0;i<ST.length-1;i++){
+      const hint=[0,(ST[i][3]+ST[i+1][3])/2,(ST[i][0]+ST[i+1][0])/2], hm=(ST[i][2]+ST[i+1][2])/2;
+      for (let k=0;k<K;k++){
+        const a=rings[i][k], b=rings[i][(k+1)%K], cc=rings[i+1][(k+1)%K], d=rings[i+1][k];
+        const cy=(a[1]+b[1]+cc[1]+d[1])/4, cz=(a[2]+b[2]+cc[2]+d[2])/4, ny=(cy-hint[1])/hm;
+        let col=WHITE;
+        if (cz>0.262) col=(cz>0.29&&cz<0.315&&ny<-0.2)?RED:BILL;
+        else if (ny>0.3&&cz>-0.2&&cz<0.09) col=MANTLE;
+        quad(a,b,cc,d,col,0,hint);
+      }
+    }
+    const tail=[0,0.035,-0.345], tip=[0,0.046,0.338];
+    for (let k=0;k<K;k++){ tri(rings[0][k],rings[0][(k+1)%K],tail,WHITE,0,[0,0.035,-0.2]);
+      tri(rings[ST.length-1][k],rings[ST.length-1][(k+1)%K],tip,BILL,0,[0,0.055,0.3]); }
+    for (const s of [-1,1]){
+      box(s*0.039,0.087,0.219,0.012,0.013,0.013,EYE,0);
+      // legs, folded into the belly in flight; webbed feet
+      box(s*0.03,-0.122,0.006,0.012,0.135,0.012,LEG,3);
+      const f0=[s*0.03,-0.197,-0.004], f1=[s*0.06,-0.197,0.066], f2=[s*0.002,-0.197,0.066];
+      tri(f0,f1,f2,LEG,3,[s*0.03,-0.3,0.04]); tri(f0,f1,f2,LEG,3,[s*0.03,0,0.04]);
+      // wing: stations along the span [x, leading edge z, trailing edge z, raised spar height]
+      const W=[[0.05,0.075,-0.11,0.015],[0.2,0.085,-0.12,0.013],[0.34,0.07,-0.125,0.011],[0.54,-0.005,-0.13,0.008],[0.72,-0.072,-0.088,0.002]];
+      const y0=0.035;
+      for (let i=0;i<W.length-1;i++){
+        const A=W[i], B=W[i+1], seg=i<2?1:2, tipPart=i===3;
+        const pt=(St,f,top)=>{ const le=St[1], te=St[2], z=le+(te-le)*f; const y=top?y0+St[3]*(f<0.3?f/0.3:(1-f)/0.7):y0-0.003; return [s*St[0],y,z]; };
+        const strip=st=>1-0.026/Math.max(0.03,st[1]-st[2]);
+        const fA=[0,0.3,strip(A),1], fB=[0,0.3,strip(B),1];
+        const up=[s*(A[0]+B[0])/2,y0-0.2,(A[1]+A[2])/2];
+        for (let j=0;j<3;j++){
+          const col=tipPart?BLACK:(j===2?WHITE:MANTLE);
+          quad(pt(A,fA[j],true),pt(B,fB[j],true),pt(B,fB[j+1],true),pt(A,fA[j+1],true),col,seg,up);
+        }
+        quad(pt(A,0,false),pt(B,0,false),pt(B,1,false),pt(A,1,false),tipPart?UNDERTIP:UNDER,seg,[up[0],y0+0.2,up[2]]);
+        // the leading and trailing edges are closed so the wing has a little thickness when seen edge on
+        if (i===0) tri(pt(A,0,true),pt(A,0.3,true),pt(A,1,true),WHITE,seg,[s*0.5,y0,0]);
+      }
+    }
+    const g=new THREE.BufferGeometry();
+    g.setAttribute('position',new THREE.Float32BufferAttribute(P,3));
+    g.setAttribute('normal',new THREE.Float32BufferAttribute(N,3));
+    g.setAttribute('color',new THREE.Float32BufferAttribute(C,3));
+    g.setAttribute('aSeg',new THREE.Float32BufferAttribute(S,1));
+    g.computeBoundingSphere();
+    return g;
+  }
+
+  const GLSL_DEFORM=`
+    attribute vec4 iWing; attribute float iLeg; attribute float aSeg;
+    void gullRot(inout vec2 v,float a){ float c=cos(a), s=sin(a); v=vec2(c*v.x-s*v.y, s*v.x+c*v.y); }
+    void gullDeform(inout vec3 p, inout vec3 n){
+      if (aSeg>2.5){ p=mix(vec3(p.x*0.5,-0.03,0.0),p,iLeg); return; }
+      if (aSeg<0.5) return;
+      float s=sign(p.x);
+      vec3 sh=vec3(s*0.05,0.035,0.0), q=p-sh, m=n;
+      if (aSeg>1.5){
+        vec3 w=vec3(s*0.29,0.0,0.0), r=q-w; float k=tan(iWing.z);
+        r.z-=abs(r.x)*k; m.x+=k*s*m.z;
+        vec2 a=r.xy; gullRot(a,s*iWing.y); r.xy=a; a=m.xy; gullRot(a,s*iWing.y); m.xy=a;
+        q=w+r;
+      }
+      vec2 a=q.xy; gullRot(a,s*iWing.x); q.xy=a; a=m.xy; gullRot(a,s*iWing.x); m.xy=a;
+      vec3 spread=sh+q;
+      // folded: the wing lies back along the body, upper side out, the black primaries crossing over the tail
+      float u=abs(p.x)-0.05, c=p.z, t=p.y-0.035;
+      vec3 nF=vec3(s*0.55,0.835,0.0), cF=vec3(s*0.835,-0.55,0.0), sF=normalize(vec3(0.0,-0.09,-1.0));
+      vec3 folded=vec3(s*0.066,0.058,0.05)+sF*(u*0.58)+cF*(c*0.45)+nF*t-vec3(s*u*0.062,0.0,0.0);
+      vec3 nFold=sF*(n.x*s)+nF*n.y+cF*n.z;
+      p=mix(spread,folded,iWing.w);
+      n=normalize(mix(normalize(m),nFold,iWing.w));
+    }`;
+  function patch(sh,lit){
+    sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\n'+GLSL_DEFORM);
+    if (lit) sh.vertexShader=sh.vertexShader
+      .replace('#include <beginnormal_vertex>','vec3 objectNormal=vec3(normal); vec3 gP=vec3(position); gullDeform(gP,objectNormal);')
+      .replace('#include <begin_vertex>','vec3 transformed=gP;');
+    else sh.vertexShader=sh.vertexShader.replace('#include <begin_vertex>','vec3 gP=vec3(position), gN=vec3(0.0,1.0,0.0); gullDeform(gP,gN); vec3 transformed=gP;');
+  }
+
+  const geo=buildGeometry();
+  const wingA=new THREE.InstancedBufferAttribute(new Float32Array(MAX*4),4).setUsage(THREE.DynamicDrawUsage);
+  const legA=new THREE.InstancedBufferAttribute(new Float32Array(MAX),1).setUsage(THREE.DynamicDrawUsage);
+  geo.setAttribute('iWing',wingA); geo.setAttribute('iLeg',legA);
+  const mat=new THREE.MeshLambertMaterial({vertexColors:true}); mat.onBeforeCompile=sh=>patch(sh,true);
+  mat.customProgramCacheKey=()=>'gull';
+  const depth=new THREE.MeshDepthMaterial({depthPacking:THREE.RGBADepthPacking}); depth.onBeforeCompile=sh=>patch(sh,false);
+  depth.customProgramCacheKey=()=>'gullDepth';
+  const mesh=new THREE.InstancedMesh(geo,mat,MAX);
+  mesh.customDepthMaterial=depth; mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  mesh.frustumCulled=false; mesh.castShadow=opts.shadows??true; mesh.receiveShadow=false; mesh.count=0;
+  const ADULT=new THREE.Color(1,1,1), JUV=new THREE.Color('#b29c84');
+  for (let i=0;i<MAX;i++) mesh.setColorAt(i,ADULT);
+  parent.add(mesh);
+
+  /* ---------- state ---------- */
+  const birds=[], thermals=[], taken=new Set();
+  let t=0, lastCtx=null, want=Math.min(opts.count??80,MAX);
+  const ground=(ctx,x,z)=>ctx.groundHeight?ctx.groundHeight(x,z):-10;
+  const sea=ctx=>ctx.seaLevel??0;
+  const day=ctx=>ctx.daylight??1;
+  const W=ctx=>ctx.wind??{x:0,z:0};
+
+  /* ---------- the shore ---------- */
+  // distance inland from the shoreline (0 at sea) and the direction towards the nearest sea, into out {d, sx, sz, ok}
+  const DIRS=Array.from({length:12},(_,k)=>[Math.cos(k/12*TAU),Math.sin(k/12*TAU)]);
+  function shoreProbe(ctx,x,z,out={}){
+    const sl=sea(ctx);
+    if (ctx.shoreDist){
+      const f=ctx.shoreDist, e=4, gx=f(x+e,z)-f(x-e,z), gz=f(x,z+e)-f(x,z-e), l=Math.hypot(gx,gz);
+      out.d=Math.max(0,f(x,z)); out.ok=l>1e-6; if (out.ok){ out.sx=-gx/l; out.sz=-gz/l; } return out;
+    }
+    if (ground(ctx,x,z)<=sl){ out.d=0; out.ok=false; return out; }
+    const step=10, maxR=INLAND+60;
+    for (let r=step;r<=maxR;r+=step){
+      let sx=0, sz=0, n=0;
+      for (const [cx,cz] of DIRS) if (ground(ctx,x+cx*r,z+cz*r)<=sl){ sx+=cx; sz+=cz; n++; }
+      if (!n) continue;
+      const l=Math.hypot(sx,sz); if (l<1e-6){ out.d=r; out.ok=false; return out; }
+      const ux=sx/l, uz=sz/l; let lo=r-step, hi=r;
+      for (let k=0;k<4;k++){ const m=(lo+hi)/2; if (ground(ctx,x+ux*m,z+uz*m)<=sl) hi=m; else lo=m; }
+      out.d=(lo+hi)/2; out.sx=ux; out.sz=uz; out.ok=true; return out;
+    }
+    out.d=maxR+step; out.ok=false; return out;
+  }
+  const _pr={};
+  // whether there is land within reach of a point at sea: thermals and circling centres keep close to the coast
+  function nearLand(ctx,x,z,r){ const sl=sea(ctx); for (const rr of [r*0.5,r]) for (const [cx,cz] of DIRS) if (ground(ctx,x+cx*rr,z+cz*rr)>sl) return true; return false; }
+  function inBand(ctx,x,z,maxIn){ const pr=shoreProbe(ctx,x,z,_pr); return pr.d>0?pr.d<=maxIn:nearLand(ctx,x,z,35); }
+  // a place in the shore band near the player, searching further out if there is none close by
+  function bandSpot(ctx,maxIn){
+    const p=ctx.player;
+    for (let k=0;k<60;k++){ const a=R()*TAU, r=10+R()*(k<30?RANGE*0.35:RANGE*1.2), x=p.x+Math.cos(a)*r, z=p.z+Math.sin(a)*r;
+      if (inBand(ctx,x,z,maxIn)) return {x,z}; }
+    // out at sea, away from any shore (on a ferry, say), the gulls circle over the open water near the player
+    for (let k=0;k<30;k++){ const a=R()*TAU, r=20+R()*RANGE*0.3, x=p.x+Math.cos(a)*r, z=p.z+Math.sin(a)*r;
+      if (shoreProbe(ctx,x,z,_pr).d<=0 && ground(ctx,x,z)<sea(ctx)-1) return {x,z}; }
+    return null;
+  }
+  function newThermal(ctx,T){
+    // the circle, at most 1.2 times the thermal's radius, stays inside the inland limit
+    const r=15+R()*13, s=bandSpot(ctx,Math.max(5,INLAND*0.45-r*0.5));
+    if (!s && T) { T.life=20; return T; }
+    const at=s||{x:ctx.player.x,z:ctx.player.z};
+    return Object.assign(T||{},{x:at.x,z:at.z,r,dir:R()<0.5?1:-1,top:14+R()*20,lift:0.9+R()*0.8,life:70+R()*120,chk:R(),gen:((T&&T.gen)||0)+1});
+  }
+  function nearestThermal(b,except){
+    let best=null, bd=Infinity;
+    for (const T of thermals){ if (T===except) continue; const d=Math.hypot(T.x-b.x,T.z-b.z)+R()*40; if (d<bd){ bd=d; best=T; } }
+    return best||thermals[0];
+  }
+  function waterSpot(ctx,cx,cz,rMin,rMax){
+    for (let k=0;k<40;k++){ const a=R()*TAU, r=rMin+R()*(rMax-rMin), x=cx+Math.cos(a)*r, z=cz+Math.sin(a)*r, g=ground(ctx,x,z)-sea(ctx);
+      if (g<-1.2 && (g>-30 || k>=20)) return {x,y:sea(ctx),z,water:true}; }
+    return null;
+  }
+  // land perches are used only near the water; the answer is kept for each perch object
+  const perchNear=new WeakMap();
+  function perchOK(ctx,q){ let v=perchNear.get(q); if (v===undefined){ v=shoreProbe(ctx,q.x,q.z,_pr).d<=PERCH_IN; perchNear.set(q,v); } return v; }
+  function pickPerch(b,ctx){
+    const p=ctx.player, list=ctx.perches||[], roost=day(ctx)<0.35;
+    if (R()<(roost?0.5:0.35)){ const w=waterSpot(ctx,b.x,b.z,10,90)||waterSpot(ctx,p.x,p.z,15,RANGE*0.6); if (w) return w; }
+    let best=null, bs=-Infinity;
+    for (let k=0;k<24&&list.length;k++){ const q=list[(R()*list.length)|0]; if (taken.has(q)||!perchOK(ctx,q)) continue;
+      const d=Math.hypot(q.x-b.x,q.z-b.z), dp=Math.hypot(q.x-p.x,q.z-p.z); if (dp<b.scareR+4||d>150) continue;
+      const sc=-d*0.025-dp*0.004+R(); if (sc>bs){ bs=sc; best=q; } }
+    if (best) return best;
+    const a=R()*TAU; return waterSpot(ctx,b.x,b.z,10,120)||{x:b.x+Math.cos(a)*40,y:sea(ctx),z:b.z+Math.sin(a)*40,water:true};
+  }
+
+  function makeBird(i){
+    return {i,mode:SOAR,x:0,y:20,z:0,psi:R()*TAU,sp:9,vy:0,yawRate:0,bank:0,pitch:0,ph:R()*TAU,ph2:R()*TAU,flap:0,drive:0,
+      freq:2.6+R()*0.6,baseFreq:0,burst:0,nextBurst:2+R()*8,fold:0,legs:0,size:0.92+R()*0.16,juv:R()<0.14,
+      th:null,orbR:20,top:30,timer:10,tx:0,ty:0,tz:0,perch:null,landPhase:0,minD:1e9,ax:0,az:0,boat:null,rejoin:false,
+      fBack:6,fSide:0,fAlt:8,fDir:1,diveT:20,scareR:6+R()*6,flush:-1,raise:0,nextRaise:15+R()*40,callT:5+R()*40,
+      age:0,psiT:0,bob:0,sx:0,sy:0,sz:0,extra:0,y0:0,flare:0,shT:R()*0.5,inl:0,seaX:0,seaZ:0,seaOK:false};
+  }
+  function setMode(b,m){ b.mode=m; b.age=0; }
+  function freePerch(b){ if (b.perch) taken.delete(b.perch); b.perch=null; }
+  function startSoar(b,T,ctx){
+    setMode(b,SOAR); b.th=T||nearestThermal(b); b.orbR=b.th.r*(0.7+R()*0.5); b.top=b.th.top*(0.6+R()*0.5); b.timer=25+R()*60;
+  }
+  function startGlide(b,T){ setMode(b,GLIDE); b.th=T; b.tx=T.x; b.tz=T.z; b.ty=Math.max(12,b.y-6+R()*10); }
+  function startFollow(b,B){
+    setMode(b,FOLLOW); b.boat=B; b.fBack=2+R()*10; b.fSide=(R()-0.5)*8; b.fAlt=3.5+R()*8; b.fDir=R()<0.5?1:-1;
+    b.orbR=5+R()*5; b.timer=60+R()*150; b.diveT=8+R()*30;
+  }
+  function startLand(b,ctx,P){
+    freePerch(b); P=P||pickPerch(b,ctx); b.perch=P; if (!P.water) taken.add(P);
+    setMode(b,LAND); b.landPhase=0; b.minD=1e9;
+    const w=W(ctx), ws=Math.hypot(w.x,w.z);
+    // land into the wind, approaching from downwind; in still air, from the side the bird is already on
+    let ux, uz; if (ws>1.5){ ux=w.x/ws; uz=w.z/ws; } else { const d=Math.hypot(b.x-P.x,b.z-P.z)||1; ux=(b.x-P.x)/d; uz=(b.z-P.z)/d; }
+    b.ax=P.x+ux*22; b.az=P.z+uz*22;
+    // an approach from deep inland is turned round to come in from the seaward side
+    if (!P.water && shoreProbe(ctx,b.ax,b.az,_pr).d>PERCH_IN+8){ b.ax=P.x-ux*22; b.az=P.z-uz*22; }
+  }
+  function startTakeoff(b,ctx,scared){
+    const p=ctx.player, w=W(ctx), ws=Math.hypot(w.x,w.z);
+    const water=b.perch&&b.perch.water; freePerch(b);
+    setMode(b,TAKEOFF);
+    if (scared) b.psi=Math.atan2(b.x-p.x,b.z-p.z)+(R()-0.5)*0.9;
+    else if (ws>1.5) b.psi=Math.atan2(-w.x,-w.z)+(R()-0.5)*0.6;
+    b.sp=water?1.5:2.5; b.vy=water?0.8:1.8; b.flap=0.6; b.freq=3.6+R()*0.5; b.timer=2.6+R()*1.2; b.y0=b.y; b.yawRate=0;
+    if (onCall && R()<(scared?0.55:0.15)) onCall({x:b.x,y:b.y,z:b.z,kind:scared?'alarm':'mew'});
+  }
+  function spawn(b,ctx){
+    const p=ctx.player, roost=day(ctx)<0.35, boats=ctx.boats||[], r=R();
+    b.juv=R()<0.14; mesh.setColorAt(b.i,b.juv?JUV:ADULT); if (mesh.instanceColor) mesh.instanceColor.needsUpdate=true;
+    if (r<(roost?0.85:0.28)){
+      b.x=p.x; b.z=p.z; const P=pickPerch(b,ctx); b.perch=P; if (!P.water) taken.add(P);
+      setMode(b,PERCH); b.x=P.x; b.z=P.z; b.y=P.y+(P.water?0.035:0.2)*SCALE*b.size; b.fold=1; b.legs=P.water?0:1; b.sp=0;
+      b.psi=R()*TAU; b.psiT=b.psi; b.timer=30+R()*120; return;
+    }
+    if (r<0.48 && boats.length){ const B=boats[(R()*boats.length)|0]; startFollow(b,B);
+      b.x=B.x+(R()-0.5)*30; b.z=B.z+(R()-0.5)*30; b.y=b.fAlt; return; }
+    const T=thermals[(R()*thermals.length)|0]; startSoar(b,T,ctx);
+    const a=R()*TAU; b.x=T.x+Math.cos(a)*b.orbR; b.z=T.z+Math.sin(a)*b.orbR; b.y=8+R()*(b.top-8);
+    b.psi=Math.atan2(-Math.sin(a)*T.dir,Math.cos(a)*T.dir);
+  }
+
+  /* ---------- flight ---------- */
+  // steer towards a direction, height and airspeed with limited turn rate, coordinated banking and gliding sink;
+  // the bird flaps when it needs to climb faster than the air carries it, when slow and during bursts
+  function fly(b,ctx,h,dx,dz,alt,spd,lift,maxYaw,landing){
+    const w=W(ctx), ws=Math.hypot(w.x,w.z);
+    if (b.sx||b.sz){ dx+=b.sx; dz+=b.sz; }
+    // keeping to the coast: beyond a little over half the inland limit a pull towards the sea sets in, growing smoothly
+    // so that at the limit it outweighs whatever else the gull is doing; the final approach to a perch is exempt
+    if (!landing){
+      b.shT-=h;
+      if (b.shT<=0){ const pr=shoreProbe(ctx,b.x,b.z,_pr); b.inl=pr.d;
+        if (pr.ok){ b.seaX=pr.sx; b.seaZ=pr.sz; b.seaOK=true; }
+        else if (pr.d>0 && !b.seaOK){ const T=nearestThermal(b); if (T){ const l=Math.hypot(T.x-b.x,T.z-b.z)||1; b.seaX=(T.x-b.x)/l; b.seaZ=(T.z-b.z)/l; } }
+        b.shT=b.inl<INLAND*0.35?0.6:0.2; }
+      // an onshore wind carries a gull inland while it turns, so the pull starts earlier the stronger it blows
+      const onshore=b.inl>0?Math.max(0,-(w.x*b.seaX+w.z*b.seaZ)):0, de=b.inl+onshore*6;
+      const u=cl((de-INLAND*0.55)/(INLAND*0.45),0,1), k=u*u*(3-2*u)*2.5+Math.max(0,(de-INLAND)/15);
+      if (k>0){ const l=Math.hypot(dx,dz)||1; dx=dx/l+b.seaX*k; dz=dz/l+b.seaZ*k;
+        spd+=Math.min(k,2)*(1.5+onshore*0.4); maxYaw=Math.max(maxYaw,0.9+Math.min(k,2)*0.35); }
+    }
+    const diff=wrap(Math.atan2(dx,dz)-b.psi);
+    b.yawRate+=(cl(diff*1.2,-maxYaw,maxYaw)-b.yawRate)*ease(2.2,h);
+    b.psi=wrap(b.psi+b.yawRate*h);
+    // the floor looks ahead along the course, so a gull rises before a slope instead of on it
+    const fx=Math.sin(b.psi), fz=Math.cos(b.psi), ahead=landing?b.x:b.x+fx*12, aheadZ=landing?b.z:b.z+fz*12;
+    const floor=Math.max(ground(ctx,b.x,b.z),ground(ctx,ahead,aheadZ),sea(ctx))+(landing?0:3);
+    if (!landing) alt=Math.max(alt,floor+1.5);
+    alt+=b.sy;
+    const passive=lift-0.6;
+    let wantVy=cl((alt-b.y)*0.4,-3.5,2.8);
+    let drive=(b.burst>0||b.extra>0)?1:0;
+    if (wantVy>passive+0.35) drive=1;
+    if (b.sp<6.2) drive=1;
+    b.drive=drive;
+    b.flap+=(drive-b.flap)*ease(drive>b.flap?4:1.8,h);
+    const vyT=Math.min(wantVy,passive+2.8*b.flap);
+    b.vy+=(vyT-b.vy)*ease(1.5,h);
+    // a landing gull sets its airspeed from the ground speed it wants plus the headwind, so it can hang in a gale
+    const spT=landing?cl(spd-(w.x*fx+w.z*fz),2.5,14):spd+ws*0.35-Math.min(0,b.vy)*0.5;
+    b.sp+=(spT-b.sp)*ease(landing?1.6:0.8,h);
+    const bankT=cl(Math.atan(b.sp*b.yawRate/9.81),-1.0,1.0);
+    b.bank+=(bankT-b.bank)*ease(3.5,h);
+    b.pitch+=(Math.atan2(b.vy,Math.max(b.sp,2))*0.6+b.flare-b.pitch)*ease(3,h);
+    b.x+=(fx*b.sp+w.x)*h; b.z+=(fz*b.sp+w.z)*h; b.y+=b.vy*h;
+    if (!landing && b.y<floor-1.5){ b.y+=(floor-1.5-b.y)*ease(3,h); b.vy=Math.max(b.vy,0); b.drive=1; }
+    if (b.flap>0.01) b.ph+=TAU*b.freq*h*(0.6+0.4*b.flap);
+  }
+
+  function separate(){
+    for (const b of birds){ b.sx=b.sy=b.sz=0; }
+    for (let i=0;i<birds.length;i++){ const a=birds[i]; if (a.mode>FOLLOW) continue;
+      for (let j=i+1;j<birds.length;j++){ const c=birds[j]; if (c.mode>FOLLOW) continue;
+        const dx=a.x-c.x, dy=a.y-c.y, dz=a.z-c.z, d2=dx*dx+dy*dy+dz*dz; if (d2>16||d2<1e-6) continue;
+        const k=(16-d2)/16/Math.sqrt(d2);
+        a.sx+=dx*k; a.sz+=dz*k; a.sy+=Math.sign(dy||1)*k*2; c.sx-=dx*k; c.sz-=dz*k; c.sy-=Math.sign(dy||1)*k*2; } }
+  }
+
+  function step(ctx,h){
+    t+=h;
+    const p=ctx.player, boats=ctx.boats||[], light=day(ctx), roost=light<0.35, w=W(ctx);
+    const nT=cl(Math.round(birds.length/24),2,8);
+    while (thermals.length<nT) thermals.push(newThermal(ctx));
+    // a thermal leans and drifts downwind more slowly than the wind itself, and is let go once it has drifted well
+    // away or out of the shore band
+    for (const T of thermals){ T.x+=w.x*0.4*h; T.z+=w.z*0.4*h; T.life-=h; T.chk-=h;
+      let out=false; if (T.chk<=0){ T.chk=1; out=!inBand(ctx,T.x,T.z,INLAND*0.45-T.r*0.5+10); }
+      if (out||T.life<0||Math.hypot(T.x-p.x,T.z-p.z)>RANGE*0.6) newThermal(ctx,T); }
+    const nearPlayer=thermals.some(T=>Math.hypot(T.x-p.x,T.z-p.z)<RANGE);
+    separate();
+    const followers=birds.reduce((n,b)=>n+(b.mode===FOLLOW),0);
+    for (const b of birds){
+      b.age+=h;
+      if (b.mode<=FOLLOW){
+        b.nextBurst-=h; b.burst-=h;
+        if (b.nextBurst<=0){ b.burst=(2+R()*4)/b.freq; b.nextBurst=b.mode===FOLLOW?3+R()*6:6+R()*14; }
+        b.callT-=h; if (b.callT<=0){ b.callT=20+R()*70; if (onCall && R()<light) onCall({x:b.x,y:b.y,z:b.z,kind:R()<0.6?'long':'mew'}); }
+        // a bird that has strayed far from the player is brought back towards it
+        const dp=Math.hypot(b.x-p.x,b.z-p.z);
+        if (dp>RANGE*2 && nearPlayer){ spawn(b,ctx); continue; }
+        if (dp>RANGE*1.2 && b.mode!==GLIDE && b.mode!==FOLLOW) startGlide(b,nearestThermal({x:p.x,z:p.z}));
+        if (roost && b.mode!==FOLLOW && R()<h*0.08) startLand(b,ctx);
+        // a boat passing close by draws gulls after it, now and then
+        else if (!roost && b.mode!==FOLLOW && followers<birds.length*0.3 && R()<h*0.04)
+          for (const B of boats) if (Math.hypot(B.x-b.x,B.z-b.z)<150){ startFollow(b,B); break; }
+      }
+      b.flare=0; b.extra=0;
+      switch (b.mode){
+      case SOAR: {
+        const T=b.th; if (!T||!thermals.includes(T)){ startSoar(b,nearestThermal(b),ctx); break; }
+        const rx=b.x-T.x, rz=b.z-T.z, d=Math.hypot(rx,rz)||1, k=cl((d-b.orbR)/b.orbR*1.6,-0.8,1.6);
+        const tx=-rz/d*T.dir, tz=rx/d*T.dir;
+        const lift=d<T.r*1.5?T.lift*(roost?0.3:1):0;
+        fly(b,ctx,h,tx-rx/d*k,tz-rz/d*k,b.top+3*Math.sin(t*0.2+b.ph2),8.6+b.size,lift,0.9,false);
+        b.timer-=h*(b.y>b.top-2?2:1);
+        if (b.timer<=0){
+          const B=boats.length?boats.reduce((m,o)=>Math.hypot(o.x-b.x,o.z-b.z)<Math.hypot(m.x-b.x,m.z-b.z)?o:m):null;
+          const r=R();
+          if (roost||r<0.2) startLand(b,ctx);
+          else if (B && Math.hypot(B.x-b.x,B.z-b.z)<220 && followers<birds.length*0.3 && r<0.45) startFollow(b,B);
+          else if (r<0.75) startGlide(b,nearestThermal(b,T));
+          else startSoar(b,T,ctx);
+        }
+        break; }
+      case GLIDE: {
+        const dx=b.tx-b.x, dz=b.tz-b.z, d=Math.hypot(dx,dz);
+        fly(b,ctx,h,dx,dz,b.ty,10.5,0,0.8,false);
+        if (d<25 || b.age>60) startSoar(b,b.th&&thermals.includes(b.th)?b.th:nearestThermal(b),ctx);
+        break; }
+      case FOLLOW: {
+        const B=b.boat; if (!B||!boats.includes(B)){ startSoar(b,nearestThermal(b),ctx); break; }
+        const fx=Math.sin(B.heading), fz=Math.cos(B.heading), L=(B.length||8)/2, v=B.speed||0;
+        // circle a point that hangs behind the stern and moves with the boat, a little ahead of where it is now
+        const cx=B.x-fx*(L+b.fBack)+fz*b.fSide+fx*v*1.5, cz=B.z-fz*(L+b.fBack)-fx*b.fSide+fz*v*1.5;
+        // the circle is held upwind of the slot by the drift the wind would give it, so the wheeling gulls stay over the wake
+        const ox=cx-w.x*1.2, oz=cz-w.z*1.2;
+        const rx=b.x-ox, rz=b.z-oz, d=Math.hypot(rx,rz)||1, k=cl((d-b.orbR)/b.orbR*1.8,-0.8,2.5);
+        const tx=-rz/d*b.fDir+fx*v*0.08, tz=rx/d*b.fDir+fz*v*0.08;
+        let dx=tx-rx/d*k, dz=tz-rz/d*k, spd=7.2+v*0.4+(d>40?3:0);
+        // a fast boat such as a ferry is kept pace with from a slot astern and to one side, since a gull cannot
+        // circle a point moving nearly as fast as it flies; slow boats are circled
+        const fm=cl((v-2.5)/4,0,1);
+        if (fm>0){
+          const gx=B.x-fx*(L+b.fBack)+fz*b.fSide*1.5-b.x, gz=B.z-fz*(L+b.fBack)-fx*b.fSide*1.5-b.z, gd=Math.hypot(gx,gz), q=1.2/Math.max(gd,6);
+          const ax=fx+gx*q, az=fz+gz*q, la=Math.hypot(ax,az)||1, lo=Math.hypot(dx,dz)||1;
+          dx=dx/lo*(1-fm)+ax/la*fm; dz=dz/lo*(1-fm)+az/la*fm;
+          spd=spd*(1-fm)+Math.max(7,v+cl((gx*fx+gz*fz)*0.45,-3,7))*fm;
+        }
+        fly(b,ctx,h,dx,dz,b.fAlt+1.5*Math.sin(t*0.37+b.ph2),spd,0.4,1.7,false);
+        b.timer-=h; b.diveT-=h;
+        if (b.diveT<=0){ b.diveT=10+R()*35;
+          if (R()<0.5){ const P={x:B.x-fx*(L+6+R()*16)+fz*(R()-0.5)*6,y:sea(ctx),z:B.z-fz*(L+6+R()*16)-fx*(R()-0.5)*6,water:true};
+            if (ground(ctx,P.x,P.z)<sea(ctx)-1){ b.rejoin=true; startLand(b,ctx,P); break; } } }
+        if (b.timer<=0||roost){ b.boat=null; b.rejoin=false; if (roost) startLand(b,ctx); else startSoar(b,nearestThermal(b),ctx); }
+        break; }
+      case LAND: {
+        const P=b.perch, ph=(P.water?0.035:0.2)*SCALE*b.size, gy=P.y+ph;
+        if (b.landPhase===0){
+          const dx=b.ax-b.x, dz=b.az-b.z, d=Math.hypot(dx,dz);
+          fly(b,ctx,h,dx,dz,gy+6,9.5,0,1.1,false);
+          if (d<12||b.age>25){ b.landPhase=1; b.minD=1e9; }
+        } else {
+          const dx=P.x-b.x, dz=P.z-b.z, d=Math.hypot(dx,dz), dy=gy-b.y;
+          b.flare=cl(1-d/8,0,1)*0.45; b.extra=d<10?1:0;
+          b.legs+=((d<14?1:0)-b.legs)*ease(3,h);
+          if (d<4 && Math.abs(dy)<3){
+            // the last few metres: the gull hangs on its wings and lets itself down onto the spot
+            const D=Math.hypot(d,dy)||1e-6, v=Math.min(4,0.4+D*1.1)*h, k=Math.min(1,v/D);
+            b.x+=dx*k; b.z+=dz*k; b.y+=dy*k; b.sp+=(1.5-b.sp)*ease(3,h); b.vy=0; b.flap+=(1-b.flap)*ease(4,h);
+            b.ph+=TAU*b.freq*h; b.bank*=1-ease(4,h); b.pitch+=(0.35-b.pitch)*ease(4,h); b.yawRate=0;
+            if (d>0.3) b.psi=wrap(b.psi+cl(wrap(Math.atan2(dx,dz)-b.psi),-1,1)*ease(3,h));
+            if (D<0.06){ setMode(b,PERCH); b.sp=0; b.vy=0; b.x=P.x; b.z=P.z; b.y=gy; b.psiT=b.psi; b.timer=b.rejoin?3+R()*8:(roost?1e9:25+R()*110); }
+            break;
+          }
+          fly(b,ctx,h,dx,dz,gy+d*0.25,cl(1.2+d*0.33,1.2,9.5),0,2.4,true);
+          b.minD=Math.min(b.minD,d);
+          if (b.minD<7 && d>b.minD+9) startLand(b,ctx,P);   // overshot: go round again
+          else if (b.age>60) startLand(b,ctx);                // beaten by the wind: choose somewhere nearer
+        }
+        break; }
+      case PERCH: {
+        const P=b.perch||{x:b.x,y:b.y,z:b.z,water:true}, water=!!P.water;
+        b.fold+=(1-b.fold)*ease(2.2,h); b.flap*=1-ease(6,h);
+        b.legs+=((water?0:1)-b.legs)*ease(2,h);
+        b.bank*=1-ease(3,h); b.pitch*=1-ease(3,h);
+        if (water){ b.x+=w.x*0.06*h; b.z+=w.z*0.06*h; P.x=b.x; P.z=b.z;
+          b.y=sea(ctx)+0.035*SCALE*b.size+0.03*Math.sin(t*1.3+b.ph2)+0.012*Math.sin(t*2.7+b.ph);
+          b.pitch=0.05*Math.cos(t*1.3+b.ph2); b.bank=0.04*Math.sin(t*1.1+b.ph); }
+        else { b.y=P.y+0.2*SCALE*b.size; b.pitch=0.13; }   // a standing gull holds its body tilted up a little
+        // gulls stand facing into the wind and shift round now and then
+        const ws=Math.hypot(w.x,w.z);
+        if (R()<h*0.12) b.psiT=ws>2?Math.atan2(-w.x,-w.z)+(R()-0.5)*0.7:b.psi+(R()-0.5)*2;
+        b.psi=wrap(b.psi+cl(wrap(b.psiT-b.psi),-1,1)*ease(1.2,h));
+        b.nextRaise-=h; if (b.nextRaise<=0){ b.raise=1.8; b.nextRaise=20+R()*60; if (onCall&&R()<0.5*light) onCall({x:b.x,y:b.y,z:b.z,kind:'long'}); }
+        if (b.raise>0) b.raise-=h;
+        const dp=Math.hypot(b.x-p.x,b.z-p.z,b.y-(p.y??0));
+        let go=dp<b.scareR*(water?1.3:1);
+        for (const B of boats) if (water && Math.hypot(B.x-b.x,B.z-b.z)<(B.length||8)*0.5+6) go=true;
+        if (b.flush>0){ b.flush-=h; if (b.flush<=0){ b.flush=-1; go=true; } }
+        if (go){
+          startTakeoff(b,ctx,true);
+          // neighbours take fright a moment later
+          for (const o of birds) if (o.mode===PERCH && o.flush<0 && Math.hypot(o.x-b.x,o.z-b.z)<9) o.flush=0.15+R()*0.8;
+          break; }
+        b.timer-=h*(roost?0:1);
+        if (b.timer<=0) startTakeoff(b,ctx,false);
+        break; }
+      case TAKEOFF: {
+        b.extra=1; b.fold+=(0-b.fold)*ease(9,h);
+        if (b.age>0.35) b.legs+=(0-b.legs)*ease(7,h);
+        fly(b,ctx,h,Math.sin(b.psi),Math.cos(b.psi),b.y0+14,9,0,0.6,b.age<1);
+        b.timer-=h;
+        if (b.timer<=0){ b.freq=2.6+R()*0.6;
+          if (b.rejoin && b.boat && boats.includes(b.boat)){ b.rejoin=false; startFollow(b,b.boat); }
+          else if (roost) startLand(b,ctx); else startSoar(b,nearestThermal(b),ctx); }
+        break; }
+      }
+      if (b.mode<=FOLLOW||b.mode===TAKEOFF) b.fold+=(0-b.fold)*ease(6,h);
+      if (b.mode<=FOLLOW) b.legs+=(0-b.legs)*ease(3,h);
+    }
+  }
+
+  /* ---------- writing the instances ---------- */
+  const M=new THREE.Matrix4(), Q=new THREE.Quaternion(), E=new THREE.Euler(0,0,0,'YXZ'), V=new THREE.Vector3(), Sv=new THREE.Vector3();
+  function write(ctx){
+    const o=ctx&&ctx.origin, ox=o?o.x:0, oy=o?o.y:0, oz=o?o.z:0; mesh.position.set(ox,oy,oz);
+    const wa=wingA.array, la=legA.array;
+    for (let i=0;i<birds.length;i++){
+      const b=birds[i], f=b.flap, s=Math.sin(b.ph), c=Math.cos(b.ph);
+      // gliding: a shallow dihedral at the shoulder, the hand angled down a little and swept back with speed
+      const g1=0.1+0.05*Math.sin(t*0.8+b.ph2), g2=-0.12-0.05*Math.sin(t*0.6+b.ph2*1.7), gs=0.08+cl((b.sp-9)/5,0,1)*0.4;
+      // flapping: a deeper stroke on take-off and landing (b.extra) than in cruising flight
+      const amp=b.extra?0.6:0.46;
+      let th1=g1+(0.12+amp*s-g1)*f, th2=g2+(amp*0.55*Math.sin(b.ph-0.9)-g2)*f, sw=gs+(0.1+0.42*Math.max(0,c)-gs)*f, fold=b.fold;
+      if (b.raise>0){ const k=Math.sin(Math.PI*cl(b.raise/1.8,0,1)); th1=lerpN(th1,1.05,k); th2=lerpN(th2,0.2,k); sw=lerpN(sw,0.05,k); fold*=1-k*0.85; }
+      if (b.flare>0){ sw*=1-b.flare; }
+      wa[i*4]=th1; wa[i*4+1]=th2; wa[i*4+2]=sw; wa[i*4+3]=fold; la[i]=b.legs;
+      E.set(-b.pitch,b.psi,-b.bank); Q.setFromEuler(E);
+      V.set(b.x-ox,b.y-oy-0.025*c*f*SCALE,b.z-oz); Sv.setScalar(SCALE*b.size);
+      M.compose(V,Q,Sv); mesh.setMatrixAt(i,M);
+    }
+    mesh.count=birds.length; mesh.instanceMatrix.needsUpdate=true; wingA.needsUpdate=true; legA.needsUpdate=true;
+  }
+  const lerpN=(a,b,k)=>a+(b-a)*k;
+
+  function resize(ctx){
+    while (birds.length>want){ const b=birds.pop(); freePerch(b); }
+    while (birds.length<want){ const b=makeBird(birds.length); birds.push(b); spawn(b,ctx); }
+  }
+
+  return {
+    mesh, birds, thermals,
+    get count(){ return want; },
+    setCount(n){ want=Math.max(0,Math.min(MAX,n|0)); if (lastCtx) resize(lastCtx); },
+    update(dt,ctx){
+      lastCtx=ctx;
+      if (!thermals.length) for (let k=0;k<2;k++) thermals.push(newThermal(ctx));
+      resize(ctx);
+      if (!ctx.paused && dt>0){ const n=Math.ceil(Math.min(dt,0.25)/(1/30)), h=Math.min(dt,0.25)/n; for (let k=0;k<n;k++) step(ctx,h); }
+      write(ctx);
+    },
+    // moves every gull, its targets and the thermals, as when the world is shifted under them
+    shift(dx,dz){ const ps=new Set();
+      for (const b of birds){ b.x+=dx; b.z+=dz; b.tx+=dx; b.tz+=dz; b.ax+=dx; b.az+=dz; if (b.perch) ps.add(b.perch); }
+      for (const P of ps){ P.x+=dx; P.z+=dz; } for (const T of thermals){ T.x+=dx; T.z+=dz; } },
+    // forgets every gull and thermal; the flock is placed afresh on the next update
+    reset(){ birds.length=0; thermals.length=0; taken.clear(); },
+    shoreDistance(x,z){ return lastCtx?shoreProbe(lastCtx,x,z,{}).d:0; },
+    inland:INLAND,
+    birdPosition(i,out){ const b=birds[i]; return out.set(b.x,b.y,b.z); },
+    modeOf(i){ return MODES[birds[i].mode]; },
+    dispose(){ parent.remove(mesh); geo.dispose(); mat.dispose(); depth.dispose(); mesh.dispose(); birds.length=0; thermals.length=0; taken.clear(); },
+  };
+}
+/* ================= end of seagulls ================= */
+
+
+/* ================= testbench scene ================= */
+const canvas=document.getElementById('c');
+const renderer=new THREE.WebGLRenderer({canvas,antialias:true,preserveDrawingBuffer:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.outputColorSpace=THREE.SRGBColorSpace;
+renderer.toneMapping=THREE.ACESFilmicToneMapping;
+renderer.shadowMap.enabled=true; renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+const scene=new THREE.Scene();
+scene.fog=new THREE.Fog(hex('#9fc0dc'),220,1800); scene.background=hex('#9fc0dc');
+const camera=new THREE.PerspectiveCamera(55,1,0.05,4000);
+camera.position.set(-26,5,50);
+const controls=new OrbitControls(camera,canvas);
+controls.target.set(-60,13,-6); controls.enableDamping=true; controls.maxPolarAngle=Math.PI*0.495; controls.update();
+
+// sky, lights and day/dusk, after updateDaylight in index.html
+const skyU={uTop:{value:new THREE.Color()},uMid:{value:new THREE.Color()},uHor:{value:new THREE.Color()},uSun:{value:new THREE.Vector3(0,1,0)},uSunCol:{value:new THREE.Color()},uDay:{value:1}};
+const sky=new THREE.Mesh(new THREE.SphereGeometry(1800,32,16),new THREE.ShaderMaterial({uniforms:skyU,side:THREE.BackSide,depthWrite:false,fog:false,
+  vertexShader:`varying vec3 vDir; void main(){ vDir=normalize(position); gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+  fragmentShader:`uniform vec3 uTop,uMid,uHor,uSun,uSunCol; uniform float uDay; varying vec3 vDir;
+    void main(){ vec3 d=normalize(vDir); float y=d.y;
+      vec3 c = y>0.12 ? mix(uMid,uTop,clamp((y-0.12)/0.6,0.0,1.0)) : mix(uHor,uMid,clamp((y+0.04)/0.16,0.0,1.0));
+      float sd=max(dot(d,uSun),0.0); c+=uSunCol*(pow(sd,900.0)*6.0+pow(sd,12.0)*0.35+pow(sd,3.0)*0.12*(1.0-uDay));
+      gl_FragColor=vec4(c,1.0);
+      #include <tonemapping_fragment>
+      #include <colorspace_fragment>
+    }`}));
+sky.renderOrder=-1; scene.add(sky);
+const hemi=new THREE.HemisphereLight(hex('#d8cde0'),hex('#f0c49a'),2.3); scene.add(hemi);
+const sun=new THREE.DirectionalLight(hex('#fff1dc'),2.6); sun.castShadow=true;
+sun.shadow.mapSize.set(4096,4096); Object.assign(sun.shadow.camera,{left:-110,right:110,top:110,bottom:-110,near:1,far:500});
+sun.shadow.bias=-0.0004; sun.shadow.normalBias=0.03; scene.add(sun,sun.target);
+const SKY={
+  day:{top:hex('#1f5c9c'),mid:hex('#5f95c4'),hor:hex('#9fc0dc'),hs:hex('#d8cde0'),hg:hex('#f0c49a')},
+  dusk:{top:hex('#2c3f74'),mid:hex('#9b7898'),hor:hex('#f2a477'),hs:hex('#d9a08c'),hg:hex('#8a5f55')},
+  night:{top:hex('#040a1a'),mid:hex('#0a1632'),hor:hex('#16264a'),hs:hex('#3a4f86'),hg:hex('#141a2c')},
+};
+const mix3=(out,k,wd,wk,wn)=>out.setRGB(SKY.day[k].r*wd+SKY.dusk[k].r*wk+SKY.night[k].r*wn,SKY.day[k].g*wd+SKY.dusk[k].g*wk+SKY.night[k].g*wn,SKY.day[k].b*wd+SKY.dusk[k].b*wk+SKY.night[k].b*wn);
+const SUN_DIR=new THREE.Vector3(), _c1=new THREE.Color(), _c2=new THREE.Color();
+let hour=10, daylight=1;
+function updateDaylight(){
+  const ang=(hour-6)/24*Math.PI*2;
+  SUN_DIR.set(0.32,Math.sin(ang)*0.94,-Math.cos(ang)).normalize();
+  const e=SUN_DIR.y, wd=smooth((e-0.04)/0.3), wn=smooth((-e-0.02)/0.2), wk=Math.max(0,1-wd-wn);
+  mix3(skyU.uTop.value,'top',wd,wk,wn); mix3(skyU.uMid.value,'mid',wd,wk,wn); mix3(skyU.uHor.value,'hor',wd,wk,wn);
+  skyU.uSun.value.copy(SUN_DIR); skyU.uDay.value=wd;
+  skyU.uSunCol.value.copy(_c1.set('#ffb070').lerp(_c2.set('#fff4e0'),wd)).multiplyScalar(smooth((e+0.06)/0.1));
+  scene.fog.color.copy(skyU.uHor.value); scene.background.copy(skyU.uHor.value);
+  mix3(hemi.color,'hs',wd,wk,wn); mix3(hemi.groundColor,'hg',wd,wk,wn); hemi.intensity=2.3*wd+1.5*wk+1.0*wn;
+  const sunUp=smooth((e+0.02)/0.12), moonUp=smooth((-e-0.04)/0.12), L=SUN_DIR.clone();
+  if (sunUp>0.01){ sun.color.set('#ff9a5a').lerp(_c2.set('#fff1dc'),wd); sun.intensity=sunUp*(1.1+1.5*wd); }
+  else { L.multiplyScalar(-1); sun.color.set('#9fb3ff'); sun.intensity=moonUp; }
+  if (L.y<0.05) L.y=0.05;
+  sun.position.copy(L).multiplyScalar(250); sun.target.position.set(0,0,0);
+  renderer.toneMappingExposure=1.0+0.35*wn;
+  seaMat.specular.set('#121a22').lerp(_c2.set('#9fb0d8'),moonUp);
+  daylight=smooth((e+0.06)/0.22);
+}
+
+// terrain: land to the north (-z), a beach, a rocky point to the east and the sea to the south
+const shoreZ=x=>8*Math.sin(x*0.021)+4*Math.sin(x*0.057+1.3);
+function terrain(x,z){
+  const inl=shoreZ(x)-z;
+  let h=inl<0?inl*0.07-Math.max(0,-inl-25)*0.12:inl*0.055+smooth((inl-18)/45)*(9+5*Math.sin(x*0.03)+3*Math.sin(x*0.11+z*0.07))
+    +smooth((inl-110)/160)*(22+12*Math.sin(x*0.011+inl*0.008)+6*Math.sin(x*0.037-inl*0.021));
+  const pt=Math.exp(-((x-75)**2)/900)*Math.exp(-((z-shoreZ(75)-6)**2)/500)*5; h+=pt;   // the rocky point
+  return h;
+}
+const ROCKS=[], PERCHES=[];
+{ const r=mulberry(7);
+  for (let k=0;k<26;k++){ const x=55+r()*55, z=shoreZ(x)-8+r()*34, s=0.8+r()*2.4;
+    ROCKS.push({x,z,r:s,h:s*(0.6+r()*0.7),base:terrain(x,z)-0.3,rot:r()*6.28,shade:r()}); }
+  for (let k=0;k<8;k++){ const x=-30+r()*70, z=shoreZ(x)+12+r()*25, s=0.9+r()*1.4; ROCKS.push({x,z,r:s,h:s*0.9+0.6,base:terrain(x,z)-0.3,rot:r()*6.28,shade:r()}); }
+}
+function mulberry(a){ return ()=>{ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+const QUAY={x0:-76,x1:-63,z0:shoreZ(-70)-14,z1:52,top:1.4};
+function groundHeight(x,z){
+  let h=terrain(x,z);
+  if (x>QUAY.x0&&x<QUAY.x1&&z>QUAY.z0&&z<QUAY.z1) h=Math.max(h,QUAY.top);
+  for (const R of ROCKS){ const d=Math.hypot(x-R.x,z-R.z); if (d<R.r) h=Math.max(h,R.base+R.h*0.85*(1-(d/R.r)**2)); }
+  return h;
+}
+const C={beach:hex('#ecd9ad'),sand2:hex('#e6c99a'),wet:hex('#cdb68a'),grass:hex('#a6a661'),grass2:hex('#8f9a53'),scrub:hex('#9a9a5c'),rock:hex('#b8a48e'),stone:hex('#dcc6ab'),stoneDark:hex('#c4ad92'),grey:hex('#9a948a'),seabed:hex('#4f7f91')};
+{ const g=new THREE.PlaneGeometry(1000,900,200,180).rotateX(-Math.PI/2).toNonIndexed(), p=g.attributes.position, col=[];
+  for (let i=0;i<p.count;i++) p.setY(i,terrain(p.getX(i),p.getZ(i)-200)), p.setZ(i,p.getZ(i)-200);
+  for (let i=0;i<p.count;i+=3){
+    const y=(p.getY(i)+p.getY(i+1)+p.getY(i+2))/3, x=p.getX(i), z=p.getZ(i);
+    const slope=Math.abs(p.getY(i)-p.getY(i+1))+Math.abs(p.getY(i)-p.getY(i+2));
+    const nz=Math.sin(x*0.05+z*0.03)*Math.sin(z*0.045-x*0.02);
+    let c=y<-3?C.seabed.clone().lerp(C.wet,clamp((y+8)/5,0,1)):y<0.2?C.wet:y<1.8?C.beach:y<3.0+nz?C.sand2:(nz>0.55?C.grass2:nz<-0.55?C.scrub:C.grass);
+    if (y>2.4 && x>58 && x<100 && y<9) c=C.rock;
+    c=c.clone().multiplyScalar(0.96+0.08*((Math.sin(x*12.9+z*78.2)*43758.5)%1+1)/2);
+    for (let k=0;k<3;k++) col.push(c.r,c.g,c.b); }
+  g.setAttribute('color',new THREE.Float32BufferAttribute(col,3)); g.computeVertexNormals();
+  const m=new THREE.Mesh(g,new THREE.MeshLambertMaterial({vertexColors:true})); m.receiveShadow=true; scene.add(m); }
+// rocks, flat shaded
+{ const base=new THREE.IcosahedronGeometry(1,0), mat=new THREE.MeshLambertMaterial({vertexColors:true,flatShading:true});
+  for (const R of ROCKS){ const g=base.clone(), col=[], c=C.grey.clone().lerp(C.rock,R.shade);
+    for (let i=0;i<g.attributes.position.count;i++){ const k=0.9+0.12*((i*7919%13)/13); col.push(c.r*k,c.g*k,c.b*k); }
+    g.setAttribute('color',new THREE.Float32BufferAttribute(col,3));
+    const m=new THREE.Mesh(g,mat); m.scale.set(R.r,R.h,R.r*0.9); m.rotation.y=R.rot; m.position.set(R.x,R.base,R.z); m.castShadow=m.receiveShadow=true; scene.add(m);
+    PERCHES.push({x:R.x,y:R.base+R.h*0.85,z:R.z}); } }
+// the quay: a stone mole with a kerb and bollards
+{ const mat=new THREE.MeshLambertMaterial({color:C.stone}), kerb=new THREE.MeshLambertMaterial({color:C.stoneDark}), dark=new THREE.MeshLambertMaterial({color:hex('#3b3b42')});
+  const W=QUAY.x1-QUAY.x0, L=QUAY.z1-QUAY.z0, cx=(QUAY.x0+QUAY.x1)/2, cz=(QUAY.z0+QUAY.z1)/2;
+  const body=new THREE.Mesh(new THREE.BoxGeometry(W,QUAY.top+8,L),mat); body.position.set(cx,(QUAY.top-8)/2,cz); body.castShadow=body.receiveShadow=true; scene.add(body);
+  for (const x of [QUAY.x0+0.3,QUAY.x1-0.3]){ const k=new THREE.Mesh(new THREE.BoxGeometry(0.6,0.25,L),kerb); k.position.set(x,QUAY.top+0.125,cz); k.castShadow=k.receiveShadow=true; scene.add(k);
+    for (let z=QUAY.z0+2;z<QUAY.z1-0.5;z+=1.7) PERCHES.push({x,y:QUAY.top+0.25,z}); }
+  for (let z=QUAY.z0+8;z<QUAY.z1;z+=9) for (const x of [QUAY.x0+1.1,QUAY.x1-1.1]){
+    const b=new THREE.Mesh(new THREE.CylinderGeometry(0.22,0.28,0.55,8),dark); b.position.set(x,QUAY.top+0.275,z); b.castShadow=true; scene.add(b);
+    PERCHES.push({x,y:QUAY.top+0.55,z}); }
+  for (let x=QUAY.x0+1;x<QUAY.x1-0.5;x+=1.6) PERCHES.push({x,y:QUAY.top,z:QUAY.z1-0.4}); }
+// a few places on the beach close to the water
+for (let x=-40;x<50;x+=6){ const z=shoreZ(x)+6; if (terrain(x,z)>0.15) PERCHES.push({x,y:terrain(x,z),z}); }
+
+// the sea, with the ripples of index.html
+const seaU={uTime:{value:0}};
+const seaMat=new THREE.MeshPhongMaterial({color:hex('#2c6ead'),specular:hex('#121a22'),shininess:50,transparent:true,opacity:0.93});
+seaMat.onBeforeCompile=sh=>{ sh.uniforms.uTime=seaU.uTime;
+  sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nvarying vec3 vSeaP;').replace('#include <project_vertex>','#include <project_vertex>\nvSeaP=(modelMatrix*vec4(transformed,1.0)).xyz;');
+  sh.fragmentShader=sh.fragmentShader.replace('#include <common>',`#include <common>
+    varying vec3 vSeaP; uniform float uTime;
+    float sh2(vec2 p){ return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453); }
+    float sn2(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f); return mix(mix(sh2(i),sh2(i+vec2(1,0)),f.x),mix(sh2(i+vec2(0,1)),sh2(i+vec2(1,1)),f.x),f.y); }
+    mat2 rot2(float a){ float c=cos(a), s=sin(a); return mat2(c,-s,s,c); }
+    float seaWaves(vec2 q,float t){ return sn2(rot2(0.3)*q*0.16+vec2(t*0.06,t*0.035))*0.45+sn2(rot2(1.9)*q*0.37+vec2(-t*0.08,t*0.05))*0.28+sn2(rot2(4.1)*q*0.9+vec2(t*0.13,-t*0.1))*0.17; }`)
+    .replace('#include <normal_fragment_maps>',`#include <normal_fragment_maps>
+      { vec2 q=vSeaP.xz; float t=uTime, e=0.4; float k=1.0-smoothstep(80.0,700.0,length(vSeaP-cameraPosition));
+        float wx=seaWaves(q+vec2(e,0.0),t)-seaWaves(q-vec2(e,0.0),t), wz=seaWaves(q+vec2(0.0,e),t)-seaWaves(q-vec2(0.0,e),t);
+        normal=normalize(normal+(viewMatrix*vec4(-wx*1.5*k,0.0,-wz*1.5*k,0.0)).xyz); }`); };
+const sea=new THREE.Mesh(new THREE.PlaneGeometry(4000,4000).rotateX(-Math.PI/2),seaMat); sea.receiveShadow=true; sea.renderOrder=1; scene.add(sea);
+
+// a fishing boat on a long loop offshore
+function boatGeometry(){
+  const P=[],Cc=[], hull=hex('#2f5f8f'), band=hex('#f3efe6'), anti=hex('#7a2f26'), wood=hex('#9b7652'), white=hex('#f4f1ea'), glass=hex('#2c3640');
+  const tri=(a,b,c,col,hint)=>{ const u=new THREE.Vector3(...b).sub(new THREE.Vector3(...a)), v=new THREE.Vector3(...c).sub(new THREE.Vector3(...a)), n=u.cross(v);
+    const m=new THREE.Vector3(...a).add(new THREE.Vector3(...b)).add(new THREE.Vector3(...c)).multiplyScalar(1/3).sub(new THREE.Vector3(...hint));
+    if (n.dot(m)<0){ const t=b; b=c; c=t; } for (const p of [a,b,c]){ P.push(...p); Cc.push(col.r,col.g,col.b); } };
+  const L=9.5, B=1.7, H=1.35, D=0.95, N=14, rings=[];
+  for (let i=0;i<=N;i++){ const t=i/N, z=(t-0.5)*L, b=t<0.55?B*(0.76+0.24*Math.sin(t/0.55*Math.PI/2)):B*Math.cos((t-0.55)/0.45*Math.PI/2)+0.02;
+    const top=H*0.78+H*0.22*(2*t-1)**2+(t>0.75?(t-0.75)*H*1.3:0), kb=-D*(t<0.78?1:1-Math.pow((t-0.78)/0.22,1.5)*0.92);
+    rings.push([[-b,top],[-0.97*b,0.4*top],[-0.6*b,0.6*kb],[0,kb],[0.6*b,0.6*kb],[0.97*b,0.4*top],[b,top]].map(([x,y])=>[x,y,z])); }
+  for (let i=0;i<N;i++){ const hint=[0,0.3,(rings[i][0][2]+rings[i+1][0][2])/2];
+    for (let k=0;k<6;k++){ const a=rings[i][k], b=rings[i][k+1], c=rings[i+1][k+1], d=rings[i+1][k], ym=(a[1]+b[1]+c[1]+d[1])/4;
+      const col=(k===0||k===5)?band:(ym<0.05?anti:hull); tri(a,b,c,col,hint); tri(a,c,d,col,hint); }
+    const fy=Math.min(rings[i][0][1],rings[i+1][0][1])-0.18, a=rings[i][1], d=rings[i+1][1];
+    tri([a[0],fy,a[2]],[-a[0],fy,a[2]],[-d[0],fy,d[2]],wood,[0,-5,a[2]]); tri([a[0],fy,a[2]],[-d[0],fy,d[2]],[d[0],fy,d[2]],wood,[0,-5,a[2]]); }
+  const r0=rings[0], tc=[0,(r0[0][1]+r0[3][1])/2,r0[0][2]];
+  for (let k=0;k<6;k++) tri(tc,r0[k],r0[k+1],k===0||k===5?band:hull,[0,tc[1],tc[2]+1]);
+  const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.Float32BufferAttribute(P,3)); g.setAttribute('color',new THREE.Float32BufferAttribute(Cc,3)); g.computeVertexNormals();
+  const grp=new THREE.Group(), m=new THREE.Mesh(g,new THREE.MeshLambertMaterial({vertexColors:true,side:THREE.DoubleSide})); m.castShadow=true; grp.add(m);
+  const add=(geo,col,x,y,z)=>{ const o=new THREE.Mesh(geo,new THREE.MeshLambertMaterial({color:col})); o.position.set(x,y,z); o.castShadow=true; grp.add(o); return o; };
+  add(new THREE.BoxGeometry(1.9,1.75,2.2),white,0,0.95+0.87,-0.9);
+  add(new THREE.BoxGeometry(1.95,0.42,1.7),glass,0,2.25,-0.9).scale.set(1.01,1,0.9);
+  add(new THREE.BoxGeometry(2.15,0.12,2.5),hex('#c4544b'),0,2.76,-0.9);
+  add(new THREE.CylinderGeometry(0.07,0.07,5.4,8),hex('#e9e4da'),0,3.7,1.5);
+  add(new THREE.BoxGeometry(1.8,0.08,0.08),hex('#e9e4da'),0,5.2,1.5);
+  return {grp,L};
+}
+const boatObj=boatGeometry(); scene.add(boatObj.grp);
+const boat={x:0,z:0,heading:0,speed:3.2,length:boatObj.L,s:0};
+const BOAT_PATH=s=>[10+170*Math.cos(s),150+60*Math.sin(s)];
+function updateBoat(dt){
+  const [x0,z0]=BOAT_PATH(boat.s), [x1,z1]=BOAT_PATH(boat.s+0.001), dl=Math.hypot(x1-x0,z1-z0)/0.001;
+  boat.s+=boat.speed*dt/dl;
+  const [x,z]=BOAT_PATH(boat.s), [xa,za]=BOAT_PATH(boat.s+0.01);
+  boat.x=x; boat.z=z; boat.heading=Math.atan2(xa-x,za-z);
+  boatObj.grp.position.set(x,0.05*Math.sin(simTime*1.2),z); boatObj.grp.rotation.set(0.03*Math.sin(simTime*0.9),boat.heading,0.04*Math.sin(simTime*0.7),'YXZ');
+}
+
+// the player: a figure that may be dragged about, or walked towards the nearest perched gulls
+const HOME=new THREE.Vector3(-50,0,-2); HOME.y=groundHeight(HOME.x,HOME.z);
+const player=HOME.clone();
+const playerObj=new THREE.Group();
+{ const m=new THREE.MeshLambertMaterial({color:hex('#c4544b')}), skin=new THREE.MeshLambertMaterial({color:hex('#e0b48f')});
+  const b=new THREE.Mesh(new THREE.CylinderGeometry(0.2,0.26,1.35,10),m); b.position.y=0.68; b.castShadow=true;
+  const h=new THREE.Mesh(new THREE.SphereGeometry(0.17,12,8),skin); h.position.y=1.55; h.castShadow=true;
+  const ring=new THREE.Mesh(new THREE.RingGeometry(0.7,0.9,32).rotateX(-Math.PI/2),new THREE.MeshBasicMaterial({color:hex('#f7f3ec'),transparent:true,opacity:0.8,depthWrite:false}));
+  ring.position.y=0.05; playerObj.add(b,h,ring); scene.add(playerObj); }
+const hitProxy=new THREE.Mesh(new THREE.SphereGeometry(1.6,8,6),new THREE.MeshBasicMaterial({visible:false})); playerObj.add(hitProxy); hitProxy.position.y=0.9;
+
+/* ================= gulls in the scene ================= */
+let audio=null, callsOn=false;
+function gullCall(e){
+  if (!callsOn||!audio) return;
+  const now=audio.currentTime, pan=audio.createPanner(); pan.panningModel='HRTF'; pan.distanceModel='inverse'; pan.refDistance=12; pan.rolloffFactor=1.2;
+  pan.positionX.value=e.x; pan.positionY.value=e.y; pan.positionZ.value=e.z; pan.connect(audio.destination);
+  const notes=e.kind==='alarm'?3:e.kind==='long'?4+((Math.random()*4)|0):1, base=1050+Math.random()*250;
+  for (let k=0;k<notes;k++){
+    const t0=now+k*(e.kind==='alarm'?0.13:0.24)+(e.kind==='long'&&k===0?0:0), dur=e.kind==='alarm'?0.09:e.kind==='mew'?0.45:k===0?0.32:0.17;
+    const o=audio.createOscillator(), o2=audio.createOscillator(), f=audio.createBiquadFilter(), g=audio.createGain();
+    o.type='sawtooth'; o2.type='square'; f.type='bandpass'; f.frequency.value=2300; f.Q.value=1.6;
+    const f0=base*(e.kind==='long'&&k===0?1.25:1), f1=f0*(e.kind==='mew'?0.7:0.78);
+    for (const os of [o,o2]){ os.frequency.setValueAtTime(f0*(os===o2?1.004:1),t0); os.frequency.exponentialRampToValueAtTime(f1,t0+dur); os.connect(f); os.start(t0); os.stop(t0+dur+0.05); }
+    g.gain.setValueAtTime(0,t0); g.gain.linearRampToValueAtTime(0.16,t0+0.02); g.gain.exponentialRampToValueAtTime(0.001,t0+dur);
+    f.connect(g); g.connect(pan);
+  }
+}
+const gulls=createGulls(scene,{count:80,range:170,onCall:gullCall});
+
+/* ---------- tracks: where every gull has been over the last minute, and the inland limit ---------- */
+const TRACK_N=120, trackPos=new Float32Array(256*TRACK_N*3), trackCol=new Float32Array(256*TRACK_N*3);
+const trackGeo=new THREE.BufferGeometry(); trackGeo.setAttribute('position',new THREE.BufferAttribute(trackPos,3)); trackGeo.setAttribute('color',new THREE.BufferAttribute(trackCol,3));
+trackGeo.setDrawRange(0,0);
+const tracks=new THREE.Points(trackGeo,new THREE.PointsMaterial({size:4,sizeAttenuation:false,vertexColors:true,depthTest:false,transparent:true,opacity:0.9,fog:false}));
+tracks.frustumCulled=false; tracks.renderOrder=5; tracks.visible=false; scene.add(tracks);
+const MODE_COL={soar:hex('#e8f1ff'),glide:hex('#9fd3ff'),follow:hex('#ffd34d'),land:hex('#ff9a5a'),perch:hex('#ff5a4d'),takeoff:hex('#c58bff')};
+let trackHead=0, trackT=0, trackFill=0;
+function recordTracks(dt){
+  trackT+=dt; if (trackT<0.5) return; trackT=0;
+  const n=gulls.birds.length;
+  for (let i=0;i<n;i++){ const b=gulls.birds[i], o=((trackHead*256)+i)*3, c=MODE_COL[gulls.modeOf(i)];
+    trackPos[o]=b.x; trackPos[o+1]=b.y; trackPos[o+2]=b.z; trackCol[o]=c.r; trackCol[o+1]=c.g; trackCol[o+2]=c.b; }
+  for (let i=n;i<256;i++){ const o=((trackHead*256)+i)*3; trackPos[o]=trackPos[o+1]=trackPos[o+2]=0; trackPos[o+1]=-1e4; }
+  trackHead=(trackHead+1)%TRACK_N; trackFill=Math.min(TRACK_N,trackFill+1);
+  trackGeo.setDrawRange(0,trackFill*256); trackGeo.attributes.position.needsUpdate=true; trackGeo.attributes.color.needsUpdate=true;
+}
+// the inland limit, found the way the gulls find it, drawn on the ground
+let limitLine=null;
+function buildLimitLine(){
+  const pts=[];
+  for (let x=-480;x<=480;x+=6){ let z=shoreZ(x); while (z>shoreZ(x)-400 && gulls.shoreDistance(x,z)<gulls.inland) z-=3; pts.push(new THREE.Vector3(x,groundHeight(x,z)+0.6,z)); }
+  limitLine=new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),new THREE.LineBasicMaterial({color:hex('#c4544b'),depthTest:false,fog:false}));
+  limitLine.renderOrder=6; limitLine.visible=tracks.visible; scene.add(limitLine);
+}
+
+/* ================= controls and loop ================= */
+const $=id=>document.getElementById(id);
+let paused=false, walking=false, wind={x:0,z:0}, simTime=0, view='overview', focus=-1;
+function setWind(){ const s=+$('w').value, a=+$('wd').value*Math.PI/180; // compass bearing the wind blows from, north = -z
+  wind={x:-Math.sin(a)*s,z:Math.cos(a)*s}; $('wV').textContent=`${s} m/s`; $('wdV').textContent=`${$('wd').value}°`; }
+function setHour(){ hour=+$('h').value; const hh=Math.floor(hour), mm=Math.round((hour-hh)*60/5)*5;
+  $('hV').textContent=`${String(hh+(mm===60)).padStart(2,'0')}:${String(mm%60).padStart(2,'0')}`; updateDaylight(); }
+$('n').oninput=()=>{ $('nV').textContent=$('n').value; gulls.setCount(+$('n').value); };
+$('w').oninput=$('wd').oninput=setWind; $('h').oninput=setHour;
+function setPaused(p){ paused=p; $('pause').classList.toggle('on',p); $('pause').textContent=p?'Resume':'Pause'; }
+$('pause').onclick=()=>setPaused(!paused);
+addEventListener('keydown',e=>{ if (e.code==='KeyP') setPaused(!paused); });
+$('walk').onclick=()=>{ walking=!walking; $('walk').classList.toggle('on',walking); $('walk').textContent=walking?'Stop':'Walk to gulls'; };
+$('reset').onclick=()=>{ player.copy(HOME); walking=false; $('walk').classList.remove('on'); $('walk').textContent='Walk to gulls'; };
+$('calls').onclick=()=>{ callsOn=!callsOn; if (callsOn&&!audio) audio=new AudioContext(); if (audio) audio.resume();
+  $('calls').classList.toggle('on',callsOn); $('calls').textContent=callsOn?'Calls on':'Calls off'; };
+const camPrev=new THREE.Vector3(), birdNow=new THREE.Vector3();
+function pickBird(kind){
+  const want={flying:['soar','glide'],perched:['perch'],following:['follow']}[kind]; if (!want) return -1;
+  const n=gulls.birds.length, start=(focus+1)%n;
+  for (let k=0;k<n;k++){ const i=(start+k)%n; if (want.includes(gulls.modeOf(i))) return i; }
+  return (start)%n;
+}
+function setView(v){ view=v; $('view').value=v;
+  if (v==='overview'){ focus=-1; camera.position.set(-26,5,50); controls.target.set(-60,13,-6);
+    // aim between the root of the quay and the nearest thermal, so the circling gulls are in the picture
+    const T=gulls.thermals.reduce((m,t)=>!m||Math.hypot(t.x-player.x,t.z-player.z)<Math.hypot(m.x-player.x,m.z-player.z)?t:m,null);
+    if (T){ controls.target.set((T.x-63)/2,4+T.top*0.4,(T.z-6)/2); camera.position.set(controls.target.x+30,5,52); } controls.minDistance=0; return; }
+  focus=pickBird(v); if (focus<0) return;
+  gulls.birdPosition(focus,birdNow); const b=gulls.birds[focus];
+  const fx=Math.sin(b.psi), fz=Math.cos(b.psi);
+  camera.position.set(birdNow.x-fx*1.6+fz*1.3,birdNow.y+0.55,birdNow.z-fz*1.6-fx*1.3);
+  controls.target.copy(birdNow); controls.minDistance=0.4; camPrev.copy(birdNow); }
+function setTracks(on){ tracks.visible=on; if (on&&!limitLine) buildLimitLine(); if (limitLine) limitLine.visible=on;
+  $('tracks').classList.toggle('on',on); $('tracks').textContent=on?'Tracks on':'Tracks off'; }
+$('tracks').onclick=()=>setTracks(!tracks.visible);
+$('view').onchange=()=>setView($('view').value);
+$('next').onclick=()=>{ if (view==='overview') setView('flying'); else setView(view); };
+
+// dragging the player
+const ray=new THREE.Raycaster(), ndc=new THREE.Vector2(); let dragging=false;
+function toNdc(e){ const r=canvas.getBoundingClientRect(); ndc.set((e.clientX-r.left)/r.width*2-1,-(e.clientY-r.top)/r.height*2+1); }
+canvas.addEventListener('pointerdown',e=>{ toNdc(e); ray.setFromCamera(ndc,camera); if (ray.intersectObject(hitProxy).length){ dragging=true; controls.enabled=false; canvas.setPointerCapture(e.pointerId); } });
+canvas.addEventListener('pointermove',e=>{ if (!dragging) return; toNdc(e); ray.setFromCamera(ndc,camera);
+  // march along the ray to the ground
+  const o=ray.ray.origin, d=ray.ray.direction; for (let s=0;s<800;s+=0.5){ const x=o.x+d.x*s, y=o.y+d.y*s, z=o.z+d.z*s; if (y<=Math.max(groundHeight(x,z),0)){ player.set(x,0,z); break; } } });
+canvas.addEventListener('pointerup',()=>{ dragging=false; controls.enabled=true; });
+
+function resize(){ renderer.setSize(innerWidth,innerHeight,false); camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); }
+addEventListener('resize',resize); resize();
+
+const ctx={player,daylight:1,wind,groundHeight,seaLevel:0,boats:[boat],perches:PERCHES,paused:false};
+function stepWorld(dt){
+  const wdt=paused?0:dt; simTime+=wdt; seaU.uTime.value=simTime;
+  if (!paused) updateBoat(wdt);
+  if (walking){ let best=null, bd=1e9;
+    for (let i=0;i<gulls.birds.length;i++){ const b=gulls.birds[i]; if (gulls.modeOf(i)!=='perch'||(b.perch&&b.perch.water)) continue; const d=Math.hypot(b.x-player.x,b.z-player.z); if (d<bd){ bd=d; best=b; } }
+    if (best && bd>0.8){ player.x+=(best.x-player.x)/bd*1.6*dt; player.z+=(best.z-player.z)/bd*1.6*dt; } }
+  player.y=Math.max(groundHeight(player.x,player.z),0);
+  playerObj.position.copy(player); if (walking) playerObj.rotation.y+=0;
+  Object.assign(ctx,{daylight,wind,paused});
+  gulls.update(dt,ctx); if (!paused) recordTracks(dt);
+  if (focus>=0 && focus<gulls.birds.length){ gulls.birdPosition(focus,birdNow); camera.position.add(birdNow.clone().sub(camPrev)); controls.target.copy(birdNow); camPrev.copy(birdNow); }
+}
+let fpsT=0, fpsN=0, fps=0;
+function stats(dt){
+  fpsT+=dt; fpsN++; if (fpsT>0.5){ fps=Math.round(fpsN/fpsT); fpsT=fpsN=0;
+    const m={}; for (let i=0;i<gulls.birds.length;i++){ const k=gulls.modeOf(i); m[k]=(m[k]||0)+1; }
+    $('stats').textContent=`Soaring ${m.soar||0} · gliding ${m.glide||0} · following ${m.follow||0} · landing ${m.land||0} · perched ${m.perch||0} · taking off ${m.takeoff||0} · ${fps} fps`; }
+}
+let last=performance.now(), frozen=false;
+function frame(now){
+  const dt=Math.min(0.1,(now-last)/1000); last=now;
+  if (!frozen){ stepWorld(dt); stats(dt); }
+  controls.update(); renderer.render(scene,camera);
+  requestAnimationFrame(frame);
+}
+setWind(); setHour(); ctx.wind=wind;
+requestAnimationFrame(frame);
+
+// for automated checks: freeze the loop and advance the world by fixed steps
+window.tb={gulls,camera,controls,player,boat,setView,ctx,setTracks,
+  freeze(f=true){ frozen=f; },
+  run(sec,h=1/60){ for (let s=0;s<sec;s+=h) stepWorld(h); controls.update(); renderer.render(scene,camera); },
+  setHour(h){ $('h').value=h; setHour(); }, setWind(s,from){ $('w').value=s; $('wd').value=from; setWind(); },
+  setCount(n){ $('n').value=n; $('n').oninput(); }, walk(on){ if (walking!==on) $('walk').onclick(); }, pause(p){ setPaused(p); },
+  look(px,py,pz,tx,ty,tz){ focus=-1; camera.position.set(px,py,pz); controls.target.set(tx,ty,tz); controls.update(); },
+  focusBird(i){ focus=i; gulls.birdPosition(i,birdNow); camPrev.copy(birdNow); controls.target.copy(birdNow); },
+  modes(){ const m={}; for (let i=0;i<gulls.birds.length;i++){ const k=gulls.modeOf(i); m[k]=(m[k]||0)+1; } return m; },
+};
+</script>
+</body>
+</html>

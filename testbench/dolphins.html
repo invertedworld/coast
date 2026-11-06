@@ -1,0 +1,695 @@
+<!doctype html>
+<title>Coast: dolphins</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Marcellus&family=Alegreya+Sans:wght@400;500;700&display=swap">
+<style>
+/* The testbench uses the panel style of Coast: plaster text on a translucent sea-blue panel. */
+:root{
+  --sea:#1d5189; --sea-deep:#123761; --plaster:#f5e9d7; --plaster-dim:#d9c8b0;
+  --coral:#d85d52; --verdigris:#7cc3ad; --ink:#26232b;
+  --panel:rgba(18,55,97,.86); --line:rgba(245,233,215,.22);
+  --font-display:'Marcellus','Trajan Pro',Georgia,serif;
+  --font-body:'Alegreya Sans','Gill Sans','Segoe UI',system-ui,sans-serif;
+  color-scheme:dark;
+}
+html,body{height:100%;margin:0;overflow:hidden;background:var(--sea);color:var(--plaster);font-family:var(--font-body);font-size:16px}
+#scene{position:fixed;inset:0;display:block;width:100%;height:100%;touch-action:none;outline:none}
+.panel{position:fixed;z-index:4;top:16px;left:16px;width:min(300px,calc(100vw - 32px));box-sizing:border-box;background:var(--panel);
+  border:1px solid var(--line);border-radius:4px;padding:14px 16px 16px;backdrop-filter:blur(8px);font-size:.95rem;line-height:1.3}
+.panel h1{margin:0 0 10px;font-family:var(--font-display);font-weight:400;font-size:1.35rem}
+.panel .row{display:grid;grid-template-columns:7.2em 1fr 5.4em;align-items:center;gap:8px;padding:5px 0}
+.panel .row.two{grid-template-columns:7.2em 1fr}
+.panel label{color:var(--plaster-dim)}
+.panel output{text-align:right;font-variant-numeric:tabular-nums;font-size:.88rem}
+.panel input[type=range]{width:100%;accent-color:var(--verdigris)}
+.panel input[type=checkbox]{accent-color:var(--verdigris);width:18px;height:18px;margin:0}
+.seg{display:flex;gap:0;border:1px solid var(--line);border-radius:3px;overflow:hidden}
+.seg button{flex:1;border-radius:0;border:0}
+button{font:500 .9rem/1 var(--font-body);color:var(--plaster);background:rgba(245,233,215,.08);border:1px solid var(--line);border-radius:3px;padding:7px 10px;cursor:pointer}
+button[aria-pressed=true]{background:var(--plaster);color:var(--ink)}
+.actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.actions button{flex:1 1 40%}
+[hidden]{display:none!important}
+</style>
+
+<canvas id="scene" tabindex="0" aria-label="Dolphins testbench"></canvas>
+<aside class="panel" id="panel" aria-label="Dolphin settings">
+  <h1>Dolphins</h1>
+  <div class="row"><label for="pods">Pods</label><input id="pods" type="range" min="1" max="6" step="1" value="3"><output id="podsV">3</output></div>
+  <div class="row"><label for="size">Pod size</label><input id="size" type="range" min="3" max="8" step="1" value="5"><output id="sizeV">5</output></div>
+  <div class="row"><label for="leaps">Leaps</label><input id="leaps" type="range" min="0" max="12" step="1" value="3"><output id="leapsV">3 /min</output></div>
+  <div class="row two"><label>Formation</label><div class="seg"><button id="tight" aria-pressed="true">Tight</button><button id="loose" aria-pressed="false">Loose</button></div></div>
+  <div class="row two"><label for="bow">Bow-riding</label><input id="bow" type="checkbox" checked></div>
+  <div class="row two"><label>Time of day</label><div class="seg"><button id="day" aria-pressed="true">Day</button><button id="dusk" aria-pressed="false">Dusk</button></div></div>
+  <div class="actions">
+    <button id="pause" aria-pressed="false">Pause</button>
+    <button id="follow" aria-pressed="false">Follow a dolphin</button>
+    <button id="next" hidden>Next dolphin</button>
+  </div>
+</aside>
+
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"}}</script>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js';
+
+const lerp=(a,b,t)=>a+(b-a)*t;
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const smooth=t=>{ t=clamp(t,0,1); return t*t*(3-2*t); };
+const hex=h=>new THREE.Color(h);
+
+/* ================= dolphins =================
+   Pods of bottlenose dolphins for Coast. Everything below this line and above the matching closing line is
+   self-contained and may be pasted into index.html as it stands; it needs only THREE.
+
+   const D=createDolphins(parent, opts)   parent: the group the meshes join (in Coast, `world`)
+     opts: pods (3), podSize (5, or [min, max] for a size drawn for each pod), leapsPerMinute (per pod, 3), bowRide (true), minDepth (m, 6),
+           range (m from the focus within which pods keep, 260), formation ('tight' or 'loose'), maxDolphins (64), seed, ghost (0..1, 0.45),
+           onSound(kind, x, y, z, strength), kind being 'breath', 'leap' or 'splash'
+   D.update(dt, ctx)                      ctx: camera, focus {x,z} (defaults to the camera), boats
+                                           [{x,z,head,v,len,beam}] (forward is (sin head, cos head)),
+                                           depthAt(x,z) (depth of water in metres, negative on land), seaLevel (0),
+                                           bright (0..1, the light on unlit foam and spray), paused,
+                                           keepOut(x,z) (true where pods must not go), spawnWeight(x,z) (0..1, the
+                                           chance that a pod may appear there)
+   D.setOptions(o)   D.trigger(kind, pod)   ('breath', 'leap' or 'ride')   D.reset()   D.shift(dz)
+   D.dolphins   D.pods   D.dispose()
+
+   Positions are world metres with y up and the sea at y = seaLevel. Under water each dolphin is drawn a second
+   time as a faint dark shape projected on to the surface along the line of sight, so that it reads through the
+   nearly opaque sea and is still hidden correctly by hulls and quays above the water. */
+function createDolphins(parent, opts={}){
+  const O=Object.assign({pods:3,podSize:5,leapsPerMinute:3,bowRide:true,minDepth:6,range:260,maxDolphins:64,seed:20261106,ghost:0.45,formation:'tight',onSound:null},opts);
+  let sd=(O.seed>>>0)||1;
+  const R=()=>{ sd=(sd+0x6D2B79F5)>>>0; let t=sd; t=Math.imul(t^t>>>15,t|1); t^=t+Math.imul(t^t>>>7,t|61); return ((t^t>>>14)>>>0)/4294967296; };
+  const rr=(a,b)=>a+(b-a)*R();
+  const cl=(v,a,b)=>Math.max(a,Math.min(b,v));
+  const angTo=(a,b)=>Math.atan2(Math.sin(b-a),Math.cos(b-a));
+  const G=9.81, TAU=Math.PI*2;
+  let SEA=0;
+
+  /* ---------- the body: rings of eight round a tapering axis, with dorsal fin, flippers and flukes ----------
+     The dolphin is 2.6 m long, its nose towards +z and its back towards +y; the flukes reach 1.47 m behind the
+     centre. The colour grades from a dark grey cape through paler flanks to a near-white belly. */
+  function buildGeo(){
+    const P=[], C=[];
+    const cBack=hex('#525f6b'), cFlank=hex('#8794a0'), cBelly=hex('#dcdcd6'), cFin=hex('#48545f'), cEye=hex('#16191d');
+    const tri=(a,b,c,dir,ca,cb,cc)=>{
+      const ux=b[0]-a[0],uy=b[1]-a[1],uz=b[2]-a[2],vx=c[0]-a[0],vy=c[1]-a[1],vz=c[2]-a[2];
+      const nx=uy*vz-uz*vy, ny=uz*vx-ux*vz, nz=ux*vy-uy*vx;
+      if (nx*dir[0]+ny*dir[1]+nz*dir[2]<0){ const t=b; b=c; c=t; const q=cb; cb=cc; cc=q; }
+      P.push(a[0],a[1],a[2],b[0],b[1],b[2],c[0],c[1],c[2]); C.push(ca.r,ca.g,ca.b,cb.r,cb.g,cb.b,cc.r,cc.g,cc.b); };
+    // z, half width, half height, height of the axis
+    const ST=[[-1.18,0.022,0.05,0.0],[-1.0,0.042,0.095,0.005],[-0.75,0.085,0.155,0.012],[-0.45,0.15,0.225,0.02],[-0.15,0.205,0.27,0.025],
+      [0.15,0.232,0.285,0.02],[0.45,0.212,0.25,0.018],[0.70,0.165,0.195,0.02],[0.86,0.118,0.135,0.0],[0.95,0.066,0.062,-0.045],
+      [1.12,0.046,0.042,-0.06],[1.27,0.022,0.02,-0.066]];
+    const colAt=(s,z)=>{ const c=cBelly.clone().lerp(cFlank,smooth((s+0.75)/0.6)); c.lerp(cBack,smooth((s-0.05)/0.6));
+      if (z>0.9 && s<0) c.lerp(cBelly,0.4); return c; };
+    const N=8, rings=ST.map(([z,rx,ry,yc])=>{ const ring=[]; for (let k=0;k<N;k++){ const a=Math.PI/2+k*TAU/N, s=Math.sin(a);
+      ring.push({p:[rx*Math.cos(a),yc+ry*s,z],c:colAt(s,z)}); } return {ring,yc,z}; });
+    for (let i=0;i<rings.length-1;i++){ const A=rings[i], B=rings[i+1];
+      for (let k=0;k<N;k++){ const j=(k+1)%N, a=A.ring[k], b=A.ring[j], c=B.ring[j], d=B.ring[k];
+        const m=[(a.p[0]+c.p[0])/2,(a.p[1]+c.p[1])/2-(A.yc+B.yc)/2,0];
+        tri(a.p,d.p,c.p,m,a.c,d.c,c.c); tri(a.p,c.p,b.p,m,a.c,c.c,b.c); } }
+    { const A=rings[0], T=[0,0,-1.22]; for (let k=0;k<N;k++){ const a=A.ring[k], b=A.ring[(k+1)%N]; tri(a.p,b.p,T,[a.p[0]+b.p[0],a.p[1]+b.p[1],-0.2],a.c,b.c,cFlank); } }
+    { const A=rings[rings.length-1], T=[0,-0.066,1.32]; for (let k=0;k<N;k++){ const a=A.ring[k], b=A.ring[(k+1)%N]; tri(a.p,b.p,T,[a.p[0]+b.p[0],a.p[1]+b.p[1]+0.13,0.2],a.c,b.c,cFlank); } }
+    // a thin plate from an outline, its thickness th at each point measured along nrm
+    const plate=(pts,th,nrm,col)=>{ const n=pts.length;
+      const top=pts.map((p,i)=>[p[0]+nrm[0]*th[i]/2,p[1]+nrm[1]*th[i]/2,p[2]+nrm[2]*th[i]/2]);
+      const bot=pts.map((p,i)=>[p[0]-nrm[0]*th[i]/2,p[1]-nrm[1]*th[i]/2,p[2]-nrm[2]*th[i]/2]);
+      const cen=[0,0,0]; for (const p of pts){ cen[0]+=p[0]/n; cen[1]+=p[1]/n; cen[2]+=p[2]/n; }
+      const neg=[-nrm[0],-nrm[1],-nrm[2]];
+      for (let i=1;i<n-1;i++){ tri(top[0],top[i],top[i+1],nrm,col,col,col); tri(bot[0],bot[i],bot[i+1],neg,col,col,col); }
+      for (let i=0;i<n;i++){ const j=(i+1)%n, m=[(pts[i][0]+pts[j][0])/2-cen[0],(pts[i][1]+pts[j][1])/2-cen[1],(pts[i][2]+pts[j][2])/2-cen[2]];
+        tri(top[i],bot[i],bot[j],m,col,col,col); tri(top[i],bot[j],top[j],m,col,col,col); } };
+    // dorsal fin: falcate, its tip swept back over the hollow of its trailing edge
+    plate([[0,0.27,0.14],[0,0.40,-0.01],[0,0.50,-0.19],[0,0.575,-0.42],[0,0.47,-0.36],[0,0.36,-0.33],[0,0.235,-0.37]],
+      [0.065,0.05,0.032,0,0.02,0.035,0.05],[1,0,0],cFin);
+    // flippers, angled down and back from the lower flank
+    for (const sx of [-1,1]){ const n=new THREE.Vector3(sx*0.5,0.86,0.1).normalize();
+      plate([[sx*0.15,-0.11,0.52],[sx*0.29,-0.19,0.41],[sx*0.43,-0.31,0.2],[sx*0.37,-0.28,0.19],[sx*0.17,-0.16,0.31]],[0.05,0.035,0,0.012,0.04],[n.x,n.y,n.z],cFin); }
+    // flukes, swept back with a notch at the middle of the trailing edge
+    plate([[0,0,-1.05],[0.17,0,-1.21],[0.37,0,-1.44],[0.31,0,-1.48],[0.15,0,-1.41],[0,0,-1.35],[-0.15,0,-1.41],[-0.31,0,-1.48],[-0.37,0,-1.44],[-0.17,0,-1.21]],
+      [0.07,0.045,0,0,0.02,0.03,0.02,0,0,0.045],[0,1,0],cFin);
+    // eyes
+    for (const sx of [-1,1]){ const x=sx*0.15; tri([x,0.03,0.80],[x,-0.012,0.83],[x,-0.006,0.765],[sx,0,0],cEye,cEye,cEye); }
+    const g=new THREE.BufferGeometry();
+    g.setAttribute('position',new THREE.Float32BufferAttribute(P,3)); g.setAttribute('color',new THREE.Float32BufferAttribute(C,3));
+    g.computeVertexNormals(); return g;
+  }
+
+  /* ---------- the flex: a wave runs back along the body, growing towards the flukes, which pitch with its slope;
+     aFlex = (phase, amplitude at the flukes in metres, curvature of the path in 1/m) ---------- */
+  const FLEX=`vec3 transformed = vec3( position );
+    { float zz=transformed.z, zn=zz/1.3;
+      float w=clamp((0.25-zn)/1.3,0.0,1.0), w2=w*w, dw=(w>0.0&&w<1.0)?-2.0*w/1.69:0.0;
+      float ph=aFlex.x+2.4*zn, s=sin(ph), c=cos(ph);
+      float dy=aFlex.y*w2*s+0.5*aFlex.z*zz*zz;
+      float sl=aFlex.y*(dw*s+w2*c*2.4/1.3)+aFlex.z*zz;
+      float a=atan(sl), yl=transformed.y;
+      transformed.y=dy+yl*cos(a); transformed.z=zz-yl*sin(a); }`;
+  const patchFlex=sh=>{ sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nattribute vec3 aFlex;').replace('#include <begin_vertex>',FLEX); };
+
+  const geo=buildGeo(), MAXD=O.maxDolphins;
+  const flexA=new THREE.InstancedBufferAttribute(new Float32Array(MAXD*3),3); flexA.setUsage(THREE.DynamicDrawUsage); geo.setAttribute('aFlex',flexA);
+  const bodyMat=new THREE.MeshPhongMaterial({vertexColors:true,flatShading:true,shininess:36,specular:hex('#2f353b')});
+  bodyMat.onBeforeCompile=patchFlex; bodyMat.customProgramCacheKey=()=>'dolphin-body';
+  const depthMat=new THREE.MeshDepthMaterial({depthPacking:THREE.RGBADepthPacking}); depthMat.onBeforeCompile=patchFlex; depthMat.customProgramCacheKey=()=>'dolphin-depth';
+  const body=new THREE.InstancedMesh(geo,bodyMat,MAXD); body.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  body.castShadow=true; body.customDepthMaterial=depthMat; body.frustumCulled=false; body.count=0;
+  for (let i=0;i<MAXD;i++) body.setColorAt(i,new THREE.Color(1,1,1));
+  // the shape under water, drawn after the sea at the depth of the surface
+  const ghostU={uSeaY:{value:0}};
+  const ghostCol=hex('#183650'), ghostMat=new THREE.MeshBasicMaterial({color:ghostCol.clone(),transparent:true,opacity:O.ghost,depthWrite:false,
+    polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-4});
+  ghostMat.onBeforeCompile=sh=>{ patchFlex(sh); sh.uniforms.uSeaY=ghostU.uSeaY;
+    sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nvarying float vDepth; uniform float uSeaY;')
+      .replace('#include <project_vertex>',`vec4 wp=vec4(transformed,1.0);
+        #ifdef USE_INSTANCING
+          wp=instanceMatrix*wp;
+        #endif
+        wp=modelMatrix*wp; vDepth=uSeaY-wp.y;
+        vec3 sp=wp.xyz; if (wp.y<uSeaY && cameraPosition.y>uSeaY){ sp=cameraPosition+(wp.xyz-cameraPosition)*((cameraPosition.y-uSeaY)/(cameraPosition.y-wp.y)); }
+        vec4 mvPosition=viewMatrix*vec4(sp,1.0); gl_Position=projectionMatrix*mvPosition;`);
+    sh.fragmentShader=sh.fragmentShader.replace('#include <common>','#include <common>\nvarying float vDepth;')
+      .replace('vec4 diffuseColor = vec4( diffuse, opacity );','if (vDepth<0.0) discard; vec4 diffuseColor=vec4(diffuse,opacity*exp(-vDepth/2.0)*smoothstep(0.0,0.25,vDepth));'); };
+  ghostMat.customProgramCacheKey=()=>'dolphin-ghost';
+  const ghost=new THREE.InstancedMesh(geo,ghostMat,MAXD); ghost.instanceMatrix=body.instanceMatrix; ghost.frustumCulled=false; ghost.count=0; ghost.renderOrder=2;
+
+  /* ---------- foam rings where the water is broken ---------- */
+  const MAXR=240, foamCol=hex('#f4f1e8');
+  const ringGeo=new THREE.CircleGeometry(1,20).rotateX(-Math.PI/2);
+  const ringA=new THREE.InstancedBufferAttribute(new Float32Array(MAXR*3),3); ringA.setUsage(THREE.DynamicDrawUsage); ringGeo.setAttribute('aRing',ringA);
+  const fxU=THREE.UniformsUtils.merge([THREE.UniformsLib.fog,{uCol:{value:foamCol.clone()},uBright:{value:1},uScale:{value:800}}]);
+  const ringMat=new THREE.ShaderMaterial({uniforms:fxU,transparent:true,depthWrite:false,fog:true,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-6,
+    vertexShader:`attribute vec3 aRing; varying vec3 vR; varying vec2 vP;
+      #include <fog_pars_vertex>
+      void main(){ vP=position.xz; vR=aRing; vec4 mvPosition=modelViewMatrix*instanceMatrix*vec4(position,1.0); gl_Position=projectionMatrix*mvPosition;
+        #include <fog_vertex>
+      }`,
+    fragmentShader:`uniform vec3 uCol; uniform float uBright; varying vec3 vR; varying vec2 vP;
+      #include <common>
+      #include <fog_pars_fragment>
+      float h2(vec2 p){ return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453); }
+      float n2(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
+        return mix(mix(h2(i),h2(i+vec2(1.0,0.0)),f.x),mix(h2(i+vec2(0.0,1.0)),h2(i+vec2(1.0,1.0)),f.x),f.y); }
+      void main(){
+        float r=length(vP); if (r>1.0) discard;
+        float age=vR.x, pt=step(1.5,vR.y), n=n2(vP*4.0+vR.y*31.0)*0.6+n2(vP*9.0-vR.y*17.0)*0.4, m=n2(vP*13.0+vR.y*7.0);
+        // an outlined ring for a break of the surface, or a soft patch of foam with no outline
+        float ring=(1.0-pt)*(1.0-smoothstep(0.0,0.07+0.22*age,abs(r-0.82)))*(0.55+0.45*m);
+        float core=(1.0-smoothstep(0.1,0.85,r))*mix(1.0-smoothstep(0.0,0.5,age),1.0,pt);
+        float f=smoothstep(0.3,0.62,max(ring*0.85,core*0.95)*(0.35+0.95*n));
+        float a=f*vR.z*(1.0-age)*(1.0-0.4*age); if (a<0.01) discard;
+        gl_FragColor=vec4(uCol*uBright,a);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+        #include <fog_fragment>
+      }`});
+  const rings=new THREE.InstancedMesh(ringGeo,ringMat,MAXR); rings.instanceMatrix.setUsage(THREE.DynamicDrawUsage); rings.frustumCulled=false; rings.count=0; rings.renderOrder=3;
+  const RG=[];   // live rings: {x,z,r0,r1,age,life,str,seed}
+
+  /* ---------- spray: drops thrown up by a splash, and the mist of a breath ---------- */
+  const MAXP=1200, pPos=new Float32Array(MAXP*3), pSize=new Float32Array(MAXP), pAlpha=new Float32Array(MAXP);
+  const pGeo=new THREE.BufferGeometry();
+  pGeo.setAttribute('position',new THREE.BufferAttribute(pPos,3).setUsage(THREE.DynamicDrawUsage));
+  pGeo.setAttribute('aSize',new THREE.BufferAttribute(pSize,1).setUsage(THREE.DynamicDrawUsage));
+  pGeo.setAttribute('aAlpha',new THREE.BufferAttribute(pAlpha,1).setUsage(THREE.DynamicDrawUsage));
+  const sprayMat=new THREE.ShaderMaterial({uniforms:fxU,transparent:true,depthWrite:false,fog:true,
+    vertexShader:`attribute float aSize; attribute float aAlpha; uniform float uScale; varying float vA;
+      #include <fog_pars_vertex>
+      void main(){ vA=aAlpha; vec4 mvPosition=modelViewMatrix*vec4(position,1.0); gl_PointSize=max(1.5,aSize*uScale/max(0.2,-mvPosition.z)); gl_Position=projectionMatrix*mvPosition;
+        #include <fog_vertex>
+      }`,
+    fragmentShader:`uniform vec3 uCol; uniform float uBright; varying float vA;
+      #include <common>
+      #include <fog_pars_fragment>
+      void main(){ vec2 c=gl_PointCoord-0.5; float d=length(c); if (d>0.5) discard;
+        gl_FragColor=vec4(uCol*uBright,vA*(1.0-smoothstep(0.32,0.5,d)));
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+        #include <fog_fragment>
+      }`});
+  const spray=new THREE.Points(pGeo,sprayMat); spray.frustumCulled=false; spray.renderOrder=4;
+  const _sz=new THREE.Vector2();
+  spray.onBeforeRender=(renderer,scene,camera)=>{ renderer.getDrawingBufferSize(_sz); fxU.uScale.value=_sz.y/(2*Math.tan(THREE.MathUtils.degToRad((camera.fov||50)/2))); };
+  const PT=[];   // live particles: {x,y,z,vx,vy,vz,age,life,size,a,mist}
+  pGeo.setDrawRange(0,0);
+  parent.add(body,ghost,rings,spray);
+
+  const sound=(k,x,y,z,s)=>{ if (O.onSound) try { O.onSound(k,x,y,z,s); } catch(e){} };
+  function ring(x,z,r0,r1,life,str){ if (RG.length>=MAXR) RG.shift(); RG.push({x,z,r0,r1,age:0,life,str,seed:R()}); }
+  function patch(x,z,r0,r1,life,str){ if (RG.length>=MAXR) RG.shift(); RG.push({x,z,r0,r1,age:0,life,str,seed:2+R()}); }
+  function drops(x,y,z,n,up,out,dirx,dirz,carry){ for (let i=0;i<n;i++){ if (PT.length>=MAXP) PT.shift();
+    const a=R()*TAU, o=out*(0.3+0.7*R());
+    PT.push({x:x+(R()-0.5)*0.5,y:y,z:z+(R()-0.5)*0.5,vx:Math.cos(a)*o+dirx*carry*R(),vy:up*(0.45+0.55*R()),vz:Math.sin(a)*o+dirz*carry*R(),
+      age:0,life:rr(0.7,1.5),size:rr(0.05,0.13),a:rr(0.6,0.95),mist:false}); } }
+  function mist(x,y,z,n,dirx,dirz,sp){ for (let i=0;i<n;i++){ if (PT.length>=MAXP) PT.shift();
+    PT.push({x:x+(R()-0.5)*0.12,y:y+0.05,z:z+(R()-0.5)*0.12,vx:(R()-0.5)*0.5+dirx*sp,vy:rr(1.2,3.4),vz:(R()-0.5)*0.5+dirz*sp,
+      age:0,life:rr(0.45,0.85),size:rr(0.035,0.08),a:rr(0.25,0.45),mist:true}); } }
+
+  /* ---------- pods and their members ---------- */
+  const pods=[], dolphins=[];
+  let FX=0, FZ=0, depthAt=()=>100, boats=[], keepOut=()=>false, spawnW=()=>1;
+  const depth=(x,z)=>{ const d=depthAt(x,z); return Number.isFinite(d)?d:100; };
+  const okSpot=(x,z)=>depth(x,z)>O.minDepth+4 && !keepOut(x,z) && R()<spawnW(x,z);
+  // a place for a pod to appear, out of the way of the focus: now and then ahead of a large boat under way, so
+  // that it meets the pod, otherwise anywhere in deep, open water; null if there is none within reach
+  function deepSpot(){
+    for (const B of boats) if ((B.len||0)>15 && B.v>3 && Math.hypot(B.x-FX,B.z-FZ)<O.range*1.5 && R()<0.4){
+      const a=rr(120,220), l=rr(-40,40), x=B.x+Math.sin(B.head)*a+Math.cos(B.head)*l, z=B.z+Math.cos(B.head)*a-Math.sin(B.head)*l; if (okSpot(x,z)) return [x,z]; }
+    for (let k=0;k<80;k++){ const a=R()*TAU, r=O.range*rr(0.35,0.85), x=FX+Math.sin(a)*r, z=FZ+Math.cos(a)*r; if (okSpot(x,z)) return [x,z]; }
+    return null; }
+  function placePod(pod){ const q=deepSpot(); pod.dormant=!q; pod.retry=2; if (!q) return;
+    [pod.x,pod.z]=q; pod.head=R()*TAU; pod.speed=pod.cruise; pod.mode='cruise'; pod.boat=null; pod.spread=1;
+    for (const d of pod.members){ d.x=pod.x+(R()-0.5)*6; d.z=pod.z+(R()-0.5)*8; d.y=d.cy; d.vy=0; d.slope=0; d.man=null; d.prev=null; d.head=pod.head; d.speed=pod.cruise; d.breathIn=-1; d.leapIn=-1; }
+    formation(pod); }
+  const sizeFor=()=>Array.isArray(O.podSize)?Math.round(rr(O.podSize[0],O.podSize[1])):O.podSize;
+  // rows two to four abreast, one behind another; members take the places nearest to where they already are,
+  // so that a pod regrouping after bow-riding does not cross over itself
+  function formation(pod){ const n=pod.members.length, tight=O.formation!=='loose';
+    const cols=n<=4?2:n<=6?3:4, lat=tight?1.6:2.7, lon=tight?3.1:4.6, j=tight?0.1:0.6, ch=Math.cos(pod.head), sh=Math.sin(pod.head);
+    const loc=d=>{ const dx=d.x-pod.x, dz=d.z-pod.z; return [dx*ch-dz*sh, dx*sh+dz*ch]; };
+    const ms=pod.members.slice().sort((a,b)=>loc(b)[1]-loc(a)[1]);
+    for (let r=0;r*cols<n;r++){ const row=ms.slice(r*cols,r*cols+cols).sort((a,b)=>loc(a)[0]-loc(b)[0]);
+      row.forEach((d,c)=>{ d.row=r; d.col=c; d.sx=(c-(row.length-1)/2)*lat+(r%2?lat*0.25:0)+rr(-j,j); d.sz=((Math.ceil(n/cols)-1)/2-r)*lon+rr(-j,j)*1.5;
+        d.cy=pod.cy+rr(-0.12,0.12); }); } }
+  function rideSlots(pod){ const n=pod.members.length; pod.members.forEach((d,i)=>{ const side=i%2?1:-1, rank=Math.floor(i/2);
+    d.rx=side*rr(0.8,1.5)+side*rank*1.7; d.rz=rr(0.8,2.4)+rank*rr(1.5,2.5)-(rank>1?rr(3,5):0); d.ry=rr(-1.3,-0.8); d.rideBreath=rr(1,6); }); }
+  function newDolphin(pod){ const d={pod,x:pod.x+(R()-0.5)*6,z:pod.z+(R()-0.5)*8,y:rr(-2.6,-1.6),head:pod.head,speed:pod.speed,slope:0,vy:0,pitch:0,roll:0,
+      cy:rr(-2.2,-1.3),man:null,breathIn:-1,leapIn:-1,leapCool:rr(2,8),flex:R()*TAU,amp:0.1,curv:0,scale:rr(0.86,1.06),ph:R()*TAU,
+      prev:null,foamT:0,state:'swim',sx:0,sz:0,rx:0,rz:0,ry:-1,rideBreath:3};
+    d.y=d.cy; return d; }
+  function newPod(){ const q=[FX,FZ], pod={x:q[0],z:q[1],dormant:false,retry:2,size:sizeFor(),head:R()*TAU,speed:rr(2.4,3.6),cruise:rr(2.4,3.6),mode:'cruise',boat:null,t:0,t2:0,rideT:0,cool:rr(0,10),spread:1,cy:rr(-1.9,-1.3),
+      breathT:rr(1,6),ph:R()*TAU,members:[]}; return pod; }
+  const fresh=[];
+  function setMembers(pod,n){ while (pod.members.length>n){ const d=pod.members.pop(); dolphins.splice(dolphins.indexOf(d),1); }
+    while (pod.members.length<n && dolphins.length<MAXD){ const d=newDolphin(pod); pod.members.push(d); dolphins.push(d); }
+    formation(pod); if (pod.mode!=='cruise') rideSlots(pod); }
+  function rebuild(){ while (pods.length>O.pods){ const p=pods.pop(); setMembers(p,0); }
+    while (pods.length<O.pods){ const p=newPod(); pods.push(p); fresh.push(p); }
+    let room=MAXD; for (const p of pods){ p.size=Math.min(p.size,Math.max(0,room)); room-=p.size; }
+    for (const p of pods) if (p.members.length!==p.size) setMembers(p,p.size);
+    while (fresh.length) placePod(fresh.pop()); }
+
+  // vertical paths are given as functions of the horizontal distance run: Hermite pieces in the water, and a
+  // ballistic flight in the air
+  const H=(y1,m1,L)=>({type:'h',y1,m1,L,x:0,y0:null,m0:0});
+  function evalH(s){ const u=cl(s.x/s.L,0,1), L=s.L, u2=u*u, u3=u2*u;
+    const y=(2*u3-3*u2+1)*s.y0+(u3-2*u2+u)*L*s.m0+(-2*u3+3*u2)*s.y1+(u3-u2)*L*s.m1;
+    const dy=((6*u2-6*u)*s.y0+(3*u2-4*u+1)*L*s.m0+(-6*u2+6*u)*s.y1+(3*u2-2*u)*L*s.m1)/L;
+    const ddy=((12*u-6)*s.y0+(6*u-4)*L*s.m0+(-12*u+6)*s.y1+(6*u-2)*L*s.m1)/(L*L);
+    return [y,dy,ddy,u>=1]; }
+  function startBreath(d){ const riding=d.pod.mode!=='cruise', peak=riding?rr(0.0,0.12):(d.peak??rr(-0.02,0.08));
+    const U=cl((riding?d.speed:d.pod.speed)*2.6,7,15); d.peak=null;
+    d.man={kind:'breath',i:0,vT:0,segs:[H(peak,0,U),H(riding?d.ry:d.cy,0,U*(riding?rr(0.9,1.25):1.05))]}; d.state='breath'; }
+  // A leap begins with a dive to between 3 and 3.8 m, then a steep climb that breaks the surface at the speed and
+  // angle of the flight: 5 to 6 m/s at 50 to 60 degrees (a body's clearance of 0.5 to 1.5 m), and now and then up
+  // to 7 m/s for a leap of about 2.5 m. On a bow wave the dolphin must keep up with the boat, so it leaves the
+  // water flatter, at the boat's speed, with the same rise.
+  function startLeap(d){ const riding=d.pod.mode!=='cruise', b=d.pod.boat;
+    let vx, vy;
+    if (riding&&b){ vx=b.v+0.4; vy=rr(3.6,4.6); }
+    else { const v=R()<0.08?rr(6.5,7.1):rr(5,6), th=rr(50,60)*Math.PI/180; vx=v*Math.cos(th); vy=v*Math.sin(th); }
+    const deep=-Math.min(rr(3,3.8),depth(d.x,d.z)-1.5), m=vy/vx, Ur=cl(2.0*(-deep)/m+1.2,3.5,riding?14:6);
+    d.man={kind:'leap',i:0,vT:Math.max(vx,d.speed*0.8),segs:[H(deep,0,cl(d.speed*1.1,3,9)),H(0,m,Ur),{type:'air',vx,vy},H(riding?d.ry:d.cy,0,cl(vx*1.6,5,12))]};
+    d.state='leap'; d.leapCool=rr(5,10);
+    for (const o of d.pod.members) if (o!==d && !o.man && o.leapIn<0 && R()<0.3) o.leapIn=rr(0.25,0.7); }
+
+  // pose of a point on the body (local x right, y up, z forward) in the world
+  const _w=[0,0,0];
+  function toWorld(d,lx,ly,lz){ const s=d.scale, ch=Math.cos(d.head), sh=Math.sin(d.head), cp=Math.cos(d.pitch), sp=Math.sin(d.pitch);
+    lx*=s; ly*=s; lz*=s;
+    _w[0]=d.x+ch*lx-sh*sp*ly+sh*cp*lz; _w[1]=d.y+cp*ly+sp*lz; _w[2]=d.z-sh*lx-ch*sp*ly+ch*cp*lz; return _w; }
+  const SAMPLES=[[0,-0.06,1.3],[0,0.17,0.62],[0,0.575,-0.42],[0,0,-1.4],[0,0.27,0.0]];   // nose, blowhole, fin tip, flukes, fin base
+
+  function surfaceFx(d,h){
+    const ys=SAMPLES.map(p=>{ const w=toWorld(d,...p); return [w[0],w[1]-SEA,w[2]]; });
+    const prev=d.prev; d.prev=ys.map(w=>w[1]);
+    if (!prev) return;
+    const fx=Math.sin(d.head), fz=Math.cos(d.head), seg=d.man&&d.man.segs[d.man.i], air=seg&&seg.type==='air', leaping=d.man&&d.man.kind==='leap';
+    for (let k=0;k<4;k++){ const y0=prev[k], y1=ys[k][1]; if ((y0<0)===(y1<0)) continue;
+      const [x,,z]=ys[k], v=(y1-y0)/h, up=y1>=0;
+      if (k===0){
+        if (up && leaping && v>2){ ring(x,z,0.5,2.3+v*0.12,2.4,0.85); patch(x,z,0.5,1.3,2.4,0.9); drops(x,SEA,z,14+Math.round(v*4),v*0.75,1.4,fx,fz,d.speed*0.5); sound('leap',x,SEA,z,cl(v/6,0,1)); }
+        else if (!up && leaping && v<-2){ ring(x,z,0.7,2.7+(-v)*0.18,2.8,0.9); patch(x,z,0.8,1.9,3.2,1); drops(x,SEA,z,26+Math.round(-v*6),rr(3.5,5.5),2.2,fx,fz,d.speed*0.35); sound('splash',x,SEA,z,cl(-v/7,0,1)); }
+        else { ring(x,z,0.3,1.1,1.7,0.5); patch(x,z,0.3,0.7,1.6,0.6); drops(x,SEA,z,3,1.2,0.6,fx,fz,0.5); }
+      } else if (k===1){ if (up && !leaping){ mist(x,ys[1][1]+SEA,z,22,fx,fz,d.speed*0.6); sound('breath',x,SEA,z,0.6); } }
+      else if (k===2){ ring(x,z,0.2,0.75,1.3,0.55); }
+      else if (k===3){ if (up && leaping && v>1.5){ drops(x,SEA,z,10+Math.round(v*3),v*0.55,0.9,fx,fz,d.speed*0.4); ring(x,z,0.4,1.6,2,0.7); }
+        if (!up){ const big=leaping&&v<-2; ring(x,z,big?0.6:0.3,big?2.2:1.2,big?2.4:1.6,big?0.9:0.6);
+          if (Math.abs(v)>0.4) drops(x,SEA,z,big?18:4,big?4:1.4,big?1.6:0.7,fx,fz,0.4); } }
+    }
+    // a trail of foam where the fin or the back cuts the surface
+    d.foamT-=h; if (d.foamT<=0 && !air){
+      const fb=ys[4], ft=ys[2];
+      if (fb[1]<0 && ft[1]>0){ const t=fb[1]/(fb[1]-ft[1]); patch(lerp(fb[0],ft[0],t),lerp(fb[2],ft[2],t),0.15,0.5+d.speed*0.04,1.4,0.55); d.foamT=0.06; }
+      const n=ys[0], f=ys[3]; if ((n[1]>0)!==(f[1]>0) && d.y-SEA>-0.4){ const t=n[1]/(n[1]-f[1]); patch(lerp(n[0],f[0],t),lerp(n[2],f[2],t),0.3,0.9,1.6,0.45); d.foamT=0.06; }
+    }
+  }
+
+  function podStep(pod,h){
+    if (pod.dormant){ pod.retry-=h; if (pod.retry<=0) placePod(pod); return; }
+    pod.t+=h;
+    const b=pod.boat;
+    if (pod.mode!=='cruise'){
+      if (!b || !boats.includes(b) || b.v<2.5 || !O.bowRide){ leave(pod); return; }
+      const fx=Math.sin(b.head), fz=Math.cos(b.head);
+      pod.x=b.x+fx*b.len/2; pod.z=b.z+fz*b.len/2; pod.head=b.head; pod.speed=b.v;
+      if (pod.mode==='approach'){ pod.t2+=h; let m=0; for (const d of pod.members) m+=Math.hypot(d.x-pod.x,d.z-pod.z)/pod.members.length;
+        if (m<9){ pod.mode='ride'; } else if (pod.t2>90) leave(pod); }
+      else { pod.rideT-=h; if (pod.rideT<=0 || depth(pod.x,pod.z)<O.minDepth || keepOut(pod.x,pod.z)) leave(pod); }
+      return;
+    }
+    const fx=Math.sin(pod.head), fz=Math.cos(pod.head);
+    let turn=0.10*Math.sin(pod.t*0.071+pod.ph)+0.06*Math.sin(pod.t*0.19+pod.ph*2.3);
+    // shallow water and the places kept clear (harbours, the channels into coves) ahead turn the pod aside
+    const room=(x,z)=>keepOut(x,z)?-1:depth(x,z);
+    const dA=Math.min(room(pod.x+fx*25,pod.z+fz*25),room(pod.x+fx*55,pod.z+fz*55));
+    const dF=Math.hypot(pod.x-FX,pod.z-FZ);
+    if (dA<O.minDepth+3){ const l=room(pod.x+Math.sin(pod.head+0.7)*40,pod.z+Math.cos(pod.head+0.7)*40), r=room(pod.x+Math.sin(pod.head-0.7)*40,pod.z+Math.cos(pod.head-0.7)*40); turn=(l>r?1:-1)*0.5; }
+    else if (dF>O.range) turn+=cl(angTo(pod.head,Math.atan2(FX-pod.x,FZ-pod.z)),-1,1)*0.2;
+    pod.head+=turn*h;
+    pod.speed+=(pod.cruise-pod.speed)*(1-Math.exp(-h*0.25)); pod.spread+=(1-pod.spread)*(1-Math.exp(-h*0.12));
+    pod.x+=fx*pod.speed*h; pod.z+=fz*pod.speed*h;
+    if (dF>O.range*3){ placePod(pod); return; }
+    pod.cool-=h;
+    if (O.bowRide && pod.cool<=0) for (const B of boats){ if (B.v<3) continue; const dd=Math.hypot(B.x-pod.x,B.z-pod.z);
+      if (dd<170 && R()<0.5*h){ pod.mode='approach'; pod.boat=B; pod.t2=0; pod.rideT=rr(25,55); rideSlots(pod); for (const d of pod.members) d.breathIn=-1; break; } }
+    pod.breathT-=h;
+    if (pod.breathT<=0){ pod.breathT=rr(9,20); const ripple=R()<0.6, gap=rr(0.12,0.24), peak=rr(-0.02,0.08), dir=R()<0.5;
+      for (const d of pod.members){ if (!d.man && d.breathIn<0){ const c=dir?d.col:-d.col+4;
+        d.breathIn=ripple?(c*gap+d.row*gap*0.6)%1.6:rr(0,0.1); d.peak=peak+rr(-0.015,0.015); } } }
+  }
+  function leave(pod){ const b=pod.boat; let mx=0, mz=0, lat=0; const n=pod.members.length||1;
+    for (const d of pod.members){ mx+=d.x/n; mz+=d.z/n; if (b) lat+=((d.x-b.x)*Math.cos(b.head)-(d.z-b.z)*Math.sin(b.head))/n; }
+    pod.mode='cruise'; pod.x=mx; pod.z=mz; pod.head=(b?b.head:pod.head)+(lat>=0?1:-1)*rr(0.55,1.1);
+    pod.speed=b?b.v:pod.speed; pod.cool=rr(35,70); pod.boat=null; pod.breathT=rr(3,8); pod.spread=2.4; formation(pod); }
+
+  function dolphinStep(d,h){
+    const pod=d.pod, riding=pod.mode!=='cruise', b=pod.boat;
+    let tx, tz, base, fH;
+    if (riding && b){ const fx=Math.sin(b.head), fz=Math.cos(b.head), rx=Math.cos(b.head), rz=-Math.sin(b.head);
+      const jx=d.rx+0.35*Math.sin(pod.t*0.4+d.ph), jz=b.len/2+d.rz+0.8*Math.sin(pod.t*0.27+d.ph*1.3);
+      tx=b.x+rx*jx+fx*jz; tz=b.z+rz*jx+fz*jz; base=b.v; fH=b.head; }
+    else { const h0=pod.head, A=O.formation==='loose'?1:0.22, sx=d.sx*pod.spread+A*Math.sin(pod.t*0.13+d.ph), sz=d.sz*pod.spread+A*1.4*Math.sin(pod.t*0.09+d.ph*1.7);
+      tx=pod.x+Math.cos(h0)*sx+Math.sin(h0)*sz; tz=pod.z-Math.sin(h0)*sx+Math.cos(h0)*sz; base=pod.speed; fH=h0; }
+    // aim at a point ahead of the place in the formation, so that a dolphin on its place swims with the pod
+    const ax=tx+Math.sin(fH)*6-d.x, az=tz+Math.cos(fH)*6-d.z, ex=tx-d.x, ez=tz-d.z;
+    let want=Math.atan2(ax,az);
+    const ahead=ex*Math.sin(d.head)+ez*Math.cos(d.head);
+    let vT=cl(base+cl(ahead*(riding?0.9:0.5),-2.5,riding?6:3),0.8,riding?13:9);
+    if (depth(d.x,d.z)<O.minDepth*0.7) want=Math.atan2(pod.x-d.x,pod.z-d.z);
+    const seg=d.man&&d.man.segs[d.man.i], air=seg&&seg.type==='air';
+    if (d.man && d.man.vT && d.man.i<3) vT=d.man.i===1?d.man.vT:Math.max(vT*0.9,d.man.vT);
+    if (!air) d.speed+=cl(vT-d.speed,-(d.man&&d.man.kind==='leap'?6:3)*h,(d.man&&d.man.kind==='leap'?6:4)*h);
+    const tr=air?0:d.man?0.45:riding?1.4:1.0, dh=cl(angTo(d.head,want)*2.0,-tr,tr);
+    d.head+=dh*h;
+    d.x+=Math.sin(d.head)*d.speed*h; d.z+=Math.cos(d.head)*d.speed*h;
+    // keep out of the hulls of boats
+    for (const B of boats){ const dx=d.x-B.x, dz=d.z-B.z; if (dx*dx+dz*dz>900) continue;
+      const c=Math.cos(B.head), s=Math.sin(B.head), lx=dx*c-dz*s, lz=dx*s+dz*c, hw=(B.beam||6)/2+0.9, hl=(B.len||20)/2+0.6;
+      if (Math.abs(lz)<hl && Math.abs(lx)<hw && d.y>-3){ const push=(Math.sign(lx)||1)*(hw-Math.abs(lx)); d.x+=c*push; d.z+=-s*push; } }
+    // vertical path
+    let curvT=0;
+    if (!d.man){
+      d.state='swim';
+      const floor=-(depth(d.x,d.z)-1.5), cy=Math.max(riding?d.ry:d.cy,Math.min(-0.8,floor));
+      if (d.breathIn>=0){ d.breathIn-=h; if (d.breathIn<0) startBreath(d); }
+      if (d.leapIn>=0){ d.leapIn-=h; if (d.leapIn<0 && !d.man && depth(d.x,d.z)>O.minDepth) startLeap(d); }
+      d.leapCool-=h;
+      if (!d.man && riding && pod.mode==='ride'){ d.rideBreath-=h; if (d.rideBreath<=0){ d.rideBreath=rr(3,8); startBreath(d); } }
+      const lam=O.leapsPerMinute/60/Math.max(1,pod.members.length)*(pod.mode==='ride'?1.6:1);
+      if (!d.man && d.leapCool<=0 && R()<lam*h && depth(d.x,d.z)>O.minDepth && Math.abs(d.y-cy)<0.6) startLeap(d);
+      if (!d.man){ d.vy+=(4*(cy-d.y)-4*d.vy)*h; d.y+=d.vy*h; d.slope=d.vy/Math.max(d.speed,0.6); }
+    }
+    if (d.man){ const s=d.man.segs[d.man.i];
+      if (s.type==='h'){ if (s.y0===null){ s.y0=d.y; s.m0=d.slope; }
+        s.x+=d.speed*h; const [y,dy,ddy,done]=evalH(s); d.y=y; d.slope=dy; curvT=ddy/Math.pow(1+dy*dy,1.5);
+        if (done) nextSeg(d); }
+      else { if (!s.init){ s.init=true; if (s.vx===undefined) s.vx=d.speed; s.vy=s.vy??s.vx*d.slope; }
+        d.speed=s.vx; s.vy-=G*h; d.y+=s.vy*h; d.slope=s.vy/s.vx; curvT=-G/(s.vx*s.vx)/Math.pow(1+d.slope*d.slope,1.5)*0.6;
+        if (d.y<SEA && s.vy<0) nextSeg(d); }
+      d.vy=d.slope*d.speed;
+    }
+    d.pitch=Math.atan(d.slope);
+    d.curv+=(cl(curvT,-0.6,0.6)-d.curv)*(1-Math.exp(-h*10));
+    d.roll+=(cl(-dh*0.5,-0.5,0.5)-d.roll)*(1-Math.exp(-h*4));
+    // the beat of the flukes: harder when climbing to leap, almost still in the air or gliding on a bow wave
+    const sg=d.man&&d.man.segs[d.man.i];
+    let ampT=cl(0.06+0.018*d.speed,0.06,0.2), fr=0.7+0.28*d.speed;
+    if (riding && pod.mode==='ride' && Math.abs(ahead)<2.5){ ampT=0.04; fr=1.2; }
+    if (d.man && d.man.kind==='leap' && d.man.i===0){ ampT=0.24; fr=3.2; }
+    if (sg && sg.type==='air'){ ampT=0.02; fr=0.5; }
+    d.amp+=(ampT-d.amp)*(1-Math.exp(-h*4)); d.flex+=TAU*fr*h; if (d.flex>1e4) d.flex-=TAU*1000;
+    surfaceFx(d,h);
+  }
+  function nextSeg(d){ const m=d.man; m.i++; if (m.i>=m.segs.length){ d.man=null; d.vy=0; return; }
+    const s=m.segs[m.i]; if (s.type==='h'){ s.y0=d.y; s.m0=d.slope; } d.state=s.type==='air'?'air':m.kind; }
+
+  function fxStep(dt){
+    for (let i=PT.length-1;i>=0;i--){ const p=PT[i]; p.age+=dt/p.life;
+      if (p.mist){ const k=Math.exp(-3*dt); p.vx*=k; p.vz*=k; p.vy=p.vy*k-0.6*dt; p.size+=dt*0.12; }
+      else { const k=Math.exp(-0.4*dt); p.vx*=k; p.vz*=k; p.vy-=G*dt; }
+      p.x+=p.vx*dt; p.y+=p.vy*dt; p.z+=p.vz*dt;
+      if (p.age>=1 || (!p.mist && p.y<SEA-0.05 && p.vy<0)){ PT[i]=PT[PT.length-1]; PT.pop(); } }
+    for (let i=RG.length-1;i>=0;i--){ RG[i].age+=dt/RG[i].life; if (RG[i].age>=1) RG.splice(i,1); }
+  }
+
+  const _m=new THREE.Matrix4(), _q=new THREE.Quaternion(), _e=new THREE.Euler(0,0,0,'YXZ'), _p=new THREE.Vector3(), _s=new THREE.Vector3();
+  function write(){
+    let i=0;
+    for (const d of dolphins){ if (d.pod.dormant) continue; _e.set(-d.pitch,d.head,d.roll,'YXZ'); _q.setFromEuler(_e); _p.set(d.x,d.y,d.z); _s.setScalar(d.scale);
+      _m.compose(_p,_q,_s); body.setMatrixAt(i,_m); flexA.setXYZ(i,d.flex,d.amp/d.scale,d.curv*d.scale); i++; }
+    body.count=ghost.count=i; body.instanceMatrix.needsUpdate=true; flexA.needsUpdate=true;
+    _q.identity();
+    RG.forEach((g,i)=>{ const r=lerp(g.r0,g.r1,Math.sqrt(g.age)); _p.set(g.x,SEA+0.02,g.z); _s.set(r,1,r); _m.compose(_p,_q,_s); rings.setMatrixAt(i,_m); ringA.setXYZ(i,g.age,g.seed,g.str); });
+    rings.count=RG.length; rings.instanceMatrix.needsUpdate=true; ringA.needsUpdate=true;
+    PT.forEach((p,i)=>{ pPos[i*3]=p.x; pPos[i*3+1]=p.y; pPos[i*3+2]=p.z; pSize[i]=p.size; pAlpha[i]=p.a*(1-p.age)*(p.mist?1:Math.min(1,p.age*8+0.3)); });
+    pGeo.setDrawRange(0,PT.length); for (const k of ['position','aSize','aAlpha']) pGeo.attributes[k].needsUpdate=true;
+  }
+
+  function readCtx(ctx){
+    SEA=ctx.seaLevel||0; ghostU.uSeaY.value=SEA;
+    if (ctx.depthAt) depthAt=ctx.depthAt;
+    boats=ctx.boats||[]; keepOut=ctx.keepOut||(()=>false); spawnW=ctx.spawnWeight||(()=>1);
+    const f=ctx.focus||(ctx.camera&&ctx.camera.position); if (f){ FX=f.x; FZ=f.z; }
+    const br=ctx.bright===undefined?1:ctx.bright; fxU.uBright.value=br;
+    ghostMat.color.copy(ghostCol).multiplyScalar(0.35+0.65*br); ghostMat.opacity=O.ghost;
+  }
+  let started=false;
+  function update(dt,ctx={}){
+    readCtx(ctx);
+    if (!started){ started=true; rebuild(); write(); }
+    if (ctx.paused || !(dt>0)) return;
+    dt=Math.min(dt,0.1); const n=Math.ceil(dt*60-1e-6), h=dt/n;
+    for (let k=0;k<n;k++){ for (const p of pods) podStep(p,h); for (const d of dolphins) if (!d.pod.dormant) dolphinStep(d,h); }
+    fxStep(dt); write();
+  }
+  function setOptions(o){ Object.assign(O,o); O.pods=cl(Math.round(O.pods),0,32);
+    if (!Array.isArray(O.podSize)) O.podSize=cl(Math.round(O.podSize),1,16);
+    if ('podSize' in o) for (const p of pods) p.size=sizeFor();
+    if (started){ rebuild(); if ('formation' in o) for (const p of pods) if (p.mode==='cruise') formation(p); } }
+  function trigger(kind,pi=0){ const pod=pods[pi%Math.max(1,pods.length)]; if (!pod) return;
+    if (kind==='breath') pod.breathT=0;
+    else if (kind==='leap'){ const d=pod.members.find(m=>!m.man); if (d){ d.leapCool=0; startLeap(d); } }
+    else if (kind==='ride' && boats.length){ let B=boats[0]; for (const b of boats) if (Math.hypot(b.x-pod.x,b.z-pod.z)<Math.hypot(B.x-pod.x,B.z-pod.z)) B=b;
+      pod.mode='approach'; pod.boat=B; pod.t2=0; pod.rideT=rr(25,55); rideSlots(pod); } }
+  // a new island: every pod is placed afresh in its waters, and the foam and spray of the old one are cleared
+  function reset(){ RG.length=0; PT.length=0; for (const p of pods){ p.dormant=true; p.retry=0; } if (started) write(); }
+  // the world has moved by dz from north to south (Coast repeats every WRAP_Z)
+  function shift(dz){ for (const p of pods) p.z+=dz; for (const d of dolphins) d.z+=dz; for (const g of RG) g.z+=dz; for (const q of PT) q.z+=dz; if (started) write(); }
+  function dispose(){ parent.remove(body,ghost,rings,spray); geo.dispose(); ringGeo.dispose(); pGeo.dispose();
+    for (const m of [bodyMat,depthMat,ghostMat,ringMat,sprayMat]) m.dispose(); }
+  return {update,setOptions,trigger,reset,shift,dispose,get dolphins(){ return dolphins; },get pods(){ return pods; },options:O,meshes:{body,ghost,rings,spray}};
+}
+/* ================= end of dolphins ================= */
+
+
+/* ================= testbench scene: renderer, sky, sea, an island, a ferry ================= */
+const canvas=document.getElementById('scene');
+const renderer=new THREE.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance',preserveDrawingBuffer:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.outputColorSpace=THREE.SRGBColorSpace;
+renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.toneMappingExposure=1.0;
+renderer.shadowMap.enabled=true; renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+const scene=new THREE.Scene();
+const FOG=hex('#9fc0dc'); scene.fog=new THREE.Fog(FOG,90,1500); scene.background=FOG.clone();
+const camera=new THREE.PerspectiveCamera(55,1,0.3,3600); camera.position.set(34,16,40);
+const controls=new OrbitControls(camera,canvas); controls.target.set(0,0,0); controls.enableDamping=true; controls.maxPolarAngle=Math.PI*0.495; controls.minDistance=3; controls.maxDistance=900;
+
+// the sky, sun and hemisphere light of Coast, without the stars
+const skyU={uTop:{value:new THREE.Color()},uMid:{value:new THREE.Color()},uHor:{value:new THREE.Color()},uSun:{value:new THREE.Vector3(0,1,0)},uSunCol:{value:new THREE.Color()},uDay:{value:1}};
+const sky=new THREE.Mesh(new THREE.SphereGeometry(500,48,24),new THREE.ShaderMaterial({uniforms:skyU,side:THREE.BackSide,depthWrite:false,fog:false,
+  vertexShader:`varying vec3 vDir; void main(){ vDir=normalize(position); gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+  fragmentShader:`uniform vec3 uTop,uMid,uHor,uSun,uSunCol; uniform float uDay; varying vec3 vDir;
+    void main(){ vec3 d=normalize(vDir); float y=d.y;
+      vec3 c = y>0.12 ? mix(uMid,uTop,clamp((y-0.12)/0.6,0.0,1.0)) : mix(uHor,uMid,clamp((y+0.04)/0.16,0.0,1.0));
+      float sd=max(dot(d,uSun),0.0); c += uSunCol*(pow(sd,900.0)*6.0 + pow(sd,12.0)*0.35 + pow(sd,3.0)*0.12*(1.0-uDay));
+      gl_FragColor=vec4(c,1.0);
+      #include <tonemapping_fragment>
+      #include <colorspace_fragment>
+    }`}));
+sky.renderOrder=-1; scene.add(sky);
+const hemi=new THREE.HemisphereLight(hex('#d8cde0'),hex('#f0c49a'),2.3); scene.add(hemi);
+const sun=new THREE.DirectionalLight(hex('#fff1dc'),2.6); scene.add(sun,sun.target);
+sun.castShadow=true; sun.shadow.mapSize.set(2048,2048); Object.assign(sun.shadow.camera,{left:-70,right:70,top:70,bottom:-70,near:1,far:400});
+sun.shadow.bias=-0.0004; sun.shadow.normalBias=0.04;
+const SUN_DIR=new THREE.Vector3(), LIGHT_DIR=new THREE.Vector3();
+const SKY={
+  day:{top:hex('#1f5c9c'),mid:hex('#5f95c4'),hor:hex('#9fc0dc'),hs:hex('#d8cde0'),hg:hex('#f0c49a')},
+  dusk:{top:hex('#2c3f74'),mid:hex('#9b7898'),hor:hex('#f2a477'),hs:hex('#d9a08c'),hg:hex('#8a5f55')},
+  night:{top:hex('#040a1a'),mid:hex('#0a1632'),hor:hex('#16264a'),hs:hex('#3a4f86'),hg:hex('#141a2c')},
+};
+const _c1=new THREE.Color(), _c2=new THREE.Color();
+const mix3=(out,k,wd,wk,wn)=>out.setRGB(SKY.day[k].r*wd+SKY.dusk[k].r*wk+SKY.night[k].r*wn, SKY.day[k].g*wd+SKY.dusk[k].g*wk+SKY.night[k].g*wn, SKY.day[k].b*wd+SKY.dusk[k].b*wk+SKY.night[k].b*wn);
+let hour=10.5, bright=1;
+function updateDaylight(){
+  const ang=(hour-6)/24*Math.PI*2;
+  SUN_DIR.set(0.32,Math.sin(ang)*0.94,-Math.cos(ang)).normalize();
+  const e=SUN_DIR.y, wd=smooth((e-0.04)/0.3), wn=smooth((-e-0.02)/0.2), wk=Math.max(0,1-wd-wn);
+  mix3(skyU.uTop.value,'top',wd,wk,wn); mix3(skyU.uMid.value,'mid',wd,wk,wn); mix3(skyU.uHor.value,'hor',wd,wk,wn);
+  skyU.uSun.value.copy(SUN_DIR); skyU.uDay.value=wd;
+  skyU.uSunCol.value.copy(_c1.set('#ffb070').lerp(_c2.set('#fff4e0'),wd)).multiplyScalar(smooth((e+0.06)/0.1));
+  scene.fog.color.copy(skyU.uHor.value); scene.background.copy(skyU.uHor.value);
+  mix3(hemi.color,'hs',wd,wk,wn); mix3(hemi.groundColor,'hg',wd,wk,wn); hemi.intensity=2.3*wd+1.5*wk+1.0*wn;
+  const sunUp=smooth((e+0.02)/0.12);
+  LIGHT_DIR.copy(SUN_DIR); sun.color.set('#ff9a5a').lerp(_c2.set('#fff1dc'),wd); sun.intensity=sunUp*(1.1+1.5*wd);
+  if (LIGHT_DIR.y<0.05) LIGHT_DIR.y=0.05;
+  bright=0.22+0.78*Math.max(wd,wk*0.75);   // as surfMat.uniforms.uBright in Coast
+  renderer.toneMappingExposure=1.0+0.35*wn;
+}
+
+// the sea of Coast: a flat Phong plane whose normal is rippled by drifting layers of value noise
+const seaUniforms={uTime:{value:0}}, origU={value:new THREE.Vector3()};
+const seaMat=new THREE.MeshPhongMaterial({color:hex('#2c6ead'),specular:hex('#121a22'),shininess:50,transparent:true,opacity:0.93,
+  polygonOffset:true,polygonOffsetFactor:-1,polygonOffsetUnits:-2});
+seaMat.onBeforeCompile=(sh)=>{
+  sh.uniforms.uTime=seaUniforms.uTime; sh.uniforms.uOrig=origU;
+  sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nvarying vec3 vSeaP;').replace('#include <project_vertex>','#include <project_vertex>\nvSeaP=(modelMatrix*vec4(transformed,1.0)).xyz;');
+  sh.fragmentShader=sh.fragmentShader.replace('#include <common>',`#include <common>
+    varying vec3 vSeaP; uniform float uTime; uniform vec3 uOrig;
+    float sh2(vec2 p){ return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453); }
+    float sn2(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
+      return mix(mix(sh2(i),sh2(i+vec2(1.0,0.0)),f.x),mix(sh2(i+vec2(0.0,1.0)),sh2(i+vec2(1.0,1.0)),f.x),f.y); }
+    mat2 rot2(float a){ float c=cos(a), s=sin(a); return mat2(c,-s,s,c); }
+    float seaWaves(vec2 q,float t,float px){
+      return sn2(rot2(0.3)*q*0.16+vec2(t*0.06,t*0.035))*0.45*(1.0-smoothstep(0.12,0.3,px*0.16))
+           + sn2(rot2(1.9)*q*0.37+vec2(-t*0.08,t*0.05))*0.28*(1.0-smoothstep(0.12,0.3,px*0.37))
+           + sn2(rot2(4.1)*q*0.9+vec2(t*0.13,-t*0.1))*0.17*(1.0-smoothstep(0.12,0.3,px*0.9))
+           + sn2(rot2(2.7)*q*2.3+vec2(-t*0.24,t*0.19))*0.1*(1.0-smoothstep(0.12,0.3,px*2.3)); }`)
+    .replace('#include <normal_fragment_maps>',`#include <normal_fragment_maps>
+      { vec2 q=vSeaP.xz+uOrig.xz; float t=uTime, e=0.4;
+        vec2 dq=fwidth(q); float px=max(dq.x,dq.y);
+        float k=1.0-smoothstep(80.0,700.0,length(vSeaP-cameraPosition));
+        float wx=seaWaves(q+vec2(e,0.0),t,px)-seaWaves(q-vec2(e,0.0),t,px);
+        float wz=seaWaves(q+vec2(0.0,e),t,px)-seaWaves(q-vec2(0.0,e),t,px);
+        normal=normalize(normal+(viewMatrix*vec4(-wx*1.5*k,0.0,-wz*1.5*k,0.0)).xyz); }`);
+};
+const sea=new THREE.Mesh(new THREE.PlaneGeometry(9000,9000).rotateX(-Math.PI/2),seaMat);
+sea.receiveShadow=true; sea.renderOrder=1; scene.add(sea);
+
+// a rocky island with a beach, standing on a sea bed 16 m down
+const IC={x:-170,z:-230};
+function groundH(x,z){ const dx=x-IC.x, dz=z-IC.z, a=Math.atan2(dz,dx), r=Math.hypot(dx,dz)*(1+0.13*Math.sin(3*a+1)+0.07*Math.sin(5*a+2.2));
+  return -16+52*Math.exp(-(r/80)*(r/80)); }
+const depthAt=(x,z)=>-groundH(x,z);
+{ const C_={seabed:hex('#4f7f91'),sand:hex('#dcb886'),beach:hex('#ecd9ad'),grass:hex('#a6a661'),scrub:hex('#9a9a5c'),rock:hex('#b8a48e'),foam:hex('#f4f1e8')};
+  const N=120, S=420, g=new THREE.PlaneGeometry(S,S,N,N).rotateX(-Math.PI/2).toNonIndexed(), p=g.attributes.position, col=[];
+  for (let i=0;i<p.count;i++){ const x=p.getX(i)+IC.x, z=p.getZ(i)+IC.z; p.setXYZ(i,x,groundH(x,z),z); }
+  for (let i=0;i<p.count;i+=3){ let h=0; for (let k=0;k<3;k++) h+=p.getY(i+k)/3; const c=new THREE.Color();
+    if (h<-0.45) c.copy(C_.seabed).lerp(C_.sand,smooth((h+6)/5.5)); else if (h<1.6) c.copy(C_.beach); else if (h<20) c.copy(C_.grass).lerp(C_.scrub,(i*0.618)%1); else c.copy(C_.rock);
+    if (h>-0.45 && h<0.12) c.lerp(C_.foam,0.55*(1-Math.abs(h+0.15)/0.3));
+    for (let k=0;k<3;k++) col.push(c.r,c.g,c.b); }
+  g.setAttribute('color',new THREE.Float32BufferAttribute(col,3)); g.computeVertexNormals();
+  const isle=new THREE.Mesh(g,new THREE.MeshLambertMaterial({vertexColors:true,flatShading:true})); isle.receiveShadow=true; scene.add(isle);
+  const bed=new THREE.Mesh(new THREE.PlaneGeometry(9000,9000).rotateX(-Math.PI/2),new THREE.MeshLambertMaterial({color:C_.seabed})); bed.position.y=-16.05; scene.add(bed); }
+
+// a ferry of the size and colours of Coast's (26 m by 6.4 m, bow towards +z), on an oval course at 9 m/s
+const FL=26, FB=6.4;
+function buildFerry(){ const g=new THREE.Group(), M={};
+  const mat=c=>M[c]||(M[c]=new THREE.MeshLambertMaterial({color:hex(c)}));
+  const box=(x,y,z,w,h,d,c)=>{ const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat(c)); m.position.set(x,y+h/2,z); m.castShadow=m.receiveShadow=true; g.add(m); return m; };
+  const white='#f1ede4', blue='#2d5f9e', anti='#7a2f26', deck='#9c8a72', glass='#30363c', red='#b8392f';
+  const zs=-FL/2+1, ze=FL/2-4.5, hl=ze-zs, hc=(zs+ze)/2, bw=t=>FB*(1-Math.pow(t,1.5)*0.88);
+  // the hull is the deck plan, square at the stern and narrowing to the stem, raised as a prism
+  const plan=(grow,y0,h,c)=>{ const sh=new THREE.Shape(), pts=[[-FB/2,zs],[FB/2,zs],[FB/2,ze]];
+    for (let k=1;k<=8;k++){ const t=k/8; pts.push([bw(t)/2,ze+t*4.5]); } for (let k=8;k>=0;k--){ const t=k/8; pts.push([-bw(t)/2,ze+t*4.5]); }
+    pts.forEach(([x,z],i)=>{ const X=x*grow, Y=-(z+(z>0?grow-1:1-grow)*2); i?sh.lineTo(X,Y):sh.moveTo(X,Y); });
+    const m=new THREE.Mesh(new THREE.ExtrudeGeometry(sh,{depth:h,bevelEnabled:false,curveSegments:1}).rotateX(-Math.PI/2),mat(c)); m.position.y=y0; m.castShadow=m.receiveShadow=true; g.add(m); };
+  plan(0.96,-1.6,0.6,anti); plan(1,-1.05,2.5,white); plan(1.006,0.94,0.32,blue); plan(0.97,1.45,0.06,deck);
+  box(0,1.5,1.4,FB-2.6,2.3,13.9,white); box(0,2.45,1.4,FB-2.55,0.9,13.6,glass);
+  box(0,3.8,1.4,FB-2.0,0.14,15.5,'#d8d2c6');
+  box(0,3.94,4.7,FB-4.2,1.9,2.8,white); box(0,4.7,4.7,FB-4.15,0.75,2.6,glass); box(0,5.84,4.7,FB-3.8,0.12,3.3,'#d8d2c6');
+  box(0,3.94,-3,0.9,2.6,1.3,red); box(0,6.5,-3,0.92,0.4,1.32,'#2a2a2e');
+  return g; }
+const ferry=buildFerry(); scene.add(ferry);
+const route={cx:40,cz:10,rx:230,rz:150,t:2.2};
+const ferryInfo={x:0,z:0,head:0,v:9,len:FL,beam:FB};   // the boat the dolphins are given, one object kept for good
+let time=0;
+function updateFerry(dt){
+  const dpx=-Math.sin(route.t)*route.rx, dpz=Math.cos(route.t)*route.rz, sp=Math.hypot(dpx,dpz);
+  route.t+=ferryInfo.v*dt/sp;
+  const x=route.cx+Math.cos(route.t)*route.rx, z=route.cz+Math.sin(route.t)*route.rz;
+  const head=Math.atan2(-Math.sin(route.t)*route.rx,Math.cos(route.t)*route.rz);
+  Object.assign(ferryInfo,{x,z,head});
+  ferry.position.set(x,0.05*Math.sin(time*0.9),z); ferry.rotation.set(0.012*Math.sin(time*0.7),head,0.02*Math.sin(time*0.55),'YXZ');
+}
+
+/* ================= the dolphins in the testbench ================= */
+const soundLog=[];
+const D=createDolphins(scene,{pods:3,podSize:5,leapsPerMinute:3,bowRide:true,range:220,onSound:(k,x,y,z,s)=>{ soundLog.push([k,+s.toFixed(2)]); if (soundLog.length>50) soundLog.shift(); }});
+const ctx={camera,focus:{x:0,z:0},boats:[ferryInfo],depthAt,seaLevel:0,bright:1,paused:false};
+
+/* ---------- controls ---------- */
+const $=id=>document.getElementById(id);
+let paused=false, follow=-1;
+const bindRange=(id,fmt,set)=>{ const el=$(id), out=$(id+'V'); const f=()=>{ out.textContent=fmt(+el.value); set(+el.value); }; el.addEventListener('input',f); };
+bindRange('pods',v=>v,v=>D.setOptions({pods:v}));
+bindRange('size',v=>v,v=>D.setOptions({podSize:v}));
+bindRange('leaps',v=>v+' /min',v=>D.setOptions({leapsPerMinute:v}));
+$('bow').addEventListener('change',e=>D.setOptions({bowRide:e.target.checked}));
+function setTime(dusk){ hour=dusk?17.85:10.5; $('day').setAttribute('aria-pressed',!dusk); $('dusk').setAttribute('aria-pressed',dusk); updateDaylight(); }
+function setFormation(f){ D.setOptions({formation:f}); $('tight').setAttribute('aria-pressed',f==='tight'); $('loose').setAttribute('aria-pressed',f==='loose'); }
+$('tight').onclick=()=>setFormation('tight'); $('loose').onclick=()=>setFormation('loose');
+$('day').onclick=()=>setTime(false); $('dusk').onclick=()=>setTime(true);
+function setPause(p){ paused=p; $('pause').textContent=p?'Resume':'Pause'; $('pause').setAttribute('aria-pressed',p); }
+$('pause').onclick=()=>setPause(!paused);
+addEventListener('keydown',e=>{ if (e.code==='KeyP' && !e.repeat) setPause(!paused); });
+const followPos=new THREE.Vector3(), followLook=new THREE.Vector3();
+function setFollow(i){ follow=i; const on=i>=0; $('follow').textContent=on?'Orbit view':'Follow a dolphin'; $('follow').setAttribute('aria-pressed',on); $('next').hidden=!on;
+  controls.enabled=!on; if (!on){ controls.target.copy(followLook).setY(0); } else { const d=D.dolphins[i]; if (d){ followLook.set(d.x,d.y,d.z); followPos.copy(camera.position); } } }
+$('follow').onclick=()=>setFollow(follow>=0?-1:0);
+$('next').onclick=()=>setFollow((follow+1)%Math.max(1,D.dolphins.length));
+
+function resize(){ const w=innerWidth, h=innerHeight; renderer.setSize(w,h,false); camera.aspect=w/h; camera.updateProjectionMatrix(); }
+addEventListener('resize',resize); resize(); setTime(false);
+
+function tick(dt){
+  const wdt=paused?0:dt; time+=wdt; seaUniforms.uTime.value=time;
+  updateFerry(wdt);
+  ctx.bright=bright; ctx.paused=paused;
+  D.update(dt,ctx);
+  if (follow>=0){ const d=D.dolphins[follow%Math.max(1,D.dolphins.length)];
+    if (d){ const fx=Math.sin(d.head), fz=Math.cos(d.head), rx=Math.cos(d.head), rz=-Math.sin(d.head);
+      const want=new THREE.Vector3(d.x-fx*6.5+rx*3.2,Math.max(d.y+2.2,1.4),d.z-fz*6.5+rz*3.2), k=1-Math.exp(-dt*3);
+      followPos.lerp(want,k); followLook.lerp(new THREE.Vector3(d.x+fx*1.5,Math.max(d.y,-0.6),d.z+fz*1.5),1-Math.exp(-dt*6));
+      camera.position.copy(followPos); camera.lookAt(followLook); } }
+  else controls.update();
+  const t=follow>=0?followLook:controls.target;
+  sun.target.position.set(Math.round(t.x/2)*2,0,Math.round(t.z/2)*2); sun.position.copy(sun.target.position).addScaledVector(LIGHT_DIR,200);
+  sky.position.copy(camera.position);
+}
+let last=performance.now();
+const tb={manual:false,D,ferry:ferryInfo,camera,controls,soundLog,
+  advance(sec,fps=60){ const n=Math.round(sec*fps); for (let i=0;i<n;i++) tick(1/fps); renderer.render(scene,camera); },
+  view(px,py,pz,tx,ty,tz){ camera.position.set(px,py,pz); controls.target.set(tx,ty,tz); controls.update(); renderer.render(scene,camera); },
+  setFollow, setTime, setPause, render(){ renderer.render(scene,camera); }};
+window.tb=tb;
+function frame(now){ const dt=Math.min(0.05,(now-last)/1000); last=now; if (!tb.manual){ tick(dt); renderer.render(scene,camera); } requestAnimationFrame(frame); }
+requestAnimationFrame(frame);
+</script>
