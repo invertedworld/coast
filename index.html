@@ -98,6 +98,7 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
       <div class="row"><span><kbd>W</kbd><kbd>S</kbd></span><span>Paddle</span></div>
       <div class="row"><span><kbd>Q</kbd><kbd>E</kbd></span><span>Turn the head</span></div>
       <div class="row"><span><kbd>C</kbd></span><span>Helm or view from astern</span></div>
+      <div class="row"><span><kbd>+</kbd><kbd>−</kbd></span><span>Distance from astern</span></div>
       <div class="row"><span><kbd>V</kbd></span><span>Bird’s-eye view</span></div>
       <div class="row"><span><kbd>Y</kbd></span><span>Step ashore, or back to the quay</span></div>
     </div>
@@ -3626,6 +3627,18 @@ function patchGround(mat){
 }
 const nightU={value:0};
 const matB=new THREE.MeshLambertMaterial({vertexColors:true}); patchBuildings(matB,true);
+// the trains: the same material, but fading into the sky with distance as the distant land does, so that a train out
+// beyond the land that is drawn fades with it instead of standing in the sky
+const matTrain=new THREE.MeshLambertMaterial({vertexColors:true}); patchBuildings(matTrain,true);
+{ const ob=matTrain.onBeforeCompile; matTrain.onBeforeCompile=(sh,r)=>{ ob(sh,r);
+    Object.assign(sh.uniforms,{uTop:skyU.uTop,uMid:skyU.uMid,uHor:skyU.uHor,uSun:skyU.uSun,uSunCol:skyU.uSunCol,uDay:skyU.uDay});
+    sh.fragmentShader=sh.fragmentShader.replace('#include <common>','#include <common>\nuniform vec3 uTop, uMid, uHor, uSun, uSunCol; uniform float uDay;')
+      .replace('#include <fog_fragment>',`#include <fog_fragment>
+      { vec3 d=normalize(vWP-cameraPosition); float y=d.y, fk=1.0-smoothstep(1400.0,2150.0,length(vWP.xz-cameraPosition.xz));
+        vec3 sk = y>0.12 ? mix(uMid,uTop,clamp((y-0.12)/0.6,0.0,1.0)) : mix(uHor,uMid,clamp((y+0.04)/0.16,0.0,1.0));
+        float sd=max(dot(d,uSun),0.0); sk+=uSunCol*(pow(sd,12.0)*0.35+pow(sd,3.0)*0.12*(1.0-uDay));
+        gl_FragColor.rgb=mix(linearToOutputTexel(vec4(sk,1.0)).rgb,gl_FragColor.rgb,fk); }`); };
+  matTrain.customProgramCacheKey=()=>'train-skyfade'; }
 // rooms are lit by their own light, not the sun: daylight from the doors and windows by day, lamplight at night.
 // MeshBasicMaterial is unlit, so the faces are shaded here by the way they face
 const roomU={value:new THREE.Color(1,1,1)};
@@ -3767,12 +3780,129 @@ const seaMat=new THREE.MeshPhongMaterial({color:hex('#2c6ead'),specular:hex('#12
 // towards, the offset along it and the size of a gust; the offsets along and across the wind (uGust.z, uGustC) are
 // set each frame for the quantised origin QORIGIN, so that q+QORIGIN, the true position, is what is sampled
 const seaGust={uGustTex:{value:null},uGust:{value:new THREE.Vector4(0,1,0,36)},uGustC:{value:0},uGustAmt:{value:0}};
+/* ---------- the swell ----------
+   Long, smooth swells rolling in from the open sea, the kind left by wind far away. Each side of the island has
+   three long-crested trains, which run towards its shore at directions about 12 degrees apart and at periods of
+   0.9, 1 and 1.1 times a base period of 6.8 to 9 s drawn from the seed (6.1 to 9.9 s), so that the crests come in
+   sets; their wavelengths follow from deep-water dispersion (L = g T^2 / 2 pi, about 58 to 153 m) and they move at the
+   matching phase speed. Their direction leans a little towards the prevailing wind, but not with its shifts. The
+   height from trough to crest, at the meeting of a set, varies from island to island and from day to day between
+   about 0.3 and 1.25 m (SWELL_H). The z-component of each wavenumber is a whole number of periods over WRAP_Z, and
+   the two sides' trains are blended by a weight that repeats over WRAP_Z, so the swell runs on unbroken across the
+   north-south join.
+   Where it meets the island the swell grows a little as the water shoals (by Green's law, to 1.35 times in 3 m of
+   water) and dies away in the last 1.5 m, into the surf; inside a harbour's moles it is cut to a tenth, and in a cove
+   by up to seven tenths. These factors are held in a texture of 128 by 128 cells 12 m apart round the player
+   (swF), which is built afresh, a share each frame, as the player moves on, and at once after a jump. swellAt()
+   gives the height and the slopes from exactly what the sea shader draws, the GPU and the CPU reading the same
+   bytes of the texture, and everything afloat rides on it. */
+const SWN=6, SWS=128, SWC=12, SWELL_G=9.81;
+const swK=[...Array(SWN)].map(()=>new THREE.Vector4()), swP=new Float32Array(SWN);
+const swComp=[];
+let swH=0.8, swDayN=0, swLastHour=null, swSeed=null, swOverride=null;   // swOverride: a height set for tests
+function swellSetup(){
+  swSeed=SEED; swComp.length=0;
+  const bearing=205+110*hash(SEED,4,972), towards=Math.PI-bearing*Math.PI/180+Math.PI;   // where the prevailing wind blows
+  for (const [si,sd] of [[0,1],[1,-1]]){
+    const base=sd>0?0:Math.PI, lean=clamp(Math.atan2(Math.sin(towards-base),Math.cos(towards-base))*0.3,-0.4,0.4);
+    const T0=6.8+2.2*hash(SEED,si,991);
+    for (const [i,off,f,a] of [[0,-0.21,1,0.5],[1,0,0.9,0.3],[2,0.21,1.1,0.2]]){
+      const th=base+lean+off+(hash(SEED,si*7+i,992)-0.5)*0.1, T=T0*f, w=2*Math.PI/T, k=w*w/SWELL_G;
+      const kz=Math.round(k*Math.cos(th)*WRAP_Z/(2*Math.PI))*2*Math.PI/WRAP_Z, kx=(Math.sin(th)<0?-1:1)*Math.sqrt(Math.max(0,k*k-kz*kz));
+      swComp.push({si,kx,kz,w,a,ph:hash(SEED,si*7+i,993)*Math.PI*2,T,L:2*Math.PI/k}); } }
+}
+// the share of each side's trains at z: 1 on its own side of the island, a half at the join and in the middle
+const swSide=z=>{ const s=Math.sin(2*Math.PI*z/WRAP_Z); return 0.5-0.5*Math.tanh(4*s)/Math.tanh(4); };
+// the factor texture: shoaling, the dying away at the shore and the shelter of harbours and coves
+const swData=new Uint8Array(SWS*SWS), swBack=new Uint8Array(SWS*SWS);
+const swTex=new THREE.DataTexture(swData,SWS,SWS,THREE.RedFormat,THREE.UnsignedByteType); swTex.magFilter=swTex.minFilter=THREE.LinearFilter; swTex.generateMipmaps=false; swTex.needsUpdate=true;
+const swF={ox:0,oz:0,ready:false,job:null};
+function swellFactor(x,z){
+  const h=heightAt(x,z); if (h>-0.3) return 0; const d=-h;
+  let m=smooth((d-0.3)/1.2)*(d>=14?1:Math.min(1.35,Math.pow(Math.max(d,0.5)/14,-0.25)));
+  for (const sd of SIDES){ const o=sd*(coastZ(sd,x)-z); if (o<-40 || o>160) continue; const H=harbourAt(sd,x); if (!H) continue;
+    const Ho=sd*(coastZ(sd,H.x)-H.zo), ax=Math.abs(x-H.x); m*=1-0.9*smooth((H.W/2+2-ax)/4)*smooth((Ho+2-o)/4); }
+  const cv=coveAtXZ(x,z);
+  if (cv){ const u=cvU(cv,x,z), w=cvS(cv,x,z); if (Math.abs(u-cvAxis(cv,w))<45) m*=1-0.7*smooth((w+cv.R)/Math.max(10,cv.R)); }
+  return m; }
+function swellBuild(cx,cz,budgetMs){
+  if (!swF.job || swF.job.cx!==cx || swF.job.cz!==cz) swF.job={cx,cz,ox:cx-SWS/2*SWC,oz:cz-SWS/2*SWC,i:0};
+  const J=swF.job, t0=performance.now(), half=SWS/2*SWC;
+  while (J.i<SWS*SWS){ const i=J.i%SWS, j=Math.floor(J.i/SWS), x=J.ox+i*SWC, z=J.oz+j*SWC;
+    // the outermost 150 m fade to calm, so that the swell ends smoothly where the texture does
+    const edge=smooth((half-SWC-Math.max(Math.abs(x-cx),Math.abs(z-cz)))/150);
+    swBack[J.i]=Math.round(clamp(swellFactor(x,z)*edge/1.4,0,1)*255); J.i++;
+    if ((J.i&63)===0 && performance.now()-t0>budgetMs) return false; }
+  swData.set(swBack); swTex.needsUpdate=true; swF.ox=J.ox; swF.oz=J.oz; swF.ready=true; swF.job=null; return true; }
+function swFactorAt(x,z){
+  if (!swF.ready) return 0;
+  const fx=(x-swF.ox)/SWC, fz=(z-swF.oz)/SWC; if (fx<0||fz<0||fx>SWS-1||fz>SWS-1) return 0;
+  const i0=Math.min(SWS-2,Math.floor(fx)), j0=Math.min(SWS-2,Math.floor(fz)), tx=fx-i0, tz=fz-j0, D=swData;
+  return ((D[j0*SWS+i0]*(1-tx)+D[j0*SWS+i0+1]*tx)*(1-tz)+(D[(j0+1)*SWS+i0]*(1-tx)+D[(j0+1)*SWS+i0+1]*tx)*tz)/255*1.4; }
+// the height of the swell at (x,z) now, and its slopes: into out {h, sx, sz}, or the height alone from swellH
+const _swo={h:0,sx:0,sz:0};
+function swellAt(x,z,out=_swo){
+  const m=swFactorAt(x,z); out.h=out.sx=out.sz=0; if (m<=0) return out;
+  const w0=swSide(z);
+  for (let i=0;i<SWN;i++){ const c=swComp[i], A=swK[i].w*(c.si?1-w0:w0), ph=c.kx*x+c.kz*z+c.ph-c.w*time, cs=Math.cos(ph), sn=Math.sin(ph);
+    out.h+=A*cs; out.sx-=A*c.kx*sn; out.sz-=A*c.kz*sn; }
+  out.h*=m; out.sx*=m; out.sz*=m; return out; }
+const swellH=(x,z)=>swellAt(x,z).h;
+const swellU={uSwK:{value:swK},uSwP:{value:Array.from(swP)},uSwTex:{value:swTex},uSwO:{value:new THREE.Vector2()},uSwQz:{value:0},uSwAmp:{value:0.4}};
+// the same in GLSL; q is the position less QORIGIN, as vSeaP+uOrig gives it
+const SWELL_GLSL=`
+  uniform vec4 uSwK[${SWN}]; uniform float uSwP[${SWN}]; uniform sampler2D uSwTex; uniform vec2 uSwO; uniform float uSwQz, uSwAmp;
+  float swFac(vec2 q){ vec2 f=(q-uSwO)/${SWC.toFixed(1)}; if (f.x<0.0||f.y<0.0||f.x>${(SWS-1).toFixed(1)}||f.y>${(SWS-1).toFixed(1)}) return 0.0; return texture2D(uSwTex,(f+0.5)/${SWS.toFixed(1)}).r*1.4; }
+  float swSideW(float z){ float s=sin(6.2831853*z/${WRAP_Z.toFixed(1)}); return 0.5-0.5*tanh(4.0*s)/tanh(4.0); }
+  // the open-sea swell (without the factor), as height and slopes
+  vec3 swellRaw(vec2 q){ float w0=swSideW(q.y+uSwQz); vec3 r=vec3(0.0);
+    for (int i=0;i<${SWN};i++){ float A=uSwK[i].w*(i<3?w0:1.0-w0), ph=uSwK[i].x*q.x+uSwK[i].y*q.y+uSwP[i];
+      r+=vec3(A*cos(ph),-A*uSwK[i].x*sin(ph),-A*uSwK[i].y*sin(ph)); }
+    return r; }
+  vec3 swellAtQ(vec2 q){ float m=swFac(q); return m>0.0?swellRaw(q)*m:vec3(0.0); }`;
+// each frame: the day's height, the trains' phases for the quantised origin, and the factor texture round the player
+function updateSwell(dt){
+  if (swSeed!==SEED){ swellSetup(); swF.ready=false; swF.job=null; }
+  if (swLastHour!==null && hour<swLastHour-12) swDayN++; swLastHour=hour;
+  // from calm to lively: a smooth value from day to day, one knot a day
+  const dd=swDayN+hour/24, d0=Math.floor(dd), f=dd-d0, v=a=>hash(SEED,a,994), k=(1-Math.cos(Math.PI*f))/2;
+  swH=swOverride??0.3+0.95*lerp(v(d0),v(d0+1),k);
+  for (let i=0;i<SWN;i++){ const c=swComp[i];
+    swK[i].set(c.kx,c.kz,c.w,c.a*swH/2);
+    swP[i]=(((c.kx*QORIGIN.x+c.kz*QORIGIN.z+c.ph-c.w*time)%(2*Math.PI))+2*Math.PI)%(2*Math.PI); }
+  for (let i=0;i<SWN;i++) swellU.uSwP.value[i]=swP[i]; swellU.uSwAmp.value=swH/2; swellU.uSwQz.value=QORIGIN.z;
+  // the texture is centred on the player in steps of 192 m; a jump of more than 700 m builds it at once
+  const cx=Math.round(player.x/192)*192, cz=Math.round(player.z/192)*192, far=!swF.ready || Math.hypot(player.x-(swF.ox+SWS/2*SWC),player.z-(swF.oz+SWS/2*SWC))>700;
+  if (far) swellBuild(cx,cz,1e9);
+  else if (swF.job || cx!==swF.ox+SWS/2*SWC || cz!==swF.oz+SWS/2*SWC) swellBuild(cx,cz,1.2);
+  swellU.uSwO.value.set(swF.ox-QORIGIN.x,swF.oz-QORIGIN.z);
+}
+// the wash on the shore rises and falls with the swell arriving there, rather than with a clock of its own
+Object.assign(surfMat.uniforms,swellU);
+surfMat.vertexShader=surfMat.vertexShader.replace('attribute float sv; uniform float uTime; uniform vec3 uOrig; varying float vSv; varying vec2 vXZ;','attribute float sv; uniform float uTime; uniform vec3 uOrig; varying float vSv; varying vec2 vXZ; varying float vSw;'+SWELL_GLSL)
+  .replace('float sw=0.5+0.5*sin(uTime*0.85+wq.x*0.045);','float sw=0.5+0.5*clamp(swellRaw(wq).x/max(uSwAmp,0.05),-1.0,1.0); vSw=sw;');
+surfMat.fragmentShader=surfMat.fragmentShader.replace('varying float vSv; varying vec2 vXZ;','varying float vSv; varying vec2 vXZ; varying float vSw;')
+  .replace('(0.55+0.45*sin(uTime*0.85+vXZ.x*0.045+1.2))','(0.3+0.7*vSw)');
+if (!surfMat.vertexShader.includes('vSw=sw') || !surfMat.fragmentShader.includes('0.3+0.7*vSw')) console.warn('The surf shader was not tied to the swell');
+// the sea is a disc of rings, close together near its middle (which follows the player) and wide apart towards
+// its edge, so the long swells are drawn smoothly near the camera with few triangles
+const seaGeo=(()=>{ const NR=120, NA=160, R0=4500, P=[0,0,0], I=[];
+  for (let r=1;r<=NR;r++){ const rad=R0*Math.pow(r/NR,2.6); for (let a=0;a<NA;a++){ const t=a/NA*Math.PI*2; P.push(Math.cos(t)*rad,0,Math.sin(t)*rad); } }
+  const v=(r,a)=>r===0?0:1+(r-1)*NA+(a%NA);
+  for (let a=0;a<NA;a++) I.push(0,v(1,a+1),v(1,a));
+  for (let r=1;r<NR;r++) for (let a=0;a<NA;a++){ const p=v(r,a), q=v(r,a+1), s=v(r+1,a), t=v(r+1,a+1); I.push(p,q,t,p,t,s); }
+  const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.Float32BufferAttribute(P,3)); g.setIndex(I); g.computeVertexNormals();
+  // the rings are wound so that the disc faces up
+  if (g.attributes.normal.getY(1)<0){ for (let i=0;i<I.length;i+=3){ const t=I[i+1]; I[i+1]=I[i+2]; I[i+2]=t; } g.setIndex(I); g.computeVertexNormals(); }
+  return g; })();
 seaMat.onBeforeCompile=(sh)=>{
-  sh.uniforms.uTime=seaUniforms.uTime; sh.uniforms.uOrig=origU; Object.assign(sh.uniforms,seaGust);
-  sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nvarying vec3 vSeaP;').replace('#include <project_vertex>','#include <project_vertex>\nvSeaP=(modelMatrix*vec4(transformed,1.0)).xyz;');
+  sh.uniforms.uTime=seaUniforms.uTime; sh.uniforms.uOrig=origU; Object.assign(sh.uniforms,seaGust,swellU);
+  // the swell lifts each vertex where it lies in the world, after the sea's scale and position
+  sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nvarying vec3 vSeaP; uniform vec3 uOrig;'+SWELL_GLSL)
+    .replace('#include <project_vertex>','vec4 wpS=modelMatrix*vec4(transformed,1.0); wpS.y+=swellAtQ(wpS.xz+uOrig.xz).x; vSeaP=wpS.xyz; vec4 mvPosition=viewMatrix*wpS; gl_Position=projectionMatrix*mvPosition;');
   sh.fragmentShader=sh.fragmentShader.replace('#include <common>',`#include <common>
     varying vec3 vSeaP; uniform float uTime; uniform vec3 uOrig;
-    uniform sampler2D uGustTex; uniform vec4 uGust; uniform float uGustC, uGustAmt;
+    uniform sampler2D uGustTex; uniform vec4 uGust; uniform float uGustC, uGustAmt; vec3 swG=vec3(0.0);`+SWELL_GLSL+`
     float gsamp(vec2 p){ return texture2D(uGustTex,(p+0.5)/64.0).r; }
     float gustG(vec2 q){ vec2 d=uGust.xy; float a=dot(q,d)-uGust.z, c=-q.x*d.y+q.y*d.x+uGustC, S=uGust.w;
       return 0.62*gsamp(vec2(a/S,c/(S*0.75)))+0.38*gsamp(vec2(a/(S*0.5)+17.3,c/(S*0.42)+5.1)); }
@@ -3792,11 +3922,30 @@ seaMat.onBeforeCompile=(sh)=>{
         vec2 dq=fwidth(q); float px=max(dq.x,dq.y);
         float g=smoothstep(0.56,0.75,gustG(q))*uGustAmt; diffuseColor.rgb*=1.0-0.26*g;
         float k=(1.0-smoothstep(80.0,700.0,length(vSeaP-cameraPosition)))*(1.0+1.2*g);
+        // the swell: its long slopes in the lighting (drawn steeper than they are, so that they read from afar), the
+        // crests a little lighter, and on the bigger days flecked with foam
+        vec3 sw=swellAtQ(q); swG=sw; float swA=max(uSwAmp,0.05), cd=length(vSeaP-cameraPosition);
+        float hn=clamp(sw.x/swA,-1.0,1.0), crest=smoothstep(0.25,1.0,hn), lit=smoothstep(0.0,0.08,swFac(q));
+        diffuseColor.rgb*=mix(1.0,0.8+0.2*(hn*0.5+0.5),lit);
+        diffuseColor.rgb=mix(diffuseColor.rgb,diffuseColor.rgb*1.25+vec3(0.03,0.07,0.08),0.55*crest);
+        float fl=sn2(q*0.7+vec2(t*0.15,-t*0.1))*0.6+sn2(q*1.9-vec2(t*0.25,t*0.2))*0.4;
+        diffuseColor.rgb=mix(diffuseColor.rgb,vec3(0.9,0.93,0.95),smoothstep(0.8,0.92,fl)*smoothstep(0.6,1.0,hn)*smoothstep(0.22,0.6,swA)*0.3*(1.0-smoothstep(200.0,900.0,cd)));
         float wx=seaWaves(q+vec2(e,0.0),t,px)-seaWaves(q-vec2(e,0.0),t,px);
         float wz=seaWaves(q+vec2(0.0,e),t,px)-seaWaves(q-vec2(0.0,e),t,px);
-        normal=normalize(normal+(viewMatrix*vec4(-wx*1.5*k,0.0,-wz*1.5*k,0.0)).xyz); }`);
+        normal=normalize(normal+(viewMatrix*vec4(-wx*1.5*k-sw.y*5.0,0.0,-wz*1.5*k-sw.z*5.0,0.0)).xyz); }`)
+    // seen at a low angle the swell shows by the sky it reflects: the faces turned towards the eye reflect less of it
+    // than the flat sea would, those turned away more (Fresnel, from the swell's own slope only)
+    .replace('#include <opaque_fragment>',`{ vec3 vd=normalize(vViewPosition), up=normalize((viewMatrix*vec4(0.0,1.0,0.0,0.0)).xyz);
+        vec3 ns=normalize(up+(viewMatrix*vec4(-swG.y*6.0,0.0,-swG.z*6.0,0.0)).xyz);
+        float f0=pow(1.0-clamp(dot(up,vd),0.0,1.0),4.0), f1=pow(1.0-clamp(dot(ns,vd),0.0,1.0),4.0);
+        float dr=clamp((f1-f0)*0.9,-0.18,0.3)*(1.0-smoothstep(500.0,1300.0,length(vSeaP-cameraPosition)));
+        #ifdef USE_FOG
+        outgoingLight=dr>0.0?mix(outgoingLight,fogColor,dr):outgoingLight*(1.0+dr);
+        #endif
+      }
+      #include <opaque_fragment>`);
 };
-const sea=new THREE.Mesh(new THREE.PlaneGeometry(9000,9000).rotateX(-Math.PI/2),seaMat);
+const sea=new THREE.Mesh(seaGeo,seaMat); sea.frustumCulled=false;
 sea.receiveShadow=true; sea.renderOrder=1; world.add(sea);
 
 /* ---------- glowing halos around lights at night ---------- */
@@ -4035,14 +4184,25 @@ function updateMask(){
   maskTex.needsUpdate=true; maskU.uMaskO.value.set(ox,oz); maskU.uMaskRel.value.set(ox-ORIGIN.x/C,oz-ORIGIN.z/C); maskDirty=false;
 }
 const farMat=new THREE.MeshLambertMaterial({vertexColors:true});
-farMat.onBeforeCompile=(sh)=>{ Object.assign(sh.uniforms,maskU);
+farMat.onBeforeCompile=(sh)=>{ Object.assign(sh.uniforms,maskU,{uTop:skyU.uTop,uMid:skyU.uMid,uHor:skyU.uHor,uSun:skyU.uSun,uSunCol:skyU.uSunCol,uDay:skyU.uDay});
   sh.vertexShader=sh.vertexShader.replace('#include <common>',`#include <common>
     uniform sampler2D uMask; uniform vec2 uMaskRel;
     float loadedAt(vec2 p){ vec2 c=floor(p/${C.toFixed(1)})-uMaskRel; if (c.x<0.0||c.y<0.0||c.x>=${MASK.toFixed(1)}||c.y>=${MASK.toFixed(1)}) return 0.0; return texture2D(uMask,(c+0.5)/${MASK.toFixed(1)}).r; }`)
     .replace('#include <begin_vertex>',`#include <begin_vertex>
     float insideL=loadedAt(transformed.xz+vec2(-2.0,-2.0))*loadedAt(transformed.xz+vec2(2.0,-2.0))*loadedAt(transformed.xz+vec2(-2.0,2.0))*loadedAt(transformed.xz+vec2(2.0,2.0));
-    transformed.y-=60.0*step(0.5,insideL);`); };
-farMat.customProgramCacheKey=()=>'farmask';
+    transformed.y-=60.0*step(0.5,insideL);
+    vFarW=(modelMatrix*vec4(transformed,1.0)).xyz;`)
+    .replace('#include <common>','#include <common>\n    varying vec3 vFarW;');
+  // towards the edge of the grid, 2.2 km out, the land fades into the sky behind it between 1.4 and 2.15 km instead of
+  // ending at a hard line: its colour is drawn towards the sky's own colour in the same direction, as the sky shader
+  // works it out (without the sun's disc), so that its outline thins away to nothing
+  sh.fragmentShader=sh.fragmentShader.replace('#include <common>',`#include <common>
+    varying vec3 vFarW; uniform vec3 uTop, uMid, uHor, uSun, uSunCol; uniform float uDay;`).replace('#include <fog_fragment>',`#include <fog_fragment>
+    { vec3 d=normalize(vFarW-cameraPosition); float y=d.y, fk=vFarW.y<0.0?1.0:1.0-smoothstep(1400.0,2150.0,length(vFarW.xz-cameraPosition.xz));   // the sea floor, under the sea, is left alone
+      vec3 sk = y>0.12 ? mix(uMid,uTop,clamp((y-0.12)/0.6,0.0,1.0)) : mix(uHor,uMid,clamp((y+0.04)/0.16,0.0,1.0));
+      float sd=max(dot(d,uSun),0.0); sk+=uSunCol*(pow(sd,12.0)*0.35+pow(sd,3.0)*0.12*(1.0-uDay));
+      gl_FragColor.rgb=mix(linearToOutputTexel(vec4(sk,1.0)).rgb,gl_FragColor.rgb,fk); }`); };
+farMat.customProgramCacheKey=()=>'farmask-skyfade';
 const farMesh=new THREE.Mesh(farGeo,farMat); farMesh.frustumCulled=false; world.add(farMesh);
 const farGlowGeo=new THREE.BufferGeometry();
 const farGlow=new THREE.Points(farGlowGeo,glowMat); farGlow.frustumCulled=false; farGlow.renderOrder=3; world.add(farGlow);
@@ -4263,9 +4423,10 @@ function resetWorld(){ chunkState=''; farCache.clear(); farOrigin=''; for (const
      opts: pods (3), podSize (5, or [min, max] for a size drawn for each pod), leapsPerMinute (per pod, 3), bowRide (true), minDepth (m, 6),
            range (m from the focus within which pods keep, 260), formation ('tight' or 'loose'), maxDolphins (64), seed, ghost (0..1, 0.45),
            onSound(kind, x, y, z, strength), kind being 'breath', 'leap' or 'splash'
-   D.update(dt, ctx)                      ctx: camera, focus {x,z} (defaults to the camera), boats
+   D.update(dt, ctx)                      ctx: camera, focus {x,z} (defaults to the camera), range (m, overrides opts.range), seek (one of the boats,
+                                           which the nearest pod makes for), boats
                                            [{x,z,head,v,len,beam}] (forward is (sin head, cos head)),
-                                           depthAt(x,z) (depth of water in metres, negative on land), seaLevel (0),
+                                           depthAt(x,z) (depth of water in metres, negative on land), seaLevel (0), seaAt(x,z) (the swell's height there, optional),
                                            bright (0..1, the light on unlit foam and spray), paused,
                                            keepOut(x,z) (true where pods must not go), spawnWeight(x,z) (0..1, the
                                            chance that a pod may appear there)
@@ -4273,7 +4434,7 @@ function resetWorld(){ chunkState=''; farCache.clear(); farOrigin=''; for (const
    D.dolphins   D.pods   D.dispose()
 
    Positions are world metres with y up and the sea at y = seaLevel. Under water each dolphin is drawn a second
-   time as a faint dark shape projected on to the surface along the line of sight, so that it reads through the
+   time as a faint dark shape projected on to the surface (the swell's, where ctx.seaAt gives it) along the line of sight, so that it reads through the
    nearly opaque sea and is still hidden correctly by hulls and quays above the water. */
 function createDolphins(parent, opts={}){
   const O=Object.assign({pods:3,podSize:5,leapsPerMinute:3,bowRide:true,minDepth:6,range:260,maxDolphins:64,seed:20261106,ghost:0.45,formation:'tight',onSound:null},opts);
@@ -4283,7 +4444,8 @@ function createDolphins(parent, opts={}){
   const cl=(v,a,b)=>Math.max(a,Math.min(b,v));
   const angTo=(a,b)=>Math.atan2(Math.sin(b-a),Math.cos(b-a));
   const G=9.81, TAU=Math.PI*2;
-  let SEA=0;
+  let SEA=0, seaAt=null;   // the mean sea level, and the swell's height above it where ctx.seaAt gives one
+  const seaY=(x,z)=>SEA+(seaAt?seaAt(x,z):0);
 
   /* ---------- the body: rings of eight round a tapering axis, with dorsal fin, flippers and flukes ----------
      The dolphin is 2.6 m long, its nose towards +z and its back towards +y; the flukes reach 1.47 m behind the
@@ -4349,6 +4511,8 @@ function createDolphins(parent, opts={}){
 
   const geo=buildGeo(), MAXD=O.maxDolphins;
   const flexA=new THREE.InstancedBufferAttribute(new Float32Array(MAXD*3),3); flexA.setUsage(THREE.DynamicDrawUsage); geo.setAttribute('aFlex',flexA);
+  // the height of the swell over each dolphin (ctx.seaAt), on which its shape under water is drawn
+  const seaA=new THREE.InstancedBufferAttribute(new Float32Array(MAXD),1); seaA.setUsage(THREE.DynamicDrawUsage); geo.setAttribute('aSea',seaA);
   const bodyMat=new THREE.MeshPhongMaterial({vertexColors:true,flatShading:true,shininess:36,specular:hex('#2f353b')});
   bodyMat.onBeforeCompile=patchFlex; bodyMat.customProgramCacheKey=()=>'dolphin-body';
   const depthMat=new THREE.MeshDepthMaterial({depthPacking:THREE.RGBADepthPacking}); depthMat.onBeforeCompile=patchFlex; depthMat.customProgramCacheKey=()=>'dolphin-depth';
@@ -4360,13 +4524,13 @@ function createDolphins(parent, opts={}){
   const ghostCol=hex('#183650'), ghostMat=new THREE.MeshBasicMaterial({color:ghostCol.clone(),transparent:true,opacity:O.ghost,depthWrite:false,
     polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-4});
   ghostMat.onBeforeCompile=sh=>{ patchFlex(sh); sh.uniforms.uSeaY=ghostU.uSeaY;
-    sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nvarying float vDepth; uniform float uSeaY;')
+    sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nvarying float vDepth; uniform float uSeaY; attribute float aSea;')
       .replace('#include <project_vertex>',`vec4 wp=vec4(transformed,1.0);
         #ifdef USE_INSTANCING
           wp=instanceMatrix*wp;
         #endif
-        wp=modelMatrix*wp; vDepth=uSeaY-wp.y;
-        vec3 sp=wp.xyz; if (wp.y<uSeaY && cameraPosition.y>uSeaY){ sp=cameraPosition+(wp.xyz-cameraPosition)*((cameraPosition.y-uSeaY)/(cameraPosition.y-wp.y)); }
+        float sy=uSeaY+aSea; wp=modelMatrix*wp; vDepth=sy-wp.y;
+        vec3 sp=wp.xyz; if (wp.y<sy && cameraPosition.y>sy){ sp=cameraPosition+(wp.xyz-cameraPosition)*((cameraPosition.y-sy)/(cameraPosition.y-wp.y)); }
         vec4 mvPosition=viewMatrix*vec4(sp,1.0); gl_Position=projectionMatrix*mvPosition;`);
     sh.fragmentShader=sh.fragmentShader.replace('#include <common>','#include <common>\nvarying float vDepth;')
       .replace('vec4 diffuseColor = vec4( diffuse, opacity );','if (vDepth<0.0) discard; vec4 diffuseColor=vec4(diffuse,opacity*exp(-vDepth/2.0)*smoothstep(0.0,0.25,vDepth));'); };
@@ -4439,23 +4603,25 @@ function createDolphins(parent, opts={}){
   function patch(x,z,r0,r1,life,str){ if (RG.length>=MAXR) RG.shift(); RG.push({x,z,r0,r1,age:0,life,str,seed:2+R()}); }
   function drops(x,y,z,n,up,out,dirx,dirz,carry){ for (let i=0;i<n;i++){ if (PT.length>=MAXP) PT.shift();
     const a=R()*TAU, o=out*(0.3+0.7*R());
-    PT.push({x:x+(R()-0.5)*0.5,y:y,z:z+(R()-0.5)*0.5,vx:Math.cos(a)*o+dirx*carry*R(),vy:up*(0.45+0.55*R()),vz:Math.sin(a)*o+dirz*carry*R(),
+    PT.push({sy:y,x:x+(R()-0.5)*0.5,y:y,z:z+(R()-0.5)*0.5,vx:Math.cos(a)*o+dirx*carry*R(),vy:up*(0.45+0.55*R()),vz:Math.sin(a)*o+dirz*carry*R(),
       age:0,life:rr(0.7,1.5),size:rr(0.05,0.13),a:rr(0.6,0.95),mist:false}); } }
   function mist(x,y,z,n,dirx,dirz,sp){ for (let i=0;i<n;i++){ if (PT.length>=MAXP) PT.shift();
-    PT.push({x:x+(R()-0.5)*0.12,y:y+0.05,z:z+(R()-0.5)*0.12,vx:(R()-0.5)*0.5+dirx*sp,vy:rr(1.2,3.4),vz:(R()-0.5)*0.5+dirz*sp,
-      age:0,life:rr(0.45,0.85),size:rr(0.035,0.08),a:rr(0.25,0.45),mist:true}); } }
+    PT.push({x:x+(R()-0.5)*0.12,y:y+0.05,z:z+(R()-0.5)*0.12,vx:(R()-0.5)*0.5+dirx*sp,vy:rr(1.6,4.0),vz:(R()-0.5)*0.5+dirz*sp,
+      age:0,life:rr(0.6,1.1),size:rr(0.06,0.13),a:rr(0.35,0.55),mist:true}); } }
 
   /* ---------- pods and their members ---------- */
   const pods=[], dolphins=[];
-  let FX=0, FZ=0, depthAt=()=>100, boats=[], keepOut=()=>false, spawnW=()=>1;
+  let FX=0, FZ=0, depthAt=()=>100, boats=[], keepOut=()=>false, spawnW=()=>1, RNG=O.range, seek=null, seeker=null;
+  // the least speed at which a boat's bow wave is worth riding: 3 m/s for a ferry, 1.2 m/s for a dinghy
+  const vMin=B=>cl((B.len||20)*0.115,1.2,3);
   const depth=(x,z)=>{ const d=depthAt(x,z); return Number.isFinite(d)?d:100; };
   const okSpot=(x,z)=>depth(x,z)>O.minDepth+4 && !keepOut(x,z) && R()<spawnW(x,z);
   // a place for a pod to appear, out of the way of the focus: now and then ahead of a large boat under way, so
   // that it meets the pod, otherwise anywhere in deep, open water; null if there is none within reach
   function deepSpot(){
-    for (const B of boats) if ((B.len||0)>15 && B.v>3 && Math.hypot(B.x-FX,B.z-FZ)<O.range*1.5 && R()<0.4){
+    for (const B of boats) if ((B.len||0)>15 && B.v>3 && Math.hypot(B.x-FX,B.z-FZ)<RNG*1.5 && R()<0.4){
       const a=rr(120,220), l=rr(-40,40), x=B.x+Math.sin(B.head)*a+Math.cos(B.head)*l, z=B.z+Math.cos(B.head)*a-Math.sin(B.head)*l; if (okSpot(x,z)) return [x,z]; }
-    for (let k=0;k<80;k++){ const a=R()*TAU, r=O.range*rr(0.35,0.85), x=FX+Math.sin(a)*r, z=FZ+Math.cos(a)*r; if (okSpot(x,z)) return [x,z]; }
+    for (let k=0;k<80;k++){ const a=R()*TAU, r=RNG*rr(0.35,0.85), x=FX+Math.sin(a)*r, z=FZ+Math.cos(a)*r; if (okSpot(x,z)) return [x,z]; }
     return null; }
   function placePod(pod){ const q=deepSpot(); pod.dormant=!q; pod.retry=2; if (!q) return;
     [pod.x,pod.z]=q; pod.head=R()*TAU; pod.speed=pod.cruise; pod.mode='cruise'; pod.boat=null; pod.spread=1;
@@ -4472,7 +4638,7 @@ function createDolphins(parent, opts={}){
       row.forEach((d,c)=>{ d.row=r; d.col=c; d.sx=(c-(row.length-1)/2)*lat+(r%2?lat*0.25:0)+rr(-j,j); d.sz=((Math.ceil(n/cols)-1)/2-r)*lon+rr(-j,j)*1.5;
         d.cy=pod.cy+rr(-0.12,0.12); }); } }
   function rideSlots(pod){ const n=pod.members.length; pod.members.forEach((d,i)=>{ const side=i%2?1:-1, rank=Math.floor(i/2);
-    d.rx=side*rr(0.8,1.5)+side*rank*1.7; d.rz=rr(0.8,2.4)+rank*rr(1.5,2.5)-(rank>1?rr(3,5):0); d.ry=rr(-1.3,-0.8); d.rideBreath=rr(1,6); }); }
+    d.rx=side*rr(0.8,1.5)+side*rank*1.7; d.rz=rr(0.8,2.4)+rank*rr(1.5,2.5)-(rank>1?rr(3,5)*Math.min(1,((pod.boat&&pod.boat.len)||26)/14):0); d.ry=rr(-1.3,-0.8); d.rideBreath=rr(1,6); }); }
   function newDolphin(pod){ const d={pod,x:pod.x+(R()-0.5)*6,z:pod.z+(R()-0.5)*8,y:rr(-2.6,-1.6),head:pod.head,speed:pod.speed,slope:0,vy:0,pitch:0,roll:0,
       cy:rr(-2.2,-1.3),man:null,breathIn:-1,leapIn:-1,leapCool:rr(2,8),flex:R()*TAU,amp:0.1,curv:0,scale:rr(0.86,1.06),ph:R()*TAU,
       prev:null,foamT:0,state:'swim',sx:0,sz:0,rx:0,rz:0,ry:-1,rideBreath:3};
@@ -4528,14 +4694,14 @@ function createDolphins(parent, opts={}){
     for (let k=0;k<4;k++){ const y0=prev[k], y1=ys[k][1]; if ((y0<0)===(y1<0)) continue;
       const [x,,z]=ys[k], v=(y1-y0)/h, up=y1>=0;
       if (k===0){
-        if (up && leaping && v>2){ ring(x,z,0.5,2.3+v*0.12,2.4,0.85); patch(x,z,0.5,1.3,2.4,0.9); drops(x,SEA,z,14+Math.round(v*4),v*0.75,1.4,fx,fz,d.speed*0.5); sound('leap',x,SEA,z,cl(v/6,0,1)); }
-        else if (!up && leaping && v<-2){ ring(x,z,0.7,2.7+(-v)*0.18,2.8,0.9); patch(x,z,0.8,1.9,3.2,1); drops(x,SEA,z,26+Math.round(-v*6),rr(3.5,5.5),2.2,fx,fz,d.speed*0.35); sound('splash',x,SEA,z,cl(-v/7,0,1)); }
-        else { ring(x,z,0.3,1.1,1.7,0.5); patch(x,z,0.3,0.7,1.6,0.6); drops(x,SEA,z,3,1.2,0.6,fx,fz,0.5); }
-      } else if (k===1){ if (up && !leaping){ mist(x,ys[1][1]+SEA,z,22,fx,fz,d.speed*0.6); sound('breath',x,SEA,z,0.6); } }
+        if (up && leaping && v>2){ ring(x,z,0.5,2.3+v*0.12,2.4,0.85); patch(x,z,0.5,1.3,2.4,0.9); drops(x,seaY(x,z),z,14+Math.round(v*4),v*0.75,1.4,fx,fz,d.speed*0.5); sound('leap',x,SEA,z,cl(v/6,0,1)); }
+        else if (!up && leaping && v<-2){ ring(x,z,0.7,2.7+(-v)*0.18,2.8,0.9); patch(x,z,0.8,1.9,3.2,1); drops(x,seaY(x,z),z,26+Math.round(-v*6),rr(3.5,5.5),2.2,fx,fz,d.speed*0.35); sound('splash',x,SEA,z,cl(-v/7,0,1)); }
+        else { ring(x,z,0.3,1.1,1.7,0.5); patch(x,z,0.3,0.7,1.6,0.6); drops(x,seaY(x,z),z,3,1.2,0.6,fx,fz,0.5); }
+      } else if (k===1){ if (up && !leaping){ mist(x,ys[1][1]+seaY(x,z),z,22,fx,fz,d.speed*0.6); sound('breath',x,SEA,z,0.6); } }
       else if (k===2){ ring(x,z,0.2,0.75,1.3,0.55); }
-      else if (k===3){ if (up && leaping && v>1.5){ drops(x,SEA,z,10+Math.round(v*3),v*0.55,0.9,fx,fz,d.speed*0.4); ring(x,z,0.4,1.6,2,0.7); }
+      else if (k===3){ if (up && leaping && v>1.5){ drops(x,seaY(x,z),z,10+Math.round(v*3),v*0.55,0.9,fx,fz,d.speed*0.4); ring(x,z,0.4,1.6,2,0.7); }
         if (!up){ const big=leaping&&v<-2; ring(x,z,big?0.6:0.3,big?2.2:1.2,big?2.4:1.6,big?0.9:0.6);
-          if (Math.abs(v)>0.4) drops(x,SEA,z,big?18:4,big?4:1.4,big?1.6:0.7,fx,fz,0.4); } }
+          if (Math.abs(v)>0.4) drops(x,seaY(x,z),z,big?18:4,big?4:1.4,big?1.6:0.7,fx,fz,0.4); } }
     }
     // a trail of foam where the fin or the back cuts the surface
     d.foamT-=h; if (d.foamT<=0 && !air){
@@ -4550,7 +4716,7 @@ function createDolphins(parent, opts={}){
     pod.t+=h;
     const b=pod.boat;
     if (pod.mode!=='cruise'){
-      if (!b || !boats.includes(b) || b.v<2.5 || !O.bowRide){ leave(pod); return; }
+      if (!b || !boats.includes(b) || b.v<vMin(b)*0.8 || !O.bowRide){ leave(pod); return; }
       const fx=Math.sin(b.head), fz=Math.cos(b.head);
       pod.x=b.x+fx*b.len/2; pod.z=b.z+fz*b.len/2; pod.head=b.head; pod.speed=b.v;
       if (pod.mode==='approach'){ pod.t2+=h; let m=0; for (const d of pod.members) m+=Math.hypot(d.x-pod.x,d.z-pod.z)/pod.members.length;
@@ -4565,23 +4731,32 @@ function createDolphins(parent, opts={}){
     const dA=Math.min(room(pod.x+fx*25,pod.z+fz*25),room(pod.x+fx*55,pod.z+fz*55));
     const dF=Math.hypot(pod.x-FX,pod.z-FZ);
     if (dA<O.minDepth+3){ const l=room(pod.x+Math.sin(pod.head+0.7)*40,pod.z+Math.cos(pod.head+0.7)*40), r=room(pod.x+Math.sin(pod.head-0.7)*40,pod.z+Math.cos(pod.head-0.7)*40); turn=(l>r?1:-1)*0.5; }
-    else if (dF>O.range) turn+=cl(angTo(pod.head,Math.atan2(FX-pod.x,FZ-pod.z)),-1,1)*0.2;
+    else if (pod===seeker){
+      // the pod sent to the player's boat makes for a place beside it, which changes now and then, and falls in
+      // there on the boat's heading at its speed
+      const s=seek; pod.seekT=(pod.seekT||0)-h;
+      if (pod.seekT<=0){ pod.seekT=rr(15,35); pod.seekSide=R()<0.5?-1:1; pod.seekOff=rr(10,28); pod.seekAhead=rr(-6,18); }
+      const cs=Math.cos(s.head), sn=Math.sin(s.head), gx=s.x+cs*pod.seekSide*pod.seekOff+sn*pod.seekAhead, gz=s.z-sn*pod.seekSide*pod.seekOff+cs*pod.seekAhead;
+      const gd=Math.hypot(gx-pod.x,gz-pod.z), want=gd>30?Math.atan2(gx-pod.x,gz-pod.z):Math.atan2(gx+sn*8-pod.x,gz+cs*8-pod.z);
+      turn=cl(angTo(pod.head,want)*1.2,-0.6,0.6); pod.seekV=gd>80?6:gd>40?4.6:cl(s.v+gd*0.06,1.6,4.6); }
+    else if (dF>RNG) turn+=cl(angTo(pod.head,Math.atan2(FX-pod.x,FZ-pod.z)),-1,1)*0.2;
     pod.head+=turn*h;
-    pod.speed+=(pod.cruise-pod.speed)*(1-Math.exp(-h*0.25)); pod.spread+=(1-pod.spread)*(1-Math.exp(-h*0.12));
+    const sk=pod===seeker; pod.speed+=((sk?(pod.seekV||pod.cruise):pod.cruise)-pod.speed)*(1-Math.exp(-h*(sk?0.6:0.25))); pod.spread+=(1-pod.spread)*(1-Math.exp(-h*0.12));
     pod.x+=fx*pod.speed*h; pod.z+=fz*pod.speed*h;
-    if (dF>O.range*3){ placePod(pod); return; }
+    if (dF>RNG*3){ placePod(pod); return; }
     pod.cool-=h;
-    if (O.bowRide && pod.cool<=0) for (const B of boats){ if (B.v<3) continue; const dd=Math.hypot(B.x-pod.x,B.z-pod.z);
-      if (dd<170 && R()<0.5*h){ pod.mode='approach'; pod.boat=B; pod.t2=0; pod.rideT=rr(25,55); rideSlots(pod); for (const d of pod.members) d.breathIn=-1; break; } }
+    // a pod may join a boat under way; the one sent to the player's boat joins only that, once it is close by
+    if (O.bowRide && pod.cool<=0) for (const B of boats){ const mine=B===seek; if (B.v<vMin(B) || (pod===seeker && !mine)) continue; const dd=Math.hypot(B.x-pod.x,B.z-pod.z);
+      if (dd<(mine?45:170) && R()<(mine?0.12:0.5)*h){ pod.mode='approach'; pod.boat=B; pod.t2=0; pod.rideT=mine?rr(15,35):rr(25,55); rideSlots(pod); for (const d of pod.members) d.breathIn=-1; break; } }
     pod.breathT-=h;
-    if (pod.breathT<=0){ pod.breathT=rr(9,20); const ripple=R()<0.6, gap=rr(0.12,0.24), peak=rr(-0.02,0.08), dir=R()<0.5;
+    if (pod.breathT<=0){ pod.breathT=pod===seeker?rr(6,12):rr(9,20); const ripple=R()<0.6, gap=rr(0.12,0.24), peak=rr(0.03,0.12), dir=R()<0.5;
       for (const d of pod.members){ if (!d.man && d.breathIn<0){ const c=dir?d.col:-d.col+4;
         d.breathIn=ripple?(c*gap+d.row*gap*0.6)%1.6:rr(0,0.1); d.peak=peak+rr(-0.015,0.015); } } }
   }
   function leave(pod){ const b=pod.boat; let mx=0, mz=0, lat=0; const n=pod.members.length||1;
     for (const d of pod.members){ mx+=d.x/n; mz+=d.z/n; if (b) lat+=((d.x-b.x)*Math.cos(b.head)-(d.z-b.z)*Math.sin(b.head))/n; }
     pod.mode='cruise'; pod.x=mx; pod.z=mz; pod.head=(b?b.head:pod.head)+(lat>=0?1:-1)*rr(0.55,1.1);
-    pod.speed=b?b.v:pod.speed; pod.cool=rr(35,70); pod.boat=null; pod.breathT=rr(3,8); pod.spread=2.4; formation(pod); }
+    pod.speed=b?b.v:pod.speed; pod.cool=b&&b===seek?rr(12,30):rr(35,70); pod.boat=null; pod.breathT=rr(3,8); pod.spread=2.4; formation(pod); }
 
   function dolphinStep(d,h){
     const pod=d.pod, riding=pod.mode!=='cruise', b=pod.boat;
@@ -4649,27 +4824,34 @@ function createDolphins(parent, opts={}){
       if (p.mist){ const k=Math.exp(-3*dt); p.vx*=k; p.vz*=k; p.vy=p.vy*k-0.6*dt; p.size+=dt*0.12; }
       else { const k=Math.exp(-0.4*dt); p.vx*=k; p.vz*=k; p.vy-=G*dt; }
       p.x+=p.vx*dt; p.y+=p.vy*dt; p.z+=p.vz*dt;
-      if (p.age>=1 || (!p.mist && p.y<SEA-0.05 && p.vy<0)){ PT[i]=PT[PT.length-1]; PT.pop(); } }
+      if (p.age>=1 || (!p.mist && p.y<p.sy-0.05 && p.vy<0)){ PT[i]=PT[PT.length-1]; PT.pop(); } }
     for (let i=RG.length-1;i>=0;i--){ RG[i].age+=dt/RG[i].life; if (RG[i].age>=1) RG.splice(i,1); }
   }
 
   const _m=new THREE.Matrix4(), _q=new THREE.Quaternion(), _e=new THREE.Euler(0,0,0,'YXZ'), _p=new THREE.Vector3(), _s=new THREE.Vector3();
   function write(){
     let i=0;
-    for (const d of dolphins){ if (d.pod.dormant) continue; _e.set(-d.pitch,d.head,d.roll,'YXZ'); _q.setFromEuler(_e); _p.set(d.x,d.y,d.z); _s.setScalar(d.scale);
-      _m.compose(_p,_q,_s); body.setMatrixAt(i,_m); flexA.setXYZ(i,d.flex,d.amp/d.scale,d.curv*d.scale); i++; }
-    body.count=ghost.count=i; body.instanceMatrix.needsUpdate=true; flexA.needsUpdate=true;
+    for (const d of dolphins){ if (d.pod.dormant) continue; _e.set(-d.pitch,d.head,d.roll,'YXZ'); _q.setFromEuler(_e); const sw=seaAt?seaAt(d.x,d.z):0; _p.set(d.x,d.y+sw,d.z); _s.setScalar(d.scale);
+      _m.compose(_p,_q,_s); body.setMatrixAt(i,_m); flexA.setXYZ(i,d.flex,d.amp/d.scale,d.curv*d.scale); seaA.setX(i,sw); i++; }
+    body.count=ghost.count=i; body.instanceMatrix.needsUpdate=true; flexA.needsUpdate=true; seaA.needsUpdate=true;
     _q.identity();
-    RG.forEach((g,i)=>{ const r=lerp(g.r0,g.r1,Math.sqrt(g.age)); _p.set(g.x,SEA+0.02,g.z); _s.set(r,1,r); _m.compose(_p,_q,_s); rings.setMatrixAt(i,_m); ringA.setXYZ(i,g.age,g.seed,g.str); });
+    RG.forEach((g,i)=>{ const r=lerp(g.r0,g.r1,Math.sqrt(g.age)); _p.set(g.x,seaY(g.x,g.z)+0.02,g.z); _s.set(r,1,r); _m.compose(_p,_q,_s); rings.setMatrixAt(i,_m); ringA.setXYZ(i,g.age,g.seed,g.str); });
     rings.count=RG.length; rings.instanceMatrix.needsUpdate=true; ringA.needsUpdate=true;
     PT.forEach((p,i)=>{ pPos[i*3]=p.x; pPos[i*3+1]=p.y; pPos[i*3+2]=p.z; pSize[i]=p.size; pAlpha[i]=p.a*(1-p.age)*(p.mist?1:Math.min(1,p.age*8+0.3)); });
     pGeo.setDrawRange(0,PT.length); for (const k of ['position','aSize','aAlpha']) pGeo.attributes[k].needsUpdate=true;
   }
 
   function readCtx(ctx){
-    SEA=ctx.seaLevel||0; ghostU.uSeaY.value=SEA;
+    SEA=ctx.seaLevel||0; seaAt=ctx.seaAt||null; ghostU.uSeaY.value=SEA;
     if (ctx.depthAt) depthAt=ctx.depthAt;
-    boats=ctx.boats||[]; keepOut=ctx.keepOut||(()=>false); spawnW=ctx.spawnWeight||(()=>1);
+    boats=ctx.boats||[]; keepOut=ctx.keepOut||(()=>false); spawnW=ctx.spawnWeight||(()=>1); RNG=ctx.range||O.range;
+    // ctx.seek, the player's own boat, draws the nearest pod in the water to it
+    seek=ctx.seek||null;
+    if (!seek) seeker=null;
+    else { // the nearest pod, kept unless another comes much closer
+      let best=null, bd=1e9; for (const p of pods){ if (p.dormant) continue; const d=Math.hypot(p.x-seek.x,p.z-seek.z); if (d<bd){ bd=d; best=p; } }
+      const cur=seeker&&!seeker.dormant&&pods.includes(seeker)?Math.hypot(seeker.x-seek.x,seeker.z-seek.z):1e9;
+      if (best && best!==seeker && bd<cur*0.6-20) seeker=best; else if (cur===1e9) seeker=best; }
     const f=ctx.focus||(ctx.camera&&ctx.camera.position); if (f){ FX=f.x; FZ=f.z; }
     const br=ctx.bright===undefined?1:ctx.bright; fxU.uBright.value=br;
     ghostMat.color.copy(ghostCol).multiplyScalar(0.35+0.65*br); ghostMat.opacity=O.ghost;
@@ -4698,7 +4880,7 @@ function createDolphins(parent, opts={}){
   function shift(dz){ for (const p of pods) p.z+=dz; for (const d of dolphins) d.z+=dz; for (const g of RG) g.z+=dz; for (const q of PT) q.z+=dz; if (started) write(); }
   function dispose(){ parent.remove(body,ghost,rings,spray); geo.dispose(); ringGeo.dispose(); pGeo.dispose();
     for (const m of [bodyMat,depthMat,ghostMat,ringMat,sprayMat]) m.dispose(); }
-  return {update,setOptions,trigger,reset,shift,dispose,get dolphins(){ return dolphins; },get pods(){ return pods; },options:O,meshes:{body,ghost,rings,spray}};
+  return {update,setOptions,trigger,reset,shift,dispose,get dolphins(){ return dolphins; },get pods(){ return pods; },get seeker(){ return seeker; },options:O,meshes:{body,ghost,rings,spray}};
 }
 /* ================= end of dolphins ================= */
 /* Coast's pods: two within reach of the player, appearing in open water clear of harbours and of the channels into
@@ -4716,17 +4898,23 @@ function dlKeepOut(x,z){
     for (let n=Math.floor(x/HARB)-1;n<=Math.floor(x/HARB)+1;n++){ const H=harbourInfo(sd,n); if (H && Math.abs(x-H.x)<H.W/2+90) return true; }
     for (let n=Math.floor(x/CV_SP)-1;n<=Math.floor(x/CV_SP)+1;n++){ const cv=coveInfo(sd,n); if (cv && Math.abs(x-cv.X)<cv.UX+30) return true; } }
   return false; }
-const dlCtx={camera,focus:dlFocus,boats:[],depthAt:(x,z)=>-heightAt(x,z),seaLevel:0,bright:1,paused:false,keepOut:dlKeepOut,
+const dlCtx={camera,focus:dlFocus,boats:[],depthAt:(x,z)=>-heightAt(x,z),seaLevel:0,seaAt:(x,z)=>swellH(x,z),bright:1,paused:false,keepOut:dlKeepOut,
   spawnWeight:(x,z)=>{ const o=-seaDist(x,z); return o<70?0:o<160?0.3:1; }};
 let dlSeed=SEED;
 wrapHooks.push(d=>dolphins.shift(d));
+// the swell's factor texture covers the same ground in the next repeat of the world
+wrapHooks.push(d=>{ swF.oz+=d; swF.job=null; });
 function updateDolphins(wdt){
   if (SEED!==dlSeed){ dlSeed=SEED; dolphins.reset(); }
   dlFocus.x=player.x; dlFocus.z=player.z; dlCtx.paused=paused; dlCtx.bright=surfMat.uniforms.uBright.value;
   const B=dlCtx.boats; B.length=0;
   for (const F of ferries){ if (!F.R || !F.m.visible) continue; const b=dlBoat(F,FL,FB); b.x=F.m.position.x; b.z=F.m.position.z; b.head=F.head; b.v=F.v; B.push(b); }
   for (const s of sailers){ const b=dlBoat(s,7,2.4); b.x=s.m.position.x; b.z=s.m.position.z; b.head=s.m.rotation.y; b.v=s.sp; B.push(b); }
-  if (sailD){ const S=sailD.state, b=dlBoat(sailD,4,1.5); b.x=S.x; b.z=S.z; b.head=S.head; b.v=Math.max(0,S.u); B.push(b); }
+  // while the player sails in open water at least 6 m deep, the nearest pod makes for the dinghy, and the pods keep
+  // within about 200 m of it
+  dlCtx.seek=null; dlCtx.range=sailD?200:380;
+  if (sailD){ const S=sailD.state, b=dlBoat(sailD,4,1.5); b.x=S.x; b.z=S.z; b.head=S.head; b.v=Math.max(0,S.u); B.push(b);
+    if (-heightAt(S.x,S.z)>=6 && !dlKeepOut(S.x,S.z)) dlCtx.seek=b; }
   dolphins.update(wdt,dlCtx);
   // window.__village is made once the main loop has started, so the helper is added to it when it first exists
   if (window.__village && !window.__village.findDolphins){ window.__village.findDolphins=findDolphins; window.__village.dolphins=dolphins; }
@@ -5271,8 +5459,8 @@ const windBase=()=>({speed:4.2+2.2*hash(SEED,3,971),dir:Math.PI-(205+110*hash(SE
 const WIND=createWind({...windBase(),gust:0.45,shift:1,seed:(SEED*31+7)>>>0,shelter:windShelter,hour:()=>hour,onshore:(x,z)=>shoreSide(x,z)>0?Math.PI:0});
 seaGust.uGustTex.value=WIND.uniforms.uGustTex.value;
 // the height of the sea surface for the boat's pitch and roll: a low swell of three trains, less in shelter
-function dgySea(x,z){ const A=(0.45+WIND.options.speed/10)*(1-0.7*windShelter(x,z)), t=time;
-  return A*(0.05*Math.sin(0.45*(x*0.8+z*0.6)-1.35*t)+0.035*Math.sin(0.7*(-x*0.3+z*0.95)-1.75*t+1.3)+0.025*Math.sin(1.05*(x*0.95-z*0.31)-2.1*t+2.6)); }
+function dgySea(x,z){ const A=0.5*(0.45+WIND.options.speed/10)*(1-0.7*windShelter(x,z)), t=time;
+  return swellH(x,z)+A*(0.05*Math.sin(0.45*(x*0.8+z*0.6)-1.35*t)+0.035*Math.sin(0.7*(-x*0.3+z*0.95)-1.75*t+1.3)+0.025*Math.sin(1.05*(x*0.95-z*0.31)-2.1*t+2.6)); }
 // where a walker stepping out of the boat would stand: the ground, a quay or a mole; null at a wall or in deep water
 function dgyWalkAt(x,z){
   let g=walkGround(x,z,2.6); const cx=Math.floor(x/C), cz=Math.floor(z/C);
@@ -5303,7 +5491,7 @@ const DGY_COLS=[['#f2ede4','#2f5f8f','#b5473a','#2f5f8f'],['#2f5f8f','#f2ede4','
 const dinghies=new Map();   // harbour key -> {H,B,D}
 let sailD=null, dgyScan=0, dgySeed=SEED, dgyHandling='assisted';
 const dgyLook={yaw:0,pitch:-0.1};
-let dgyChase=false;   // sailing, viewed from astern (C) instead of from the helm
+let dgyChase=false, dgyChaseD=11;   // sailing, viewed from astern (C) instead of from the helm
 const dgyCtx={wind:WIND,depthAt:(x,z)=>-heightAt(x,z),surfaceAt:dgySea,obstacles:{obbs:[],circles:[]},boats:[],input:{steer:0,trim:0,paddle:0},walkAt:dgyWalkAt,paused:false};
 const dgyIdle={wind:WIND,depthAt:(x,z)=>-heightAt(x,z),surfaceAt:dgySea,obstacles:{obbs:[],circles:[]},boats:[],input:{},walkAt:dgyWalkAt,paused:false};
 const dgyKey=H=>H.n*4+H.sd;
@@ -5420,7 +5608,7 @@ function updateDinghies(dt,wdt){
     if (e.D===sailD) e.D.update(dt,dgyCtx); else if (!far) e.D.update(dt,dgyIdle); e.D.mesh.visible=!far||e.D===sailD; }
   if (sailD){ const S=sailD.state; player.x=S.x; player.z=S.z; player.y=Math.max(0,S.heave)+0.4; player.vy=0; player.grounded=true; eyeY=player.y; }
   updateWisps(dt,wdt);
-  if (window.__village && !window.__village.dinghyKey){ Object.assign(window.__village,{dinghyKey,dinghies,WIND,dinghyBerth,dgyHarbourNear,dgyLook,wispInfo:()=>{ let a=0; for (let i=0;i<wispGeo.instanceCount;i++) a+=wispP[i*4]; return {n:wispGeo.instanceCount,meanAlpha:wispGeo.instanceCount?a/wispGeo.instanceCount:0}; },
+  if (window.__village && !window.__village.dinghyKey){ Object.assign(window.__village,{dinghyKey,dinghies,WIND,dinghyBerth,dgyHarbourNear,dgyLook,setSwell(h){ swOverride=h; },swellAt:(x,z)=>({...swellAt(x,z)}),swellInfo:()=>({H:swH,day:swDayN,trains:swComp.map(c=>({T:+c.T.toFixed(2),L:+c.L.toFixed(1),dir:+(Math.atan2(c.kx,c.kz)*180/Math.PI).toFixed(1),side:c.si,share:c.a}))}),wispInfo:()=>{ let a=0; for (let i=0;i<wispGeo.instanceCount;i++) a+=wispP[i*4]; return {n:wispGeo.instanceCount,meanAlpha:wispGeo.instanceCount?a/wispGeo.instanceCount:0}; },
     setHandling(m){ dgyHandling=m==='realistic'?'realistic':'assisted'; if (sailD) sailD.setMode(dgyHandling); }});
     Object.defineProperty(window.__village,'sailD',{get:()=>sailD}); }
 }
@@ -5518,7 +5706,8 @@ function updateSailers(dt){
         s.x+=sg*c*k; s.off=Math.max(30,sailClear(s.sd,s.x),s.off+s.sd*sg*sn*k); } }
     z=coastZ(s.sd,s.x)-s.sd*s.off;
     const z2=coastZ(s.sd,s.x+s.dir*2)-s.sd*s.off, rot=Math.atan2(s.dir*2,z2-z);
-    s.m.position.set(s.x,0.05*Math.sin(time*1.2+s.ph),z); s.m.rotation.set(0.03*Math.sin(time*0.9+s.ph),rot,0.12*s.dir);
+    const W=swellAt(s.x,z);
+    s.m.position.set(s.x,0.05*Math.sin(time*1.2+s.ph)+W.h,z); s.m.rotation.set(0.03*Math.sin(time*0.9+s.ph)-0.8*(W.sx*Math.sin(rot)+W.sz*Math.cos(rot)),rot,0.12*s.dir+0.8*(W.sx*Math.cos(rot)-W.sz*Math.sin(rot)));
   }
 }
 
@@ -5760,8 +5949,8 @@ function updateTrainLights(){
   if (want!==coachLampsOn){ coachLampsOn=want; for (const c of coachLamps) c.l.intensity=0; }
   if (coachLampsOn) for (const c of coachLamps){ const m=train.cars[c.i].m; c.l.position.set(m.position.x,m.position.y+2.4,m.position.z); c.l.intensity=60*nightU.value; }
 }
-for (let i=0;i<6;i++){ const loco=i===0||i===5, spec=loco?LOCO:COACH, m=new THREE.Mesh(spec.geo,matB); m.castShadow=true; m.receiveShadow=true; m.rotation.order='YXZ'; world.add(m);
-  const doors=[]; if (!loco) for (const sx of [-1,1]) for (const e of [-1,1]){ const d=new THREE.Mesh(CAR_DOOR,matB); d.castShadow=true; d.receiveShadow=true; d.userData={sx,e}; m.add(d); doors.push(d); }
+for (let i=0;i<6;i++){ const loco=i===0||i===5, spec=loco?LOCO:COACH, m=new THREE.Mesh(spec.geo,matTrain); m.castShadow=true; m.receiveShadow=true; m.rotation.order='YXZ'; world.add(m);
+  const doors=[]; if (!loco) for (const sx of [-1,1]) for (const e of [-1,1]){ const d=new THREE.Mesh(CAR_DOOR,matTrain); d.castShadow=true; d.receiveShadow=true; d.userData={sx,e}; m.add(d); doors.push(d); }
   train.cars.push({m,L:spec.L,doors,loco,flip:i===5,lamps:loco?locoLamps(m):null}); }
 // the car at the front of the train, and the coaches
 const leadCar=()=>train.cars[train.lead?train.cars.length-1:0], isCoach=i=>!train.cars[i].loco;
@@ -5837,7 +6026,7 @@ function buildWagon(kind){
 const SHUNTER=buildShunter(), WAGON={van:buildWagon('van'),open:buildWagon('open'),tank:buildWagon('tank'),flat:buildWagon('flat')};
 const GOODS_SPEC=[SHUNTER,...['van','open','tank','flat','van','van','open','flat','tank','tank','open','van'].map(k=>WAGON[k]),SHUNTER];
 const goods={cars:[],R:null,x:0,dir:1,lead:0,v:0,wait:0,toB:false,legs:[],check:0};
-GOODS_SPEC.forEach((spec,i)=>{ const loco=i===0||i===GOODS_SPEC.length-1, m=new THREE.Mesh(spec.geo,matB); m.castShadow=true; m.receiveShadow=true; m.rotation.order='YXZ'; m.visible=false; world.add(m);
+GOODS_SPEC.forEach((spec,i)=>{ const loco=i===0||i===GOODS_SPEC.length-1, m=new THREE.Mesh(spec.geo,matTrain); m.castShadow=true; m.receiveShadow=true; m.rotation.order='YXZ'; m.visible=false; world.add(m);
   goods.cars.push({m,L:spec.L,loco,flip:i===GOODS_SPEC.length-1,lamps:loco?locoLamps(m,SHUNT_L,2.85):null}); });
 // a point a given chord length behind (dir=1) or ahead (dir=-1) of x along a branch
 function brBack(B,x,D,dir){ let u=D;
@@ -6214,8 +6403,12 @@ function updateFerries(dt){
     // quay when the ferry turns away from its berth
     const [x1,z1]=ferryAt(F,F.s+11), [x0,z0]=ferryAt(F,F.s-11), [x2,z2]=ferryAt(F,F.s+17), [x3,z3]=ferryAt(F,F.s-5);
     const x=(x0+x1)/2, z=(z0+z1)/2, head=Math.atan2(x1-x0,z1-z0), h2=Math.atan2(x2-x3,z2-z3), turn=Math.atan2(Math.sin(h2-head),Math.cos(h2-head));
-    F.head=head; F.m.position.set(x,0.05*Math.sin(time*0.9),z);
-    F.m.rotation.set(0.012*Math.sin(time*0.7),head,0.02*Math.sin(time*0.55)+clamp(-turn*F.v*0.05,-0.05,0.05));
+    // the ferry rides the swell as its length and beam allow, sampled at bow and stern and at either side; the
+    // motion dies away as it slows into a landing, and the harbour's moles have already taken most of it
+    const fs=Math.sin(head), fc=Math.cos(head), sk=smooth(F.v/3), hb=swellH(x+fs*11,z+fc*11), hs=swellH(x-fs*11,z-fc*11), hp=swellH(x+fc*3,z-fs*3), hq=swellH(x-fc*3,z+fs*3);
+    F.swell={h:sk*0.85*(hb+hs+hp+hq)/4,pitch:sk*0.85*(hs-hb)/22,roll:sk*0.7*(hp-hq)/6};
+    F.head=head; F.m.position.set(x,0.05*Math.sin(time*0.9)+F.swell.h,z);
+    F.m.rotation.set(0.012*Math.sin(time*0.7)+F.swell.pitch,head,0.02*Math.sin(time*0.55)+clamp(-turn*F.v*0.05,-0.05,0.05)+F.swell.roll);
     // the quay lies to one side of the hull; local x points to (cos head, -sin head)
     const [qx,qz]=ferryQuay(F.R,F.wait>0?F.at:F.next); F.side=Math.sign((qx-x)*Math.cos(head)-(qz-z)*Math.sin(head))||1;
     F.g.visible=F.wait>1.2; F.g.position.set(F.side*(FB/2+FPL/2-0.1),FD0+0.04,FGZ);
@@ -7126,6 +7319,7 @@ function ferryDeckClamp(){
 }
 const ferryFloor=()=>fe.lv===0?FD0:fe.lv===2?FD1:FD0+clamp((fe.lz-FSTB)/(FUZ0-FSTB),0,1)*(FD1-FD0);
 let prevModeF='street';
+const _fq=new THREE.Quaternion(), _fe=new THREE.Euler();
 // G: to the goods train, beside its leading shunter; if none works near the player, to the nearest goods line, where
 // its train is being loaded at the west quay
 function jumpToGoods(){
@@ -7463,7 +7657,7 @@ function frame(now){
   if (player.y<ground) player.y=ground;
   eyeY = (eyeY===null||Math.abs(eyeY-player.y)>3) ? player.y : eyeY+(player.y-eyeY)*(1-Math.exp(-dt*14));
   }
-  updateDinghies(dt,wdt);
+  updateSwell(dt); updateDinghies(dt,wdt);
   wrapWorld();
   if (updateOrigin()){ doorsDirty=true; roomScan=0; setChurchU(); for (const D of rooms) setRoomLights(D); maskDirty=true; beams.t=0; rebuildFar(player.x,player.z); }
   updateChunks(player.x,player.z,6); updateFades(dt); updateTiles(); roomsUpdate(dt);
@@ -7524,10 +7718,18 @@ function frame(now){
       if (descent.t>=descent.dur) descent.t=-1; }
   } else if (mode==='dinghy' && sailD && dgyChase){
     // from astern: the camera stands 11 m off the boat, and the mouse carries it round her and up and down
-    const B=sailD.mesh.position, a=sailD.state.head+Math.PI+dgyLook.yaw, p=clamp(dgyLook.pitch,0.04,1.2), D=11;
+    // + and − bring the camera nearer to or further from the boat, between 5 and 80 m
+    const zk=((keys.Minus||keys.NumpadSubtract)?1:0)-((keys.Equal||keys.NumpadAdd)?1:0);
+    if (zk) dgyChaseD=clamp(dgyChaseD*Math.exp(zk*dt*1.5),5,80);
+    // the further off, the higher the lowest angle, so that from a distance the camera looks over the roofs of a harbour
+    const B=sailD.mesh.position, a=sailD.state.head+Math.PI+dgyLook.yaw, D=dgyChaseD, p=clamp(dgyLook.pitch,0.04+0.36*clamp((D-11)/69,0,1),1.2);
     const want=new THREE.Vector3(B.x+Math.sin(a)*Math.cos(p)*D, 1.6+Math.sin(p)*D, B.z+Math.cos(a)*Math.cos(p)*D);
+    // over land, which beyond the quays may carry houses up to about 9 m high, the camera comes in as far as it must to
+    // keep the boat in sight
+    for (let k=1;k<=16;k++){ const t=k/16, px=B.x+(want.x-B.x)*t, pz=B.z+(want.z-B.z)*t, py=B.y+1.6+(want.y-B.y-1.6)*t, g=heightAt(px,pz);
+      if (g>0.3 && g+(seaDist(px,pz)>12?9:0.5)>py){ const f=Math.max(5/D,(k-1)/16); want.set(B.x+(want.x-B.x)*f, B.y+1.6+(want.y-B.y-1.6)*f, B.z+(want.z-B.z)*f); break; } }
     want.y=Math.max(want.y,heightAt(want.x,want.z)+1.5);
-    if (firstCam||camPos.distanceTo(want)>40) camPos.copy(want); else camPos.lerp(want,1-Math.exp(-dt*6));
+    if (firstCam||camPos.distanceTo(want)>120) camPos.copy(want); else camPos.lerp(want,1-Math.exp(-dt*6));
     camera.position.copy(camPos); camTarget.set(B.x,B.y+1.6,B.z); camLookAt(camTarget);
     if (camera.far!==3600 || camera.near!==0.1){ camera.far=3600; camera.near=0.1; camera.updateProjectionMatrix(); sea.scale.setScalar(1); scene.fog.near=90; scene.fog.far=1500; islandMesh.visible=false; farMesh.visible=farGlow.visible=true; }
   } else if (mode==='dinghy' && sailD){
@@ -7540,7 +7742,8 @@ function frame(now){
   sea.position.set(Math.round(player.x/50)*50,0,Math.round(player.z/50)*50);
   seaUniforms.uTime.value=time;
   for (const ch of chunks.values()) for (const b of ch.boats){ if (!b.floating) continue;
-    b.m.position.y=b.y+0.07*Math.sin(time*1.4+b.ph); b.m.rotation.z=0.035*Math.sin(time*1.1+b.ph); b.m.rotation.x=0.022*Math.sin(time*0.8+b.ph*1.7); }
+    const p=b.m.position, r=b.m.rotation.y, W=swellAt(p.x,p.z);   // the swell, much reduced inside the harbour, under the gentle bobbing
+    p.y=b.y+0.07*Math.sin(time*1.4+b.ph)+W.h; b.m.rotation.z=0.035*Math.sin(time*1.1+b.ph)+0.8*(W.sx*Math.cos(r)-W.sz*Math.sin(r)); b.m.rotation.x=0.022*Math.sin(time*0.8+b.ph*1.7)-0.8*(W.sx*Math.sin(r)+W.sz*Math.cos(r)); }
   updateSailers(wdt); updateTrain(wdt); updateGoods(wdt); updateFerries(wdt); gangwayStep(); coachStep(wdt,turn);
   const tx=Math.round(player.x/2)*2, tz=Math.round(player.z/2)*2, ty=Math.round(player.y);
   hour=(hour+wdt/HOUR_SEC*(keys.KeyT?40:1))%24; updateDaylight(); updateClocks();
@@ -7554,7 +7757,8 @@ function frame(now){
     ferryDeckClamp(); ferryInside(dt,fe.px??fox,fe.pz??foz); fe.px=fe.lx; fe.pz=fe.lz; fe.ey+=(ferryFloor()-fe.ey)*(1-Math.exp(-dt*12)); FERRY_EYE.set(fe.lx,fe.ey+1.65,fe.lz);
     const m=ridden.m; m.updateMatrixWorld();
     camera.position.copy(FERRY_EYE).applyMatrix4(m.matrix);
-    camera.rotation.set(fe.pitch, ridden.head+Math.PI+fe.yaw, 0, 'YXZ');
+    // the eye turns with the ship as it pitches and rolls, so the deck stays level under it and the horizon moves
+    camera.quaternion.copy(m.quaternion).multiply(_fq.setFromEuler(_fe.set(fe.pitch,Math.PI+fe.yaw,0,'YXZ')));
     player.x=m.position.x; player.z=m.position.z; player.y=1.5; eyeY=player.y;
     sky.position.copy(camera.position);
   }
@@ -7622,6 +7826,7 @@ function frame(now){
      wind          {x,z} in m/s, the direction the air moves
      groundHeight  (x,z) => height of whatever is underfoot (terrain, quays, rocks); below seaLevel is sea
      seaLevel      0 in Coast
+     seaAt         optional (x,z) => the swell's height above seaLevel there, on which floating gulls ride
      boats         [{x,z,heading,speed,length}], heading as in rotation.y (the bow points along sin, cos); a boat
                    may also carry catch (true while it comes home with fish: the nearest gulls join it, up to want,
                    4-7, ahead of any other boat, and no more than half the flock in all), settle (true once it has berthed: its gulls come down on it or
@@ -8083,7 +8288,7 @@ function createGulls(parent, opts={}){
         b.legs+=((water?0:1)-b.legs)*ease(2,h);
         b.bank*=1-ease(3,h); b.pitch*=1-ease(3,h);
         if (water){ b.x+=w.x*0.06*h; b.z+=w.z*0.06*h; P.x=b.x; P.z=b.z;
-          b.y=sea(ctx)+0.035*SCALE*b.size+0.03*Math.sin(t*1.3+b.ph2)+0.012*Math.sin(t*2.7+b.ph);
+          b.y=sea(ctx)+(ctx.seaAt?ctx.seaAt(b.x,b.z):0)+0.035*SCALE*b.size+0.03*Math.sin(t*1.3+b.ph2)+0.012*Math.sin(t*2.7+b.ph);
           b.pitch=0.05*Math.cos(t*1.3+b.ph2); b.bank=0.04*Math.sin(t*1.1+b.ph); }
         else { b.y=P.y+0.2*SCALE*b.size; b.pitch=0.13; }   // a standing gull holds its body tilted up a little
         // gulls stand facing into the wind and shift round now and then
@@ -8240,7 +8445,7 @@ function gullBoats(){
   if (sailD){ const S=sailD.state; add(sailD,S.x,S.z,S.head,Math.max(0,S.u),4); }
   return gullBoatList;
 }
-const gullCtx={player,daylight:1,wind:undefined,groundHeight:(x,z)=>walkGround(x,z,1e3),seaLevel:0,shoreDist:seaDist,boats:gullBoatList,perches:[],paused:false,origin:ORIGIN};
+const gullCtx={player,daylight:1,wind:undefined,groundHeight:(x,z)=>walkGround(x,z,1e3),seaLevel:0,seaAt:(x,z)=>swellH(x,z),shoreDist:seaDist,boats:gullBoatList,perches:[],paused:false,origin:ORIGIN};
 let gullSeed=SEED;
 let gullsOn=true;
 function updateGulls(dt){
@@ -8410,8 +8615,9 @@ function updateFleet(dt){
     let m=fleetMeshes.get(f.key);
     if (!m){ m=new THREE.Mesh(BOATS[f.idx].geo,matB); m.rotation.order='YXZ'; m.castShadow=true; m.receiveShadow=true; world.add(m); fleetMeshes.set(f.key,m); }
     // the boats rise and fall on the sea as the moored ones do, and sit a little by the stern under way
-    m.position.set(f.x,0.05*Math.sin(time*1.2+f.ph),z);
-    m.rotation.set(0.03*Math.sin(time*0.9+f.ph)-Math.min(0.03,f.speed*0.006),f.heading,0.04*Math.sin(time*0.7+f.ph));
+    const W=swellAt(f.x,z), hd=f.heading;
+    m.position.set(f.x,0.05*Math.sin(time*1.2+f.ph)+W.h,z);
+    m.rotation.set(0.03*Math.sin(time*0.9+f.ph)-Math.min(0.03,f.speed*0.006)-0.7*(W.sx*Math.sin(hd)+W.sz*Math.cos(hd)),hd,0.04*Math.sin(time*0.7+f.ph)+0.7*(W.sx*Math.cos(hd)-W.sz*Math.sin(hd)));
     if (f.speed>0.3 && d<nd){ nd=d; near=f; }
   }
   for (const [k,m] of fleetMeshes) if (!shown.has(k)){ world.remove(m); fleetMeshes.delete(k); }

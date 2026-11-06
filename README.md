@@ -60,7 +60,7 @@ The panel opened with **H** lists the controls. They are reproduced here for ref
 | T | Speeds up time while held. |
 | P | Pauses the world: the trains, ferries, boats, dolphins, sea, lighthouse beams, cats, gulls and time of day stand still while the player walks, flies and looks about as usual. P again resumes. |
 | R | Rides in the passenger train's cab. R or V again steps off beside the track. |
-| C | Follows the train being ridden, or else the nearer of the passenger and goods trains, from behind. The mouse orbits the camera and + − change its distance. C or V again steps off beside the track. While sailing, C changes between the helm and a view from 11 m astern of the dinghy, which the mouse carries round her; R, G, C and F do not take the player to a train or a ferry until they are ashore. |
+| C | Follows the train being ridden, or else the nearer of the passenger and goods trains, from behind. The mouse orbits the camera and + − change its distance. C or V again steps off beside the track. While sailing, C changes between the helm and a view from astern of the dinghy, 11 m off at first, which the mouse carries round her and + − bring nearer or further, between 5 and 80 m; R, G, C and F do not take the player to a train or a ferry until they are ashore. |
 | G | Rides in the cab of the goods train working the nearest goods line, setting it to work there if none is near. G or V again steps off beside the track. |
 | F | Boards the nearest ferry wherever it is. F or V again steps ashore, or at the next landing if the ferry is under way. |
 | Y | Within 6 m of a dinghy at street level, boards it. Elsewhere, takes the player to the quay beside the dinghy of the nearest harbour, leaving any train or ferry first and coming down from the bird's-eye view. While sailing, Y steps ashore when the boat lies within 3 m of a quay, a mole or a beach; out at sea it returns the dinghy to its berth and puts the player on the quay beside it, from the helm, the view from astern or the bird's-eye view. |
@@ -268,6 +268,21 @@ No readout of the wind or of the boat's speed is shown on the screen. While sail
 
 The boat being sailed carries the player across the north–south join (`wrapHooks`), and the other dinghies are rebuilt at their berths afterwards. A dinghy left away from its berth stays where it was left until the player is 1.5 km from it; the next **Y** to that harbour moors it again. The dinghies stand still while the world is paused. A dinghy draws a cap at its gunwale that writes only depth, after the opaque objects and before the sea, so that the transparent sea is not drawn inside the open boat. `window.__village` holds `dinghyKey`, `dinghies`, `sailD`, `wispInfo`, `WIND`, `dinghyBerth`, `dgyHarbourNear` and `setHandling` for automated checks.
 
+### The swell
+
+A long swell rolls in from the open sea on both sides of the island: smooth, rounded crests left by wind far away, beneath the ripples of the local wind.
+
+- **Trains.** Each side has three long-crested trains that run towards its shore, at directions about 12° apart and at 0.9, 1 and 1.1 times a base period of 6.8 to 9 s drawn from the seed. Their periods therefore lie between about 6 and 10 s. The wavelengths follow from deep-water dispersion, L = gT²/2π, between about 58 and 153 m, and each train moves at the matching phase speed. Because the trains differ slightly in period and direction, the crests come in sets. Their direction leans by up to about 23° towards the island's prevailing wind, but does not follow its shifts.
+- **Height.** The height from trough to crest, where the trains of a set meet, is drawn afresh for each island and each day of the game, between about 0.3 m on a calm day and 1.25 m on a lively one, and changes smoothly through the day (`swH`).
+- **The shore.** As the water shoals the swell grows a little, by Green's law, to 1.35 times in 3 m of water, and in the last 1.5 m it dies away into the surf. The wash on the shore rises with each crest that arrives there. Inside a harbour's moles the swell is cut to a tenth, and in a cove by up to seven tenths towards its head.
+- **One function.** `swellAt(x, z)` gives the height of the swell and its two slopes at the present moment, from exactly what the sea shader draws. The shore and shelter factors are held in a texture of 128 by 128 cells 12 m apart round the player (`swF`), which the GPU and the CPU read byte for byte alike. It is rebuilt within 1.2 ms a frame as the player moves on, and at once after a jump of more than 700 m. Beyond its outermost 150 m the swell fades to calm, so the sea further off is flat.
+- **What rides it.** The sea itself is displaced vertex by vertex. Its shading shows the long slopes, with darker troughs, lighter crests and a reflection of the sky that changes with the slope, so that the crests can be told at a low angle and at a distance. On the bigger days the crests are flecked with foam. Every boat rides the swell: the boats moored and at anchor in the harbours (little, because of the shelter), the sailing boats, the fishing fleet, the dinghy and the ferries. A ferry is sampled at bow, stern and either side, so that it heaves, pitches and rolls as its length and beam allow, and its motion dies away as it slows into a landing. The dolphins surface, breathe and throw their spray at the moving surface, and the gulls sitting on the sea ride it.
+- **The views.** From the dinghy's helm the boat lifts and drops and the horizon rises and falls, damped as the boat's other motions are. On a ferry the eye turns with the ship, so that the deck stays level under it while the horizon moves. In the bird's-eye view the swell shows as long, slow undulations.
+- **Sea mesh.** The sea is a disc of 120 rings by 160 segments, close together near its middle, which follows the player, and wide apart towards its edge 4.5 km away.
+- **Time and the join.** The swell follows the world's time, so it stands still while the world is paused. The z-component of each wavenumber is a whole number of periods over `WRAP_Z`, and the weight that divides the sea between the two sides' trains repeats over `WRAP_Z`, so the swell runs on unbroken across the north–south join.
+
+`window.__village` holds `swellAt`, `swellInfo()`, which lists the trains with their periods, wavelengths and directions, and `setSwell(h)`, which fixes the height for tests; `setSwell(null)` returns it to the day's own.
+
 ### Dolphins
 
 Pods of bottlenose dolphins swim in the open sea. The module `createDolphins(parent, opts)` returns an object with `update(dt, ctx)`, `setOptions(o)`, `trigger(kind, pod)`, `reset()`, `shift(dz)` and `dispose()`. It is self-contained, and the same block is used in `testbench/dolphins.html`, where it may be examined on its own with a ferry, an island and a control panel.
@@ -310,7 +325,7 @@ The shadow map is a square centred on the player and moved in 2 m steps. Where t
 
 ### Shading
 
-The building and ground shaders add procedural surface patterns according to the `surf` attribute: plaster, roof tiles, stone, wood, brick, bougainvillea bracts and natural rock, the last with faint beds, pitting and grain for the cliffs, caves and boulders of the coves. The sea has layers of ripples, each of which fades out as its wavelength approaches the size of a pixel. Fountains have animated water sheets, jets, arcs and spreading rings.
+The building and ground shaders add procedural surface patterns according to the `surf` attribute: plaster, roof tiles, stone, wood, brick, bougainvillea bracts and natural rock, the last with faint beds, pitting and grain for the cliffs, caves and boulders of the coves. The sea has layers of ripples, each of which fades out as its wavelength approaches the size of a pixel. The swell is drawn as described under [The swell](#the-swell). Fountains have animated water sheets, jets, arcs and spreading rings.
 
 ### Cameras
 
@@ -318,7 +333,7 @@ The building and ground shaders add procedural surface patterns according to the
 - **Bird's-eye.** Orbiting above the player. The fog, far plane and sea grow with the zoom so that nothing is clipped.
 - **Cab.** On the track 1.2 m ahead of the locomotive's nose, at the driver's eye height, with the whole train drawn behind; the mouse looks round, so the locomotive can be seen by looking back.
 - **Chase.** Behind and above the train, orbited with the mouse and kept clear of the ground. While the train is underground, the camera follows the hillside above it.
-- **Ferry.** Walking about the decks, with the eye following the ferry's motion.
+- **Ferry.** Walking about the decks, with the eye following the ferry's motion, its heave, pitch and roll on the swell included.
 - **Dinghy.** At the helm, sitting out to windward, with the eye following the boat's heel and pitch.
 
 **Tilt-shift.** The scene is rendered off-screen and blurred horizontally and vertically, with a radius that grows away from a horizontal band of sharp focus through the player, so that the view resembles a miniature model.

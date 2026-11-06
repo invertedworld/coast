@@ -70,9 +70,10 @@ const hex=h=>new THREE.Color(h);
      opts: pods (3), podSize (5, or [min, max] for a size drawn for each pod), leapsPerMinute (per pod, 3), bowRide (true), minDepth (m, 6),
            range (m from the focus within which pods keep, 260), formation ('tight' or 'loose'), maxDolphins (64), seed, ghost (0..1, 0.45),
            onSound(kind, x, y, z, strength), kind being 'breath', 'leap' or 'splash'
-   D.update(dt, ctx)                      ctx: camera, focus {x,z} (defaults to the camera), boats
+   D.update(dt, ctx)                      ctx: camera, focus {x,z} (defaults to the camera), range (m, overrides opts.range), seek (one of the boats,
+                                           which the nearest pod makes for), boats
                                            [{x,z,head,v,len,beam}] (forward is (sin head, cos head)),
-                                           depthAt(x,z) (depth of water in metres, negative on land), seaLevel (0),
+                                           depthAt(x,z) (depth of water in metres, negative on land), seaLevel (0), seaAt(x,z) (the swell's height there, optional),
                                            bright (0..1, the light on unlit foam and spray), paused,
                                            keepOut(x,z) (true where pods must not go), spawnWeight(x,z) (0..1, the
                                            chance that a pod may appear there)
@@ -80,7 +81,7 @@ const hex=h=>new THREE.Color(h);
    D.dolphins   D.pods   D.dispose()
 
    Positions are world metres with y up and the sea at y = seaLevel. Under water each dolphin is drawn a second
-   time as a faint dark shape projected on to the surface along the line of sight, so that it reads through the
+   time as a faint dark shape projected on to the surface (the swell's, where ctx.seaAt gives it) along the line of sight, so that it reads through the
    nearly opaque sea and is still hidden correctly by hulls and quays above the water. */
 function createDolphins(parent, opts={}){
   const O=Object.assign({pods:3,podSize:5,leapsPerMinute:3,bowRide:true,minDepth:6,range:260,maxDolphins:64,seed:20261106,ghost:0.45,formation:'tight',onSound:null},opts);
@@ -90,7 +91,8 @@ function createDolphins(parent, opts={}){
   const cl=(v,a,b)=>Math.max(a,Math.min(b,v));
   const angTo=(a,b)=>Math.atan2(Math.sin(b-a),Math.cos(b-a));
   const G=9.81, TAU=Math.PI*2;
-  let SEA=0;
+  let SEA=0, seaAt=null;   // the mean sea level, and the swell's height above it where ctx.seaAt gives one
+  const seaY=(x,z)=>SEA+(seaAt?seaAt(x,z):0);
 
   /* ---------- the body: rings of eight round a tapering axis, with dorsal fin, flippers and flukes ----------
      The dolphin is 2.6 m long, its nose towards +z and its back towards +y; the flukes reach 1.47 m behind the
@@ -156,6 +158,8 @@ function createDolphins(parent, opts={}){
 
   const geo=buildGeo(), MAXD=O.maxDolphins;
   const flexA=new THREE.InstancedBufferAttribute(new Float32Array(MAXD*3),3); flexA.setUsage(THREE.DynamicDrawUsage); geo.setAttribute('aFlex',flexA);
+  // the height of the swell over each dolphin (ctx.seaAt), on which its shape under water is drawn
+  const seaA=new THREE.InstancedBufferAttribute(new Float32Array(MAXD),1); seaA.setUsage(THREE.DynamicDrawUsage); geo.setAttribute('aSea',seaA);
   const bodyMat=new THREE.MeshPhongMaterial({vertexColors:true,flatShading:true,shininess:36,specular:hex('#2f353b')});
   bodyMat.onBeforeCompile=patchFlex; bodyMat.customProgramCacheKey=()=>'dolphin-body';
   const depthMat=new THREE.MeshDepthMaterial({depthPacking:THREE.RGBADepthPacking}); depthMat.onBeforeCompile=patchFlex; depthMat.customProgramCacheKey=()=>'dolphin-depth';
@@ -167,13 +171,13 @@ function createDolphins(parent, opts={}){
   const ghostCol=hex('#183650'), ghostMat=new THREE.MeshBasicMaterial({color:ghostCol.clone(),transparent:true,opacity:O.ghost,depthWrite:false,
     polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-4});
   ghostMat.onBeforeCompile=sh=>{ patchFlex(sh); sh.uniforms.uSeaY=ghostU.uSeaY;
-    sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nvarying float vDepth; uniform float uSeaY;')
+    sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nvarying float vDepth; uniform float uSeaY; attribute float aSea;')
       .replace('#include <project_vertex>',`vec4 wp=vec4(transformed,1.0);
         #ifdef USE_INSTANCING
           wp=instanceMatrix*wp;
         #endif
-        wp=modelMatrix*wp; vDepth=uSeaY-wp.y;
-        vec3 sp=wp.xyz; if (wp.y<uSeaY && cameraPosition.y>uSeaY){ sp=cameraPosition+(wp.xyz-cameraPosition)*((cameraPosition.y-uSeaY)/(cameraPosition.y-wp.y)); }
+        float sy=uSeaY+aSea; wp=modelMatrix*wp; vDepth=sy-wp.y;
+        vec3 sp=wp.xyz; if (wp.y<sy && cameraPosition.y>sy){ sp=cameraPosition+(wp.xyz-cameraPosition)*((cameraPosition.y-sy)/(cameraPosition.y-wp.y)); }
         vec4 mvPosition=viewMatrix*vec4(sp,1.0); gl_Position=projectionMatrix*mvPosition;`);
     sh.fragmentShader=sh.fragmentShader.replace('#include <common>','#include <common>\nvarying float vDepth;')
       .replace('vec4 diffuseColor = vec4( diffuse, opacity );','if (vDepth<0.0) discard; vec4 diffuseColor=vec4(diffuse,opacity*exp(-vDepth/2.0)*smoothstep(0.0,0.25,vDepth));'); };
@@ -246,23 +250,25 @@ function createDolphins(parent, opts={}){
   function patch(x,z,r0,r1,life,str){ if (RG.length>=MAXR) RG.shift(); RG.push({x,z,r0,r1,age:0,life,str,seed:2+R()}); }
   function drops(x,y,z,n,up,out,dirx,dirz,carry){ for (let i=0;i<n;i++){ if (PT.length>=MAXP) PT.shift();
     const a=R()*TAU, o=out*(0.3+0.7*R());
-    PT.push({x:x+(R()-0.5)*0.5,y:y,z:z+(R()-0.5)*0.5,vx:Math.cos(a)*o+dirx*carry*R(),vy:up*(0.45+0.55*R()),vz:Math.sin(a)*o+dirz*carry*R(),
+    PT.push({sy:y,x:x+(R()-0.5)*0.5,y:y,z:z+(R()-0.5)*0.5,vx:Math.cos(a)*o+dirx*carry*R(),vy:up*(0.45+0.55*R()),vz:Math.sin(a)*o+dirz*carry*R(),
       age:0,life:rr(0.7,1.5),size:rr(0.05,0.13),a:rr(0.6,0.95),mist:false}); } }
   function mist(x,y,z,n,dirx,dirz,sp){ for (let i=0;i<n;i++){ if (PT.length>=MAXP) PT.shift();
-    PT.push({x:x+(R()-0.5)*0.12,y:y+0.05,z:z+(R()-0.5)*0.12,vx:(R()-0.5)*0.5+dirx*sp,vy:rr(1.2,3.4),vz:(R()-0.5)*0.5+dirz*sp,
-      age:0,life:rr(0.45,0.85),size:rr(0.035,0.08),a:rr(0.25,0.45),mist:true}); } }
+    PT.push({x:x+(R()-0.5)*0.12,y:y+0.05,z:z+(R()-0.5)*0.12,vx:(R()-0.5)*0.5+dirx*sp,vy:rr(1.6,4.0),vz:(R()-0.5)*0.5+dirz*sp,
+      age:0,life:rr(0.6,1.1),size:rr(0.06,0.13),a:rr(0.35,0.55),mist:true}); } }
 
   /* ---------- pods and their members ---------- */
   const pods=[], dolphins=[];
-  let FX=0, FZ=0, depthAt=()=>100, boats=[], keepOut=()=>false, spawnW=()=>1;
+  let FX=0, FZ=0, depthAt=()=>100, boats=[], keepOut=()=>false, spawnW=()=>1, RNG=O.range, seek=null, seeker=null;
+  // the least speed at which a boat's bow wave is worth riding: 3 m/s for a ferry, 1.2 m/s for a dinghy
+  const vMin=B=>cl((B.len||20)*0.115,1.2,3);
   const depth=(x,z)=>{ const d=depthAt(x,z); return Number.isFinite(d)?d:100; };
   const okSpot=(x,z)=>depth(x,z)>O.minDepth+4 && !keepOut(x,z) && R()<spawnW(x,z);
   // a place for a pod to appear, out of the way of the focus: now and then ahead of a large boat under way, so
   // that it meets the pod, otherwise anywhere in deep, open water; null if there is none within reach
   function deepSpot(){
-    for (const B of boats) if ((B.len||0)>15 && B.v>3 && Math.hypot(B.x-FX,B.z-FZ)<O.range*1.5 && R()<0.4){
+    for (const B of boats) if ((B.len||0)>15 && B.v>3 && Math.hypot(B.x-FX,B.z-FZ)<RNG*1.5 && R()<0.4){
       const a=rr(120,220), l=rr(-40,40), x=B.x+Math.sin(B.head)*a+Math.cos(B.head)*l, z=B.z+Math.cos(B.head)*a-Math.sin(B.head)*l; if (okSpot(x,z)) return [x,z]; }
-    for (let k=0;k<80;k++){ const a=R()*TAU, r=O.range*rr(0.35,0.85), x=FX+Math.sin(a)*r, z=FZ+Math.cos(a)*r; if (okSpot(x,z)) return [x,z]; }
+    for (let k=0;k<80;k++){ const a=R()*TAU, r=RNG*rr(0.35,0.85), x=FX+Math.sin(a)*r, z=FZ+Math.cos(a)*r; if (okSpot(x,z)) return [x,z]; }
     return null; }
   function placePod(pod){ const q=deepSpot(); pod.dormant=!q; pod.retry=2; if (!q) return;
     [pod.x,pod.z]=q; pod.head=R()*TAU; pod.speed=pod.cruise; pod.mode='cruise'; pod.boat=null; pod.spread=1;
@@ -279,7 +285,7 @@ function createDolphins(parent, opts={}){
       row.forEach((d,c)=>{ d.row=r; d.col=c; d.sx=(c-(row.length-1)/2)*lat+(r%2?lat*0.25:0)+rr(-j,j); d.sz=((Math.ceil(n/cols)-1)/2-r)*lon+rr(-j,j)*1.5;
         d.cy=pod.cy+rr(-0.12,0.12); }); } }
   function rideSlots(pod){ const n=pod.members.length; pod.members.forEach((d,i)=>{ const side=i%2?1:-1, rank=Math.floor(i/2);
-    d.rx=side*rr(0.8,1.5)+side*rank*1.7; d.rz=rr(0.8,2.4)+rank*rr(1.5,2.5)-(rank>1?rr(3,5):0); d.ry=rr(-1.3,-0.8); d.rideBreath=rr(1,6); }); }
+    d.rx=side*rr(0.8,1.5)+side*rank*1.7; d.rz=rr(0.8,2.4)+rank*rr(1.5,2.5)-(rank>1?rr(3,5)*Math.min(1,((pod.boat&&pod.boat.len)||26)/14):0); d.ry=rr(-1.3,-0.8); d.rideBreath=rr(1,6); }); }
   function newDolphin(pod){ const d={pod,x:pod.x+(R()-0.5)*6,z:pod.z+(R()-0.5)*8,y:rr(-2.6,-1.6),head:pod.head,speed:pod.speed,slope:0,vy:0,pitch:0,roll:0,
       cy:rr(-2.2,-1.3),man:null,breathIn:-1,leapIn:-1,leapCool:rr(2,8),flex:R()*TAU,amp:0.1,curv:0,scale:rr(0.86,1.06),ph:R()*TAU,
       prev:null,foamT:0,state:'swim',sx:0,sz:0,rx:0,rz:0,ry:-1,rideBreath:3};
@@ -335,14 +341,14 @@ function createDolphins(parent, opts={}){
     for (let k=0;k<4;k++){ const y0=prev[k], y1=ys[k][1]; if ((y0<0)===(y1<0)) continue;
       const [x,,z]=ys[k], v=(y1-y0)/h, up=y1>=0;
       if (k===0){
-        if (up && leaping && v>2){ ring(x,z,0.5,2.3+v*0.12,2.4,0.85); patch(x,z,0.5,1.3,2.4,0.9); drops(x,SEA,z,14+Math.round(v*4),v*0.75,1.4,fx,fz,d.speed*0.5); sound('leap',x,SEA,z,cl(v/6,0,1)); }
-        else if (!up && leaping && v<-2){ ring(x,z,0.7,2.7+(-v)*0.18,2.8,0.9); patch(x,z,0.8,1.9,3.2,1); drops(x,SEA,z,26+Math.round(-v*6),rr(3.5,5.5),2.2,fx,fz,d.speed*0.35); sound('splash',x,SEA,z,cl(-v/7,0,1)); }
-        else { ring(x,z,0.3,1.1,1.7,0.5); patch(x,z,0.3,0.7,1.6,0.6); drops(x,SEA,z,3,1.2,0.6,fx,fz,0.5); }
-      } else if (k===1){ if (up && !leaping){ mist(x,ys[1][1]+SEA,z,22,fx,fz,d.speed*0.6); sound('breath',x,SEA,z,0.6); } }
+        if (up && leaping && v>2){ ring(x,z,0.5,2.3+v*0.12,2.4,0.85); patch(x,z,0.5,1.3,2.4,0.9); drops(x,seaY(x,z),z,14+Math.round(v*4),v*0.75,1.4,fx,fz,d.speed*0.5); sound('leap',x,SEA,z,cl(v/6,0,1)); }
+        else if (!up && leaping && v<-2){ ring(x,z,0.7,2.7+(-v)*0.18,2.8,0.9); patch(x,z,0.8,1.9,3.2,1); drops(x,seaY(x,z),z,26+Math.round(-v*6),rr(3.5,5.5),2.2,fx,fz,d.speed*0.35); sound('splash',x,SEA,z,cl(-v/7,0,1)); }
+        else { ring(x,z,0.3,1.1,1.7,0.5); patch(x,z,0.3,0.7,1.6,0.6); drops(x,seaY(x,z),z,3,1.2,0.6,fx,fz,0.5); }
+      } else if (k===1){ if (up && !leaping){ mist(x,ys[1][1]+seaY(x,z),z,22,fx,fz,d.speed*0.6); sound('breath',x,SEA,z,0.6); } }
       else if (k===2){ ring(x,z,0.2,0.75,1.3,0.55); }
-      else if (k===3){ if (up && leaping && v>1.5){ drops(x,SEA,z,10+Math.round(v*3),v*0.55,0.9,fx,fz,d.speed*0.4); ring(x,z,0.4,1.6,2,0.7); }
+      else if (k===3){ if (up && leaping && v>1.5){ drops(x,seaY(x,z),z,10+Math.round(v*3),v*0.55,0.9,fx,fz,d.speed*0.4); ring(x,z,0.4,1.6,2,0.7); }
         if (!up){ const big=leaping&&v<-2; ring(x,z,big?0.6:0.3,big?2.2:1.2,big?2.4:1.6,big?0.9:0.6);
-          if (Math.abs(v)>0.4) drops(x,SEA,z,big?18:4,big?4:1.4,big?1.6:0.7,fx,fz,0.4); } }
+          if (Math.abs(v)>0.4) drops(x,seaY(x,z),z,big?18:4,big?4:1.4,big?1.6:0.7,fx,fz,0.4); } }
     }
     // a trail of foam where the fin or the back cuts the surface
     d.foamT-=h; if (d.foamT<=0 && !air){
@@ -357,7 +363,7 @@ function createDolphins(parent, opts={}){
     pod.t+=h;
     const b=pod.boat;
     if (pod.mode!=='cruise'){
-      if (!b || !boats.includes(b) || b.v<2.5 || !O.bowRide){ leave(pod); return; }
+      if (!b || !boats.includes(b) || b.v<vMin(b)*0.8 || !O.bowRide){ leave(pod); return; }
       const fx=Math.sin(b.head), fz=Math.cos(b.head);
       pod.x=b.x+fx*b.len/2; pod.z=b.z+fz*b.len/2; pod.head=b.head; pod.speed=b.v;
       if (pod.mode==='approach'){ pod.t2+=h; let m=0; for (const d of pod.members) m+=Math.hypot(d.x-pod.x,d.z-pod.z)/pod.members.length;
@@ -372,23 +378,32 @@ function createDolphins(parent, opts={}){
     const dA=Math.min(room(pod.x+fx*25,pod.z+fz*25),room(pod.x+fx*55,pod.z+fz*55));
     const dF=Math.hypot(pod.x-FX,pod.z-FZ);
     if (dA<O.minDepth+3){ const l=room(pod.x+Math.sin(pod.head+0.7)*40,pod.z+Math.cos(pod.head+0.7)*40), r=room(pod.x+Math.sin(pod.head-0.7)*40,pod.z+Math.cos(pod.head-0.7)*40); turn=(l>r?1:-1)*0.5; }
-    else if (dF>O.range) turn+=cl(angTo(pod.head,Math.atan2(FX-pod.x,FZ-pod.z)),-1,1)*0.2;
+    else if (pod===seeker){
+      // the pod sent to the player's boat makes for a place beside it, which changes now and then, and falls in
+      // there on the boat's heading at its speed
+      const s=seek; pod.seekT=(pod.seekT||0)-h;
+      if (pod.seekT<=0){ pod.seekT=rr(15,35); pod.seekSide=R()<0.5?-1:1; pod.seekOff=rr(10,28); pod.seekAhead=rr(-6,18); }
+      const cs=Math.cos(s.head), sn=Math.sin(s.head), gx=s.x+cs*pod.seekSide*pod.seekOff+sn*pod.seekAhead, gz=s.z-sn*pod.seekSide*pod.seekOff+cs*pod.seekAhead;
+      const gd=Math.hypot(gx-pod.x,gz-pod.z), want=gd>30?Math.atan2(gx-pod.x,gz-pod.z):Math.atan2(gx+sn*8-pod.x,gz+cs*8-pod.z);
+      turn=cl(angTo(pod.head,want)*1.2,-0.6,0.6); pod.seekV=gd>80?6:gd>40?4.6:cl(s.v+gd*0.06,1.6,4.6); }
+    else if (dF>RNG) turn+=cl(angTo(pod.head,Math.atan2(FX-pod.x,FZ-pod.z)),-1,1)*0.2;
     pod.head+=turn*h;
-    pod.speed+=(pod.cruise-pod.speed)*(1-Math.exp(-h*0.25)); pod.spread+=(1-pod.spread)*(1-Math.exp(-h*0.12));
+    const sk=pod===seeker; pod.speed+=((sk?(pod.seekV||pod.cruise):pod.cruise)-pod.speed)*(1-Math.exp(-h*(sk?0.6:0.25))); pod.spread+=(1-pod.spread)*(1-Math.exp(-h*0.12));
     pod.x+=fx*pod.speed*h; pod.z+=fz*pod.speed*h;
-    if (dF>O.range*3){ placePod(pod); return; }
+    if (dF>RNG*3){ placePod(pod); return; }
     pod.cool-=h;
-    if (O.bowRide && pod.cool<=0) for (const B of boats){ if (B.v<3) continue; const dd=Math.hypot(B.x-pod.x,B.z-pod.z);
-      if (dd<170 && R()<0.5*h){ pod.mode='approach'; pod.boat=B; pod.t2=0; pod.rideT=rr(25,55); rideSlots(pod); for (const d of pod.members) d.breathIn=-1; break; } }
+    // a pod may join a boat under way; the one sent to the player's boat joins only that, once it is close by
+    if (O.bowRide && pod.cool<=0) for (const B of boats){ const mine=B===seek; if (B.v<vMin(B) || (pod===seeker && !mine)) continue; const dd=Math.hypot(B.x-pod.x,B.z-pod.z);
+      if (dd<(mine?45:170) && R()<(mine?0.12:0.5)*h){ pod.mode='approach'; pod.boat=B; pod.t2=0; pod.rideT=mine?rr(15,35):rr(25,55); rideSlots(pod); for (const d of pod.members) d.breathIn=-1; break; } }
     pod.breathT-=h;
-    if (pod.breathT<=0){ pod.breathT=rr(9,20); const ripple=R()<0.6, gap=rr(0.12,0.24), peak=rr(-0.02,0.08), dir=R()<0.5;
+    if (pod.breathT<=0){ pod.breathT=pod===seeker?rr(6,12):rr(9,20); const ripple=R()<0.6, gap=rr(0.12,0.24), peak=rr(0.03,0.12), dir=R()<0.5;
       for (const d of pod.members){ if (!d.man && d.breathIn<0){ const c=dir?d.col:-d.col+4;
         d.breathIn=ripple?(c*gap+d.row*gap*0.6)%1.6:rr(0,0.1); d.peak=peak+rr(-0.015,0.015); } } }
   }
   function leave(pod){ const b=pod.boat; let mx=0, mz=0, lat=0; const n=pod.members.length||1;
     for (const d of pod.members){ mx+=d.x/n; mz+=d.z/n; if (b) lat+=((d.x-b.x)*Math.cos(b.head)-(d.z-b.z)*Math.sin(b.head))/n; }
     pod.mode='cruise'; pod.x=mx; pod.z=mz; pod.head=(b?b.head:pod.head)+(lat>=0?1:-1)*rr(0.55,1.1);
-    pod.speed=b?b.v:pod.speed; pod.cool=rr(35,70); pod.boat=null; pod.breathT=rr(3,8); pod.spread=2.4; formation(pod); }
+    pod.speed=b?b.v:pod.speed; pod.cool=b&&b===seek?rr(12,30):rr(35,70); pod.boat=null; pod.breathT=rr(3,8); pod.spread=2.4; formation(pod); }
 
   function dolphinStep(d,h){
     const pod=d.pod, riding=pod.mode!=='cruise', b=pod.boat;
@@ -456,27 +471,34 @@ function createDolphins(parent, opts={}){
       if (p.mist){ const k=Math.exp(-3*dt); p.vx*=k; p.vz*=k; p.vy=p.vy*k-0.6*dt; p.size+=dt*0.12; }
       else { const k=Math.exp(-0.4*dt); p.vx*=k; p.vz*=k; p.vy-=G*dt; }
       p.x+=p.vx*dt; p.y+=p.vy*dt; p.z+=p.vz*dt;
-      if (p.age>=1 || (!p.mist && p.y<SEA-0.05 && p.vy<0)){ PT[i]=PT[PT.length-1]; PT.pop(); } }
+      if (p.age>=1 || (!p.mist && p.y<p.sy-0.05 && p.vy<0)){ PT[i]=PT[PT.length-1]; PT.pop(); } }
     for (let i=RG.length-1;i>=0;i--){ RG[i].age+=dt/RG[i].life; if (RG[i].age>=1) RG.splice(i,1); }
   }
 
   const _m=new THREE.Matrix4(), _q=new THREE.Quaternion(), _e=new THREE.Euler(0,0,0,'YXZ'), _p=new THREE.Vector3(), _s=new THREE.Vector3();
   function write(){
     let i=0;
-    for (const d of dolphins){ if (d.pod.dormant) continue; _e.set(-d.pitch,d.head,d.roll,'YXZ'); _q.setFromEuler(_e); _p.set(d.x,d.y,d.z); _s.setScalar(d.scale);
-      _m.compose(_p,_q,_s); body.setMatrixAt(i,_m); flexA.setXYZ(i,d.flex,d.amp/d.scale,d.curv*d.scale); i++; }
-    body.count=ghost.count=i; body.instanceMatrix.needsUpdate=true; flexA.needsUpdate=true;
+    for (const d of dolphins){ if (d.pod.dormant) continue; _e.set(-d.pitch,d.head,d.roll,'YXZ'); _q.setFromEuler(_e); const sw=seaAt?seaAt(d.x,d.z):0; _p.set(d.x,d.y+sw,d.z); _s.setScalar(d.scale);
+      _m.compose(_p,_q,_s); body.setMatrixAt(i,_m); flexA.setXYZ(i,d.flex,d.amp/d.scale,d.curv*d.scale); seaA.setX(i,sw); i++; }
+    body.count=ghost.count=i; body.instanceMatrix.needsUpdate=true; flexA.needsUpdate=true; seaA.needsUpdate=true;
     _q.identity();
-    RG.forEach((g,i)=>{ const r=lerp(g.r0,g.r1,Math.sqrt(g.age)); _p.set(g.x,SEA+0.02,g.z); _s.set(r,1,r); _m.compose(_p,_q,_s); rings.setMatrixAt(i,_m); ringA.setXYZ(i,g.age,g.seed,g.str); });
+    RG.forEach((g,i)=>{ const r=lerp(g.r0,g.r1,Math.sqrt(g.age)); _p.set(g.x,seaY(g.x,g.z)+0.02,g.z); _s.set(r,1,r); _m.compose(_p,_q,_s); rings.setMatrixAt(i,_m); ringA.setXYZ(i,g.age,g.seed,g.str); });
     rings.count=RG.length; rings.instanceMatrix.needsUpdate=true; ringA.needsUpdate=true;
     PT.forEach((p,i)=>{ pPos[i*3]=p.x; pPos[i*3+1]=p.y; pPos[i*3+2]=p.z; pSize[i]=p.size; pAlpha[i]=p.a*(1-p.age)*(p.mist?1:Math.min(1,p.age*8+0.3)); });
     pGeo.setDrawRange(0,PT.length); for (const k of ['position','aSize','aAlpha']) pGeo.attributes[k].needsUpdate=true;
   }
 
   function readCtx(ctx){
-    SEA=ctx.seaLevel||0; ghostU.uSeaY.value=SEA;
+    SEA=ctx.seaLevel||0; seaAt=ctx.seaAt||null; ghostU.uSeaY.value=SEA;
     if (ctx.depthAt) depthAt=ctx.depthAt;
-    boats=ctx.boats||[]; keepOut=ctx.keepOut||(()=>false); spawnW=ctx.spawnWeight||(()=>1);
+    boats=ctx.boats||[]; keepOut=ctx.keepOut||(()=>false); spawnW=ctx.spawnWeight||(()=>1); RNG=ctx.range||O.range;
+    // ctx.seek, the player's own boat, draws the nearest pod in the water to it
+    seek=ctx.seek||null;
+    if (!seek) seeker=null;
+    else { // the nearest pod, kept unless another comes much closer
+      let best=null, bd=1e9; for (const p of pods){ if (p.dormant) continue; const d=Math.hypot(p.x-seek.x,p.z-seek.z); if (d<bd){ bd=d; best=p; } }
+      const cur=seeker&&!seeker.dormant&&pods.includes(seeker)?Math.hypot(seeker.x-seek.x,seeker.z-seek.z):1e9;
+      if (best && best!==seeker && bd<cur*0.6-20) seeker=best; else if (cur===1e9) seeker=best; }
     const f=ctx.focus||(ctx.camera&&ctx.camera.position); if (f){ FX=f.x; FZ=f.z; }
     const br=ctx.bright===undefined?1:ctx.bright; fxU.uBright.value=br;
     ghostMat.color.copy(ghostCol).multiplyScalar(0.35+0.65*br); ghostMat.opacity=O.ghost;
@@ -505,7 +527,7 @@ function createDolphins(parent, opts={}){
   function shift(dz){ for (const p of pods) p.z+=dz; for (const d of dolphins) d.z+=dz; for (const g of RG) g.z+=dz; for (const q of PT) q.z+=dz; if (started) write(); }
   function dispose(){ parent.remove(body,ghost,rings,spray); geo.dispose(); ringGeo.dispose(); pGeo.dispose();
     for (const m of [bodyMat,depthMat,ghostMat,ringMat,sprayMat]) m.dispose(); }
-  return {update,setOptions,trigger,reset,shift,dispose,get dolphins(){ return dolphins; },get pods(){ return pods; },options:O,meshes:{body,ghost,rings,spray}};
+  return {update,setOptions,trigger,reset,shift,dispose,get dolphins(){ return dolphins; },get pods(){ return pods; },get seeker(){ return seeker; },options:O,meshes:{body,ghost,rings,spray}};
 }
 /* ================= end of dolphins ================= */
 
