@@ -93,6 +93,8 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
       <div class="row"><span><kbd>F</kbd></span><span>Board the nearest ferry</span></div>
       <div class="row"><span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><span>Walk about the decks</span></div>
       <div class="row"><span><kbd>F</kbd></span><span>Step ashore</span></div>
+      <div class="row"><span><kbd>C</kbd></span><span>Deck or view from astern</span></div>
+      <div class="row"><span><kbd>+</kbd><kbd>−</kbd></span><span>Distance from astern</span></div>
       <div class="row"><span><kbd>V</kbd></span><span>Bird’s-eye view</span></div>
     </div>
     <div class="group"><h3>Sailing</h3>
@@ -7616,6 +7618,8 @@ const dinghies=new Map();   // harbour key -> {H,B,D}
 let sailD=null, dgyScan=0, dgySeed=SEED, dgyHandling='assisted';
 const dgyLook={yaw:0,pitch:-0.1};
 let dgyChase=false, dgyChaseD=11;   // sailing, viewed from astern (C) instead of from the helm
+// aboard a ferry, viewed from astern (C) instead of from the deck, the mouse carrying the camera round her
+let feChase=false, feSnap=false, feChaseD=70; const feLook={yaw:0,pitch:0.3};
 const dgyCtx={wind:WIND,depthAt:(x,z)=>-heightAt(x,z),surfaceAt:dgySea,obstacles:{obbs:[],circles:[]},boats:[],input:{steer:0,trim:0,paddle:0},walkAt:dgyWalkAt,paused:false};
 const dgyIdle={wind:WIND,depthAt:(x,z)=>-heightAt(x,z),surfaceAt:dgySea,obstacles:{obbs:[],circles:[]},boats:[],input:{},walkAt:dgyWalkAt,paused:false};
 const dgyKey=H=>H.n*4+H.sd;
@@ -9519,7 +9523,7 @@ addEventListener('keydown',e=>{ keys[e.code]=true;
     if (e.code==='KeyC' && !e.repeat && mode==='dinghy'){ dgyChase=!dgyChase; dgyLook.yaw=0; dgyLook.pitch=dgyChase?0.25:0; } }
   else {
   if (e.code==='KeyR' && !e.repeat) toggleTrain();
-  if (e.code==='KeyC' && !e.repeat && !inWater) toggleChase();
+  if (e.code==='KeyC' && !e.repeat && !inWater){ if (mode==='ferry'){ feChase=!feChase; feLook.yaw=0; feLook.pitch=0.3; feSnap=true; } else toggleChase(); }
   if (e.code==='KeyF' && !e.repeat) toggleFerry();
   if (e.code==='KeyG' && !e.repeat) toggleGoods(); }
   if (e.code==='KeyY' && !e.repeat) dinghyKey();
@@ -9536,7 +9540,7 @@ addEventListener('keydown',e=>{ keys[e.code]=true;
   if (e.code==='KeyN' && !e.repeat){ hour=nightU.value>0.5?10:22; SNDS.hour=Math.floor(hour); }   // to night, or back to day, without the bells striking the jump
   if (e.code==='KeyM' && !e.repeat) setMuted(!muted);
   if (e.code==='Tab'){ e.preventDefault(); if (!e.repeat) try{ if (document.fullscreenElement) document.exitFullscreen(); else { const q=document.documentElement.requestFullscreen(); if (q&&q.catch) q.catch(()=>{}); } }catch(_){} }
-  if ((e.code==='Minus'||e.code==='NumpadSubtract') && (mode==='street'||mode==='ferry') && !e.repeat) toggleView();
+  if ((e.code==='Minus'||e.code==='NumpadSubtract') && (mode==='street'||(mode==='ferry'&&!feChase)) && !e.repeat) toggleView();
   if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault(); });
 addEventListener('keyup',e=>{ keys[e.code]=false; });
 /* ---------- game controller (standard mapping): sticks move and look, buttons stand in for keys ---------- */
@@ -9665,7 +9669,9 @@ function enterFerry(F,lx,lz){
   sea.scale.setScalar(1); islandMesh.visible=false; farMesh.visible=farGlow.visible=true;
 }
 // F puts the passenger aboard the nearest ferry wherever it is, on the foredeck
+const _feW=new THREE.Vector3();
 function boardFerry(){
+  feChase=false;
   let F=null, best=1e9;
   for (const G of ferries){ if (!G.R) continue; const d=Math.hypot(G.m.position.x-player.x,G.m.position.z-player.z); if (d<best){ best=d; F=G; } }
   if (!F) return;
@@ -9674,7 +9680,7 @@ function boardFerry(){
   if (document.pointerLockElement) document.exitPointerLock();
   fe.yaw=0; fe.pitch=-0.06; enterFerry(F,0.9,FL/2-5.4);
 }
-function leaveFerry(to){
+function leaveFerry(to){ feChase=false;
   const F=ridden; ridden=null; const [qx,qz]=ferryLanding(F.R,F.wait>0?F.at:F.next);
   player.x=qx; player.z=qz; player.y=1.6; player.vy=0; player.holdT=3; eyeY=null;
   mode='street'; yaw=F.head+Math.PI;
@@ -9853,7 +9859,7 @@ function tunnelLight(dt,on){
   scene.fog.color.lerp(_c2.set('#0c0a08'),tunnelK); scene.background.copy(scene.fog.color);
   if (tunnelK>0.001) _c1.copy(skyU.uMid.value).lerp(_c2,tunnelK).getRGB(FOG_MID);
 }
-function look(dx,dy){ if (mode==='dinghy'){ dgyLook.yaw-=dx*0.0026; dgyLook.pitch=clamp(dgyLook.pitch-dy*0.0026,-1.1,1.1); return; } if (mode==='coach'){ co.yaw-=dx*0.0026; co.pitch=clamp(co.pitch-dy*0.0026,-1.1,1.1); return; } if (mode==='ferry'){ fe.yaw-=dx*0.0026; fe.pitch=clamp(fe.pitch-dy*0.0026,-1.1,1.1); return; } if (mode==='chase'){ chase.yaw-=dx*0.004; chase.pitch=clamp(chase.pitch+dy*0.003,0.02,1.3); return; } if (mode==='train'){ tYaw=clamp(tYaw-dx*0.0026,-2.6,2.6); tPitch=clamp(tPitch-dy*0.0026,-1,1); return; } if (mode==='above'){ yaw-=dx*0.005; pitch=clamp(pitch+dy*0.004,0.25,1.35); } else { const pl=mode==='swim'?1.5:1.2; yaw-=dx*0.0026; fpPitch=clamp(fpPitch-dy*0.0026,-pl,pl); } }
+function look(dx,dy){ if (mode==='dinghy'){ dgyLook.yaw-=dx*0.0026; dgyLook.pitch=clamp(dgyLook.pitch-dy*0.0026,-1.1,1.1); return; } if (mode==='coach'){ co.yaw-=dx*0.0026; co.pitch=clamp(co.pitch-dy*0.0026,-1.1,1.1); return; } if (mode==='ferry' && feChase){ feLook.yaw-=dx*0.004; feLook.pitch=clamp(feLook.pitch+dy*0.003,0.02,1.3); return; } if (mode==='ferry'){ fe.yaw-=dx*0.0026; fe.pitch=clamp(fe.pitch-dy*0.0026,-1.1,1.1); return; } if (mode==='chase'){ chase.yaw-=dx*0.004; chase.pitch=clamp(chase.pitch+dy*0.003,0.02,1.3); return; } if (mode==='train'){ tYaw=clamp(tYaw-dx*0.0026,-2.6,2.6); tPitch=clamp(tPitch-dy*0.0026,-1,1); return; } if (mode==='above'){ yaw-=dx*0.005; pitch=clamp(pitch+dy*0.004,0.25,1.35); } else { const pl=mode==='swim'?1.5:1.2; yaw-=dx*0.0026; fpPitch=clamp(fpPitch-dy*0.0026,-pl,pl); } }
 // bird's-eye: two-finger drag pans, pinch zooms; a classic mouse wheel still zooms
 function panView(dx,dy){ const k=dist*0.0016, fx=-Math.sin(yaw), fz=-Math.cos(yaw), rx=Math.cos(yaw), rz=-Math.sin(yaw);
   player.x+=(rx*dx+fx*dy)*k; player.z+=(rz*dx+fz*dy)*k; player.y=Math.max(heightAt(player.x,player.z),0); player.vy=0; eyeY=player.y; }
@@ -10401,6 +10407,16 @@ function frame(now){
     camera.position.copy(FERRY_EYE).applyMatrix4(m.matrix);
     // the eye turns with the ship as it pitches and rolls, so the deck stays level under it and the horizon moves
     camera.quaternion.copy(m.quaternion).multiply(_fq.setFromEuler(_fe.set(fe.pitch,Math.PI+fe.yaw,0,'YXZ')));
+    if (feChase){
+      // from astern: the camera stands off the ship, 70 m at first, + and − bringing it between 25 and 400 m
+      const zk=((keys.Minus||keys.NumpadSubtract)?1:0)-((keys.Equal||keys.NumpadAdd)?1:0);
+      if (zk) feChaseD=clamp(feChaseD*Math.exp(zk*dt*1.5),25,400);
+      const B=m.position, a=m.rotation.y+Math.PI+feLook.yaw, D=feChaseD, p=feLook.pitch;
+      const want=_feW.set(B.x+Math.sin(a)*Math.cos(p)*D, 6+Math.sin(p)*D, B.z+Math.cos(a)*Math.cos(p)*D);
+      want.y=Math.max(want.y,heightAt(want.x,want.z)+3);
+      if (feSnap||camPos.distanceTo(want)>150) camPos.copy(want); else camPos.lerp(want,1-Math.exp(-dt*6)); feSnap=false;
+      camera.position.copy(camPos); camTarget.set(B.x,B.y+6,B.z); camLookAt(camTarget);
+    }
     player.x=m.position.x; player.z=m.position.z; player.y=1.5; eyeY=player.y;
     sky.position.copy(camera.position);
   }
