@@ -2916,6 +2916,18 @@ const BOATS=BOAT_SPECS.map(([k,h,b,sl])=>buildBoatGeo(k,hex(h),hex(b),sl?hex(sl)
 // each boat's whole reach, rudder and stem included, abaft and forward of its origin and to either side
 for (const B of BOATS){ B.geo.computeBoundingBox(); const bb=B.geo.boundingBox; B.aft=-bb.min.z; B.fore=bb.max.z; B.half=Math.max(-bb.min.x,bb.max.x); }
 const BOAT_SMALL=5, BOAT_SAIL=[0,2,3];
+// a boat's footprint as an oriented box: its whole reach and beam, with pad metres to spare all round. Moored and
+// anchored boats keep BOAT_GAP between their hulls, and none lies within SUN_ALONG m along the shore of a beach with
+// sunbeds, from its sand out to SUN_OUT m into the sea
+const BOAT_GAP=0.6, SUN_ALONG=50, SUN_OUT=60;
+function boatBox(idx,x,z,rot,pad=0){ const B=BOATS[idx], va=-B.aft-pad, vf=B.fore+pad, vm=(va+vf)/2;
+  return {x:x+Math.sin(rot)*vm,z:z+Math.cos(rot)*vm,hw:B.half+pad,hd:(vf-va)/2,rot}; }
+// the line of a quay's face behind a boat moored stern-to at x, of half-beam h: its furthest point out to sea across
+// the stern, so that the whole stern clears the quay where the shore runs at a slant
+function quayFace(S,x,h){ let z=coastZ(S,x); for (const d of [-h-0.3,-h/2,h/2,h+0.3]){ const c=coastZ(S,x+d); if (S*c<S*z) z=c; } return z; }
+function nearSunbeds(x,z){ for (const sd of SIDES){ const s=sd*(z-coastZ(sd,x)); if (s<-SUN_OUT || s>40) continue;
+    for (let n=Math.floor(x/BCH_SP)-1;n<=Math.floor(x/BCH_SP)+1;n++){ const B=beachStretch(sd,n); if (B && Math.abs(x-B.X)<B.L/2+SUN_ALONG) return true; } }
+  return false; }
 let matBoat=null;
 // whether a point lies within d metres of a ferry crossing, so that moored boats keep the channel clear
 function nearFerryRoute(x,z,d){
@@ -2924,17 +2936,26 @@ function nearFerryRoute(x,z,d){
     for (let i=0;i<p.length;i++){ const dx=p[i][0]-x, dz=p[i][1]-z; if (dx*dx+dz*dz<d*d) return true; } }
   return false;
 }
-function placeBoat(ch,idx,x,y,z,rot,floating,roll=0){
+// own: the boat must lie wholly within the block, so that it cannot meet a boat of the next block
+function placeBoat(ch,idx,x,y,z,rot,floating,roll=0,own=false){
   if (GEN_LOD>=2) return;
   if (floating && nearFerryRoute(x,z,16)) return;
+  if (nearSunbeds(x,z)) return;
+  // clear of every boat already placed in the block, the fleet's berths and the dinghy's berth among them
+  const box=boatBox(idx,x,z,rot,BOAT_GAP/2);
+  if (own){ const x0=ch.cx*C, z0=ch.cz*C; for (const [u,v] of [[-1,-1],[1,-1],[1,1],[-1,1]]){ const [ax,az,bx,bz]=obbAxes(box), px=box.x+ax*u*box.hw+bx*v*box.hd, pz=box.z+az*u*box.hw+bz*v*box.hd;
+      if (px<x0||px>x0+C||pz<z0||pz>z0+C) return; } }
+  const boxes=ch.boatBoxes||(ch.boatBoxes=[]);
+  if (boxes.some(o=>obbOverlap(box,o,0))) return;
   // a boat afloat is left out where its hull, with 15 cm to spare, would cut into a mole, a quay or anything else solid
   // or where any part of it would stand over a quay, which the obbs do not hold, or over the shore
   if (floating){ const Bt=BOATS[idx], c=Math.cos(rot), s=Math.sin(rot), hw=Bt.half+0.15, va=-Bt.aft-0.15, vf=Bt.fore+0.15, vm=(va+vf)/2;
     if (ch.obbs.some(o=>obbOverlap({x:x+s*vm,z:z+c*vm,hw,hd:(vf-va)/2,rot},o,0))) return;
-    for (const [u,v] of [[-hw,va],[hw,va],[-hw,vf],[hw,vf],[0,va],[0,vf],[-hw,vm],[hw,vm]]) if (heightAt(x+c*u+s*v,z-s*u+c*v)>-0.2) return; }
+    for (const [u,v] of [[-hw,va],[hw,va],[-hw,vf],[hw,vf],[0,va],[0,vf],[-hw,vm],[hw,vm]]) if (heightAtExact(x+c*u+s*v,z-s*u+c*v)>-0.2) return; }
   const B=BOATS[idx], m=new THREE.Mesh(B.geo,matBoat); m.layers.enable(1);
   m.rotation.order='YXZ'; m.position.set(x,y,z); m.rotation.set(0,rot,roll); m.castShadow=true; m.receiveShadow=true;
   world.add(m); ch.boats.push({m,y,ph:hash(Math.round(x*7),Math.round(z*7),9)*6.28,floating,roll,sail:BOAT_SAIL.includes(idx)});
+  boxes.push(box);
   if (!floating) ch.obbs.push({x,z,hw:B.B+0.1,hd:B.L/2,rot,top:Infinity});
 }
 
@@ -3093,10 +3114,15 @@ function buildHarbour(gb,ch,R,H){
   for (const A of arms){ const zm=(A.z0+A.z1)/2; if (nearFerryRoute(A.xa,zm,8)) continue;
     ladder(A.xa-A.sd*2.1,zm,Math.PI/2,top,[A.xa-A.sd*2.7,zm],[A.xa-A.sd*1.0,zm],A.sd*Math.PI/2); }
   // boats moored stern-to along the quay, and a couple swinging in the basin
-  // (the dinghy's berth, and the line from it to its buoy, are left clear, as is the quay's ladder)
+  // (the dinghy's berth, and the line from it to its buoy, are left clear, as is the quay's ladder). Each keeps clear
+  // of the fishing boats' berths, the dinghy and its line, and the boats placed before it; one that does not fit is
+  // left out
+  { const bx=ch.boatBoxes||(ch.boatBoxes=[]);
+    for (const f of fishBoats(H)) bx.push(boatBox(f.idx,f.bx,f.bz,f.brot,BOAT_GAP/2));
+    if (DB){ const za=DB.stern.z, zb=DB.bow.z; bx.push({x:DB.x,z:(za+zb)/2,hw:DGY_HALF+BOAT_GAP/2+0.3,hd:Math.abs(za-zb)/2+0.8,rot:0}); } }
   for (let x=H.x-H.W/2+5; x<H.x+H.W/2-4; x+=4.4){
     if (R()<0.28) continue;
-    const idx=Math.floor(R()*BOATS.length), z=coastZ(S,x)-S*(0.9+BOATS[idx].aft);   // the rudder 20 cm off the quay's face
+    const idx=Math.floor(R()*BOATS.length), z=quayFace(S,x,BOATS[idx].half)-S*(0.9+BOATS[idx].aft);   // the rudder 0.7 m off the quay's face
     const xb=x+(R()-0.5)*0.4, rb=(S>0?Math.PI:0)+(R()-0.5)*0.12;
     if (DB && Math.abs(xb-DB.x)<BOATS[idx].half+DGY_HALF+0.7) continue;
     if (LQ!==null && Math.abs(xb-LQ)<BOATS[idx].half+0.6) continue;
@@ -3504,6 +3530,7 @@ function genChunk(cx,cz,lod=0){
         for (let kk=0; kk<48; kk++){ const dd=P.r+0.95+kk*go+go/2, x=P.x+dx*dd, z=P.z+dz*dd, top=P.level-(kk+1)*ri, g=baseH(x,z);
           if (top<=g+0.05){ stairPlan={steps,go}; break; }
           if (roadDist(x,z)<0) break;
+          if (heightAt(x,z)<0.2) break;   // no stair runs down into a harbour's basin or the sea
           steps.push({x,z,top,g}); }
         if (stairPlan) break; }
       if (!stairPlan) stairA=null; }
@@ -3695,7 +3722,9 @@ function genChunk(cx,cz,lod=0){
         if (Math.abs(hp[i]-hp[i0])<RISE && i<n) continue;
         if (Math.abs(hp[i]-hp[i0])<0.05){ i0=i; continue; }
         const [sx,sz]=P[i0], [x,z,u]=P[i], L=Math.hypot(x-sx,z-sz), mx=(sx+x)/2, mz=(sz+z)/2;
-        const ok=L<2.4 && Math.min(hp[i],hp[i0])>0.4 && heightAt(mx,mz)>0.2 && heightAt(sx,sz)>0.2 && heightAt(x,z)>0.2 && SIDES.every(sd=>Math.abs(mz-coastRoadZ(sd,mx))>CR_HW+1.2) && railPerp(mx,mz)>6 && !(railCross(Math.round(mx/C))&&Math.abs(mz-railCross(Math.round(mx/C)).z)<10) && (!F.alley || (roadDist(mx,mz)>0.4 && insideCell(cx,cz,mx,mz,-0.5)));
+        const ok=L<2.4 && Math.min(hp[i],hp[i0])>0.4 && heightAt(mx,mz)>0.2 && heightAt(sx,sz)>0.2 && heightAt(x,z)>0.2 && SIDES.every(sd=>Math.abs(mz-coastRoadZ(sd,mx))>CR_HW+1.2) && railPerp(mx,mz)>6 && !(railCross(Math.round(mx/C))&&Math.abs(mz-railCross(Math.round(mx/C)).z)<10) && (!F.alley || (roadDist(mx,mz)>0.4 && insideCell(cx,cz,mx,mz,-0.5)))
+          // and the whole tread over land, not only its middle line, so that no step juts out over a quay's edge
+          && obbSamples({x:mx,z:mz,hw:F.hw((P[i0][2]+u)/2),hd:L/2,rot:Math.atan2(x-sx,z-sz)}).every(c=>heightAt(c[0],c[1])>0.2);
         if (ok){
           const w=2*F.hw((P[i0][2]+u)/2)-(F.alley?0.05:0.3), rot=Math.atan2(x-sx,z-sz);
           // the tread is level at the upper of its two heights; the block runs down into the ground beneath it
@@ -4004,9 +4033,9 @@ function genChunk(cx,cz,lod=0){
       const x=x0+R()*C, z=z0+R()*C, h=heightAt(x,z), rot=R()*6.28, HB=harbourAt(shoreSide(x,z),x);
       if (HB && Math.abs(x-HB.x)<HB.W/2+10) continue;
       if (coveAtXZ(x,z)) continue;
-      if (h<-1.6 && h>-8 && afloat<3 && (ch.kind==='shore'||(ch.kind==='coast'&&R()<0.4))){ placeBoat(ch,Math.floor(R()*BOATS.length),x,0,z,rot,true); afloat++; }
+      if (h<-1.6 && h>-8 && afloat<3 && (ch.kind==='shore'||(ch.kind==='coast'&&R()<0.4))){ placeBoat(ch,Math.floor(R()*BOATS.length),x,0,z,rot,true,0,true); afloat++; }
       else if (h>0.2 && h<0.75 && beached<2 && roadDist(x,z)>1.5 && Math.abs(heightAt(x,z+2)-heightAt(x,z-2))<0.6 && !beachFurnished(x,z)){
-        const idx=Math.floor(R()*BOAT_SMALL); placeBoat(ch,idx,x,h-0.12,z,rot,false,0.2); beached++; }
+        const idx=Math.floor(R()*BOAT_SMALL); placeBoat(ch,idx,x,h-0.12,z,rot,false,0.2,true); beached++; }
     }
   }
 
@@ -11294,9 +11323,11 @@ function fishBoats(H){
   slots.sort((a,b)=>a.r-b.r);
   const want=1+Math.floor(hash(H.n,S>0?5:6,4812)*2.6);
   for (const sl of slots){ if (L.length>=want) break;
-    const idx=FISH_TRAWLERS[Math.floor(hash(H.n*31+sl.q,S>0?7:8,4813)*3)], Bt=BOATS[idx], x=sl.x, z=coastZ(S,x)-S*(0.9+Bt.aft);
+    const idx=FISH_TRAWLERS[Math.floor(hash(H.n*31+sl.q,S>0?7:8,4813)*3)], Bt=BOATS[idx], x=sl.x, z=quayFace(S,x,Bt.half)-S*(0.9+Bt.aft);
     if (DB && Math.abs(x-DB.x)<Bt.half+DGY_HALF+0.7) continue;
-    if (nearFerryRoute(x,z,16)) continue;
+    if (nearFerryRoute(x,z,16) || nearSunbeds(x,z)) continue;
+    // clear of the berths already taken, by BOAT_GAP
+    { const bx=boatBox(idx,x,z,rot,BOAT_GAP/2); if (L.some(f=>obbOverlap(bx,boatBox(f.idx,f.bx,f.bz,f.brot,BOAT_GAP/2),0))) continue; }
     // the hull, with 15 cm to spare, clear of the quay and the shore, as placeBoat requires
     const hw=Bt.half+0.15, va=-Bt.aft-0.15, vf=Bt.fore+0.15, vm=(va+vf)/2; let ok=true;
     for (const [u,v] of [[-hw,va],[hw,va],[-hw,vf],[hw,vf],[0,va],[0,vf],[-hw,vm],[hw,vm]]) if (heightAtExact(x+c*u+s*v,z-s*u+c*v)>-0.2){ ok=false; break; }
@@ -11574,4 +11605,6 @@ window.__village={ goods, glZone, branchesAt, get mantle(){ return mantle; }, ge
   get swimDebug(){ const S=swimmer.state; return {mode,swim:S.mode,under:S.under,lens:UW.lens,wet:UW.wet,x:S.x,y:S.y,z:S.z,water:S.water,air:S.air,surface:SEA.heightAt(S.x,S.z)}; }};
 // the shape of the land, for tests: the mountains, the islands and how each block is used
 window.__village.terrain={baseH,mtnH,mtLevel,mtSpine,mtCrest,halfW,ridgeZ,coastZ,highGround,isVillage,chunkKind,islandInfo,islandRoute,islandLight,ISL,WRAP_Z,railZ,railY,railState,stationInfo,ST_SP};
+// the boats' footprints, for tests: no two moored or anchored boats may overlap, nor lie off a beach with sunbeds
+window.__village.boats={BOATS,boatBox,fishBoats,nearSunbeds,obbOverlap,beachStretch,BCH_SP,harbourInfo,HARB};
 </script>
