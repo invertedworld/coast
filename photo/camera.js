@@ -309,6 +309,83 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
     });
   }
   function shoot() { flash(); return capture({ effects: true, gallery: true }); }
+  // the settings of the 3D render and of the painted styles, chosen in the gallery and kept in the browser's local
+  // storage; a slider's value is a multiple of the style's own amount (1 is as designed)
+  const Q_KEY = 'coast.pictureSettings';
+  const sl = (k, label, def, min, max, step, fmt = v => '× ' + v.toFixed(2)) => ({ k, label, def, min, max, step, fmt });
+  const Q_GROUPS = [
+    { id: 'render3d', title: '3D render', fields: [
+      { k: 'samples', label: 'Samples per pixel', opts: [64, 128, 256, 512, 1024, 2048, 4096], def: 512 },
+      { k: 'scale', label: 'Resolution', opts: [[0.5, '50 % of the screen'], [0.75, '75 % of the screen'], [1, 'The screen'], [1.5, '150 % of the screen'], [2, '200 % of the screen']], def: 1 },
+      { k: 'bounces', label: 'Bounces of light', opts: [2, 3, 4, 5, 6, 8, 10], def: 5 },
+      { k: 'horizonReach', label: 'Draw distance', opts: [[1500, '1.5 km'], [3000, '3 km'], [5000, '5 km'], [8000, '8 km'], [12000, '12 km']], def: 5000 },
+      { k: 'hazeVisibility', label: 'Visibility in the haze', opts: [[8000, '8 km'], [15000, '15 km'], [28000, '28 km'], [50000, '50 km'], [100000, '100 km']], def: 28000 },
+      { k: 'denoise', label: 'Noise filter', opts: [[0, 'Off'], [2, 'Light'], [5, 'Normal'], [8, 'Strong']], def: 5 },
+      { k: 'materials', label: 'Glass and metal', check: true, def: true },
+      { k: 'haze', label: 'Haze', check: true, def: true } ] },
+    { id: 'all', title: 'Painting', fields: [ sl('duration', 'Time to paint', 6, 0, 30, 1, v => v ? v + ' s' : 'At once') ] },
+    { id: 'watercolour', title: 'Watercolour', fields: [
+      sl('abstraction', 'Simplification', 8, 2, 16, 1, v => v + ' px'), sl('washes', 'Washes', 1, 0, 2, 0.05), sl('bleed', 'Bleeding', 1, 0, 2, 0.05),
+      sl('edge', 'Dark edges', 1, 0, 2, 0.05), sl('granulation', 'Granulation', 1, 0, 2, 0.05), sl('pencil', 'Pencil', 1, 0, 2, 0.05), sl('margin', 'Paper margin', 1, 0, 2, 0.05) ] },
+    { id: 'oil', title: 'Oil', fields: [ sl('radius', 'Brush size', 6, 2, 14, 1, v => v + ' px'), sl('stroke', 'Stroke length', 1, 0.25, 2, 0.05), sl('impasto', 'Impasto', 1, 0, 2, 0.05) ] },
+    { id: 'impressionist', title: 'Impressionist', fields: [ sl('size', 'Dab size', 1, 0.4, 2.5, 0.05), sl('strokes', 'Number of dabs', 1, 0.3, 2, 0.05), sl('jitter', 'Broken colour', 1, 0, 2, 0.05) ] },
+    { id: 'charcoal', title: 'Charcoal', fields: [ sl('abstraction', 'Simplification', 5, 2, 12, 1, v => v + ' px'), sl('hatching', 'Hatching', 1, 0, 2, 0.05),
+      sl('smudge', 'Smudging', 1, 0, 2, 0.05), sl('contour', 'Contour lines', 1, 0, 2, 0.05) ] },
+  ];
+  const QS = Object.fromEntries(Q_GROUPS.map(g => [g.id, Object.fromEntries(g.fields.map(f => [f.k, f.def]))]));
+  try { const v = JSON.parse(localStorage.getItem(Q_KEY) || 'null');
+    if (v) for (const g of Q_GROUPS) for (const f of g.fields) if (v[g.id] && typeof v[g.id][f.k] === typeof f.def) QS[g.id][f.k] = v[g.id][f.k]; } catch (e) { /* storage unavailable */ }
+  const Q = QS.render3d;
+  function buildQuality() {
+    const form = galEl.querySelector('form.q'); form.textContent = '';
+    for (const g of Q_GROUPS) {
+      const fs = document.createElement('fieldset'), lg = document.createElement('legend'); lg.textContent = g.title; fs.appendChild(lg);
+      for (const f of g.fields) {
+        const l = document.createElement('label'), name = g.id + '.' + f.k, v = QS[g.id][f.k];
+        if (f.check) { l.className = 'ck'; const i = document.createElement('input'); i.type = 'checkbox'; i.checked = v; i.name = name; l.append(i, f.label); }
+        else if (f.opts) { const sel = document.createElement('select'); sel.name = name;
+          for (const o of f.opts) { const [ov, t] = Array.isArray(o) ? o : [o, String(o)]; const op = new Option(t, ov); if (ov === v) op.selected = true; sel.add(op); }
+          l.append(f.label, sel); }
+        else { const i = document.createElement('input'); i.type = 'range'; i.name = name; i.min = f.min; i.max = f.max; i.step = f.step; i.value = v;
+          const out = document.createElement('output'); out.textContent = f.fmt(v);
+          const top = document.createElement('span'); top.append(f.label, out); l.append(top, i); }
+        fs.appendChild(l);
+      }
+      form.appendChild(fs);
+    }
+  }
+  function onQInput(e) {
+    const [gid, k] = (e.target.name || '').split('.'), g = Q_GROUPS.find(x => x.id === gid), f = g && g.fields.find(x => x.k === k); if (!f) return;
+    QS[gid][k] = f.check ? e.target.checked : Number(e.target.value);
+    if (!f.check && !f.opts) e.target.parentNode.querySelector('output').textContent = f.fmt(QS[gid][k]);
+    try { localStorage.setItem(Q_KEY, JSON.stringify(QS)); } catch (err) { /* storage unavailable */ }
+  }
+  // a path-traced picture of the view through the lens, shown clearing from noise as the samples are taken; Esc stops it
+  const ptEl = document.createElement('div'); ptEl.className = 'pt'; ptEl.hidden = true;
+  ptEl.innerHTML = '<canvas></canvas><div></div>'; document.body.appendChild(ptEl);
+  let ptJob = null;
+  async function render3D() {
+    if (ptJob) return; ptJob = new AbortController();
+    if (document.pointerLockElement) document.exitPointerLock();
+    const view = ptEl.querySelector('canvas'), label = ptEl.querySelector('div'), g2 = view.getContext('2d');
+    const W = Math.round(renderer.domElement.width * Q.scale), H = Math.round(renderer.domElement.height * Q.scale);
+    view.width = W; view.height = H; g2.fillStyle = '#0e1216'; g2.fillRect(0, 0, view.width, view.height);
+    ptEl.hidden = false; label.textContent = '3D render';
+    camera.updateMatrixWorld();
+    const cam = camera.clone(); cam.fov = fovFor(S.focal, camera.aspect); cam.updateProjectionMatrix();
+    cam.matrixWorld.copy(camera.matrixWorld);
+    const phases = { world: 'Loading the world', scene: 'Gathering the scene', albedo: 'Colours', bvh: 'Building', trace: 'Tracing', denoise: 'Denoising', done: 'Done' };
+    try {
+      const { pathTrace } = await import('./pathtrace.js');
+      const out = await pathTrace({ renderer, scene, camera: cam, signal: ptJob.signal, width: W, height: H,
+        samples: Q.samples, bounces: Q.bounces, horizonReach: Q.horizonReach, hazeVisibility: Q.hazeVisibility, denoise: Q.denoise, materials: Q.materials, haze: Q.haze,
+        onProgress: ({ phase, fraction }) => { label.textContent = `3D render · ${phases[phase] || phase} · ${Math.round((fraction || 0) * 100)}%`; },
+        onFrame: (c, k) => { g2.drawImage(c, 0, 0, view.width, view.height); label.textContent = `3D render · ${Math.round(k * 100)}%`; } });
+      out.photo = { width: out.width, height: out.height, on: true, focalLength: S.focal, fNumber: S.fNumber, focusDistance: S.focus, ev: S.ev, effect: '3d', time: Date.now() };
+      gallery.push({ canvas: out, meta: out.photo, time: Date.now() }); while (gallery.length > KEEP) gallery.shift(); updateCount();
+    } catch (err) { if (err.name !== 'AbortError') console.warn('The 3D render failed:', err); }
+    ptJob = null; ptEl.hidden = true;
+  }
 
   /* ---------- the viewfinder, the flash and the gallery ---------- */
   const css = document.createElement('style');
@@ -344,6 +421,20 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
 .gal .strip{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;min-height:74px}
 .gal .strip img{height:66px;border:2px solid transparent;border-radius:2px;cursor:pointer;flex:none}
 .gal .strip img.sel{border-color:var(--plaster,#f5e9d7)}
+.gal .fx{display:flex;gap:6px;margin-right:12px}
+.gal .fx button{background:rgba(245,233,215,.16);color:var(--plaster,#f5e9d7)}
+.pt{position:fixed;inset:0;z-index:7;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:rgba(14,18,22,.92);color:var(--plaster,#f5e9d7);font:500 .9rem var(--font-body,system-ui);font-variant-numeric:tabular-nums}
+.pt canvas{max-width:calc(100% - 32px);max-height:calc(100% - 80px);box-shadow:0 4px 20px rgba(0,0,0,.5)}
+.gal form.q{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px 18px;max-height:45vh;overflow-y:auto;padding:12px 14px;background:rgba(245,233,215,.07);border-radius:3px;font-size:.85rem}
+.gal form.q[hidden]{display:none}
+.gal form.q fieldset{border:0;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.gal form.q legend{font:400 1rem var(--font-display,serif);color:var(--plaster,#f5e9d7);padding:0 0 4px}
+.gal form.q label>span{display:flex;justify-content:space-between}
+.gal form.q output{font-variant-numeric:tabular-nums;color:var(--plaster,#f5e9d7)}
+.gal form.q input[type=range]{width:100%;accent-color:#d9c8b0}
+.gal form.q label{display:flex;flex-direction:column;gap:4px;color:var(--plaster-dim,#d9c8b0)}
+.gal form.q label.ck{flex-direction:row;align-items:center;gap:8px}
+.gal form.q select,.gal form.q input[type=number]{font:inherit;color:var(--ink,#26232b);background:var(--plaster,#f5e9d7);border:0;border-radius:3px;padding:4px 6px}
 .gal .none{margin:auto;color:var(--plaster-dim,#d9c8b0)}
 `;
   document.head.appendChild(css);
@@ -354,9 +445,10 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
   const shutterEl = document.createElement('div'); shutterEl.className = 'shutter';
   const galEl = document.createElement('div'); galEl.className = 'gal'; galEl.hidden = true;
   galEl.setAttribute('role', 'dialog'); galEl.setAttribute('aria-label', 'Pictures');
-  galEl.innerHTML = `<header><h2>Pictures</h2><button data-a="dl">Download PNG</button><button data-a="del">Delete</button><button data-a="close">Close</button></header>
-    <div class="big"></div><div class="info"></div><div class="strip"></div>`;
+  galEl.innerHTML = `<header><h2>Pictures</h2><span class="fx"><button data-fx="watercolour">Watercolour</button><button data-fx="oil">Oil</button><button data-fx="impressionist">Impressionist</button><button data-fx="charcoal">Charcoal</button></span><button data-a="q">Settings</button><button data-a="dl">Download PNG</button><button data-a="del">Delete</button><button data-a="close">Close</button></header>
+    <form class="q" hidden></form><div class="big"></div><div class="info"></div><div class="strip"></div>`;
   document.body.append(vf, shutterEl, galEl);
+  galEl.querySelector('form.q').addEventListener('input', onQInput);
   const vfK = k => vf.querySelector(`[data-k="${k}"]`);
   const afEl = vf.querySelector('.af'), evMark = vf.querySelector('.ev u'), vignette = document.querySelector('.vignette');
 
@@ -406,9 +498,29 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
     const name = `coast-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}.png`;
     g.canvas.toBlob(b => { const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); }, 'image/png');
   }
+  // a painted version of the chosen picture, shown being made in place of it, then kept beside it in the gallery
+  let painting = false;
+  async function paint(name) {
+    if (painting || sel < 0) return; painting = true;
+    const src = gallery[sel], big = galEl.querySelector('.big'), view = document.createElement('canvas');
+    view.width = src.canvas.width; view.height = src.canvas.height; const g2 = view.getContext('2d');
+    big.textContent = ''; big.appendChild(view);
+    galEl.querySelectorAll('button').forEach(b => { b.disabled = b.dataset.a !== 'close'; });
+    try {
+      const { applyEffect } = await import('./effects.js');
+      const dur = QS.all.duration * 1000;
+      const out = await applyEffect(name, src.canvas, { ...QS[name], seed: (Date.now() & 0xffff), duration: dur, onFrame: dur ? c => { g2.drawImage(c, 0, 0, view.width, view.height); } : undefined });
+      out.photo = { ...src.meta, effect: name };
+      gallery.splice(sel + 1, 0, { canvas: out, meta: out.photo, time: Date.now() }); while (gallery.length > KEEP) gallery.shift();
+      sel = Math.min(sel + 1, gallery.length - 1); updateCount();
+    } catch (err) { console.warn('The picture could not be painted:', err); }
+    painting = false; if (!galEl.hidden) buildGallery();
+  }
   galEl.addEventListener('click', e => {
+    if (e.target.dataset && e.target.dataset.fx) return paint(e.target.dataset.fx);
     const a = e.target.dataset && e.target.dataset.a; if (!a) return;
     if (a === 'close') closeGallery();
+    if (a === 'q') { const form = galEl.querySelector('form.q'); if (form.hidden) buildQuality(); form.hidden = !form.hidden; }
     if (a === 'dl') download(sel);
     if (a === 'del' && sel >= 0) { gallery.splice(sel, 1); sel = Math.min(sel, gallery.length - 1); updateCount(); buildGallery(); }
   });
@@ -434,11 +546,13 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
       else if (e.code === 'Tab') return;
       return stop(e);
     }
+    if (ptJob && e.isTrusted) { if (e.code === 'Escape') ptJob.abort(); return stop(e); }
     if (e.code === 'KeyK') { if (!e.repeat) toggle(); return stop(e); }
     if (e.code === 'KeyL') { if (!e.repeat) openGallery(); return stop(e); }
     if (!S.on) return;
     const c = e.code;
-    if (c === 'Enter' || c === 'NumpadEnter') { if (!e.repeat) shoot(); }
+    if ((c === 'Enter' || c === 'NumpadEnter') && e.shiftKey) { if (!e.repeat) render3D(); }
+    else if (c === 'Enter' || c === 'NumpadEnter') { if (!e.repeat) shoot(); }
     else if (c === 'Equal' || c === 'NumpadAdd') zoom(Math.pow(2, 1 / 8));
     else if (c === 'Minus' || c === 'NumpadSubtract') zoom(Math.pow(2, -1 / 8));
     else if (c === 'BracketLeft') stepAperture(-1);
@@ -466,7 +580,7 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
   const lookScale = () => S.on && saved === null ? Math.tan(fovFor(S.focal, camera.aspect) * Math.PI / 360) / Math.tan(camera.fov * Math.PI / 360) : 1;
 
   const api = {
-    capture, shoot, gallery, renderer, scene, camera, download, openGallery, closeGallery,
+    capture, shoot, render3D, gallery, renderer, scene, camera, download, openGallery, closeGallery,
     addEffectHook(fn) { hooks.push(fn); return () => { const i = hooks.indexOf(fn); if (i >= 0) hooks.splice(i, 1); }; },
     removeEffectHook(fn) { const i = hooks.indexOf(fn); if (i >= 0) hooks.splice(i, 1); },
     get state() { return { on: S.on, focal: S.focal, fNumber: S.fNumber, focus: S.focus, autofocus: S.autofocus, ev: S.ev, focused: S.af }; },
