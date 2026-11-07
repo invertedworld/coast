@@ -5,6 +5,12 @@
      source  an HTMLCanvasElement, HTMLImageElement or ImageBitmap holding the picture
      opts    seed (a number, for the random parts), and per-effect settings listed with each effect below
              (opts.debug names an intermediate stage to return instead, for the testbench)
+             onFrame(canvas, progress): when given, the picture is shown being made. The effect's own canvas,
+               holding the picture so far, is passed after every frame with progress from 0 to 1 (it may return
+               a promise, which is awaited); the last call has progress 1 and shows exactly the picture that is
+               returned. The canvas must be copied or drawn from during the call, as the next frame replaces it.
+             duration: length of the progressive display in milliseconds (default 6000), paced by the display
+             steps: instead of real time, a fixed number of evenly spaced frames, for recording
 
    pathTrace({renderer, scene, camera, samples, onProgress, ...}) -> Promise<HTMLCanvasElement>
      re-renders the scene from the camera with a progressive path tracer on the GPU; see photo/pathtrace.js
@@ -37,7 +43,11 @@ const VERT = `in vec3 position; in vec2 uv; out vec2 vUv; void main(){ vUv=uv; g
 // helpers shared by every fragment shader
 const LIB = `precision highp float; precision highp int;
 in vec2 vUv; out vec4 fragColor;
-uniform vec2 uRes; uniform float uS; uniform float uSeed;
+uniform vec2 uRes; uniform float uS; uniform float uSeed; uniform float uT;
+// progressive display: 0 when a part of the picture has not been laid yet, 1 once it has. A part laid between
+// t0 and t1 arrives at a moment set by ord (0 to 1), fading in over the last 30 per cent of its span; at the
+// end (uT = 1) everything is laid, so the last frame is exactly the static picture
+float reveal(float t0, float t1, float ord){ if (uT>=1.0) return 1.0; float f=0.3*(t1-t0); float tt=t0+(t1-t0-f)*clamp(ord,0.0,1.0); return clamp((uT-tt)/f,0.0,1.0); }
 #define PI 3.14159265
 float lum(vec3 c){ return dot(c,vec3(0.299,0.587,0.114)); }
 float hash12(vec2 p){ vec3 p3=fract(vec3(p.xyx)*0.1031); p3+=dot(p3,p3.yzx+33.33); return fract((p3.x+p3.y)*p3.z); }
@@ -79,7 +89,7 @@ function pass(frag, U, out, size) {
   const w = out ? out.width : size.w, h = out ? out.height : size.h;
   // three.js keeps the uniforms object a material was compiled with, so the values are changed in place
   const set = (k, v) => { if (v && v.isWebGLRenderTarget) v = v.texture; if (m.uniforms[k]) m.uniforms[k].value = v; else m.uniforms[k] = { value: v }; };
-  set('uRes', new THREE.Vector2(w, h)); set('uS', h / 800); set('uSeed', U.uSeed ?? 0);
+  set('uRes', new THREE.Vector2(w, h)); set('uS', h / 800); set('uSeed', U.uSeed ?? 0); set('uT', U.uT ?? 1);
   for (const k in U) set(k, U[k]);
   g.quad.material = m;
   g.renderer.setRenderTarget(out || null);
@@ -231,12 +241,16 @@ void main(){
     rim+=m*exp(-dpx*dpx/(9.0*uS*uS)); }
   float hard=1.0-0.75*wmask;                               // wet passages keep soft edges
   float Af=mix(A,Aq,clamp(uWashes*0.7*hard,0.0,1.0));
+  // progressive: pale washes spread first and darker glazes follow, each region in its own time
+  float ordW=clamp(fbm(p*0.004+uSeed+90.0)*1.3-0.15,0.0,1.0);
+  if (uT<1.0){ float k=clamp((uT-0.12-0.2*ordW)/0.62,0.0,1.0); Af=min(Af,3.2*k*k*k+0.25*smoothstep(0.0,0.25,k)); }
   // shadows glazed towards blue and violet
   vec3 violet=-log(vec3(0.62,0.6,0.8)); violet/=-log(lum(vec3(0.62,0.6,0.8)));
   ah=mix(ah,violet,0.3*smoothstep(0.55,1.3,Af));
   // pigment density: pooling at the edges of washes and of shapes, slow blotches, granulation in the tooth
   float dark=clamp((lum(eb)-lum(c))*7.0,0.0,1.0);
-  float d=1.0+uEdge*(0.35*rim*hard+0.3*dark);
+  float lateEdge=reveal(0.74,0.95,fbm(p*0.01+uSeed+91.0));
+  float d=1.0+uEdge*(0.35*rim*hard+0.3*dark)*lateEdge;
   d*=1.0+0.4*(fbm(p*0.005+uSeed+11.0)-0.5)+(0.15+0.2*(1.0-busy))*(fbm(p*0.018+uSeed+5.0)-0.5);
   // the strokes of a broad wash, laid along the flow of the picture: streaks of more and less pigment
   vec2 tf=texture(tTfm,vUv).xy; vec2 fq=vec2(dot(p,tf),dot(p,vec2(-tf.y,tf.x)));
@@ -260,7 +274,7 @@ void main(){
   // a faint pencil drawing beneath the paint, broken where the pencil lifted
   float e=lum(texture(tP1,vUv).rgb)-lum(texture(tP2,vUv).rgb);
   float line=smoothstep(0.012,0.04,-e)*smoothstep(0.35,0.6,fbm(p*0.05+uSeed+30.0)+0.2);
-  col*=1.0-uPencil*0.28*line*(0.6+0.4*ph);
+  col*=1.0-uPencil*0.28*line*(0.6+0.4*ph)*reveal(0.0,0.14,fbm(p*0.006+uSeed+92.0));
   // the edge of the painting: irregular, with dry-brush breaks where the brush skipped over the tooth
   vec2 q=abs(vUv-0.5)*2.0;
   float edgeN=(fbm(p*0.0035+uSeed+21.0)-0.5)*0.5+(fbm(p*0.025+uSeed+2.0)-0.5)*0.12+(fbm(vec2(atan(vUv.y-0.5,vUv.x-0.5)*1.3,uSeed+4.0))-0.5)*0.3;
@@ -269,7 +283,7 @@ void main(){
   float dry=smoothstep(0.35,0.7,ph+cover*0.55);
   cover=clamp(mix(dry*cover,cover,cover*cover),0.0,1.0);
   float erim=smoothstep(0.05,0.35,cover)*(1.0-smoothstep(0.35,0.95,cover));
-  col*=1.0-0.12*erim*uEdge;
+  col*=1.0-0.12*erim*uEdge*lateEdge;
   col=mix(paper,col,cover);
   // the paper's tooth, lit from the upper left
   float hx=paperH(p+vec2(1.0,0.0))-ph, hy=paperH(p+vec2(0.0,1.0))-ph;
@@ -289,10 +303,10 @@ function watercolour(srcTex, w, h, o) {
   blur(wob, 8 * s, tmp, wet);
   blur(wob, 3 * s, tmp, edge);
   blur(A, 1.0 * s, tmp, p1); blur(A, 2.0 * s, tmp, p2);
-  const dbg = { A, B, wob, wet, edge }[o.debug]; if (dbg) { show(dbg, w, h); return; }
-  pass(WC_FINAL, { tAbs: wob, tGap: gap, tTfm: tfm, tWet: wet, tEdge: edge, tP1: p1, tP2: p2, uEdge: o.edge ?? 1, uGran: o.granulation ?? 1,
-    uBleed: o.bleed ?? 1, uMargin: o.margin ?? 1, uWashes: o.washes ?? 1, uPencil: o.pencil ?? 1, uSeed: seed }, null, { w, h });
-  [tfm, A, B, wob, wet, edge, tmp, p1, p2, gap].forEach(t => t.dispose());
+  const all = [tfm, A, B, wob, wet, edge, tmp, p1, p2, gap], dispose = () => all.forEach(t => t.dispose());
+  const dbg = { A, B, wob, wet, edge }[o.debug]; if (dbg) return { frame: () => show(dbg, w, h), dispose };
+  return { dispose, frame: t => pass(WC_FINAL, { tAbs: wob, tGap: gap, tTfm: tfm, tWet: wet, tEdge: edge, tP1: p1, tP2: p2, uEdge: o.edge ?? 1,
+    uGran: o.granulation ?? 1, uBleed: o.bleed ?? 1, uMargin: o.margin ?? 1, uWashes: o.washes ?? 1, uPencil: o.pencil ?? 1, uSeed: seed, uT: t }, null, { w, h }) };
 }
 
 /* ---------- oil painting ----------
@@ -304,7 +318,7 @@ function watercolour(srcTex, w, h, o) {
    canvas weave shows where the paint is thin. Broad strokes cover the picture, and smaller ones are laid where
    it has detail.
    opts: radius (Kuwahara radius, default 6), stroke (stroke size, default 1), impasto (relief, default 1) */
-const OIL_STROKES = `uniform sampler2D tTfm, tPaint; uniform float uCell, uLen, uWidth, uLayer, uTol;
+const OIL_STROKES = `uniform sampler2D tTfm, tPaint; uniform float uCell, uLen, uWidth, uLayer, uTol, uCut;
 float bristle(float s, float id){ return 0.4*vnoise(vec2(s*4.0,id*13.1))+0.35*vnoise(vec2(s*11.0,id*7.3))+0.25*vnoise(vec2(s*23.0,id*3.1)); }
 void main(){
   vec2 px=vUv*uRes; float cell=uCell*uS, r=uWidth*uS, L=uLen*uS, stepL=max(1.0,0.12*L);
@@ -326,7 +340,8 @@ void main(){
         float sd=dot(dv,vec2(-tp.y,tp.x))/rk;
         // ragged ends: each bristle runs out of paint at its own point
         float endK=L*lk*(0.8+0.2*vnoise(vec2(sd*6.0,pr*91.0)));
-        if (d<rk && abs(along)<endK && pr>best){
+        // strokes are laid in order of pr, so a stroke beyond the cut is not on the canvas yet
+        if (d<rk && abs(along)<endK && pr>best && pr<uCut){
           // a stroke stops where the paint beneath it changes colour, as a painter keeps to the shapes
           vec3 ld=texture(tPaint,cp/uRes).rgb;
           if (length(ld-here)<uTol){ best=pr; bc=cp; bt=tp*(dir==0?1.0:-1.0); bAlong=along/endK; bSide=sd; } }
@@ -351,11 +366,13 @@ void main(){
   c*=0.93+0.14*br;
   fragColor=vec4(c,clamp(h,0.02,1.0)); }`;
 
-const OIL_FINAL = `uniform sampler2D tBase, tMid, tFine, tDetail; uniform float uImpasto;
+const OIL_FINAL = `uniform sampler2D tBase, tMid, tFine, tDetail; uniform float uImpasto, uLayers, uBaseDone;
+// uLayers: how many of the three layers of strokes are on the canvas so far; before the broad strokes cover it,
+// the bare toned canvas shows between them
 vec4 paintAt(vec2 uv){ vec4 a=texture(tBase,uv), m=texture(tMid,uv), b=texture(tFine,uv); float d=texture(tDetail,uv).r;
-  vec4 c=a; if (c.a<=0.0) c.a=0.12;
-  if (m.a>0.0) c=m;
-  if (b.a>0.0 && d>0.35) c=b;
+  vec4 c=a; if (c.a<=0.0) c=uBaseDone>0.5?vec4(a.rgb,0.12):vec4(0.8,0.75,0.66,0.0);
+  if (uLayers>1.5 && m.a>0.0) c=m;
+  if (uLayers>2.5 && b.a>0.0 && d>0.35) c=b;
   return c; }
 void main(){
   vec2 px=vUv*uRes, p=px/uS, e=1.0/uRes;
@@ -386,18 +403,30 @@ void main(){ vec2 d=1.0/uRes; vec3 a=texture(tSrc,vUv-vec2(d.x,0)).rgb, b=textur
 function oil(srcTex, w, h, o) {
   const s = h / 800, seed = o.seed ?? 1, S = o.stroke ?? 1;
   const tfm = orientation(srcTex, w, h, 2.5 * s, 0.01, seed);
-  const A = target(w, h), B = target(w, h), base = target(w, h), mid = target(w, h), fine = target(w, h), det = target(w, h), tmp = target(w, h);
+  const A = target(w, h), B = target(w, h), base = target(w, h), mid = target(w, h), fine = target(w, h), det = target(w, h), tmp = target(w, h),
+    live = target(w, h);
   const r = (o.radius ?? 6) * s;
   kuwahara(srcTex, tfm, r, A, 8);
   kuwahara(A, tfm, r * 0.5, B, 8);
   const tfm2 = orientation(B, w, h, 5.0 * s, 0.006, seed);
-  pass(OIL_STROKES, { tTfm: tfm2, tPaint: B, uCell: 15 * S, uLen: 36 * S, uWidth: 11.5 * S, uLayer: 0, uTol: 0.2, uSeed: seed }, base);
-  pass(OIL_STROKES, { tTfm: tfm2, tPaint: B, uCell: 12 * S, uLen: 22 * S, uWidth: 6.5 * S, uLayer: 1, uTol: 0.14, uSeed: seed }, mid);
-  pass(OIL_STROKES, { tTfm: tfm2, tPaint: A, uCell: 4.5 * S, uLen: 8 * S, uWidth: 2.6 * S, uLayer: 2, uTol: 0.12, uSeed: seed }, fine);
+  const L0 = { tTfm: tfm2, tPaint: B, uCell: 15 * S, uLen: 36 * S, uWidth: 11.5 * S, uLayer: 0, uTol: 0.2, uSeed: seed };
+  const L1 = { tTfm: tfm2, tPaint: B, uCell: 12 * S, uLen: 22 * S, uWidth: 6.5 * S, uLayer: 1, uTol: 0.14, uSeed: seed };
+  const L2 = { tTfm: tfm2, tPaint: A, uCell: 4.5 * S, uLen: 8 * S, uWidth: 2.6 * S, uLayer: 2, uTol: 0.12, uSeed: seed };
+  for (const [L, out] of [[L0, base], [L1, mid], [L2, fine]]) pass(OIL_STROKES, { ...L, uCut: 2 }, out);
   pass(OIL_DETAIL, { tSrc: srcTex }, det); blur(det, 4 * s, tmp, det);
-  const dbg = { A, B, base, mid, fine, det, tfm: tfm2 }[o.debug]; if (dbg) { show(dbg, w, h); return; }
-  pass(OIL_FINAL, { tBase: base, tMid: mid, tFine: fine, tDetail: det, uImpasto: o.impasto ?? 1, uSeed: seed }, null, { w, h });
-  [tfm, tfm2, A, B, base, mid, fine, det, tmp].forEach(t => t.dispose());
+  const all = [tfm, tfm2, A, B, base, mid, fine, det, tmp, live], dispose = () => all.forEach(t => t.dispose());
+  const dbg = { A, B, base, mid, fine, det, tfm: tfm2 }[o.debug]; if (dbg) return { frame: () => show(dbg, w, h), dispose };
+  // progressive: the layer being painted is traced again each frame with only the strokes laid so far; broad
+  // strokes over the toned canvas first, then the middle strokes, then the fine ones
+  const span = [[0.02, 0.46], [0.46, 0.8], [0.8, 0.99]], Ls = [L0, L1, L2], done = [base, mid, fine];
+  const frame = t => {
+    const T = [base, mid, fine]; let layers = 3, baseDone = 1;
+    if (t < 1) for (let i = 0; i < 3; i++) { const [t0, t1] = span[i]; if (t < t1) {
+      pass(OIL_STROKES, { ...Ls[i], uCut: Math.max(0, (t - t0) / (t1 - t0)) }, live);
+      T[i] = live; layers = i + 1; baseDone = i > 0 ? 1 : 0; break; } }
+    pass(OIL_FINAL, { tBase: T[0], tMid: T[1], tFine: T[2], tDetail: det, uLayers: layers, uBaseDone: baseDone, uImpasto: o.impasto ?? 1, uSeed: seed, uT: t }, null, { w, h });
+  };
+  return { dispose, frame };
 }
 
 /* ---------- impressionist ----------
@@ -407,7 +436,7 @@ function oil(srcTex, w, h, o) {
    gradient of the picture. The strokes carry bristle marks and a little relief.
    opts: strokes (density, default 1), size (stroke size, default 1), jitter (colour variation, default 1) */
 const IMP_VERT = `in vec3 position; in vec2 uv; in vec4 iA; in vec4 iB; in vec4 iC;
-uniform vec2 uRes;
+uniform vec2 uRes; uniform float uFirst;
 out vec2 vUv; out vec3 vCol; out vec4 vP;
 void main(){
   // iA: centre (px), length, width; iB: direction, seed, load; iC: colour, unused
@@ -415,7 +444,9 @@ void main(){
   vec2 q=position.xy*vec2(iA.z,iA.w);
   vec2 px=iA.xy+dir*q.x+nrm*q.y;
   vUv=uv; vCol=iC.rgb; vP=vec4(iB.z,iB.w,iA.z/iA.w,iC.a);
-  gl_Position=vec4(px/uRes*2.0-1.0,0.0,1.0); }`;
+  gl_Position=vec4(px/uRes*2.0-1.0,0.0,1.0);
+  if (float(gl_InstanceID)<uFirst) gl_Position=vec4(2.0,2.0,2.0,1.0);      // already on the canvas
+}`;
 
 const IMP_FRAG = `precision highp float; in vec2 vUv; in vec3 vCol; in vec4 vP; out vec4 fragColor; uniform float uHeight;
 float h1(float n){ return fract(sin(n)*43758.5453); }
@@ -490,11 +521,12 @@ function impressionist(srcTex, w, h, o) {
   g.renderer.setRenderTarget(height); g.renderer.setClearColor(new THREE.Color(0, 0, 0), 1); g.renderer.clear();
   const geo = new THREE.PlaneGeometry(1, 1); geo.translate(0.5, 0, 0);   // u runs along the stroke from where the brush lands
   const matC = new THREE.RawShaderMaterial({ glslVersion: THREE.GLSL3, vertexShader: `precision highp float;\n` + IMP_VERT, fragmentShader: IMP_FRAG,
-    uniforms: { uRes: { value: new THREE.Vector2(w, h) }, uHeight: { value: 0 } }, transparent: true, depthTest: false, depthWrite: false,
+    uniforms: { uRes: { value: new THREE.Vector2(w, h) }, uHeight: { value: 0 }, uFirst: { value: 0 } }, transparent: true, depthTest: false, depthWrite: false,
     blending: THREE.CustomBlending, blendSrc: THREE.SrcAlphaFactor, blendDst: THREE.OneMinusSrcAlphaFactor, blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.OneFactor });
-  const matH = matC.clone(); matH.uniforms = { uRes: matC.uniforms.uRes, uHeight: { value: 1 } };
+  const matH = matC.clone(); matH.uniforms = { uRes: matC.uniforms.uRes, uHeight: { value: 1 }, uFirst: matC.uniforms.uFirst };
   const sample = (A, x, y) => { const i = (Math.min(dh - 1, Math.max(0, Math.floor(y / 2))) * dw + Math.min(dw - 1, Math.max(0, Math.floor(x / 2)))) * 4; return [A[i], A[i + 1], A[i + 2], A[i + 3]]; };
   const layers = [{ r: 11, gap: 6.5, src: 0, all: true }, { r: 6.5, gap: 4.8, src: 1, all: false }, { r: 3.6, gap: 3.0, src: 2, all: false }];
+  const all = [], ends = [];
   for (const [li, L] of layers.entries()) {
     const R = L.r * s * SZ, gap = L.gap * s * SZ / Math.sqrt(DEN), strokes = [];
     // where the painting so far differs from the picture, the next layer adds strokes (Hertzmann's layered painting)
@@ -531,20 +563,33 @@ function impressionist(srcTex, w, h, o) {
     }
     // random order, so that no direction of the grid shows
     for (let i = strokes.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [strokes[i], strokes[j]] = [strokes[j], strokes[i]]; }
-    const n = strokes.length, iA = new Float32Array(n * 4), iB = new Float32Array(n * 4), iC = new Float32Array(n * 4);
-    strokes.forEach((k, i) => { iA.set(k.slice(0, 4), i * 4); iB.set(k.slice(4, 8), i * 4); iC.set(k.slice(8, 12), i * 4); });
-    const ig = new THREE.InstancedBufferGeometry(); ig.index = geo.index; ig.attributes.position = geo.attributes.position; ig.attributes.uv = geo.attributes.uv;
-    ig.setAttribute('iA', new THREE.InstancedBufferAttribute(iA, 4)); ig.setAttribute('iB', new THREE.InstancedBufferAttribute(iB, 4)); ig.setAttribute('iC', new THREE.InstancedBufferAttribute(iC, 4));
-    ig.instanceCount = n;
-    const mesh = new THREE.Mesh(ig, matC); mesh.frustumCulled = false;
-    const sc = new THREE.Scene(); sc.add(mesh);
-    g.renderer.setRenderTarget(paint); g.renderer.render(sc, g.cam);
-    mesh.material = matH; g.renderer.setRenderTarget(height); g.renderer.render(sc, g.cam);
-    ig.dispose();
+    all.push(...strokes); ends.push(all.length);
   }
-  if (o.debug === 'paint') { show(paint, w, h); return; } if (o.debug === 'height') { show(height, w, h); return; }
-  pass(IMP_FINAL, { tPaint: paint, tHeight: height }, null, { w, h });
-  [tfm, tmp, ...soft, small, paint, height].forEach(t => t.dispose()); matC.dispose(); matH.dispose(); geo.dispose();
+  const n = all.length, iA = new Float32Array(n * 4), iB = new Float32Array(n * 4), iC = new Float32Array(n * 4);
+  all.forEach((k, i) => { iA.set(k.slice(0, 4), i * 4); iB.set(k.slice(4, 8), i * 4); iC.set(k.slice(8, 12), i * 4); });
+  const ig = new THREE.InstancedBufferGeometry(); ig.index = geo.index; ig.attributes.position = geo.attributes.position; ig.attributes.uv = geo.attributes.uv;
+  ig.setAttribute('iA', new THREE.InstancedBufferAttribute(iA, 4)); ig.setAttribute('iB', new THREE.InstancedBufferAttribute(iB, 4)); ig.setAttribute('iC', new THREE.InstancedBufferAttribute(iC, 4));
+  const mesh = new THREE.Mesh(ig, matC); mesh.frustumCulled = false;
+  const sc = new THREE.Scene(); sc.add(mesh);
+  // the strokes go down in the order they were made: broad ones over the underpainting first, then middle, then fine
+  const span = [[0.04, 0.46], [0.46, 0.8], [0.8, 1.0]];
+  const countAt = t => { if (t >= 1) return n; let c = 0;
+    for (let i = 0; i < 3; i++) { const lo = i ? ends[i - 1] : 0, [t0, t1] = span[i]; c = t <= t0 ? c : lo + Math.round((ends[i] - lo) * Math.min(1, (t - t0) / (t1 - t0))); if (t < t1) break; }
+    return c; };
+  let drawn = 0;
+  const dispose = () => { [tfm, tmp, ...soft, small, paint, height].forEach(t => t.dispose()); matC.dispose(); matH.dispose(); geo.dispose(); ig.dispose(); };
+  const frame = t => {
+    const upto = countAt(t);
+    if (upto > drawn) {
+      ig.instanceCount = upto; matC.uniforms.uFirst.value = drawn;
+      mesh.material = matC; g.renderer.setRenderTarget(paint); g.renderer.render(sc, g.cam);
+      mesh.material = matH; g.renderer.setRenderTarget(height); g.renderer.render(sc, g.cam);
+      drawn = upto;
+    }
+    if (o.debug === 'paint') return show(paint, w, h); if (o.debug === 'height') return show(height, w, h);
+    pass(IMP_FINAL, { tPaint: paint, tHeight: height }, null, { w, h });
+  };
+  return { frame, dispose };
 }
 
 /* ---------- charcoal ----------
@@ -597,26 +642,27 @@ void main(){
   // smudged middle tones: charcoal rubbed into the paper with a finger or stump
   float sm=uSmudge*smoothstep(0.03,0.9,mix(Ds,D,0.5))*(0.8+0.35*(fbm(p*0.01+uSeed+3.0)-0.5));
   sm*=0.55+0.45*smoothstep(0.1,0.7,ph);
-  k=1.0-(1.0-k)*(1.0-0.62*sm);
+  vec2 sw=p*0.004+uSeed+93.0; float ord=fbm(sw), ord2=fbm(sw+7.0);
+  k=1.0-(1.0-k)*(1.0-0.62*sm*reveal(0.5,0.74,ord2));
   // hatching: two sets of strokes, the second crossing the first in the shadows
   vec4 h1=texture(tH1,vUv), h2=texture(tH2,vUv);
   float g1=smoothstep(1.0-h1.x*1.5-0.1,1.0-h1.x*1.5+0.25,ph);
   float g2=smoothstep(1.0-h2.x*1.5-0.1,1.0-h2.x*1.5+0.25,ph);
-  k=1.0-(1.0-k)*(1.0-uHatch*0.7*h1.x*g1)*(1.0-uHatch*0.7*h2.x*g2);
+  k=1.0-(1.0-k)*(1.0-uHatch*0.7*h1.x*g1*reveal(0.0,0.36,ord))*(1.0-uHatch*0.7*h2.x*g2*reveal(0.28,0.56,ord2));
   // the deepest shadows pressed into a dense black
   float deep=smoothstep(0.62,0.95,D);
-  k=1.0-(1.0-k)*(1.0-0.8*deep*smoothstep(0.2,0.6,ph+deep*0.4));
+  k=1.0-(1.0-k)*(1.0-0.8*deep*smoothstep(0.2,0.6,ph+deep*0.4)*reveal(0.4,0.66,ord));
   // contours: crisp lines from the picture's edges, heavier and lighter as the hand presses and lifts
   float e=lum(texture(tP1,vUv).rgb)-lum(texture(tP2,vUv).rgb);
   float cl=smoothstep(0.015,0.05,abs(e))*(0.55+0.45*vnoise(p*0.03+uSeed+8.0));
   cl*=smoothstep(0.25,0.55,ph+0.35*cl);
-  k=1.0-(1.0-k)*(1.0-uContour*0.85*cl);
+  k=1.0-(1.0-k)*(1.0-uContour*0.85*cl*reveal(0.68,0.9,fbm(p*0.012+uSeed+94.0)));
   // highlights lifted with a putty rubber: streaks of bare paper in the lightest places
   float lift=smoothstep(0.1,0.02,Ds)*(0.6+0.4*fbm(vec2(p.x*0.02,p.y*0.08)+uSeed+40.0));
-  k*=1.0-lift;
+  k*=1.0-lift*reveal(0.88,0.99,ord);
   // dust and smudges on the sheet
   float dust=smoothstep(0.62,0.8,fbm(p*0.004+uSeed+60.0))*0.12+step(0.9985,hash12(floor(p*0.7)+uSeed))*0.5;
-  k=1.0-(1.0-k)*(1.0-dust*smoothstep(0.3,0.7,ph));
+  k=1.0-(1.0-k)*(1.0-dust*smoothstep(0.3,0.7,ph)*reveal(0.9,1.0,ord2));
   vec3 paper=vec3(0.93,0.915,0.875), char=vec3(0.11,0.105,0.11);
   vec3 col=mix(paper,char,clamp(k,0.0,1.0));
   // the tooth of the paper, lit from the upper left, everywhere the charcoal has not filled it
@@ -644,10 +690,10 @@ function charcoal(srcTex, w, h, o) {
   pass(CH_HATCH, { tTfm: tfm2, tQuiet: det, tTone: tone, uLen: 22, uLayer: 0, uTurn: 0.75, uFrom: 0.15, uSeed: seed }, h1);
   pass(CH_HATCH, { tTfm: tfm2, tQuiet: det, tTone: tone, uLen: 18, uLayer: 1, uTurn: -0.45, uFrom: 0.5, uSeed: seed }, h2);
   blur(A, 1.0 * s, tmp, p1); blur(A, 1.8 * s, tmp, p2);
-  const dbg = { A, tone, soft, h1, h2 }[o.debug]; if (dbg) { show(dbg, w, h); return; }
-  pass(CH_FINAL, { tTone: tone, tSoft: soft, tH1: h1, tH2: h2, tP1: p1, tP2: p2, uHatch: o.hatching ?? 1, uContour: o.contour ?? 1,
-    uSmudge: o.smudge ?? 1, uSeed: seed }, null, { w, h });
-  [tfm, tfm2, A, tone, soft, h1, h2, tmp, p1, p2, det].forEach(t => t.dispose());
+  const all = [tfm, tfm2, A, tone, soft, h1, h2, tmp, p1, p2, det], dispose = () => all.forEach(t => t.dispose());
+  const dbg = { A, tone, soft, h1, h2 }[o.debug]; if (dbg) return { frame: () => show(dbg, w, h), dispose };
+  return { dispose, frame: t => pass(CH_FINAL, { tTone: tone, tSoft: soft, tH1: h1, tH2: h2, tP1: p1, tP2: p2, uHatch: o.hatching ?? 1,
+    uContour: o.contour ?? 1, uSmudge: o.smudge ?? 1, uSeed: seed, uT: t }, null, { w, h }) };
 }
 
 const RUN = { watercolour, oil, impressionist, charcoal };
@@ -657,10 +703,20 @@ export async function applyEffect(name, source, opts = {}) {
   const { w, h } = size(source);
   const g = ctx(); g.renderer.setSize(w, h, false);
   const tex = sourceTexture(source);
-  f(tex, w, h, opts);
-  const out = toCanvas(w, h);
-  tex.dispose();
-  return out;
+  const job = f(tex, w, h, opts);
+  try {
+    // progressive display: the picture is shown being made, frame by frame, on the effect's own canvas
+    if (opts.onFrame) {
+      if (opts.steps) for (let i = 0; i < opts.steps; i++) { const t = opts.steps > 1 ? i / (opts.steps - 1) : 1; job.frame(t); await opts.onFrame(g.renderer.domElement, t); }
+      else {
+        const dur = opts.duration ?? 6000, t0 = performance.now();
+        for (;;) { const t = Math.min(1, (performance.now() - t0) / dur); job.frame(t); await opts.onFrame(g.renderer.domElement, t);
+          if (t >= 1) break; await new Promise(r => requestAnimationFrame(r)); }
+      }
+    }
+    job.frame(1);
+    return toCanvas(w, h);
+  } finally { job.dispose(); tex.dispose(); }
 }
 
 export async function pathTrace(opts) {

@@ -35,7 +35,8 @@
   <div class="row"><label for="fx">Effect</label><select id="fx">
     <option value="watercolour">Watercolour</option><option value="oil">Oil painting</option><option value="impressionist">Impressionist</option><option value="charcoal">Charcoal</option></select></div>
   <div class="row"><label for="seed">Seed</label><select id="seed"><option>1</option><option>2</option><option>3</option></select></div>
-  <div class="row"><span></span><button id="save">Save picture</button></div>
+  <div class="row"><label for="dur">Painting</label><select id="dur"><option value="0">Finished</option><option value="4000">4 s</option><option value="8000" selected>8 s</option><option value="16000">16 s</option></select></div>
+  <div class="row"><button id="paint">Paint</button><button id="save">Save picture</button></div>
   <div class="stats" id="stats"></div>
 </div>
 <script type="module">
@@ -44,7 +45,8 @@ const $=id=>document.getElementById(id);
 const load=name=>new Promise((res,rej)=>{ const im=new Image(); im.onload=()=>res(im); im.onerror=rej; im.src=`photo-src/${name}.jpg`; });
 async function run(fx,pic,opts={}){
   const im=await load(pic); $('src').src=im.src;
-  const t0=performance.now();
+  const t0=performance.now(), out0=$('out');
+  if (opts.duration) opts={...opts,onFrame:(cv,t)=>{ out0.width=cv.width; out0.height=cv.height; out0.getContext('2d').drawImage(cv,0,0); $('stats').textContent=`${Math.round(t*100)} %`; }};
   const c=await applyEffect(fx,im,opts);
   const ms=performance.now()-t0;
   const out=$('out'); out.width=c.width; out.height=c.height; out.getContext('2d').drawImage(c,0,0);
@@ -53,6 +55,7 @@ async function run(fx,pic,opts={}){
   return c;
 }
 const go=()=>run($('fx').value,$('pic').value,{seed:+$('seed').value});
+$('paint').addEventListener('click',()=>run($('fx').value,$('pic').value,{seed:+$('seed').value,duration:+$('dur').value}));
 ['pic','fx','seed'].forEach(id=>$(id).addEventListener('change',go));
 $('save').addEventListener('click',()=>{ const a=document.createElement('a'); a.download=`${$('pic').value}-${$('fx').value}.png`; a.href=$('out').toDataURL('image/png'); a.click(); });
 // for automated renders: returns the result as a PNG data URL
