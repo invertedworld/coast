@@ -8679,15 +8679,110 @@ const ferryLanding=(R,stop)=>stop===0?[R.P.x+Math.sign(R.I.x-R.P.x||1)*FGZ,R.P.q
 const player={x:0,z:0,y:0,vy:0,r:0.6,face:0,grounded:true};
 const STEP=0.8;
 let yaw=0, pitch=0.86, dist=62, fpPitch=-0.08;
-function spawnPlayer(){
-  for (let r=0;r<12;r++) for (const i of (r?[-r,r]:[0])){
+// The player starts on the seaward edge of a square that looks out over the sea, facing a point on the shore that can
+// be walked to directly: a beach at the water's edge or the edge of a quay, reached by streets, stairs and paths over a
+// distance no more than SPAWN_DETOUR times the straight line to it. The squares nearest the middle of the island's
+// first stretch are tried in turn, each walked (shoreWalk) over its blocks at full detail, which are built for the
+// purpose and kept; the first that passes is taken. Where none does, the nearest square is taken as before.
+const SPAWN_DETOUR=1.45, SPAWN_SEA=100;
+// a block at full detail, built now if it is not yet loaded at that level
+function spawnBlock(cx,cz){ const k=key(cx,cz); let ch=chunks.get(k); if (ch && ch.lod===0) return ch;
+  if (ch) disposeChunk(ch);
+  ch=genChunk(cx,cz,0); chunks.set(k,ch); addChunkToScene(ch); ch.fade=1; setChunkFade(ch); farDirty=true; maskDirty=true; return ch; }
+// The shortest walk from (x0,z0), standing at y0, to the water's edge on side sd (shoreGoal), under the player's own rules (steps
+// up of at most STEP, drops of at most 1.4 m, the cove's paths and no deep water), keeping 0.35 m clear either side of
+// the body, so that the way is comfortably wide: an A*
+// search over a grid of GW m in eight directions, drawn towards the shore. Returns the length walked, the point reached
+// and the route, or null within maxN points.
+function shoreWalk(x0,z0,y0,sd,maxN=200000){
+  const GW=0.5, r=player.r+0.35, BK=4, bk=new Map(), built=new Set();
+  const bkey=(i,j)=>i*65536+j;
+  const addBlock=(cx,cz)=>{ const k=cx+','+cz; if (built.has(k)) return; built.add(k); const ch=spawnBlock(cx,cz);
+    const put=(it,x,z,e)=>{ for (let i=Math.floor((x-e)/BK); i<=Math.floor((x+e)/BK); i++) for (let j=Math.floor((z-e)/BK); j<=Math.floor((z+e)/BK); j++){ const q=bkey(i,j); let L=bk.get(q); if (!L) bk.set(q,L=[]); L.push(it); } };
+    for (const o of ch.obbs) put(o,o.x,o.z,Math.hypot(o.hw,o.hd)+r+0.1);
+    for (const c of ch.circles) put(c,c.x,c.z,c.r+r+0.1); };
+  let lastB='';
+  const items=(x,z)=>{ const cx=Math.floor(x/C), cz=Math.floor(z/C), b=cx+','+cz;
+    if (b!==lastB){ lastB=b; for (let j=-1;j<=1;j++) for (let i=-1;i<=1;i++) addBlock(cx+i,cz+j); }
+    return bk.get(bkey(Math.floor(x/BK),Math.floor(z/BK)))||[]; };
+  const ground=(x,z,y)=>{ let g=walkGround(x,z,y);
+    for (const o of items(x,z)){ if (o.hw!==undefined){ if (o.top===Infinity||o.top>y+STEP) continue; const [lu,lv]=obbLocal(o,x,z); if (Math.abs(lu)<=o.hw&&Math.abs(lv)<=o.hd) g=Math.max(g,o.top); }
+      else if (o.top!==Infinity && o.top<=y+STEP && Math.hypot(x-o.x,z-o.z)<=o.r) g=Math.max(g,o.top); }
+    return g; };
+  const blocked=(x,z,y)=>{ for (const o of items(x,z)){ if (o.top<=y+STEP) continue;
+      if (o.hw!==undefined){ if (o.bot!==undefined && y+1.75<o.bot) continue; if (obbCircleDist(o,x,z)<r-0.05) return true; }
+      else if (Math.hypot(x-o.x,z-o.z)<o.r+r-0.05) return true; }
+    return false; };
+  const sOf=(x,z)=>sd*(z-coastZ(sd,x)), hOf=(x,z)=>0.8*Math.max(0,sOf(x,z)-3);
+  // a binary heap of [f, node]
+  const hf=[], hn=[];
+  const push=(f,n)=>{ let i=hf.length; hf.push(f); hn.push(n); while (i>0){ const p=(i-1)>>1; if (hf[p]<=f) break; hf[i]=hf[p]; hn[i]=hn[p]; i=p; } hf[i]=f; hn[i]=n; };
+  const pop=()=>{ const n=hn[0], lf=hf.pop(), ln=hn.pop(); if (hf.length){ let i=0; for (;;){ let c=2*i+1; if (c>=hf.length) break; if (c+1<hf.length && hf[c+1]<hf[c]) c++; if (hf[c]>=lf) break; hf[i]=hf[c]; hn[i]=hn[c]; i=c; } hf[i]=lf; hn[i]=ln; } return n; };
+  const nodes=new Map(), K=(i,j)=>(i+4096)*8192+(j+4096);
+  nodes.set(K(0,0),{i:0,j:0,y:y0,g:0,p:null,done:false}); push(hOf(x0,z0),K(0,0));
+  const DIRS=[[1,0,1],[-1,0,1],[0,1,1],[0,-1,1],[1,1,Math.SQRT2],[1,-1,Math.SQRT2],[-1,1,Math.SQRT2],[-1,-1,Math.SQRT2]];
+  let n=0;
+  while (hf.length && n<maxN){ const k=pop(), N=nodes.get(k); if (N.done) continue; N.done=true; n++;
+    const x=x0+N.i*GW, z=z0+N.j*GW;
+    if (n>1 && shoreGoal(sd,x,z,N.y)){
+      const route=[]; for (let q=N; q; q=q.p) route.push([x0+q.i*GW,z0+q.j*GW,q.y]); route.reverse();
+      return {L:N.g,x,z,y:N.y,route,n}; }
+    for (const [di,dj,c] of DIRS){ const ii=N.i+di, jj=N.j+dj, kk=K(ii,jj); const M=nodes.get(kk); if (M&&M.done) continue;
+      const nx=x0+ii*GW, nz=z0+jj*GW, cost=N.g+c*GW; if (M && M.g<=cost) continue;
+      const g=ground(nx,nz,N.y);
+      if (g<-1.0 || blocked(nx,nz,N.y) || !coveMoveOk(x,z,N.y,N.y,nx,nz,g)) continue;
+      if (c>1 && blocked(x+di*GW/2,z+dj*GW/2,N.y)) continue;
+      if (M){ M.g=cost; M.y=g; M.p=N; } else nodes.set(kk,{i:ii,j:jj,y:g,g:cost,p:N,done:false});
+      push(cost+hOf(nx,nz),kk); } }
+  return null;
+}
+// the shore a walk may end on: a beach at the water's edge, or the edge of a harbour's quay
+function shoreGoal(sd,x,z,y){ const s=sd*(z-coastZ(sd,x));
+  if (y<0.45 && s<8) return true;
+  const H=harbourAt(sd,x); return !!H && y<1.7 && Math.abs(x-H.x)<H.W/2+2 && hbS(H,x,z)<1.2; }
+// the squares that may serve as a start, nearest the middle first: big enough, raised at least 8 m, with the ground
+// falling away on the seaward side
+function spawnSquares(){ const out=[];
+  for (let r=0;r<24;r++) for (const i of (r?[-r,r]:[0])){
     const zc=coastOff(i*C+C/2);
     for (let j=Math.floor(zc/C); j<Math.floor(zc/C)+4; j++){
       const P=piazzaInfo(i,j); if (!P||P.small||P.level<8) continue;
       if (baseH(P.x,P.z-P.r-3)>P.level-1) continue;
-      player.x=P.x; player.z=P.z-P.r+4.5; player.y=P.level; yaw=0; fpPitch=-0.1; return;
-    }
-  }
+      out.push({x:P.x,z:P.z-P.r+4.5,y:P.level}); } }
+  return out; }
+// whether the point (x1,y1,z1) can be seen from the eye standing at (x0,y0,z0), over the ground, the walls and the
+// roofs between (a wall that may not be climbed is held as standing without end, and is passed over): the start asks for the sea SPAWN_SEA m beyond the point on the shore it faces
+function shoreInView(x0,z0,y0,x1,z1,y1){
+  const n=Math.ceil(Math.hypot(x1-x0,z1-z0)), ye=y0+1.62;
+  for (let i=2;i<n-1;i++){ const t=i/n, x=lerp(x0,x1,t), z=lerp(z0,z1,t), h=lerp(ye,y1+0.6,t);
+    if (heightAt(x,z)>h) return false;
+    const ch=spawnBlock(Math.floor(x/C),Math.floor(z/C));
+    for (const o of ch.obbs){ if (Math.abs(o.x-x)>o.hw+o.hd||Math.abs(o.z-z)>o.hw+o.hd) continue; const [lu,lv]=obbLocal(o,x,z);
+      if (o.roof){ const r=roofAt(o.roof,lu,lv); if (r!==null && r>h) return false; continue; }
+      if (Math.abs(lu)>o.hw||Math.abs(lv)>o.hd) continue;
+      if (o.top!==Infinity && o.top>h && !(o.bot!==undefined && o.bot>h)) return false; } }
+  return true; }
+let spawnInfo=null;   // the start chosen and its walk to the shore, for tests
+function spawnPlayer(){
+  const sq=spawnSquares(), t0=performance.now();
+  // the first square with a direct walk to the shore and that shore in view (looking no more than five squares beyond
+  // the first with the walk); failing that, the first with the walk
+  let first=null;
+  for (let t=0;t<Math.min(sq.length,first?first.t+6:14);t++){ const S=sq[t], W=shoreWalk(S.x,S.z,S.y,1);
+    if (!W) continue;
+    const D=Math.hypot(W.x-S.x,W.z-S.z);
+    if (W.L>SPAWN_DETOUR*D) continue;
+    // the sea in view: at least three of eleven sight lines fanned 25 degrees either side of the way faced
+    let seen=0; const a0=Math.atan2(W.x-S.x,W.z-S.z), R0=D+SPAWN_SEA;
+    for (let k=-5;k<=5 && seen<3;k++){ const a=a0+k*5*Math.PI/180; if (shoreInView(S.x,S.z,S.y,S.x+Math.sin(a)*R0,S.z+Math.cos(a)*R0,0)) seen++; }
+    const C1={S,W,D,t,view:seen>=3};
+    if (!first) first=C1;
+    if (C1.view){ first=C1; break; } }
+  if (first){ const {S,W,D,t,view}=first;
+    player.x=S.x; player.z=S.z; player.y=S.y; yaw=Math.atan2(-(W.x-S.x),-(W.z-S.z)); fpPitch=-0.1;
+    spawnInfo={...S,tried:t+1,walk:W,ratio:W.L/D,view,ms:performance.now()-t0}; return; }
+  spawnInfo={fallback:true,squares:sq.length,ms:performance.now()-t0};
+  if (sq.length){ const S=sq[0]; player.x=S.x; player.z=S.z; player.y=S.y; yaw=0; fpPitch=-0.1; return; }
   for (let r=0;r<10;r++) for (const i of (r?[-r,r]:[0])){
     const zt=coastOff(i*C)+60, j=Math.floor(zt/C);
     if (!vSegOn(i,j)) continue;
@@ -11467,7 +11562,7 @@ window.__village={ goods, glZone, branchesAt, get mantle(){ return mantle; }, ge
       return {cv,sd,X:cv.X,name:cv.name,cave:cv.cave,beach:W(cvAxis(cv,cv.Bh-Math.max(cv.Bw,2.5)*0.5),cv.Bh-Math.max(cv.Bw,2.5)*0.5),pathTop:W(G.pathTop.u,G.roadS-CR_HW-0.5),pathFoot:W(G.pathFoot.u,G.pathFoot.s),landing:coveLanding(cv),
         mouth:A&&{...W(A.u+A.au*-1.5,A.s+A.as*-1.5),y:A.fM},inside:A&&{...W(A.u+A.au*A.aMax*0.7,A.s+A.as*A.aMax*0.7)},caves:G.caves.length}; } return null; },
   coveLanding, coveFns:{cvOnPath,cvLand,cvU,cvS,cvL2W,cvAxis,cvBuild,coveAtXZ,coveCaveCell,cvCaveLocal,coveNoWalk},
-  coveInfo, walkGround, coveMoveOk, standableAt, get holdT(){ return player.holdT; },
+  coveInfo, walkGround, coveMoveOk, standableAt, get spawnInfo(){ return spawnInfo; }, shoreWalk, spawnPlayer, get holdT(){ return player.holdT; },
   findIsland(){ const m0=Math.floor(player.x/ISL); for (let k=0;k<20;k++) for (const m of [m0+k,m0-k]) for (const sd of SIDES){ const I=islandInfo(sd,m); if (I) return I; } return null; },
   player,chunks,get mode(){return mode},toggleView,setYaw:v=>yaw=v,setPitch:v=>pitch=v,setFpPitch:v=>fpPitch=v,setDist:v=>dist=v,keys,heightAt,
   // swimming and diving: the swimmer, the water, the seabed's life; swimAt puts the player in the water at (x,z), at the
