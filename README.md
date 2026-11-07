@@ -4,11 +4,16 @@ Coast is a procedurally generated Mediterranean island, rendered in the browser 
 
 The program is contained in `index.html`, apart from the cat in `cat/`. There is no build step and there are no local dependencies.
 
+Coast may be played at <https://invertedworld.itch.io/coast>. The user guide is in [`docs/user-guide.md`](docs/user-guide.md); this document describes the design of the program.
+
 ## Contents of the repository
 
 | Path | Description |
 |---|---|
-| `index.html` | The complete program: markup, styles and one JavaScript module (about 7,400 lines). |
+| `index.html` | The complete program: markup, styles and one JavaScript module (about 11,000 lines). |
+| `docs/user-guide.md` | The user guide, which describes how the island is explored and how each control behaves. |
+| `LICENSE` | The MIT licence under which the program, its documentation and its sounds are published. |
+| `CONTRIBUTING.md` | How to run, change and submit changes to the program. |
 | `cat/` | The cat from Michi-Neko: The Cat Philosopher's Path by c1t1zen1, under the MIT licence (`cat/LICENSE`). See `cat/README.md`. |
 | `sounds.json` | Maps sound identifiers to audio files (see [Sound](#sound)). |
 | `sounds/` | The audio files that `sounds.json` names. |
@@ -662,3 +667,7 @@ Setting `window.__freeCam = {p: Vector3, t: Vector3}` places the camera at `p` l
 - Where blocks at different levels of detail meet, a cove's cliff face may show a thin crack, because the columns of the face differ between levels.
 - The sea in a cove is the same deep blue as the open sea. The shallows over the beach and in the cave's pool are not lighter.
 - The far terrain samples a cove every 22 m without its cliff meshes, so beyond the outline blocks a cove appears only as a rough notch in the coast.
+
+## Licence
+
+Coast is published under the MIT licence; see `LICENSE`. The licence covers the program, its documentation and the recordings in `sounds/` and `village sounds/`. The cat in `cat/` is the work of c1t1zen1, from Michi-Neko: The Cat Philosopher's Path, and keeps its own MIT licence (`cat/LICENSE`). Three.js is loaded from a CDN under its own MIT licence, and the fonts Marcellus and Alegreya Sans are loaded from Google Fonts under the SIL Open Font Licence.
