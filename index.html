@@ -6774,14 +6774,14 @@ ${GLSL} uniform float uPx; attribute vec2 aPar; varying float vA;
     st.under=true; st.bub=0; const l0=st.lens; render(r,scene,camera);
     if (drawAbove){ st.lens='split'; render(r,scene,camera,drawAbove); } st.under=u0; st.bub=b0; st.lens=l0; spray.visible=false;
     surf.visible=v0[0]; parts.visible=v0[1]; }
-  // compiles, in the background, the target programs of materials that have come into the scene since the last call,
+  // compiles (the driver links them in the background) the target programs of materials that have come into the scene since the last call,
   // so that going into the water does not stop the frame while they are built; it returns the time it took in ms
   // only the objects whose material has not been seen are passed to the renderer, the scene's lights being taken from
   // the scene itself
   const warmed=new WeakSet(), fresh=[], few={traverse(f){ for (const o of fresh) f(o); },traverseVisible(){}};
   function warm(r,scene,camera){ const t=performance.now(); fresh.length=0;
     scene.traverse(o=>{ const m=o.material; if (!m) return; const ms=Array.isArray(m)?m:[m]; let n=false; for (const x of ms) if (!warmed.has(x)){ warmed.add(x); n=true; } if (n) fresh.push(o); });
-    if (fresh.length){ const rt0=r.getRenderTarget(); r.setRenderTarget(sceneRT); try { r.compileAsync(few,camera,scene); } finally { r.setRenderTarget(rt0); } }
+    if (fresh.length){ const rt0=r.getRenderTarget(); r.setRenderTarget(sceneRT); try { r.compile(few,camera,scene); } finally { r.setRenderTarget(rt0); } }
     fresh.length=0; return performance.now()-t; }
   function dispose(){ sceneRT.dispose(); splitRT.dispose(); rayRT.dispose(); underRT.dispose(); mixMat.dispose(); rayMat.dispose(); compMat.dispose(); surfMat.dispose(); partMat.dispose(); disc.dispose(); pg.dispose(); tri.dispose(); surf.removeFromParent(); parts.removeFromParent(); }
   return {update,render,prewarm,warm,splash,isUnder,get lens(){ return st.lens; },get wet(){ return st.lens==='under'?1:st.lens==='above'?0:st.wet; },setOptions,dispose,glsl:GLSL,uniforms:U,surface:surf,particles:parts,options:O,passes:{rayMat,compMat,sceneRT,rayRT},get under(){ return st.under; }};
