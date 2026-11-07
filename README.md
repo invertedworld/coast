@@ -89,13 +89,13 @@ The panel opened with **H** lists the controls. They are reproduced here for ref
 | Swimming to a beach or a ladder | Climbs out: the swimmer finds the bottom and wades ashore, or climbs a quay's ladder, or on to any ledge less than about 1 m above the water. |
 | Walking into a door | Opens it. A door swings away from the side it is pushed from, as far as it is pushed, and closes again about a second after nobody stands in its sweep. |
 | N | Changes to night (22:00), or back to day (10:00) if it is night. The clock runs on from there. |
-| I | Generates a new island from a random seed. |
+| I | Opens the island panel, which shows the seed of the present island. Any text of up to 32 characters may be typed as the seed (it is kept in capitals), or **Random** draws one; **Copy** copies it, and **Generate** or Enter generates the island from it. Esc, **Cancel** or I again closes the panel unchanged. While the panel is open the game takes no other keys. |
 | M | Mutes or unmutes the sound. |
 | Double click | In the bird's-eye view, the camera flies down over 1.5 s to street level at the point clicked, facing the same way. A click on open water does nothing. |
 | Tab | Full screen |
 | Page Up, Page Down | Increase or reduce the draw distance through eleven fixed levels, from simplified blocks to about 140 m with full detail to about 60 m, up to simplified blocks to about 1,700 m with full detail to about 300 m. A fixed draw distance is kept whatever the frame rate. |
 | Home | Returns the draw distance to automatic, in which the simplified blocks reach between about 100 m and 500 m, as far as the frame rate stays near 60 frames per second, and full detail reaches about 100 m. |
-| O | Shows or hides an overlay with the frame rate, the frame time and the slowest frame of the last half second, the draw distance, the number of blocks at each level of detail, the draw calls, the triangles and the player's position. |
+| O | Shows or hides an overlay with the frame rate, the frame time and the slowest frame of the last half second, the draw distance, the number of blocks at each level of detail, the draw calls, the triangles, the player's position and the seed. |
 | K | Raises the camera to the eye, or lowers it. While it is raised the frame is drawn through its lens and its controls are on the screen; the mouse is not captured, and a drag on the scene turns the view. See [Photographs, the gallery and artist mode](#photographs-the-gallery-and-artist-mode). |
 | Esc (camera raised) | Lowers the camera. |
 | Enter (camera raised) | Takes a picture, as the shutter button does. |
@@ -127,7 +127,7 @@ The help panel is centred on the screen and spans its width, up to 1,320 px. It 
 
 The program is a single ES module. Its main sections appear in the following order in the file:
 
-1. Random numbers and noise (`hash`, `rng`, `vnoise`, `fbm`). Everything derives from the global `SEED`; **N** replaces it.
+1. Random numbers and noise (`hash`, `rng`, `vnoise`, `fbm`). Everything derives from the global `SEED`, a number made from the seed text `SEED_TEXT` by `seedNumber`: a seed of up to nine digits is the number it spells, and any other text is hashed (the 32-bit string hash `h = 31h + c` of Heli's landscape seeds) to a positive number. Without a seed the island is that of seed 7. The seed is read from the address (`?seed=...`; `?seed=random` gives a new island on each load), the island panel (**I**) replaces it, and the address is then rewritten with `history.replaceState`, so that a reload or a copied link gives the same island; the default seed is left out of the address. The seed is not kept in the browser's storage. The statistics panel (**O**) shows it.
 2. The palette (`PAL`) and the surface pattern codes (`SP` plaster, `SR` roof tiles, `SS` stone, `SW` wood, `SB` brick, `SV` bougainvillea).
 3. The geometry builder `GB`, which merges transformed template shapes (`T.box`, `T.cyl`, `T.sph` and others) into one buffer per block, with per-vertex colour, a simple ambient occlusion term and a surface pattern attribute. At lower levels of detail it drops small pieces and simplifies round shapes.
 4. The terrain: the mainland, the offshore islands, harbours, the railway corridor, stations, villages, squares and alleys. All of these are pure functions of position, cached where they are expensive.

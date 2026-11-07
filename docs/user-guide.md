@@ -68,7 +68,11 @@ The clock runs continuously. **T** held speeds time forty times; **Shift** and *
 
 ## The island
 
-**I** generates a new island from a random seed. The new island replaces the present one entirely.
+**I** opens the island panel, which shows the seed of the present island. The seed may be any text of up to 32 characters, letters being kept in capitals; a seed of digits alone stands for the number it spells. **Random** replaces the seed with one drawn at random, and **Copy** copies it to the clipboard. **Generate**, or **Enter**, generates the island from the seed shown; it is unavailable while the seed is that of the present island. **Esc**, **Cancel** or **I** again closes the panel and leaves the island unchanged. While the panel is open, any other key is taken as part of the seed.
+
+The new island replaces the present one entirely, and the player begins it on foot. The same seed always produces the same island. The seed is added to the address of the page, so that the island is kept when the page is reloaded and may be shared as a link. An island may also be opened directly by adding `?seed=` and the seed to the address; `?seed=random` produces a different island at every load. Without a seed the game opens on the island of seed 7. The seed of the present island is also shown in the statistics panel (**O**).
+
+> **Example:** To return to an island seen earlier, open the panel with **I**, type the seed noted from the statistics panel, and press **Enter**.
 
 ## The camera and the gallery
 
@@ -104,7 +108,7 @@ The arrow at the top left returns to the gallery, as does **Esc**. If the finish
 
 ## Display and sound
 
-**Tab** sets full screen. **Page Up** and **Page Down** increase and reduce the draw distance through eleven fixed levels. **Home** returns the draw distance to automatic, in which the distance is adjusted to keep the frame rate near 60 frames per second. **O** shows or hides an overlay with the frame rate, the frame time, the draw distance, the number of blocks drawn, the draw calls, the triangles and the player's position.
+**Tab** sets full screen. **Page Up** and **Page Down** increase and reduce the draw distance through eleven fixed levels. **Home** returns the draw distance to automatic, in which the distance is adjusted to keep the frame rate near 60 frames per second. **O** shows or hides an overlay with the frame rate, the frame time, the draw distance, the number of blocks drawn, the draw calls, the triangles, the player's position and the seed of the island.
 
 **M** mutes or restores the sound. The sound is positional: fountains, church bells, the sea, trains, ferries, gulls and cats are heard from where they are, and the ambience changes between day and night.
 

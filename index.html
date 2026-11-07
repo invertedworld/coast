@@ -32,6 +32,19 @@ html,body{height:100%;margin:0;overflow:hidden;background:var(--sea);color:var(-
 .help .row>span:first-child{white-space:nowrap}
 .help .credits{margin:6px 0 0;padding-top:12px;border-top:1px solid var(--line);font-size:.82rem;color:var(--plaster-dim);font-variant-numeric:lining-nums}
 .help .credits a{color:var(--plaster)}
+.island{position:fixed;z-index:5;top:50%;left:50%;transform:translate(-50%,-50%);width:min(440px,calc(100vw - 32px));box-sizing:border-box;
+  background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:18px 22px 20px;backdrop-filter:blur(8px);display:flex;flex-direction:column;gap:14px}
+.island h3{margin:0;font-size:.72rem;font-weight:500;letter-spacing:.16em;text-transform:uppercase;color:var(--verdigris)}
+.island label{display:flex;align-items:center;gap:12px;font-size:1rem}
+.island input{flex:1;min-width:0;height:38px;box-sizing:border-box;padding:0 10px;border-radius:4px;border:1px solid var(--line);background:rgba(13,24,36,.55);color:var(--plaster);
+  font:500 1.05rem/1 var(--font-body);letter-spacing:.06em;font-variant-numeric:lining-nums tabular-nums}
+.island .btns{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end}
+.island button{font:500 .95rem/1 var(--font-body);color:var(--plaster);background:rgba(245,233,215,.11);border:1px solid transparent;border-radius:4px;padding:0 14px;height:38px;cursor:pointer;transition:background .12s,opacity .12s}
+.island button:hover:not(:disabled){background:rgba(245,233,215,.18)}
+.island button:disabled{opacity:.35;cursor:default}
+.island button.pri{background:var(--coral);color:#fff}
+.island button.pri:hover:not(:disabled){background:var(--coral-deep)}
+.island input:focus-visible,.island button:focus-visible{outline:2px solid var(--verdigris);outline-offset:2px}
 kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink);border-radius:3px;padding:3px 6px;margin-right:3px;display:inline-block;min-width:1em;text-align:center;box-shadow:0 2px 0 var(--plaster-dim)}
 .joy{position:fixed;width:110px;height:110px;margin:-55px 0 0 -55px;border-radius:50%;border:2px solid rgba(245,233,215,.55);pointer-events:none;z-index:3}
 .joy i{position:absolute;left:50%;top:50%;width:44px;height:44px;margin:-22px 0 0 -22px;border-radius:50%;background:rgba(245,233,215,.7)}
@@ -139,7 +152,7 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
       <div class="row"><span><kbd>L</kbd></span><span>Pictures and artist mode</span></div>
     </div>
     <div class="group"><h3>Island</h3>
-      <div class="row"><span><kbd>I</kbd></span><span>New island</span></div>
+      <div class="row"><span><kbd>I</kbd></span><span>New island from a seed</span></div>
     </div>
     <div class="group"><h3>Draw distance</h3>
       <div class="row"><span><kbd>PgUp</kbd></span><span>Increase</span></div>
@@ -173,6 +186,11 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
   </div>
   <p class="credits">The cats are from <a href="https://github.com/c1t1zen1/Michi-Neko-The-Cat-Philosophers-Path" target="_blank" rel="noopener">Michi-Neko: The Cat Philosopher’s Path</a> by c1t1zen1, used under the MIT licence.</p>
 </aside>
+<aside class="island" id="island" hidden aria-label="New island">
+  <h3>New island</h3>
+  <label>Seed <input id="seedIn" type="text" maxlength="32" spellcheck="false" autocomplete="off" autocapitalize="characters"></label>
+  <div class="btns"><button id="seedRandom">Random</button><button id="seedCopy">Copy</button><button id="seedCancel">Cancel</button><button id="seedGo" class="pri">Generate</button></div>
+</aside>
 
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"}}</script>
 <script type="module">
@@ -183,7 +201,20 @@ import { Cat, catRimUniforms } from './cat/cat.js';
 import { createPhoto } from './photo/camera.js';
 
 /* ================= random & noise ================= */
-let SEED = 7;
+// The island grows from a seed, which may be any text of up to SEED_MAX characters, kept in capitals. A seed of digits
+// alone is the number it spells; any other text is hashed to a number. Without a seed the island is that of seed 7.
+// The seed may be given in the address as ?seed=..., and ?seed=random gives a new island on every load.
+const SEED_MAX=32, SEED_DEFAULT='7';
+function seedText(s){ return String(s).trim().toUpperCase().slice(0,SEED_MAX); }
+function seedNumber(s){ s=seedText(s); if (/^\d{1,9}$/.test(s)) return +s;
+  let h=0; for (let i=0;i<s.length;i++) h=(((h<<5)-h)+s.charCodeAt(i))|0;
+  return Math.abs(h); }
+function randomSeed(){
+  try{ const a=new Uint32Array(2); crypto.getRandomValues(a); return (a[0].toString(36)+a[1].toString(36)).toUpperCase().slice(0,12); }
+  catch(_){ return Math.floor(Math.random()*1e12).toString(36).toUpperCase(); } }
+let SEED_TEXT=(()=>{ try{ const q=new URLSearchParams(location.search).get('seed');
+  if (q && q.trim()) return q.trim().toLowerCase()==='random'?randomSeed():seedText(q); }catch(_){} return SEED_DEFAULT; })();
+let SEED = seedNumber(SEED_TEXT);
 function hash(a,b,c){
   let h = Math.imul(a|0,0x27d4eb2d) ^ Math.imul(b|0,0x165667b1) ^ Math.imul(((c|0)+SEED*977)|0,0x9e3779b1);
   h = Math.imul(h ^ (h>>>15), 0x85ebca6b); h = Math.imul(h ^ (h>>>13), 0xc2b2ae35); h ^= h>>>16;
@@ -9529,7 +9560,7 @@ addEventListener('keydown',e=>{ keys[e.code]=true;
   if (e.code==='KeyB') setTilt(!tiltShift);
   if (e.code==='KeyP' && !e.repeat){ paused=!paused; lastClock=null; }
   if (e.code==='KeyH' && !e.repeat){ helpEl.hidden=!helpEl.hidden; lastCell=null; }
-  if (e.code==='KeyI' && !e.repeat) newIsland();
+  if (e.code==='KeyI' && !e.repeat) openIsland();
   if (e.code==='KeyZ' && !e.repeat) crouch=!crouch;
   if (e.code==='KeyX' && !e.repeat) sitKey();
   if (e.code==='PageUp'){ e.preventDefault(); if (!e.repeat) setDrawLvl(1); }
@@ -9942,7 +9973,7 @@ let seeding=false;
 const seedEl=document.getElementById('seeding'), seedBar=seedEl.querySelector('i'), seedTxt=seedEl.querySelector('span');
 const nextPaint=()=>new Promise(r=>requestAnimationFrame(()=>setTimeout(r,0)));
 function seedShow(k,what){ seedEl.hidden=false; seedBar.style.width=(k*100).toFixed(1)+'%'; seedTxt.textContent=`${what} ${Math.round(k*100)}%`; }
-async function newIsland(){ if (seeding) return; seeding=true;
+async function newIsland(text){ if (seeding) return; seeding=true;
   try{
     seedShow(0,'Generating a new island:'); await nextPaint();
     // the player starts the new island on foot, on land: off any boat, train or ferry first
@@ -9951,7 +9982,8 @@ async function newIsland(){ if (seeding) return; seeding=true;
     if (riding()) leaveTrain('street');
     if (mode==='ferry'||ridden) leaveFerry('street');
     if (mode!=='street'&&mode!=='above'){ mode='street'; camera.fov=70; camera.updateProjectionMatrix(); glowScale(); }
-    SEED=(Math.random()*1e6)|0; resetWorld(); spawnPlayer(); player.vy=0; player.holdT=1.5; eyeY=null; lastCell=null;
+    SEED_TEXT=seedText(text); SEED=seedNumber(SEED_TEXT); seedToAddress();
+    resetWorld(); spawnPlayer(); player.vy=0; player.holdT=1.5; eyeY=null; lastCell=null;
     let total=0;
     for (;;){ updateChunks(player.x,player.z,40,true); total=Math.max(total,queue.length+1);
       if (!queue.length) break;
@@ -9961,6 +9993,33 @@ async function newIsland(){ if (seeding) return; seeding=true;
     seedShow(1,'Generating a new island:'); await nextPaint();
   } finally { seeding=false; seedEl.hidden=true; last=performance.now(); }
 }
+// the seed is kept in the address, so that a reload or a shared link gives the same island; the default leaves it out
+function seedToAddress(){ try{ const u=new URL(location.href); if (SEED_TEXT===SEED_DEFAULT) u.searchParams.delete('seed'); else u.searchParams.set('seed',SEED_TEXT);
+  history.replaceState(history.state,'',u); }catch(_){} }
+// I opens the island panel, where a seed is typed or drawn at random and the island generated from it; Esc or I closes
+// it unchanged. While it is open the game sees no keys, and a printable key goes to the seed
+const islandEl=document.getElementById('island'), seedIn=document.getElementById('seedIn'), seedGo=document.getElementById('seedGo');
+function islandShown(){ return !islandEl.hidden; }
+function islandSync(){ const v=seedText(seedIn.value); seedGo.disabled=!v || v===SEED_TEXT; }
+function openIsland(){ if (seeding) return; if (document.pointerLockElement) document.exitPointerLock();
+  for (const k in keys) keys[k]=false; seedIn.value=SEED_TEXT; islandEl.hidden=false; islandSync(); }
+function closeIsland(){ islandEl.hidden=true; seedIn.blur(); canvas.focus({preventScroll:true}); }
+function islandGo(){ const v=seedText(seedIn.value); if (!v || v===SEED_TEXT) return; closeIsland(); newIsland(v); }
+seedIn.addEventListener('input',()=>{ const p=seedIn.selectionStart, v=seedIn.value.toUpperCase(); if (v!==seedIn.value){ seedIn.value=v; seedIn.setSelectionRange(p,p); } islandSync(); });
+document.getElementById('seedRandom').addEventListener('click',()=>{ seedIn.value=randomSeed(); islandSync(); });
+document.getElementById('seedCopy').addEventListener('click',()=>{ try{ navigator.clipboard.writeText(seedText(seedIn.value)).catch(()=>{}); }catch(_){} });
+document.getElementById('seedCancel').addEventListener('click',closeIsland);
+seedGo.addEventListener('click',islandGo);
+// registered before the camera's own keys, so that typing a seed neither raises the camera nor opens the gallery
+addEventListener('keydown',e=>{ if (!islandShown()) return;
+  e.stopImmediatePropagation();
+  const field=e.target===seedIn;
+  if (e.code==='Escape'){ e.preventDefault(); closeIsland(); }
+  else if (e.code==='Enter'||e.code==='NumpadEnter'){ e.preventDefault(); if (!e.repeat) islandGo(); }
+  else if (!field && e.code==='KeyI'){ e.preventDefault(); if (!e.repeat) closeIsland(); }
+  else if (!field && e.key.length===1 && !e.ctrlKey && !e.metaKey && !e.altKey){ seedIn.focus(); seedIn.select(); }
+  else if (!field && e.code==='Tab') e.preventDefault();
+},true);
 
 /* ================= HUD ================= */
 const pk=document.getElementById('placeKind'), pn=document.getElementById('placeName'), pd=document.getElementById('placeDesc'), elevEl=document.getElementById('elev');
@@ -11311,7 +11370,8 @@ function updateStats(){
     ['Blocks',`${lods[0]} full, ${lods[1]} simplified, ${lods[2]} outline${queue.length?`, ${queue.length} waiting`:''}`],
     ['Draw calls',`${info.render.calls}`],
     ['Triangles',`${(info.render.triangles/1e6).toFixed(2)} million`],
-    ['Position',`${player.x.toFixed(0)}, ${player.z.toFixed(0)}, height ${player.y.toFixed(1)} m`]];
+    ['Position',`${player.x.toFixed(0)}, ${player.z.toFixed(0)}, height ${player.y.toFixed(1)} m`],
+    ['Seed',SEED_TEXT]];
   statsEl.innerHTML=rows.map(([k,v])=>`<span>${k}</span><span>${v}</span>`).join('');
   statsEl.dataset.ready='1'; statsT=statsN=statsSum=statsWorst=0;
 }
