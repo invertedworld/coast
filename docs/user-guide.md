@@ -70,6 +70,38 @@ The clock runs continuously. **T** held speeds time forty times; **Shift** and *
 
 **I** generates a new island from a random seed. The new island replaces the present one entirely.
 
+## The camera and the gallery
+
+**K** raises a camera to the eye, and the island is then seen through its lens. The camera remains raised until it is lowered with the button at the top right of the screen, with **K** or with **Esc**. While it is raised the mouse is not captured: a drag across the scene turns the view, and the player walks, swims and turns with the usual keys. A click on the scene does not take a picture.
+
+The controls of the lens lie in a panel at the foot of the screen. Each shows its value and a scale, and is adjusted with the **−** and **+** buttons on either side, which repeat while held.
+
+**Zoom** sets the focal length, from 16 mm to 300 mm in the equivalent of a 35 mm frame; the default is 35 mm. **+** and **−** on the keyboard, and the mouse wheel, do the same.
+
+**Focus** sets the distance at which the picture is sharp. With **AF** lit the camera focuses on whatever lies within the square at the centre of the frame, and the square turns green once it is in focus. The **−** and **+** buttons, or **9** and **0**, move the focus nearer or further and change to manual focus, shown as **MF**; a click on **MF**, or **U**, returns to autofocus.
+
+**Aperture** sets the f-number, from f/1.4 to f/22; the default is f/2.8. A wider aperture gives a shallower depth of field. **[** and **]** do the same.
+
+**Exposure** brightens or darkens the picture in thirds of a stop, between −3 and +3 EV. **;** and **'** do the same.
+
+The large round button on the right is the shutter; **Enter** also takes a picture. Beneath it the latest picture is shown with the number of pictures taken, and a click on it opens the gallery.
+
+> **Example:** To photograph a bell tower against the sea, raise the camera with **K**, walk until the tower stands against the water, set the zoom to about 85 mm, close the aperture to f/8 so that both are sharp, and press the shutter.
+
+The gallery is opened with **L** or from the camera. Each row holds one photograph, with its number and the time it was taken, followed by the artworks made from it, each labelled with its style. A click on an item selects it and shows it enlarged with its details. **Download PNG** saves the selected item as a PNG file, and the bin deletes it; deleting a photograph also deletes its artworks. Neither is available while nothing is selected. Up to 24 photographs are kept for the duration of the session.
+
+### Artist mode
+
+**Artist mode** is available while a photograph is selected, and makes artworks from it. A style is chosen first: **Watercolour**, **Oil**, **Impressionist**, **Charcoal** or **3D render**. The settings of that style are then shown. Every setting is remembered by the browser and restored on the next visit.
+
+For the four painted styles, **Time to paint** sets how long the painting takes to appear, from at once to 30 seconds, and the remaining sliders set the character of the style, such as the size of the brush or the amount of hatching. For the 3D render, which calculates the light of the scene again from the camera with which the photograph was taken, **Samples per pixel** sets the quality and the time taken, **Resolution** the size of the picture, **Bounces of light** how often light is reflected, **Draw distance** how far the world is loaded, **Visibility in the haze** the clarity of the air, **Noise filter** the smoothing of the remaining noise, and **Glass and metal** and **Haze** whether those effects are included. A 3D render can be made only on the island on which the photograph was taken.
+
+**Render** makes the artwork, which is shown being made in the large preview, with its progress beneath the settings. The style and the settings may be changed and the artwork rendered again as often as required; a new render, a change of style or leaving artist mode stops a render in progress, and the square button beside the progress bar stops it directly. **Save** keeps the finished artwork in the gallery beside its photograph. It is available only while a finished artwork has not yet been saved.
+
+The arrow at the top left returns to the gallery, as does **Esc**. If the finished artwork has not been saved, a choice is offered first: **Save** keeps it, **Delete** discards it and **Cancel** remains in artist mode.
+
+> **Note:** Pictures and artworks are kept only until the page is closed or reloaded. Any that are to be kept should be downloaded.
+
 ## Display and sound
 
 **Tab** sets full screen. **Page Up** and **Page Down** increase and reduce the draw distance through eleven fixed levels. **Home** returns the draw distance to automatic, in which the distance is adjusted to keep the frame rate near 60 frames per second. **O** shows or hides an overlay with the frame rate, the frame time, the draw distance, the number of blocks drawn, the draw calls, the triangles and the player's position.

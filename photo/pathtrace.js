@@ -461,14 +461,16 @@ function collect(scene, cam, opt, info) {
    genChunk for the picture alone: they never join the game's scene. Afterwards the draw level is stepped back down
    (Page Down) and, if the game was choosing its draw distance itself, handed back to it (Home). */
 const pressKey = code => { for (const t of ['keydown', 'keyup']) window.dispatchEvent(new KeyboardEvent(t, { code, key: code })); };
-function extendView(V, opt, info) {
+function extendView(V, opt, info, cam) {
   const view0 = V.view;
   // the fixed levels go beyond 12 blocks, which the automatic setting never does
   const fixed0 = view0 > 12;
   for (let i = 0; i < 12 && V.view < opt.extendLevel; i++) { const v = V.view; pressKey('PageUp'); if (V.view === v) break; }
   info.viewBefore = view0; info.viewDuring = V.view;
   const t = performance.now();
-  V.updateChunks(V.player.x, V.player.z);
+  // round the camera, which for a picture taken earlier may stand elsewhere than the player
+  const wg = V.sea ? V.sea.parent : V.farMesh.parent;
+  V.updateChunks(cam.position.x - wg.position.x, cam.position.z - wg.position.z);
   info.tLoadBlocks = Math.round(performance.now() - t); info.blocks = V.chunks.size;
   return () => {
     for (let i = 0; i < 12 && V.view > view0; i++) { const v = V.view; pressKey('PageDown'); if (V.view === v) break; }
@@ -891,7 +893,7 @@ export async function pathTrace(opts = {}) {
   camPT.far = Math.max(camPT.far, opt.horizonReach * 5); camPT.updateProjectionMatrix();
   let restoreView = null, generated = [];
   try {
-  if (extend) { report('world', 0); await sleep0(); restoreView = extendView(V, opt, info); mark('tLoad'); }
+  if (extend) { report('world', 0); await sleep0(); restoreView = extendView(V, opt, info, cam); mark('tLoad'); }
   checkAbort(signal);
 
   // everything taken from the live scene is taken now, in one go, before the game moves on

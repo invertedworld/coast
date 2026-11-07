@@ -10,6 +10,7 @@
                a promise, which is awaited); the last call has progress 1 and shows exactly the picture that is
                returned. The canvas must be copied or drawn from during the call, as the next frame replaces it.
              duration: length of the progressive display in milliseconds (default 6000), paced by the display
+             signal: an AbortSignal; aborting stops the display and rejects the promise with an AbortError
              steps: instead of real time, a fixed number of evenly spaced frames, for recording
 
    pathTrace({renderer, scene, camera, samples, onProgress, ...}) -> Promise<HTMLCanvasElement>
@@ -698,7 +699,10 @@ function charcoal(srcTex, w, h, o) {
 
 const RUN = { watercolour, oil, impressionist, charcoal };
 
+function stopped(signal) { if (signal && signal.aborted) throw new DOMException('The painting was stopped.', 'AbortError'); }
+
 export async function applyEffect(name, source, opts = {}) {
+  stopped(opts.signal);
   const f = RUN[name]; if (!f) throw new Error(`There is no effect called ${name}.`);
   const { w, h } = size(source);
   const g = ctx(); g.renderer.setSize(w, h, false);
@@ -710,7 +714,7 @@ export async function applyEffect(name, source, opts = {}) {
       if (opts.steps) for (let i = 0; i < opts.steps; i++) { const t = opts.steps > 1 ? i / (opts.steps - 1) : 1; job.frame(t); await opts.onFrame(g.renderer.domElement, t); }
       else {
         const dur = opts.duration ?? 6000, t0 = performance.now();
-        for (;;) { const t = Math.min(1, (performance.now() - t0) / dur); job.frame(t); await opts.onFrame(g.renderer.domElement, t);
+        for (;;) { stopped(opts.signal); const t = Math.min(1, (performance.now() - t0) / dur); job.frame(t); await opts.onFrame(g.renderer.domElement, t);
           if (t >= 1) break; await new Promise(r => requestAnimationFrame(r)); }
       }
     }

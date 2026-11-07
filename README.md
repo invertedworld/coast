@@ -15,7 +15,7 @@ Coast may be played at <https://invertedworld.itch.io/coast>. The user guide is 
 | `LICENSE` | The MIT licence under which the program, its documentation and its sounds are published. |
 | `CONTRIBUTING.md` | How to run, change and submit changes to the program. |
 | `cat/` | The cat from Michi-Neko: The Cat Philosopher's Path by c1t1zen1, under the MIT licence (`cat/LICENSE`). See `cat/README.md`. |
-| `photo/` | The camera for taking pictures (K): the lens, depth of field, exposure, viewfinder and gallery, and the API for picture effects, `window.__village.photo` (documented at the top of `photo/camera.js`). |
+| `photo/` | The camera for taking pictures (K): the lens, depth of field, exposure and the controls on the screen (`camera.js`), the gallery and artist mode (`gallery.js`), the painted styles (`effects.js`) and the path tracer (`pathtrace.js`), with the API for picture effects, `window.__village.photo` (documented at the top of `photo/camera.js`). |
 | `sounds.json` | Maps sound identifiers to audio files (see [Sound](#sound)). |
 | `sounds/` | The audio files that `sounds.json` names. |
 | `publish-site.sh` | Publishes the game to markhammond.me (see [Publishing](#publishing)). |
@@ -96,6 +96,15 @@ The panel opened with **H** lists the controls. They are reproduced here for ref
 | Page Up, Page Down | Increase or reduce the draw distance through eleven fixed levels, from simplified blocks to about 140 m with full detail to about 60 m, up to simplified blocks to about 1,700 m with full detail to about 300 m. A fixed draw distance is kept whatever the frame rate. |
 | Home | Returns the draw distance to automatic, in which the simplified blocks reach between about 100 m and 500 m, as far as the frame rate stays near 60 frames per second, and full detail reaches about 100 m. |
 | O | Shows or hides an overlay with the frame rate, the frame time and the slowest frame of the last half second, the draw distance, the number of blocks at each level of detail, the draw calls, the triangles and the player's position. |
+| K | Raises the camera to the eye, or lowers it. While it is raised the frame is drawn through its lens and its controls are on the screen; the mouse is not captured, and a drag on the scene turns the view. See [Photographs, the gallery and artist mode](#photographs-the-gallery-and-artist-mode). |
+| Esc (camera raised) | Lowers the camera. |
+| Enter (camera raised) | Takes a picture, as the shutter button does. |
+| + − (camera raised) | Focal length, from 16 to 300 mm. The mouse wheel does the same. |
+| [ ] (camera raised) | Aperture, from f/1.4 to f/22. |
+| 9 0 (camera raised) | Focus nearer or further, which sets manual focus. Shift and the mouse wheel do the same. |
+| U (camera raised) | Autofocus or manual focus. |
+| ; ' (camera raised) | Exposure compensation, in thirds of a stop from −3 to +3 EV. |
+| L | Shows or hides the gallery. |
 | H | Shows or hides the help panel. |
 
 A game controller is supported through the Gamepad API. The left stick moves and the right stick looks. A jumps, B switches the view, X boards the ferry, Y rides in the cab and LB follows the train. Within 6 m of a dinghy, or while sailing, Y stands for the Y key instead, and a press of the right stick always does. At the helm the left stick steers and paddles and the triggers trim the sail, in place of zooming. In the water the left stick swims, A and the right trigger rise and the left trigger dives. RB sets tilt-shift, the triggers zoom, a press of the left stick switches between running and walking, the D-pad turns and tilts, Back mutes and Start shows the panel. At street level, in a coach and aboard a ferry, where the D-pad's down has nothing to tilt, it stands for the X key and sits or stands; in the bird's-eye view it tilts the view as before. Every other button already has a use, and the D-pad's down was the only one free in the places where one sits. The sticks have a wide dead zone, and after any change of view the left stick is ignored until it has returned to the centre.
@@ -514,6 +523,16 @@ The building and ground shaders add procedural surface patterns according to the
 - **Dinghy.** At the helm, sitting out to windward, with the eye following the boat's heel and pitch.
 
 **Tilt-shift.** The scene is rendered off-screen and blurred horizontally and vertically, with a radius that grows away from a horizontal band of sharp focus through the player, so that the view resembles a miniature model.
+
+### Photographs, the gallery and artist mode
+
+**K** raises the camera. The frame is then drawn through a lens model (`photo/camera.js`): a focal length of 16 to 300 mm in the equivalent of a 35 mm frame, depth of field from a thin lens, autofocus on the AF point at the centre or manual focus, and exposure compensation. Its controls are laid out on the screen as a camera's are. A panel at the foot of the frame holds the zoom, the focus, the aperture and the exposure, each with its value, a scale showing where the value lies in its range, and − and + buttons that step it, at once and then repeatedly while held; the focus also carries an AF/MF switch. A rail on the right holds the shutter and, beneath it, the latest photo with the number of photos taken, which opens the gallery. A button at the top right lowers the camera. The mouse is not captured while the camera is raised, so that the controls can be clicked, and clicking the scene takes no picture; a drag turns the view, and the player walks, swims and turns with the usual keys. The camera stays raised until it is lowered with that button, K or Esc. When it is lowered none of this runs and the frame is drawn exactly as before.
+
+The gallery (**L**, or the photo on the rail) lists the photos newest first, one row to a photo: the photo with its number and the time it was taken, then the artworks made from it, each labelled with its style. A click on any item selects it and shows it large with its details. **Download PNG** and **Delete** act on the item selected and are unavailable while nothing is; deleting a photo deletes its artworks. **Artist mode** is available while a photo is selected. The arrow keys move the selection and Esc or L closes the gallery. At most 24 photos are kept, for the length of the session.
+
+Artist mode makes artworks from one photo (`photo/gallery.js`). A style is chosen first, from Watercolour, Oil, Impressionist, Charcoal and 3D render, and its settings are then shown: for the painted styles the time taken to paint and the style's own settings, and for the 3D render the samples per pixel, the resolution (a multiple of the photo's size, shown in pixels), the bounces of light, the draw distance, the visibility in the haze, the noise filter, glass and metal, and haze. Every change is kept at once in the browser's local storage, under `coast.pictureSettings`, and restored the next time. **Render** makes the artwork in a large preview, where it is seen being painted or clearing from noise, with its progress beneath the settings; a render may be stopped, and another render, a change of style or leaving artist mode stops one in progress. Render may be pressed as often as wished. **Save** keeps the finished artwork in the gallery under its photo. It is available exactly while there is a finished render that has not been saved: it becomes unavailable when the artwork is saved and while a new render is made, and available again when that render finishes. Leaving artist mode with a finished render that has not been saved asks, on the page, whether to save it, delete it or stay.
+
+The painted styles run in a WebGL context of their own (`photo/effects.js`). The 3D render path-traces the scene again (`photo/pathtrace.js`) from the camera with which the photo was taken: the photo keeps its projection and world matrices and the floating origin at the time, and the camera is rebuilt from them and moved by the difference between that origin and the present one. The world is loaded round that camera for the render, so that a photo may be rendered after the player has gone elsewhere, as long as the place lies on the present island. The game's draw distance is handed back afterwards.
 
 ### Cats
 

@@ -13,6 +13,12 @@
      the depth buffer a few times a second and eased in dioptres); or manual focus.
    - Exposure compensation in thirds of a stop, applied before the tone curve.
 
+   While the camera is raised its controls are on the screen: the zoom, the focus (autofocus or manual, and the
+   distance), the aperture and the exposure, each stepped with − and + buttons that repeat while held, the shutter, the
+   pictures taken and a button that lowers the camera. The mouse is not captured, so that they can be clicked; a drag
+   on the scene turns the view, and the player walks with the usual keys. The gallery and artist mode are in
+   photo/gallery.js.
+
    When the camera is lowered none of these passes runs, the field of view and the exposure are the game's own and
    the frame is drawn exactly as before: the focal length changes the camera's field of view only for the duration
    of each render and puts it back afterwards.
@@ -31,8 +37,10 @@
        fn(canvas, meta) is called on every picture taken with the shutter, in the order added. It may return (or
        resolve to) a canvas, which replaces the picture for the next hook and for the gallery, or nothing to keep it.
    photo.gallery
-       The pictures kept, newest last (at most 24): { canvas, meta, time }. photo.download(i) saves one as PNG,
-       photo.openGallery() and photo.closeGallery() show and hide the viewer.
+       The photos kept, oldest first (at most 24): { n, canvas, meta, time, works }, where works holds the artworks
+       made from the photo in artist mode, { canvas, meta, time, style }, meta.effect naming the style and
+       meta.settings its settings. photo.download(i, j?) saves photo i, or its artwork j, as PNG;
+       photo.openGallery() and photo.closeGallery() show and hide the gallery; photo.studio is the gallery itself.
    photo.renderer, photo.scene, photo.camera
        The game's renderer, scene and camera. The camera hangs in a group shifted by the floating origin, so its
        world position is camera.position plus meta.origin.
@@ -44,13 +52,13 @@
             projectionMatrix: number[16], matrixWorld: number[16], origin: {x,y,z}, depth?: Float32Array }
 */
 import * as THREE from 'three';
+import { createGallery } from './gallery.js';
 
 const DIAG = Math.hypot(36, 24);   // the diagonal of a 35 mm frame, 43.3 mm
 const F_MIN = 16, F_MAX = 300;
 const STOPS = [1.4, 1.6, 1.8, 2, 2.2, 2.5, 2.8, 3.2, 3.5, 4, 4.5, 5, 5.6, 6.3, 7.1, 8, 9, 10, 11, 13, 14, 16, 18, 20, 22];
 const FOCUS_MIN = 0.3, FOCUS_MAX = 2000;
 const TILE = 16;
-const KEEP = 24;
 
 const VERT = `varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position.xy,0.0,1.0); }`;
 const DEPTH_FN = `
@@ -59,7 +67,7 @@ const DEPTH_FN = `
 
 export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, allowed = () => true }) {
   const S = { on: false, focal: 35, fNumber: 2.8, focus: 5, autofocus: true, ev: 0, afTarget: 5, afT: 0, af: false };
-  const gallery = [], hooks = [], pending = [];
+  const hooks = [], pending = [];
 
   /* ---------- targets ---------- */
   const half = THREE.HalfFloatType;
@@ -304,231 +312,124 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
         try { const r = await fn(pic, pic.photo); if (r && r.getContext) { if (!r.photo) r.photo = pic.photo; pic = r; } }
         catch (err) { console.warn('A picture effect failed:', err); }
       }
-      if (opts.gallery) { gallery.push({ canvas: pic, meta: pic.photo, time: pic.photo.time }); while (gallery.length > KEEP) gallery.shift(); updateCount(); if (!galEl.hidden) buildGallery(); }
+      if (opts.gallery) G.add(pic);
       return pic;
     });
   }
-  function shoot() { flash(); return capture({ effects: true, gallery: true }); }
-  // the settings of the 3D render and of the painted styles, chosen in the gallery and kept in the browser's local
-  // storage; a slider's value is a multiple of the style's own amount (1 is as designed)
-  const Q_KEY = 'coast.pictureSettings';
-  const sl = (k, label, def, min, max, step, fmt = v => '× ' + v.toFixed(2)) => ({ k, label, def, min, max, step, fmt });
-  const Q_GROUPS = [
-    { id: 'render3d', title: '3D render', fields: [
-      { k: 'samples', label: 'Samples per pixel', opts: [64, 128, 256, 512, 1024, 2048, 4096], def: 512 },
-      { k: 'scale', label: 'Resolution', opts: [[0.5, '50 % of the screen'], [0.75, '75 % of the screen'], [1, 'The screen'], [1.5, '150 % of the screen'], [2, '200 % of the screen']], def: 1 },
-      { k: 'bounces', label: 'Bounces of light', opts: [2, 3, 4, 5, 6, 8, 10], def: 5 },
-      { k: 'horizonReach', label: 'Draw distance', opts: [[1500, '1.5 km'], [3000, '3 km'], [5000, '5 km'], [8000, '8 km'], [12000, '12 km']], def: 5000 },
-      { k: 'hazeVisibility', label: 'Visibility in the haze', opts: [[8000, '8 km'], [15000, '15 km'], [28000, '28 km'], [50000, '50 km'], [100000, '100 km']], def: 28000 },
-      { k: 'denoise', label: 'Noise filter', opts: [[0, 'Off'], [2, 'Light'], [5, 'Normal'], [8, 'Strong']], def: 5 },
-      { k: 'materials', label: 'Glass and metal', check: true, def: true },
-      { k: 'haze', label: 'Haze', check: true, def: true } ] },
-    { id: 'all', title: 'Painting', fields: [ sl('duration', 'Time to paint', 6, 0, 30, 1, v => v ? v + ' s' : 'At once') ] },
-    { id: 'watercolour', title: 'Watercolour', fields: [
-      sl('abstraction', 'Simplification', 8, 2, 16, 1, v => v + ' px'), sl('washes', 'Washes', 1, 0, 2, 0.05), sl('bleed', 'Bleeding', 1, 0, 2, 0.05),
-      sl('edge', 'Dark edges', 1, 0, 2, 0.05), sl('granulation', 'Granulation', 1, 0, 2, 0.05), sl('pencil', 'Pencil', 1, 0, 2, 0.05), sl('margin', 'Paper margin', 1, 0, 2, 0.05) ] },
-    { id: 'oil', title: 'Oil', fields: [ sl('radius', 'Brush size', 6, 2, 14, 1, v => v + ' px'), sl('stroke', 'Stroke length', 1, 0.25, 2, 0.05), sl('impasto', 'Impasto', 1, 0, 2, 0.05) ] },
-    { id: 'impressionist', title: 'Impressionist', fields: [ sl('size', 'Dab size', 1, 0.4, 2.5, 0.05), sl('strokes', 'Number of dabs', 1, 0.3, 2, 0.05), sl('jitter', 'Broken colour', 1, 0, 2, 0.05) ] },
-    { id: 'charcoal', title: 'Charcoal', fields: [ sl('abstraction', 'Simplification', 5, 2, 12, 1, v => v + ' px'), sl('hatching', 'Hatching', 1, 0, 2, 0.05),
-      sl('smudge', 'Smudging', 1, 0, 2, 0.05), sl('contour', 'Contour lines', 1, 0, 2, 0.05) ] },
-  ];
-  const QS = Object.fromEntries(Q_GROUPS.map(g => [g.id, Object.fromEntries(g.fields.map(f => [f.k, f.def]))]));
-  try { const v = JSON.parse(localStorage.getItem(Q_KEY) || 'null');
-    if (v) for (const g of Q_GROUPS) for (const f of g.fields) if (v[g.id] && typeof v[g.id][f.k] === typeof f.def) QS[g.id][f.k] = v[g.id][f.k]; } catch (e) { /* storage unavailable */ }
-  const Q = QS.render3d;
-  function buildQuality() {
-    const form = galEl.querySelector('form.q'); form.textContent = '';
-    for (const g of Q_GROUPS) {
-      const fs = document.createElement('fieldset'), lg = document.createElement('legend'); lg.textContent = g.title; fs.appendChild(lg);
-      for (const f of g.fields) {
-        const l = document.createElement('label'), name = g.id + '.' + f.k, v = QS[g.id][f.k];
-        if (f.check) { l.className = 'ck'; const i = document.createElement('input'); i.type = 'checkbox'; i.checked = v; i.name = name; l.append(i, f.label); }
-        else if (f.opts) { const sel = document.createElement('select'); sel.name = name;
-          for (const o of f.opts) { const [ov, t] = Array.isArray(o) ? o : [o, String(o)]; const op = new Option(t, ov); if (ov === v) op.selected = true; sel.add(op); }
-          l.append(f.label, sel); }
-        else { const i = document.createElement('input'); i.type = 'range'; i.name = name; i.min = f.min; i.max = f.max; i.step = f.step; i.value = v;
-          const out = document.createElement('output'); out.textContent = f.fmt(v);
-          const top = document.createElement('span'); top.append(f.label, out); l.append(top, i); }
-        fs.appendChild(l);
-      }
-      form.appendChild(fs);
-    }
-  }
-  function onQInput(e) {
-    const [gid, k] = (e.target.name || '').split('.'), g = Q_GROUPS.find(x => x.id === gid), f = g && g.fields.find(x => x.k === k); if (!f) return;
-    QS[gid][k] = f.check ? e.target.checked : Number(e.target.value);
-    if (!f.check && !f.opts) e.target.parentNode.querySelector('output').textContent = f.fmt(QS[gid][k]);
-    try { localStorage.setItem(Q_KEY, JSON.stringify(QS)); } catch (err) { /* storage unavailable */ }
-  }
-  // a path-traced picture of the view through the lens, shown clearing from noise as the samples are taken; Esc stops it
-  const ptEl = document.createElement('div'); ptEl.className = 'pt'; ptEl.hidden = true;
-  ptEl.innerHTML = '<canvas></canvas><div></div>'; document.body.appendChild(ptEl);
-  let ptJob = null;
-  async function render3D() {
-    if (ptJob) return; ptJob = new AbortController();
-    if (document.pointerLockElement) document.exitPointerLock();
-    const view = ptEl.querySelector('canvas'), label = ptEl.querySelector('div'), g2 = view.getContext('2d');
-    const W = Math.round(renderer.domElement.width * Q.scale), H = Math.round(renderer.domElement.height * Q.scale);
-    view.width = W; view.height = H; g2.fillStyle = '#0e1216'; g2.fillRect(0, 0, view.width, view.height);
-    ptEl.hidden = false; label.textContent = '3D render';
-    camera.updateMatrixWorld();
-    const cam = camera.clone(); cam.fov = fovFor(S.focal, camera.aspect); cam.updateProjectionMatrix();
-    cam.matrixWorld.copy(camera.matrixWorld);
-    const phases = { world: 'Loading the world', scene: 'Gathering the scene', albedo: 'Colours', bvh: 'Building', trace: 'Tracing', denoise: 'Denoising', done: 'Done' };
-    try {
-      const { pathTrace } = await import('./pathtrace.js');
-      const out = await pathTrace({ renderer, scene, camera: cam, signal: ptJob.signal, width: W, height: H,
-        samples: Q.samples, bounces: Q.bounces, horizonReach: Q.horizonReach, hazeVisibility: Q.hazeVisibility, denoise: Q.denoise, materials: Q.materials, haze: Q.haze,
-        onProgress: ({ phase, fraction }) => { label.textContent = `3D render · ${phases[phase] || phase} · ${Math.round((fraction || 0) * 100)}%`; },
-        onFrame: (c, k) => { g2.drawImage(c, 0, 0, view.width, view.height); label.textContent = `3D render · ${Math.round(k * 100)}%`; } });
-      out.photo = { width: out.width, height: out.height, on: true, focalLength: S.focal, fNumber: S.fNumber, focusDistance: S.focus, ev: S.ev, effect: '3d', time: Date.now() };
-      gallery.push({ canvas: out, meta: out.photo, time: Date.now() }); while (gallery.length > KEEP) gallery.shift(); updateCount();
-    } catch (err) { if (err.name !== 'AbortError') console.warn('The 3D render failed:', err); }
-    ptJob = null; ptEl.hidden = true;
-  }
+  function shoot() { flash(); return capture({ effects: true, gallery: true }).then(c => { setRoll(c); return c; }); }
 
-  /* ---------- the viewfinder, the flash and the gallery ---------- */
+  /* ---------- the controls on the screen: the lens, the shutter, the pictures and the way out ---------- */
   const css = document.createElement('style');
   css.textContent = `
-.vf{position:fixed;inset:0;z-index:3;pointer-events:none;color:#f4efe6;font:500 15px/1 var(--font-body,system-ui);font-variant-numeric:tabular-nums;letter-spacing:.02em;text-shadow:0 1px 2px rgba(0,0,0,.55)}
-.vf .fr{position:absolute;inset:4.5% 3.5% calc(4.5% + 34px)}
-.vf .fr i{position:absolute;width:26px;height:26px;border:0 solid rgba(244,239,230,.85)}
-.vf .fr i:nth-child(1){left:0;top:0;border-width:1.5px 0 0 1.5px}
-.vf .fr i:nth-child(2){right:0;top:0;border-width:1.5px 1.5px 0 0}
-.vf .fr i:nth-child(3){left:0;bottom:0;border-width:0 0 1.5px 1.5px}
-.vf .fr i:nth-child(4){right:0;bottom:0;border-width:0 1.5px 1.5px 0}
-.vf .af{position:absolute;left:50%;top:50%;width:4.4vh;height:4.4vh;transform:translate(-50%,-50%);border:1.5px solid rgba(244,239,230,.85);border-radius:2px;box-shadow:0 0 0 1px rgba(0,0,0,.25)}
-.vf .af.ok{border-color:#8fe08a}
-.vf .af.mf{border-style:dashed}
-.vf .bar{position:absolute;left:0;right:0;bottom:0;height:34px;display:flex;align-items:center;justify-content:center;gap:28px;background:rgba(8,10,12,.62);text-shadow:none}
-.vf .bar b{font-weight:500}
-.vf .bar small{font-size:11px;letter-spacing:.12em;color:#a9b4ad;margin-right:6px}
-.vf .ev{display:inline-flex;align-items:center;gap:8px}
-.vf .ev s{position:relative;display:inline-block;width:96px;height:8px;text-decoration:none;background:linear-gradient(90deg,rgba(244,239,230,.7) 0 1px,transparent 1px) 0 4px/16px 4px repeat-x}
-.vf .ev s::before{content:"";position:absolute;left:48px;top:0;width:1px;height:8px;background:#f4efe6}
-.vf .ev s u{position:absolute;top:-3px;width:0;height:0;border:4px solid transparent;border-top-color:#f4efe6;margin-left:-4px}
+.cam{position:fixed;inset:0;z-index:3;pointer-events:none;color:var(--plaster,#f5e9d7);font:500 15px/1 var(--font-body,system-ui);font-variant-numeric:lining-nums tabular-nums;--deck:96px}
+.cam button{pointer-events:auto;font:inherit;color:inherit;border:0;margin:0;cursor:pointer;-webkit-tap-highlight-color:transparent;touch-action:manipulation;user-select:none}
+.cam svg{display:block;width:100%;height:100%}
+.cam .fr{position:absolute;inset:76px 3.5% calc(var(--deck) + 28px)}
+.cam .fr i{position:absolute;width:26px;height:26px;border:0 solid rgba(244,239,230,.8)}
+.cam .fr i:nth-child(1){left:0;top:0;border-width:1.5px 0 0 1.5px}
+.cam .fr i:nth-child(2){right:0;top:0;border-width:1.5px 1.5px 0 0}
+.cam .fr i:nth-child(3){left:0;bottom:0;border-width:0 0 1.5px 1.5px}
+.cam .fr i:nth-child(4){right:0;bottom:0;border-width:0 1.5px 1.5px 0}
+.cam .af{position:absolute;left:50%;top:50%;width:4.4vh;height:4.4vh;transform:translate(-50%,-50%);border:1.5px solid rgba(244,239,230,.85);border-radius:2px;box-shadow:0 0 0 1px rgba(0,0,0,.25)}
+.cam .af.ok{border-color:#8fe08a}
+.cam .af.mf{border-style:dashed}
+.cam .exit{position:absolute;top:16px;right:16px;width:44px;height:44px;padding:11px;border-radius:50%;background:rgba(10,14,18,.6);box-shadow:0 0 0 1px rgba(245,233,215,.18)}
+.cam .exit:hover{background:rgba(10,14,18,.8)}
+.cam .rail{position:absolute;right:16px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;align-items:center;gap:22px;padding:14px 10px;border-radius:44px;background:rgba(10,14,18,.5)}
+.cam .shut{width:72px;height:72px;border-radius:50%;padding:0;background:transparent;box-shadow:inset 0 0 0 3px #f5e9d7;display:grid;place-items:center}
+.cam .shut i{display:block;width:56px;height:56px;border-radius:50%;background:#f5e9d7;transition:transform .08s,background .08s}
+.cam .shut:hover i{background:#fff}
+.cam .shut:active i{transform:scale(.88)}
+.cam .roll{position:relative;width:52px;height:52px;padding:0;border-radius:8px;background:rgba(245,233,215,.12) center/cover no-repeat;box-shadow:0 0 0 1.5px rgba(245,233,215,.55)}
+.cam .roll svg{width:24px;height:24px;margin:auto;opacity:.75}
+.cam .roll.has svg{display:none}
+.cam .roll b{position:absolute;right:-7px;bottom:-7px;min-width:22px;height:22px;padding:0 5px;box-sizing:border-box;border-radius:11px;background:var(--verdigris,#7cc3ad);color:var(--ink,#26232b);font:600 .78rem/22px var(--font-body,system-ui);text-align:center}
+.cam .roll b:empty{display:none}
+.cam .deck{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);display:flex;align-items:stretch;padding:10px 8px;border-radius:14px;background:rgba(10,14,18,.62);box-shadow:0 0 0 1px rgba(245,233,215,.1)}
+.cam .dial{display:flex;flex-direction:column;align-items:center;gap:8px;padding:0 14px;min-width:150px;box-sizing:border-box}
+.cam .dial+.dial{border-left:1px solid rgba(245,233,215,.14)}
+.cam .dial small{display:flex;align-items:center;gap:8px;height:20px;font-size:.68rem;letter-spacing:.16em;text-transform:uppercase;color:var(--verdigris,#7cc3ad)}
+.cam .dial .row{display:flex;align-items:center;gap:6px}
+.cam .dial b{min-width:72px;text-align:center;font-weight:500;font-size:1.12rem;letter-spacing:.02em}
+.cam .step{width:34px;height:34px;padding:8px;border-radius:50%;background:rgba(245,233,215,.1)}
+.cam .step:hover{background:rgba(245,233,215,.2)}
+.cam .step:active{background:rgba(245,233,215,.3)}
+.cam .dial s{position:relative;display:block;width:100%;height:3px;border-radius:2px;background:rgba(245,233,215,.18);text-decoration:none}
+.cam .dial s u{position:absolute;top:-3px;width:3px;height:9px;margin-left:-1.5px;border-radius:1.5px;background:#f5e9d7}
+.cam .dial.ev s::before{content:"";position:absolute;left:50%;top:-2px;width:1px;height:7px;background:rgba(245,233,215,.6)}
+.cam .mode{height:20px;padding:0 7px;border-radius:10px;background:rgba(245,233,215,.12);font-size:.68rem;letter-spacing:.1em;color:var(--plaster-dim,#d9c8b0)}
+.cam .mode.on{background:var(--verdigris,#7cc3ad);color:var(--ink,#26232b)}
+.cam .af-dist.mf{color:#ffe7b0}
+@media (max-width:860px){
+  .cam{--deck:150px}
+  .cam .deck{left:8px;right:96px;bottom:8px;transform:none;display:grid;grid-template-columns:1fr 1fr;gap:12px 0;padding:10px 4px}
+  .cam .dial{min-width:0;padding:0 8px}
+  .cam .dial:nth-child(3){border-left:0}
+  .cam .dial b{min-width:58px;font-size:1rem}
+  .cam .rail{right:8px;top:auto;bottom:8px;transform:none;padding:10px 6px}
+  .cam .shut{width:62px;height:62px} .cam .shut i{width:48px;height:48px}
+  .cam .fr{inset:72px 3.5% calc(var(--deck) + 20px) 3.5%}
+}
 .shutter{position:fixed;inset:0;z-index:5;pointer-events:none;background:#fff;opacity:0}
 .shutter.go{animation:shutterflash .32s ease-out}
 @keyframes shutterflash{0%{opacity:.85}100%{opacity:0}}
-.gal{position:fixed;z-index:6;inset:16px;display:flex;flex-direction:column;gap:12px;box-sizing:border-box;padding:16px 18px;background:rgba(14,18,22,.94);border:1px solid rgba(245,233,215,.22);border-radius:4px;color:var(--plaster,#f5e9d7);font-family:var(--font-body,system-ui)}
-.gal header{display:flex;align-items:center;gap:12px}
-.gal h2{margin:0 auto 0 0;font:400 1.2rem var(--font-display,serif);letter-spacing:.04em}
-.gal button{font:500 .9rem var(--font-body,system-ui);color:var(--ink,#26232b);background:var(--plaster,#f5e9d7);border:0;border-radius:3px;padding:6px 12px;cursor:pointer}
-.gal button:disabled{opacity:.4;cursor:default}
-.gal .big{flex:1;min-height:0;display:flex;align-items:center;justify-content:center}
-.gal .big canvas{max-width:100%;max-height:100%;object-fit:contain;box-shadow:0 4px 20px rgba(0,0,0,.5)}
-.gal .info{font-size:.85rem;color:var(--plaster-dim,#d9c8b0);font-variant-numeric:tabular-nums;text-align:center;min-height:1em}
-.gal .strip{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;min-height:74px}
-.gal .strip img{height:66px;border:2px solid transparent;border-radius:2px;cursor:pointer;flex:none}
-.gal .strip img.sel{border-color:var(--plaster,#f5e9d7)}
-.gal .fx{display:flex;gap:6px;margin-right:12px}
-.gal .fx button{background:rgba(245,233,215,.16);color:var(--plaster,#f5e9d7)}
-.pt{position:fixed;inset:0;z-index:7;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:rgba(14,18,22,.92);color:var(--plaster,#f5e9d7);font:500 .9rem var(--font-body,system-ui);font-variant-numeric:tabular-nums}
-.pt canvas{max-width:calc(100% - 32px);max-height:calc(100% - 80px);box-shadow:0 4px 20px rgba(0,0,0,.5)}
-.gal form.q{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px 18px;max-height:45vh;overflow-y:auto;padding:12px 14px;background:rgba(245,233,215,.07);border-radius:3px;font-size:.85rem}
-.gal form.q[hidden]{display:none}
-.gal form.q fieldset{border:0;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
-.gal form.q legend{font:400 1rem var(--font-display,serif);color:var(--plaster,#f5e9d7);padding:0 0 4px}
-.gal form.q label>span{display:flex;justify-content:space-between}
-.gal form.q output{font-variant-numeric:tabular-nums;color:var(--plaster,#f5e9d7)}
-.gal form.q input[type=range]{width:100%;accent-color:#d9c8b0}
-.gal form.q label{display:flex;flex-direction:column;gap:4px;color:var(--plaster-dim,#d9c8b0)}
-.gal form.q label.ck{flex-direction:row;align-items:center;gap:8px}
-.gal form.q select,.gal form.q input[type=number]{font:inherit;color:var(--ink,#26232b);background:var(--plaster,#f5e9d7);border:0;border-radius:3px;padding:4px 6px}
-.gal .none{margin:auto;color:var(--plaster-dim,#d9c8b0)}
 `;
   document.head.appendChild(css);
-  const vf = document.createElement('div'); vf.className = 'vf'; vf.hidden = true;
-  vf.innerHTML = `<div class="fr"><i></i><i></i><i></i><i></i></div><div class="af"></div>
-    <div class="bar"><span><b data-k="focal"></b></span><span><b data-k="fno"></b></span><span><small data-k="mode"></small><b data-k="dist"></b></span>
-    <span class="ev"><s><u></u></s><b data-k="ev"></b></span><span><b data-k="count"></b></span></div>`;
+  const ic = d => `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+  const MINUS = ic('<path d="M6 12h12"/>'), PLUS = ic('<path d="M6 12h12M12 6v12"/>');
+  const dial = (k, label, dn, up, tdn, tup, extra = '') => `<div class="dial ${k}"><small>${label}${extra}</small>
+    <div class="row"><button class="step" data-c="${dn}" title="${tdn}" aria-label="${tdn}">${MINUS}</button><b data-k="${k}"></b><button class="step" data-c="${up}" title="${tup}" aria-label="${tup}">${PLUS}</button></div><s><u data-m="${k}"></u></s></div>`;
+  const hud = document.createElement('div'); hud.className = 'cam'; hud.hidden = true;
+  hud.innerHTML = `<div class="fr"><i></i><i></i><i></i><i></i></div><div class="af"></div>
+    <button class="exit" data-c="exit" title="Leave the camera (K)" aria-label="Leave the camera">${ic('<path d="M6 6l12 12M18 6L6 18"/>')}</button>
+    <div class="rail"><button class="shut" data-c="shoot" title="Take a picture (Enter)" aria-label="Take a picture"><i></i></button>
+      <button class="roll" data-c="gallery" title="Pictures (L)" aria-label="Pictures">${ic('<rect x="3.5" y="5.5" width="17" height="13" rx="1.5"/><path d="M3.5 15.5l5-4.5 4 3.5 3-2.5 5 4"/>')}<b></b></button></div>
+    <div class="deck">${dial('focal', 'Zoom', 'zoom-', 'zoom+', 'Wider (−)', 'Longer (+)')}
+      ${dial('focus', 'Focus', 'near', 'far', 'Nearer (9)', 'Further (0)', '<button class="mode" data-c="af" title="Autofocus or manual focus (U)">AF</button>')}
+      ${dial('fno', 'Aperture', 'open', 'close', 'Wider aperture ([)', 'Narrower aperture (])')}
+      ${dial('ev', 'Exposure', 'ev-', 'ev+', 'Darker (;)', "Brighter (')")}</div>`;
   const shutterEl = document.createElement('div'); shutterEl.className = 'shutter';
-  const galEl = document.createElement('div'); galEl.className = 'gal'; galEl.hidden = true;
-  galEl.setAttribute('role', 'dialog'); galEl.setAttribute('aria-label', 'Pictures');
-  galEl.innerHTML = `<header><h2>Pictures</h2><span class="fx"><button data-fx="watercolour">Watercolour</button><button data-fx="oil">Oil</button><button data-fx="impressionist">Impressionist</button><button data-fx="charcoal">Charcoal</button></span><button data-a="q">Settings</button><button data-a="dl">Download PNG</button><button data-a="del">Delete</button><button data-a="close">Close</button></header>
-    <form class="q" hidden></form><div class="big"></div><div class="info"></div><div class="strip"></div>`;
-  document.body.append(vf, shutterEl, galEl);
-  galEl.querySelector('form.q').addEventListener('input', onQInput);
-  const vfK = k => vf.querySelector(`[data-k="${k}"]`);
-  const afEl = vf.querySelector('.af'), evMark = vf.querySelector('.ev u'), vignette = document.querySelector('.vignette');
+  document.body.append(hud, shutterEl);
+  const vfK = k => hud.querySelector(`[data-k="${k}"]`), vfM = k => hud.querySelector(`[data-m="${k}"]`);
+  const afEl = hud.querySelector('.af'), modeEl = hud.querySelector('.mode'), rollEl = hud.querySelector('.roll'), deckEl = hud.querySelector('.deck');
+  const vignette = document.querySelector('.vignette');
+
+  const G = createGallery({ renderer, scene, camera, origin, onClose: () => { canvas.focus && canvas.focus(); } });
+  function setRoll(c) {
+    const n = G.photos.length; rollEl.querySelector('b').textContent = n ? String(n) : '';
+    const p = G.photos[n - 1]; rollEl.classList.toggle('has', !!p);
+    if (!p) { rollEl.style.backgroundImage = ''; return; }
+    if (!p.roll) { const t = document.createElement('canvas'), h = 104; t.width = Math.round(h * p.canvas.width / p.canvas.height); t.height = h; t.getContext('2d').drawImage(p.canvas, 0, 0, t.width, t.height); p.roll = t.toDataURL('image/jpeg', 0.8); }
+    rollEl.style.backgroundImage = `url(${p.roll})`;
+  }
 
   const fmtDist = m => m >= 1000 ? '∞' : m < 10 ? m.toFixed(1) + ' m' : Math.round(m) + ' m';
   const fmtEV = ev => (Math.abs(ev) < 0.05 ? '±0.0' : (ev > 0 ? '+' : '−') + Math.abs(ev).toFixed(1)) + ' EV';
   const fmtF = N => 'f/' + (Number.isInteger(N) ? N : N.toFixed(1));
+  const logPos = (v, a, b) => clamp(Math.log(v / a) / Math.log(b / a), 0, 1);
   let lastVF = '';
   function updateViewfinder() {
-    const txt = [Math.round(S.focal) + ' mm', fmtF(S.fNumber), S.autofocus ? 'AF' : 'MF', fmtDist(S.focus), fmtEV(S.ev), S.af].join('|');
+    const txt = [Math.round(S.focal), S.fNumber, S.autofocus, fmtDist(S.focus), S.ev, S.af, G.photos.length].join('|');
     if (txt === lastVF) return; lastVF = txt;
-    vfK('focal').textContent = Math.round(S.focal) + ' mm';
-    vfK('fno').textContent = fmtF(S.fNumber);
-    vfK('mode').textContent = S.autofocus ? 'AF' : 'MF';
-    vfK('dist').textContent = fmtDist(S.focus);
-    vfK('ev').textContent = fmtEV(S.ev);
-    evMark.style.left = (48 + S.ev * 16) + 'px';
+    vfK('focal').textContent = Math.round(S.focal) + ' mm'; vfM('focal').style.left = logPos(S.focal, F_MIN, F_MAX) * 100 + '%';
+    vfK('fno').textContent = fmtF(S.fNumber); vfM('fno').style.left = STOPS.indexOf(S.fNumber) / (STOPS.length - 1) * 100 + '%';
+    vfK('focus').textContent = fmtDist(S.focus); vfM('focus').style.left = logPos(S.focus, FOCUS_MIN, 1000) * 100 + '%';
+    vfK('ev').textContent = fmtEV(S.ev); vfM('ev').style.left = (S.ev + 3) / 6 * 100 + '%';
+    modeEl.textContent = S.autofocus ? 'AF' : 'MF'; modeEl.classList.toggle('on', S.autofocus);
     afEl.classList.toggle('ok', S.af); afEl.classList.toggle('mf', !S.autofocus);
   }
-  function updateCount() { vfK('count').textContent = `[${gallery.length}]`; lastVF = ''; }
-  updateCount();
   function flash() { shutterEl.classList.remove('go'); void shutterEl.offsetWidth; shutterEl.classList.add('go'); }
 
-  let sel = -1;
-  function buildGallery() {
-    const strip = galEl.querySelector('.strip'), big = galEl.querySelector('.big'), info = galEl.querySelector('.info');
-    strip.textContent = ''; big.textContent = ''; info.textContent = '';
-    if (!gallery.length) { big.innerHTML = '<span class="none">No pictures</span>'; sel = -1; }
-    else {
-      sel = clamp(sel < 0 ? gallery.length - 1 : sel, 0, gallery.length - 1);
-      gallery.forEach((g, i) => {
-        if (!g.thumb) { const t = document.createElement('canvas'), h = 132; t.width = Math.round(h * g.canvas.width / g.canvas.height); t.height = h; t.getContext('2d').drawImage(g.canvas, 0, 0, t.width, t.height); g.thumb = t.toDataURL('image/jpeg', 0.8); }
-        const im = new Image(); im.src = g.thumb; im.alt = `Picture ${i + 1}`; if (i === sel) im.className = 'sel';
-        im.onclick = () => { sel = i; buildGallery(); }; strip.appendChild(im);
-      });
-      big.appendChild(gallery[sel].canvas);
-      const m = gallery[sel].meta;
-      info.textContent = `${sel + 1} of ${gallery.length} · ${m.width} × ${m.height}` + (m.on ? ` · ${Math.round(m.focalLength)} mm · ${fmtF(m.fNumber)} · ${fmtDist(m.focusDistance)} · ${fmtEV(m.ev)}` : '');
-      strip.querySelector('.sel')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-    }
-    galEl.querySelector('[data-a="dl"]').disabled = galEl.querySelector('[data-a="del"]').disabled = !gallery.length;
-  }
-  function openGallery() { if (document.pointerLockElement) document.exitPointerLock(); sel = -1; buildGallery(); galEl.hidden = false; }
-  function closeGallery() { galEl.hidden = true; galEl.querySelector('.big').textContent = ''; canvas.focus && canvas.focus(); }
-  function download(i = gallery.length - 1) {
-    const g = gallery[i]; if (!g) return;
-    const d = new Date(g.time), p = n => String(n).padStart(2, '0');
-    const name = `coast-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}.png`;
-    g.canvas.toBlob(b => { const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); }, 'image/png');
-  }
-  // a painted version of the chosen picture, shown being made in place of it, then kept beside it in the gallery
-  let painting = false;
-  async function paint(name) {
-    if (painting || sel < 0) return; painting = true;
-    const src = gallery[sel], big = galEl.querySelector('.big'), view = document.createElement('canvas');
-    view.width = src.canvas.width; view.height = src.canvas.height; const g2 = view.getContext('2d');
-    big.textContent = ''; big.appendChild(view);
-    galEl.querySelectorAll('button').forEach(b => { b.disabled = b.dataset.a !== 'close'; });
-    try {
-      const { applyEffect } = await import('./effects.js');
-      const dur = QS.all.duration * 1000;
-      const out = await applyEffect(name, src.canvas, { ...QS[name], seed: (Date.now() & 0xffff), duration: dur, onFrame: dur ? c => { g2.drawImage(c, 0, 0, view.width, view.height); } : undefined });
-      out.photo = { ...src.meta, effect: name };
-      gallery.splice(sel + 1, 0, { canvas: out, meta: out.photo, time: Date.now() }); while (gallery.length > KEEP) gallery.shift();
-      sel = Math.min(sel + 1, gallery.length - 1); updateCount();
-    } catch (err) { console.warn('The picture could not be painted:', err); }
-    painting = false; if (!galEl.hidden) buildGallery();
-  }
-  galEl.addEventListener('click', e => {
-    if (e.target.dataset && e.target.dataset.fx) return paint(e.target.dataset.fx);
-    const a = e.target.dataset && e.target.dataset.a; if (!a) return;
-    if (a === 'close') closeGallery();
-    if (a === 'q') { const form = galEl.querySelector('form.q'); if (form.hidden) buildQuality(); form.hidden = !form.hidden; }
-    if (a === 'dl') download(sel);
-    if (a === 'del' && sel >= 0) { gallery.splice(sel, 1); sel = Math.min(sel, gallery.length - 1); updateCount(); buildGallery(); }
-  });
-
   /* ---------- controls ---------- */
-  function enter() { if (S.on || !allowed()) return; S.on = true; S.afT = 0; S.afTarget = S.focus; vf.hidden = false; if (vignette) vignette.hidden = true; lastVF = ''; updateViewfinder(); }
-  function exit() { if (!S.on) return; S.on = false; vf.hidden = true; if (vignette) vignette.hidden = false; }
+  function enter() {
+    if (S.on || !allowed()) return; S.on = true; S.afT = 0; S.afTarget = S.focus;
+    if (document.pointerLockElement) document.exitPointerLock();
+    hud.hidden = false; if (vignette) vignette.hidden = true; lastVF = ''; setRoll(); updateViewfinder();
+    hud.style.setProperty('--deck', deckEl.offsetHeight + 'px');
+  }
+  function exit() { if (!S.on) return; S.on = false; release(); hud.hidden = true; if (vignette) vignette.hidden = false; }
   function toggle() { S.on ? exit() : enter(); }
+  function openGallery() { release(); G.open(); }
   const setFocal = mm => { S.focal = clamp(mm, F_MIN, F_MAX); };
   const setAperture = N => { S.fNumber = STOPS.reduce((a, b) => Math.abs(b - N) < Math.abs(a - N) ? b : a); };
   const stepAperture = d => { const i = STOPS.indexOf(S.fNumber); S.fNumber = STOPS[clamp((i < 0 ? 6 : i) + d, 0, STOPS.length - 1)]; };
@@ -536,25 +437,44 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
   const setFocus = m => { if (m === null || m === undefined) { S.autofocus = true; S.afT = 0; } else { S.autofocus = false; S.focus = clamp(m, FOCUS_MIN, FOCUS_MAX); } };
   const nudgeFocus = k => setFocus(S.focus * k);
   const zoom = k => setFocal(S.focal * k);
+  const ZOOM = Math.pow(2, 1 / 8);
+  // the buttons that step a setting repeat while held: at once, then after 0.4 s every 70 ms (the aperture and the
+  // exposure, whose steps are coarse, every 160 ms)
+  const STEP = { 'zoom-': () => zoom(1 / ZOOM), 'zoom+': () => zoom(ZOOM), near: () => nudgeFocus(1 / 1.1), far: () => nudgeFocus(1.1),
+    open: () => stepAperture(-1), close: () => stepAperture(1), 'ev-': () => setEV(S.ev - 1 / 3), 'ev+': () => setEV(S.ev + 1 / 3) };
+  let held = null;
+  function release() { if (held) { clearTimeout(held.t); held = null; } }
+  hud.addEventListener('mousedown', e => e.preventDefault());   // the controls never take the keyboard's focus
+  hud.addEventListener('pointerdown', e => {
+    const b = e.target.closest('[data-c]'); if (!b || e.button > 0) return;
+    const c = b.dataset.c, fn = STEP[c]; if (!fn) return;
+    e.preventDefault(); release(); fn(); updateViewfinder();
+    const every = c === 'open' || c === 'close' || c === 'ev-' || c === 'ev+' ? 160 : 70;
+    const tick = () => { fn(); updateViewfinder(); held.t = setTimeout(tick, every); };
+    held = { t: setTimeout(tick, 400) };
+  });
+  for (const t of ['pointerup', 'pointercancel', 'blur']) addEventListener(t, release);
+  hud.addEventListener('pointerout', e => { if (held && e.target.closest('[data-c]') && !e.target.closest('[data-c]').contains(e.relatedTarget)) release(); });
+  hud.addEventListener('click', e => {
+    const c = e.target.closest('[data-c]')?.dataset.c; if (!c) return;
+    if (c === 'shoot') shoot();
+    else if (c === 'exit') exit();
+    else if (c === 'gallery') openGallery();
+    else if (c === 'af') { setFocus(S.autofocus ? S.focus : null); updateViewfinder(); }
+  });
 
   const stop = e => { e.preventDefault(); e.stopImmediatePropagation(); };
   addEventListener('keydown', e => {
-    if (!galEl.hidden) {
-      if (e.code === 'Escape' || (e.code === 'KeyL' && !e.repeat)) closeGallery();
-      else if (e.code === 'ArrowLeft' && sel > 0) { sel--; buildGallery(); }
-      else if (e.code === 'ArrowRight' && sel < gallery.length - 1) { sel++; buildGallery(); }
-      else if (e.code === 'Tab') return;
-      return stop(e);
-    }
-    if (ptJob && e.isTrusted) { if (e.code === 'Escape') ptJob.abort(); return stop(e); }
+    if (!e.isTrusted) return;   // keys the program presses for itself (the path tracer's draw distance) pass through
+    if (G.handleKey(e)) return;
     if (e.code === 'KeyK') { if (!e.repeat) toggle(); return stop(e); }
     if (e.code === 'KeyL') { if (!e.repeat) openGallery(); return stop(e); }
     if (!S.on) return;
     const c = e.code;
-    if ((c === 'Enter' || c === 'NumpadEnter') && e.shiftKey) { if (!e.repeat) render3D(); }
+    if (c === 'Escape') exit();
     else if (c === 'Enter' || c === 'NumpadEnter') { if (!e.repeat) shoot(); }
-    else if (c === 'Equal' || c === 'NumpadAdd') zoom(Math.pow(2, 1 / 8));
-    else if (c === 'Minus' || c === 'NumpadSubtract') zoom(Math.pow(2, -1 / 8));
+    else if (c === 'Equal' || c === 'NumpadAdd') zoom(ZOOM);
+    else if (c === 'Minus' || c === 'NumpadSubtract') zoom(1 / ZOOM);
     else if (c === 'BracketLeft') stepAperture(-1);
     else if (c === 'BracketRight') stepAperture(1);
     else if (c === 'Semicolon') setEV(S.ev - 1 / 3);
@@ -572,15 +492,15 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
     if (e.shiftKey) nudgeFocus(Math.exp(-d * 0.0015));
     else zoom(Math.exp(-d * 0.0018));
   }, { passive: false, capture: true });
-  canvas.addEventListener('mousedown', e => {
-    if (S.on && e.button === 0 && document.pointerLockElement === canvas) { shoot(); stop(e); }
-  }, true);
+  addEventListener('resize', () => { if (S.on) hud.style.setProperty('--deck', deckEl.offsetHeight + 'px'); });
 
   // the mouse turns the view less with a longer lens, so that the subject moves across the frame at the same rate
   const lookScale = () => S.on && saved === null ? Math.tan(fovFor(S.focal, camera.aspect) * Math.PI / 360) / Math.tan(camera.fov * Math.PI / 360) : 1;
 
   const api = {
-    capture, shoot, render3D, gallery, renderer, scene, camera, download, openGallery, closeGallery,
+    capture, shoot, renderer, scene, camera, openGallery, closeGallery: () => G.close(),
+    get gallery() { return G.photos; }, studio: G,
+    download(i = G.photos.length - 1, j = null) { const p = G.photos[i]; if (p) G.download(j == null ? p : p.works[j]); },
     addEffectHook(fn) { hooks.push(fn); return () => { const i = hooks.indexOf(fn); if (i >= 0) hooks.splice(i, 1); }; },
     removeEffectHook(fn) { const i = hooks.indexOf(fn); if (i >= 0) hooks.splice(i, 1); },
     get state() { return { on: S.on, focal: S.focal, fNumber: S.fNumber, focus: S.focus, autofocus: S.autofocus, ev: S.ev, focused: S.af }; },

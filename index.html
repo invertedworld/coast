@@ -126,10 +126,9 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
     </div>
     <div class="group"><h3>Camera</h3>
       <div class="row"><span><kbd>K</kbd></span><span>Raise or lower the camera</span></div>
+      <div class="row"><span><kbd>Esc</kbd></span><span>Lower the camera</span></div>
       <div class="row"><span><kbd>Enter</kbd></span><span>Take a picture</span></div>
-      <div class="row"><span><kbd>Shift</kbd><kbd>Enter</kbd></span><span>Take a 3D render</span></div>
-      <div class="row"><span><kbd>Esc</kbd></span><span>Stop the 3D render</span></div>
-      <div class="row"><span>Click</span><span>Take a picture, with the mouse captured</span></div>
+      <div class="row"><span>Drag</span><span>Turn the camera</span></div>
       <div class="row"><span><kbd>+</kbd><kbd>−</kbd></span><span>Focal length</span></div>
       <div class="row"><span>Wheel</span><span>Focal length</span></div>
       <div class="row"><span><kbd>[</kbd><kbd>]</kbd></span><span>Aperture</span></div>
@@ -137,7 +136,7 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
       <div class="row"><span><kbd>Shift</kbd> and wheel</span><span>Focus</span></div>
       <div class="row"><span><kbd>U</kbd></span><span>Autofocus or manual focus</span></div>
       <div class="row"><span><kbd>;</kbd><kbd>'</kbd></span><span>Exposure compensation</span></div>
-      <div class="row"><span><kbd>L</kbd></span><span>Pictures taken</span></div>
+      <div class="row"><span><kbd>L</kbd></span><span>Pictures and artist mode</span></div>
     </div>
     <div class="group"><h3>Island</h3>
       <div class="row"><span><kbd>I</kbd></span><span>New island</span></div>
@@ -9579,7 +9578,8 @@ function pollPad(dt){
 addEventListener('blur',()=>{ for (const k in keys) keys[k]=false; });
 let dragging=false, lx=0, ly=0;
 function lockPointer(){ try{ const p=canvas.requestPointerLock(); if (p&&p.catch) p.catch(()=>{}); }catch(_){} }
-canvas.addEventListener('mousedown',e=>{ dragging=true; lx=e.clientX; ly=e.clientY; if (mode!=='above'&&started&&document.pointerLockElement!==canvas) lockPointer(); });
+// with the camera raised the mouse is never captured, so that its controls on the screen can be clicked: a drag turns the view
+canvas.addEventListener('mousedown',e=>{ dragging=true; lx=e.clientX; ly=e.clientY; if (mode!=='above'&&started&&!PHOTO.on&&document.pointerLockElement!==canvas) lockPointer(); });
 addEventListener('mouseup',()=>dragging=false);
 /* a double click on the ground in the bird's-eye view goes down to street level at that spot, facing the same way */
 function surfaceTopAt(x,z){ let g=walkGround(x,z,1e4); const cx=Math.floor(x/C), cz=Math.floor(z/C);
