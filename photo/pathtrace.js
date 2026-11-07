@@ -59,8 +59,10 @@ const DEFAULTS = {
   horizonReach: 5000,      // metres: beyond the blocks, the land is drawn as terrain alone out to here
   terrainStep: 0.005,      // radians: the angular spacing of the distant terrain's points, as seen from the camera
   colourReach: 520,        // metres: within this the game's own surface colours are drawn for blocks built for the picture
-  maxTriangles: 12e6,      // the most triangles the path-traced scene may hold; the farthest blocks are left out beyond it
-  maxVertices: 16e6,       // the most vertices: the path tracer keeps four float4 textures of this length on the GPU
+  maxTriangles: null,      // the most triangles the path-traced scene may hold; the farthest blocks are left out beyond it.
+                           // null takes 4.5 million, or less on a machine that reports under 8 GB of memory
+  maxVertices: null,       // the most vertices: the path tracer keeps four float4 textures of this length on the GPU;
+                           // null takes 6 million, or less likewise
   materials: true,         // glass and metal are given physical materials of their own
   haze: true,              // aerial perspective in place of the game's fog
   hazeVisibility: 28000,   // metres: the meteorological visibility at sea level (extinction 3.912 / visibility)
@@ -86,7 +88,11 @@ const DEFAULTS = {
   rippleSize: 4,           // metres across one tile of the ripple pattern
   exposure: null,          // null takes the game renderer's exposure
   fog: true,               // the game's own fog, used only when the haze is turned off
-  tiles: null,             // path tracer tiles per side; null chooses from the size
+  tiles: null,             // path tracer tiles per side to begin with; null chooses from the size. The number is then
+                           // adjusted between samples so that each tile keeps the GPU busy for about tileMs
+  tileMs: 8,               // milliseconds of GPU time aimed at for one tile
+  gpuShare: 0.6,           // the share of each display frame the tracing may take, so that the page and the rest of
+                           // the system keep enough of the GPU to stay responsive
   onFrame: null,           // onFrame(canvas, progress): the picture while it clears (see the notes on pathTrace)
   frameInterval: 120,      // milliseconds: the least time between two frames handed to onFrame
   previewFilter: 4,        // a-trous iterations for the frames handed to onFrame (0 shows them unfiltered)
@@ -201,7 +207,7 @@ function runWorker(wk, msg, transfer, signal) {
 }
 async function buildBVH(geo, options, signal, info) {
   const pos = geo.attributes.position.array, idx = geo.index.array, nt = idx.length / 3;
-  const levels = nt < 200000 ? 1 : Math.max(1, Math.min(3, Math.floor(Math.log2(Math.max(2, (navigator.hardwareConcurrency || 4) - 1)))));
+  const levels = nt < 200000 ? 1 : Math.max(1, Math.min(2, Math.floor(Math.log2(Math.max(2, (navigator.hardwareConcurrency || 4) - 1)))));
   try {
     const t0 = performance.now();
     const pool = await getBVHPool(1 << levels);
@@ -1098,6 +1104,9 @@ function lightsOf(scene) {
 /* ---------- the main entry ---------- */
 export async function pathTrace(opts = {}) {
   const opt = { ...DEFAULTS, ...opts };
+  const mem = Math.min(8, navigator.deviceMemory || 8) / 8;
+  if (opt.maxTriangles == null) opt.maxTriangles = 4.5e6 * mem;
+  if (opt.maxVertices == null) opt.maxVertices = 6e6 * mem;
   const { renderer, scene, camera, signal, onProgress } = opt;
   const samples = Math.max(1, Math.round(opt.samples));
   if (!scene || !camera) throw new Error('pathTrace needs the scene and the camera.');
@@ -1263,7 +1272,7 @@ export async function pathTrace(opts = {}) {
   m.environmentIntensity = 1; m.environmentRotation.identity();
   m.backgroundMap = sky.bgTex; m.backgroundAlpha = 1; m.backgroundIntensity = 1; m.backgroundBlur = 0; m.backgroundRotation.identity();
   pt.alpha = !R.extensions.get('EXT_float_blend');
-  const tiles = opt.tiles || Math.max(1, Math.ceil(Math.sqrt(w * h / 70000)));
+  let tiles = opt.tiles || Math.max(2, Math.ceil(Math.sqrt(w * h / 25000)));
   pt.tiles.set(tiles, tiles);
   pt.setSize(w, h);
   pt.setCamera(camPT);
@@ -1348,31 +1357,41 @@ export async function pathTrace(opts = {}) {
     lastFrame = performance.now(); frameCost = lastFrame - tf;
   };
 
-  // the samples, a tile at a time; one sample is left to run on the GPU while the next is queued behind it
+  // the samples, a tile at a time, with one tile on the GPU at once. Each tile is waited for before the next is sent,
+  // and once the tiles of one display frame have kept the GPU busy for gpuShare of it, the tracing waits for the next
+  // frame, so that the page, the browser and the rest of the system are never starved of the GPU. Between samples the
+  // number of tiles is adjusted so that one tile takes about tileMs
   report('trace', 0);
   const gl = R.getContext();
   const waitFence = async f => { for (;;) { const st = gl.clientWaitSync(f, 0, 0); if (st === gl.ALREADY_SIGNALED || st === gl.CONDITION_SATISFIED || st === gl.WAIT_FAILED) break; await new Promise(r => setTimeout(r, 1)); } gl.deleteSync(f); };
+  const nextFrame = () => new Promise(r => { let done = false; const go = () => { if (!done) { done = true; r(); } };
+    if (!document.hidden) requestAnimationFrame(go); setTimeout(go, 50); });
+  const frameMs = 1000 / 60, slice = frameMs * opt.gpuShare;
   const half = Math.max(1, Math.floor(samples / 2)), gainAt = Math.min(8, samples);
-  let tTrace = 0, halfDone = false, gainDone = false, early = false, fence = null;
-  try {
-    while (pt.samples < samples) {
-      checkAbort(signal);
-      const s0 = pt.samples;
-      pt.update();
-      if (pt.isCompiling) { await new Promise(r => setTimeout(r, 30)); continue; }
-      if (tTrace === 0) { await gpuIdle(R); mark('tCompile'); tTrace = performance.now(); }
-      if (Math.floor(pt.samples) !== Math.floor(s0)) {
-        if (!halfDone && pt.samples >= half) { copyMat.uniforms.t.value = pt.target.texture; runPass(copyMat, tH); halfDone = true; }
-        if (!gainDone && pt.samples >= gainAt) { measureGain(filtered(0)); gainDone = true; }
-        else if (!gainDone && !early && opt.onFrame) { measureGain(filtered(opt.previewFilter)); early = true; info.earlyGain = info.sceneGain; }
-        if (opt.onFrame && pt.samples < samples && (lastFrame === 0 || performance.now() - lastFrame >= Math.max(opt.frameInterval, frameCost * 10))) showFrame(pt.samples / samples);
-        const f = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0); gl.flush();
-        if (fence) await waitFence(fence);
-        fence = f;
-        report('trace', pt.samples / samples);
-      }
+  let tTrace = 0, halfDone = false, gainDone = false, early = false, busy = 0, worst = 0;
+  info.tilesUsed = [];
+  while (pt.samples < samples) {
+    checkAbort(signal);
+    const s0 = pt.samples;
+    pt.update();
+    if (pt.isCompiling) { await new Promise(r => setTimeout(r, 30)); continue; }
+    if (tTrace === 0) { await gpuIdle(R); mark('tCompile'); tTrace = performance.now(); continue; }
+    const tq = performance.now();
+    const fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0); gl.flush(); await waitFence(fence);
+    const dt = performance.now() - tq; busy += dt; worst = Math.max(worst, dt);
+    if (Math.floor(pt.samples) !== Math.floor(s0)) {
+      if (!halfDone && pt.samples >= half) { copyMat.uniforms.t.value = pt.target.texture; runPass(copyMat, tH); halfDone = true; }
+      if (!gainDone && pt.samples >= gainAt) { measureGain(filtered(0)); gainDone = true; }
+      else if (!gainDone && !early && opt.onFrame) { measureGain(filtered(opt.previewFilter)); early = true; info.earlyGain = info.sceneGain; }
+      if (opt.onFrame && pt.samples < samples && (lastFrame === 0 || performance.now() - lastFrame >= Math.max(opt.frameInterval, frameCost * 10))) { showFrame(pt.samples / samples); busy += frameCost; }
+      report('trace', pt.samples / samples);
+      // the tiles of the next sample, from the slowest tile of this one
+      const want = Math.min(24, Math.max(1, Math.round(tiles * Math.sqrt(worst / opt.tileMs))));
+      if (worst > opt.tileMs * 1.5 || worst < opt.tileMs * 0.4) if (want !== tiles) { tiles = want; pt.tiles.set(tiles, tiles); info.tilesUsed.push(tiles); }
+      worst = 0;
     }
-  } finally { if (fence) gl.deleteSync(fence); }
+    if (busy >= slice) { busy = 0; await nextFrame(); }
+  }
   if (!gainDone) measureGain(filtered(0));
   await gpuIdle(R);
   info.traceMs = Math.round(performance.now() - tTrace);

@@ -274,7 +274,7 @@ export function createGallery({ renderer, scene, camera, origin, onClose }) {
     <div class="body"><aside><div class="scroll">
         <section><h3>Style</h3><div class="tiles">${STYLES.map(([id, name]) => `<button type="button" data-style="${id}" aria-pressed="false">${ICON[id]}${name}</button>`).join('')}</div></section>
         <section class="opts" hidden><h3></h3><form></form></section></div>
-      <div class="dock"><div class="state"><span class="st"></span><span class="bar"><i></i></span><button class="ib" data-a="stop" title="Stop" aria-label="Stop" hidden>${ICON.stop}</button></div>
+      <div class="dock"><div class="state"><span class="st"></span><span class="bar"><i></i></span></div>
         <div class="btns"><button class="pri" data-a="render" disabled>Render</button><button class="ok" data-a="save" disabled>Save</button></div></div></aside>
       <div class="stage"><canvas></canvas></div></div>
     <div class="ask" hidden><div role="alertdialog" aria-label="Unsaved artwork"><h3>Save this artwork?</h3>
@@ -290,9 +290,9 @@ export function createGallery({ renderer, scene, camera, origin, onClose }) {
     $(stateEl, '.bar').style.visibility = frac == null ? 'hidden' : 'visible'; stateEl.classList.toggle('done', !!done);
   }
   function syncButtons() {
-    $(art, '[data-a="render"]').disabled = !A.style;
+    const rb = $(art, '[data-a="render"]');
+    rb.textContent = A.job ? 'Cancel' : 'Render'; rb.classList.toggle('pri', !A.job); rb.disabled = !A.job && !A.style;
     $(art, '[data-a="save"]').disabled = !(A.result && !A.saved && !A.job);
-    $(art, '[data-a="stop"]').hidden = !A.job;
   }
   // the picture on the stage is drawn as large as the stage allows, keeping its shape
   function fitStage() {
@@ -353,8 +353,8 @@ export function createGallery({ renderer, scene, camera, origin, onClose }) {
   // stops the render in progress; the promise resolves once it has wound up
   async function stopJob() {
     const j = A.job; if (!j) return; j.ctl.abort(); A.run++; A.job = null;
+    showSource(); setState('Cancelled', null); syncButtons();
     try { await j.done; } catch (e) { /* stopped */ }
-    if (!A.result) { showSource(); setState('', null); } syncButtons();
   }
   async function render() {
     if (!A.style) return;
@@ -433,9 +433,8 @@ export function createGallery({ renderer, scene, camera, origin, onClose }) {
     const s = e.target.closest('[data-style]'); if (s) return pickStyle(s.dataset.style);
     const a = e.target.closest('[data-a]')?.dataset.a; if (!a) return;
     if (a === 'back') leaveArt();
-    else if (a === 'render') render();
+    else if (a === 'render') A.job ? stopJob() : render();
     else if (a === 'save') save();
-    else if (a === 'stop') stopJob();
     else if (a === 'ask-save' || a === 'ask-del') { if (a === 'ask-save') save(); const then = A.after; shutArt(); then && then(); }
     else if (a === 'ask-cancel') { ask.hidden = true; A.after = null; }
   });
