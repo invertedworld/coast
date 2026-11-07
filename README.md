@@ -15,6 +15,7 @@ Coast may be played at <https://invertedworld.itch.io/coast>. The user guide is 
 | `LICENSE` | The MIT licence under which the program, its documentation and its sounds are published. |
 | `CONTRIBUTING.md` | How to run, change and submit changes to the program. |
 | `cat/` | The cat from Michi-Neko: The Cat Philosopher's Path by c1t1zen1, under the MIT licence (`cat/LICENSE`). See `cat/README.md`. |
+| `photo/` | The camera for taking pictures (K): the lens, depth of field, exposure, viewfinder and gallery, and the API for picture effects, `window.__village.photo` (documented at the top of `photo/camera.js`). |
 | `sounds.json` | Maps sound identifiers to audio files (see [Sound](#sound)). |
 | `sounds/` | The audio files that `sounds.json` names. |
 | `publish-site.sh` | Publishes the game to markhammond.me (see [Publishing](#publishing)). |

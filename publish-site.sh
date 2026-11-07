@@ -15,7 +15,7 @@ cd "$(dirname "$0")"
 REV="${1:-HEAD}"
 SITE="${SITE_DIR:-$HOME/code/markhammond.me}"
 DEST="$SITE/play/coast"
-FILES=(index.html sounds.json sounds cat)
+FILES=(index.html sounds.json sounds cat photo)
 
 SHA="$(git rev-parse --short "$REV")"
 [ -d "$DEST/vendor/three" ] && [ -f "$DEST/fonts/fonts.css" ] || { echo "publish-site: $DEST lacks vendor/three or fonts/" >&2; exit 1; }
