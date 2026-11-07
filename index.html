@@ -235,6 +235,7 @@ const T={
   quad:tpl(new THREE.PlaneGeometry(1,1).rotateX(-Math.PI/2),false),
   prism:prismTpl(),
   ico:tpl(new THREE.IcosahedronGeometry(0.5,0),true),
+  crag:tpl(new THREE.IcosahedronGeometry(0.5,0),false),   // an angular, flat-faced rock
   body:tpl(new THREE.CylinderGeometry(.12,.24,1.25,8).translate(0,.625,0),true),
 };
 const _nm=new THREE.Matrix3();
@@ -296,10 +297,11 @@ function relPos(P,ox,oz){ const F=new Float32Array(P.length); for (let i=0;i<P.l
 
 /* ================= terrain ================= */
 // The land is an endless island running east-west. Its centre line wanders and its width varies;
-// sd=+1 is the south shore, sd=-1 the north shore. A ridge of hills and mountains runs down the middle.
+// sd=+1 is the south shore, sd=-1 the north shore. Hills rise behind each shore, and where the island is wide a
+// range of mountains runs down the middle.
 function ridgeZ(x){ return 240*(fbm(x*0.0021,3.1,451,3)-0.5); }
-// full width varies between 0.5 km and 2 km: half-width 272-978 m plus up to 22 m of shoreline wiggle each side
-function halfW(x){ return 272+706*smooth((fbm(x*0.0011,7.7,461,3)-0.25)/0.5); }
+// full width varies between 0.9 km and 3 km: half-width 430-1500 m plus up to 22 m of shoreline wiggle each side
+function halfW(x){ return 430+1070*smooth((fbm(x*0.0008,7.7,461,3)-0.22)/0.56); }
 function coastZ(sd,x){ return ridgeZ(x)-sd*(halfW(x)+44*(vnoise(x*0.011,sd>0?1.7:4.2,sd>0?409:419)-0.5)); }
 function coastOff(x){ return coastZ(1,x); }
 function landProfile(s,x,z,sd){
@@ -312,9 +314,81 @@ function landProfile(s,x,z,sd){
   const e=50*(1-Math.exp(-t/110))+0.06*t;
   const hills=(fbm(x*0.009,z*0.009,420,4)-0.5)*28*Math.min(1,t/70);
   const rn=vnoise(x*0.0032,z*0.0032,430), ridge=1-Math.abs(2*rn-1);
-  const mtn=ridge*ridge*110*clamp((t-120)/320,0,1);
+  // the rounded hills give way to the mountains where a range stands behind them
+  const mtn=ridge*ridge*110*clamp((t-120)/320,0,1)*(t>MT_D0-100?1-smooth((t-MT_D0+100)/250)*Math.min(1,mtLevel(x)*3):1);
   return b0+e+hills+mtn;
 }
+/* ---------- the mountains of the interior ----------
+   Behind a coastal belt MT_D0 m deep, kept for the towns, the farms, the coast road and the railway, the ground rises
+   to a range along the island's spine. The crest wanders either side of the middle line. Its height follows the
+   island's width, so that a narrow neck has no range at all, and a slow swell along its length, with separate summits;
+   it falls to a pass wherever the railway crosses from one shore to the other. Spurs run down from the crest towards
+   each shore every MT_SP m or so, with V-shaped valleys between them, and ribs and gullies run down the upper slopes.
+   Nothing is built on the range (highGround): above the belt the land is maquis, then scree and bare limestone. */
+const MT_D0=300, MT_H=480, MT_SP=360, RAIL_L=9000, MT_ROCK=hex('#aaa79a'), MT_PALE=hex('#c6c3b6'), MT_SCREE=hex('#8a8679'), MT_MAQUIS=hex('#6f7444');
+// the colour of high ground (slope as rise over run; n and p noise values from 0 to 1, fine and broad): from 120 m the
+// land's own colour gives way to patchy maquis, and from 170 m to limestone, pale on the gentler ground in broad
+// patches and darker scree on the steep, first on the steepest ground
+function mtTint(c,h,slope,n=0.5,p=0.5){ if (h<120) return c;
+  const m=smooth((h-120)/80)*(1-smooth((h-260)/160))*(1-smooth((slope-0.6)/0.6))*0.55*(0.6+0.8*n);
+  if (m>0) c.lerp(MT_MAQUIS,Math.min(0.8,m));
+  const k=Math.max(smooth((h-170)/240),smooth((slope-0.75)/0.7)*smooth((h-140)/60)*0.8);
+  if (k>0) c.lerp(_mtC.copy(MT_ROCK).lerp(MT_PALE,smooth((p-0.45)/0.3)*0.8).lerp(MT_SCREE,clamp((slope-0.55)*1.5,0,1)*0.75+n*0.25),k*0.92); return c; }
+const _mtC=new THREE.Color();
+function mtSpine0(x){ return ridgeZ(x)+0.35*(halfW(x)-MT_D0)*(fbm(x*0.0011,5.3,471,2)-0.5)*2; }
+// how high the range stands at x, from 0 to 1
+function mtLevel0(x){
+  const w=smooth((halfW(x)-MT_D0-120)/600); if (w<=0) return 0;
+  const sw=0.4+0.6*smooth((fbm(x*0.00075,2.9,473,3)-0.3)/0.4);
+  // the railway crosses the island where sin(2 pi x / RAIL_L + 0.7) changes sign (railZraw)
+  const ph=x*2*Math.PI/RAIL_L+0.7, dx=(ph-Math.round(ph/Math.PI)*Math.PI)*RAIL_L/(2*Math.PI);
+  return w*sw*(1-0.92*Math.exp(-dx*dx/(800*800)));
+}
+// the range's profile along its length: how high it stands, the height of the crest, which rises to separate summits
+// with saddles between them, and the line of the spine. Every point of the range asks for these several times, so
+// they are worked out at each whole metre, kept, and read in between
+const mtxCache=new Map();
+function mtX(i){ let v=mtxCache.get(i);
+  if (v===undefined){ const L=mtLevel0(i); v=[L,L>0?MT_H*L*(0.5+0.75*Math.pow(smooth((fbm(i*0.0017,1.3,481,3)-0.28)/0.44),1.3)):0,mtSpine0(i)];
+    if (mtxCache.size>200000) mtxCache.clear(); mtxCache.set(i,v); }
+  return v; }
+function mtXq(x,q){ const i=Math.floor(x), a=mtX(i)[q]; return a+(mtX(i+1)[q]-a)*(x-i); }
+const mtLevel=x=>mtXq(x,0), mtCrest=x=>mtXq(x,1), mtSpine=x=>mtXq(x,2);
+// a spur: from the crest at x0 towards one shore, on a bearing that leans a little east or west
+function mtSpur(sd,k){ const x0=(k+0.2+0.6*hash(k,sd,485))*MT_SP, a=(hash(k,sd,486)-0.5)*0.9;
+  return {x0,z0:mtSpine(x0),dx:Math.sin(a),dz:-sd*Math.cos(a),s:0.55+0.45*hash(k,sd,487),k}; }
+// the height the range adds to the land at a point; sS and sN, how far it lies inland of each shore, if known
+function mtnH(x0,z0,sS=z0-coastZ(1,x0),sN=coastZ(-1,x0)-z0){
+  if (sS<=MT_D0 || sN<=MT_D0 || mtLevel(x0)<=0) return 0;
+  const fS=z0-sS+MT_D0, fN=z0+sN-MT_D0;   // the foot of the range on either side
+  // the whole range is warped a little, so that no line in it runs quite straight
+  const x=x0+60*(fbm(x0*0.004,z0*0.004,487,2)-0.5)*2, z=z0+60*(fbm(x0*0.004,z0*0.004,488,2)-0.5)*2;
+  const Hc=mtCrest(x); if (Hc<=1) return 0;
+  const zs=clamp(mtSpine(x),fS+0.3*(fN-fS),fN-0.3*(fN-fS)), sd=z<zs?1:-1, Ds=Math.abs(zs-(sd>0?fS:fN));
+  const dc=Math.sqrt((z-zs)*(z-zs)+900)-30, q=clamp(1-dc/Ds,0,1); if (q<=0) return 0;
+  // the floors of the valleys, and the crests of the spurs between them, some spurs standing higher than others and
+  // each rising in knolls along its length
+  const V=Hc*Math.pow(q,2.6), S=Hc*Math.pow(q,1.1);
+  let g=0; const k0=Math.floor(x/MT_SP);
+  for (let k=k0-2;k<=k0+2;k++){ const P=mtSpur(sd,k), px=x-P.x0, pz=z-clamp(P.z0,fS+0.3*(fN-fS),fN-0.3*(fN-fS)), al=px*P.dx+pz*P.dz; if (al<=0) continue;
+    const u=Math.abs(px*P.dz-pz*P.dx)/(MT_SP*(0.38+0.2*P.s)); if (u>=1) continue;
+    g=Math.max(g,(1-Math.pow(u,1.3))*P.s*(0.8+0.4*vnoise(al*0.009,k*3.7,490))*smooth(al/80)); }
+  let h=V+(S-V)*Math.min(1,g);
+  // ribs and gullies running down the slopes, and rough crags over the upper ground
+  let cr=0, a=1, f=0.011, ws=0; for (let i=0;i<3;i++){ const n=1-Math.abs(2*vnoise(x*f,z*f*0.35,483+i*7)-1); cr+=a*n*n; ws+=a; a*=0.5; f*=2.1; }
+  h+=Hc*(0.10*q*(cr/ws-0.4)+0.05*q*q*(fbm(x*0.02,z*0.02,489,2)-0.5));
+  // here and there on the upper slopes, beds of limestone: broken bands of low cliff with ledges between
+  const w=0.6*smooth((q-0.35)/0.3)*smooth((vnoise(x*0.004,z*0.004,491)-0.5)/0.25);
+  if (w>0){ const st=20+10*vnoise(x*0.002,z*0.002,492), t=(h+14*vnoise(x*0.012,z*0.012,493))/st, f=t-Math.floor(t);
+    h=lerp(h,h+(smooth((f-0.6)/0.4)-f)*st,w); }
+  // eased in over the first 80 m beyond the belt, wherever the warp has moved the foot of the slope
+  return h*smooth(Math.min(z0-fS,fN-z0)/80);
+}
+// whether a block lies on the mountains, where nothing is built and no road runs
+const hgCache=new Map();
+function highGround(cx,cz){ const k=cx*1048576+cz; let v=hgCache.get(k);
+  if (v===undefined){ const x=cx*C+C/2, z=cz*C+C/2; v=mtnH(x,z)>30 || baseH0(x,z)>220; if (hgCache.size>50000) hgCache.clear(); hgCache.set(k,v); }
+  return v; }
 // Steep conical hills, each crowned by a hill town with its church on the summit.
 const PEAK=480, pkCache=new Map();
 function peakInfo(i,j){
@@ -324,7 +398,8 @@ function peakInfo(i,j){
     let x=(i+0.5)*PEAK+(hash(i,j,1202)-0.5)*220, z=(j+0.5)*PEAK+(hash(i,j,1203)-0.5)*220;
     x=Math.floor(x/C)*C+C/2+(hash(i,j,1204)-0.5)*6; z=Math.floor(z/C)*C+C/2+(hash(i,j,1205)-0.5)*6;   // summit near a block centre
     const inland=Math.min(z-coastZ(1,x),coastZ(-1,x)-z);
-    if (inland>210) P={x,z,H:55+hash(i,j,1206)*60,R:85+hash(i,j,1207)*45,cx:Math.floor(x/C),cz:Math.floor(z/C)};
+    // none on the mountains, nor on their lower slopes
+    if (inland>210 && mtnH(x,z)<4 && mtnH(x,lerp(z,mtSpine(x),0.25))<12) P={x,z,H:55+hash(i,j,1206)*60,R:85+hash(i,j,1207)*45,cx:Math.floor(x/C),cz:Math.floor(z/C)};
   }
   if (pkCache.size>20000) pkCache.clear();
   pkCache.set(k,P); return P;
@@ -344,32 +419,44 @@ function baseH(x,z){
   if (sS<sN-60) h=landProfile(sS,x,z,1);
   else if (sN<sS-60) h=landProfile(sN,x,z,-1);
   else h=Math.min(landProfile(sS,x,z,1),landProfile(sN,x,z,-1));
-  if (h>0) h+=peakAdd(x,z)*clamp(Math.min(sS,sN)/120,0,1);
+  if (h>0) h+=peakAdd(x,z)*clamp(Math.min(sS,sN)/120,0,1)+mtnH(x,z,sS,sN);
   if (sS<-150) h=Math.max(h,islandH(1,x,z)); else if (sN<-150) h=Math.max(h,islandH(-1,x,z));
   if (sS<-120) h=Math.max(h,seaRockH(1,x,z)); else if (sN<-120) h=Math.max(h,seaRockH(-1,x,z));
   if (!NO_COVE){ const cv=coveAtXZ(x,z); if (cv) h=coveH(cv,x,z,h); }
   return h;
 }
-/* ---------- small rocky islands off both coasts, clear of the ferry lane ---------- */
-const ISL=1300, isCache=new Map();
+/* ---------- rocky islands off both coasts, clear of the ferry lane ----------
+   Each shore has a slot every ISL m that may hold an island. The slots alternate between a near row, whose islands
+   begin 280-650 m off the shore, and a far row, whose islands begin 1.3-2 km out, and further still where that is
+   needed to clear the near islands either side; with each island's size, shape and place in its slot drawn apart,
+   they lie scattered over the sea rather than in a line. No island reaches beyond the slots either side of its own,
+   so a search of three slots finds every island at a point, and two islands of the same row never meet. */
+const ISL=1600, isCache=new Map();
 // Each island has an elongated outline with bays and headlands, and one of five kinds of terrain: rolling hills
 // with several summits, a long ridge, a volcanic cone with a crater, a terraced table, or hills ending in cliffs.
 // Cliffs face the open sea, so the landward shore, where any jetty stands, keeps its beach.
 const ISLE_KINDS=['hills','ridge','volcano','mesa','cliffs'];
 function islandInfo(sd,m){
   const k=m*4+sd; { const v=isCache.get(k); if (v!==undefined) return v; }
-  const o=sd>0?0:70; let I=null; const hh=n=>hash(m,n,1501+o);
-  if (hh(0)<0.62){
-    const R=110+hh(3)*190, asp=1+hh(10)*1.3, th=(hh(11)-0.5)*1.4, A=R*Math.sqrt(asp), B=R/Math.sqrt(asp);
-    const ext=Math.max(A,B)*1.3, zExt=Math.hypot(A*Math.sin(th),B*Math.cos(th))*1.3;
-    const x=m*ISL+ISL/2+(hh(2)-0.5)*Math.max(0,ISL-2*ext-160), off=260+hh(4)*260;
+  const o=sd>0?0:70; let I=null; const hh=n=>hash(m,n,1501+o), far=(m&1)!==0;
+  if (hh(0)<(far?0.7:0.75)){
+    const asp=1+hh(10)*1.1, th=(hh(11)-0.5)*1.4, R=Math.min((far?190:160)+hh(3)*(far?300:260),0.45*ISL/1.3/Math.sqrt(asp));
+    const A=R*Math.sqrt(asp), B=R/Math.sqrt(asp), ext=Math.max(A,B)*1.3, zExt=Math.hypot(A*Math.sin(th),B*Math.cos(th))*1.3;
+    const x=m*ISL+(0.08+0.84*hh(2))*ISL, off=far?1300+hh(4)*700:280+hh(4)*370;
+    // measured from the shore where it stands furthest out along the island's length
+    let c0=-1e9; for (let q=-4;q<=4;q++) c0=Math.max(c0,-sd*coastZ(sd,x+q*ext/4));
+    let z=-sd*c0-sd*(off+zExt);
+    if (far) for (const n of [m-1,m+1]){ const N=islandInfo(sd,n); if (!N) continue;
+      const dx=x-N.x, need=ext+N.ext+150; if (Math.abs(dx)>=need) continue;
+      const dz=Math.sqrt(need*need-dx*dx); if (sd*(N.z-z)<dz) z=N.z-sd*dz; }
     const kind=ISLE_KINDS[Math.floor(hh(12)*ISLE_KINDS.length)];
-    const H={hills:30+hh(5)*50,ridge:45+hh(5)*70,volcano:70+hh(5)*90,mesa:28+hh(5)*40,cliffs:25+hh(5)*45}[kind]*Math.min(1,R/180);
+    // the larger islands stand higher, up to 1.7 times the height of one of 180 m
+    const H={hills:30+hh(5)*50,ridge:45+hh(5)*70,volcano:70+hh(5)*90,mesa:28+hh(5)*40,cliffs:25+hh(5)*45}[kind]*Math.min(1.7,Math.pow(R/180,0.8));
     // summits, placed along the long axis for a ridge and scattered for hills
     const peaks=[], np=kind==='ridge'?4:kind==='volcano'||kind==='mesa'?1:2+Math.floor(hh(13)*3);
     for (let i=0;i<np;i++){ const t=kind==='ridge'?(i/(np-1)-0.5)*1.3:(hh(20+i)-0.5)*1.1, q=kind==='ridge'?(hh(30+i)-0.5)*0.2:(hh(30+i)-0.5)*0.9;
       peaks.push({u:t*A,v:q*B,r:(kind==='ridge'?0.3:0.3+hh(40+i)*0.25)*R,h:(i===0?1:0.55+hh(50+i)*0.45)}); }
-    I={sd,m,x,z:coastZ(sd,x)-sd*(off+zExt),R,A,B,ext,c:Math.cos(th),s:Math.sin(th),H,kind,peaks,
+    I={sd,m,x,z,R,A,B,ext,c:Math.cos(th),s:Math.sin(th),H,kind,peaks,
        beach:kind==='cliffs'?4+hh(6)*6:hh(6)*14, cliffA:Math.atan2(-sd,0)+(hh(14)-0.5)*1.6, cliffH:kind==='cliffs'?14+hh(15)*22:kind==='mesa'?6:0,
        seed:1510+m*7+o, name:'Isola di '+SAINTS[Math.floor(hh(7)*SAINTS.length)]};
   }
@@ -400,6 +487,7 @@ function islandH(sd,x,z){
         // cliffs rise straight from the water to a shelf, and the ground goes on from there
         const cl=I.cliffH*cf*smooth(t/5);
         h+=Math.max(g*rise,cl)+(fbm(x*0.03,z*0.03,I.seed+3,3)-0.5)*(I.kind==='volcano'?6:9)*Math.min(1,t/25);
+        h=Math.max(h,0.08+beach*0.05);   // no hollow behind the beach falls below the sea and fills as a pool
       } }
     if (h>best) best=h; }
   return best;
@@ -487,7 +575,7 @@ function ruinIn(cx,cz){
   const i=Math.floor(xc/RUIN), j=Math.floor(zc/RUIN);
   if (hash(i,j,1901)<0.35){
     const x=(i+0.15+0.7*hash(i,j,1902))*RUIN, z=(j+0.15+0.7*hash(i,j,1903))*RUIN;
-    if (Math.floor(x/C)===cx && Math.floor(z/C)===cz && seaDist(xc,zc)>60 && baseH(xc,zc)>18 && !peakNear(xc,zc,1.4)) S={x:xc,z:zc,seed:i*7919+j,isle:false}; }
+    if (Math.floor(x/C)===cx && Math.floor(z/C)===cz && seaDist(xc,zc)>60 && baseH(xc,zc)>18 && !peakNear(xc,zc,1.4) && mtnH(xc,zc)<15) S={x:xc,z:zc,seed:i*7919+j,isle:false}; }
   if (!S && seaDist(xc,zc)<-150){ const sd=shoreSide(xc,zc), m=Math.floor(xc/ISL);
     for (let q=m-1;q<=m+1 && !S;q++){ const I=islandInfo(sd,q); if (!I || hash(q,sd>0?1:2,1911)>=0.4) continue;
       const a=hash(q,3,1912)*6.283, r=I.R*(0.25+0.3*hash(q,4,1913)), x=I.x+Math.cos(a)*r, z=I.z+Math.sin(a)*r;
@@ -1161,8 +1249,16 @@ function vRoadX(i,z){ return i*C + 3.4*Math.sin(z*0.043+hash(i,0,11)*6.283) + 1.
 function vRoadW(i,z){ return 1.6+1.4*vnoise(z*0.05,i*7.31,13); }
 function hRoadZ(j,x){ return j*C + 3.4*Math.sin(x*0.041+hash(0,j,14)*6.283) + 1.7*Math.sin(x*0.113+hash(0,j,15)*6.283); }
 function hRoadW(j,x){ return 1.6+1.4*vnoise(x*0.05,j*7.31,16); }
-function vSegOn(i,j){ return hash(i,j,31)>0.16; }
-function hSegOn(i,j){ return hash(i,j,37)>0.16; }
+// no street or lane runs on to the mountains, and between villages none climbs straight up a steep slope
+const sgCache=new Map();
+function segOn(i,j,v){ const k=(i*1048576+j)*2+(v?0:1); let on=sgCache.get(k); if (on!==undefined) return on;
+  on=hash(i,j,v?31:37)>0.16;
+  if (on){ const [ax,az,bx,bz]=v?[i-1,j,i,j]:[i,j-1,i,j];
+    if (highGround(ax,az) || highGround(bx,bz)) on=false;
+    else if (!isVillage(ax,az) && !isVillage(bx,bz)){ const d=v?Math.abs(baseH0(i*C,j*C)-baseH0(i*C,j*C+C)):Math.abs(baseH0(i*C,j*C)-baseH0(i*C+C,j*C)); if (d>14) on=false; } }
+  if (sgCache.size>100000) sgCache.clear(); sgCache.set(k,on); return on; }
+function vSegOn(i,j){ return segOn(i,j,true); }
+function hSegOn(i,j){ return segOn(i,j,false); }
 function vSegAt(x,z){ let j=Math.floor(z/C); if (z<hRoadZ(j,x)) j--; else if (z>hRoadZ(j+1,x)) j++; return j; }
 function hSegAt(x,z){ let i=Math.floor(x/C); if (x<vRoadX(i,z)) i--; else if (x>vRoadX(i+1,z)) i++; return i; }
 /* ---------- coastal road, a little inland from the shore, running the length of the coast ---------- */
@@ -1205,10 +1301,14 @@ function harbourShape(H,x,z,h){
   return h;
 }
 /* ---------- coastal railway on the south side, held to a gentle grade ---------- */
-// The line swings from near one shore to near the other every ~3 km, weaving as it goes,
+// The line swings from near one shore to near the other every ~4.5 km, weaving as it goes,
 // so it crosses the ridge (in tunnel) and visits both coasts.
-const RAIL_L=6200, rzCache=new Map();
-function railZraw(x){ return ridgeZ(x)-(halfW(x)-100)*Math.sin(x*2*Math.PI/RAIL_L+0.7)+20*Math.sin(x*0.0047+1.1); }
+// It keeps to the coastal belt, about RAIL_IN m inland of the mean shore, for most of the way, and crosses the island
+// through the passes in the mountains (mtLevel) every RAIL_L/2. Its distance from the middle line follows the
+// island's width averaged over 500 m, so that its curves stay gentle where the shore bends sharply.
+const RAIL_IN=190, RAIL_K=2, rzCache=new Map();
+function railZraw(x){ let w=0; for (let k=-6;k<=6;k++) w+=halfW(x+k*40);
+  return ridgeZ(x)-(w/13-RAIL_IN)*Math.tanh(RAIL_K*Math.sin(x*2*Math.PI/RAIL_L+0.7))/Math.tanh(RAIL_K)+20*Math.sin(x*0.0047+1.1); }
 function railZ(x){ const i=Math.floor(x/2), t=x/2-i; let a=rzCache.get(i), b=rzCache.get(i+1);
   if (a===undefined){ a=railZraw(i*2); rzCache.set(i,a); } if (b===undefined){ b=railZraw(i*2+2); rzCache.set(i+1,b); }
   if (rzCache.size>200000) rzCache.clear(); return a+(b-a)*t; }
@@ -1219,7 +1319,8 @@ function railPerp(x,z){ return Math.min(mainPerp(x,z),branchPerp(x,z)); }
 const ryCache=new Map();
 function railYs(i){
   let v=ryCache.get(i); if (v!==undefined) return v;
-  let s=0, n=0; for (let k=-32;k<=32;k++){ const x=(i+k)*10, w=1-Math.abs(k)/33; s+=w*Math.max(3,baseH(x,railZ(x))); n+=w; }
+  // the level is taken from the ground without the mountains, so that the line passes under them in tunnel
+  let s=0, n=0; for (let k=-32;k<=32;k++){ const x=(i+k)*10, z=railZ(x), w=1-Math.abs(k)/33; s+=w*Math.max(3,baseH(x,z)-mtnH(x,z)); n+=w; }
   v=Math.max(4,s/n-3); if (ryCache.size>50000) ryCache.clear(); ryCache.set(i,v); return v;
 }
 // Catmull-Rom through the 10 m knots, so the grade changes smoothly rather than kinking at each knot
@@ -1369,17 +1470,19 @@ function insideCell(cx,cz,x,z,m=0){
   const t=hRoadZ(cz+1,x)-(hSegOn(cx,cz+1)?hRoadW(cz+1,x):0.2)-m; return z<t;
 }
 const core=(cx,cz)=>vnoise(cx*0.23+0.5,cz*0.23+0.5,77);
-// villages are separate clusters; the land between them is open country
+// villages are separate clusters; the land between them is open country, and the mountains and the offshore islands
+// have none
 const vgCache=new Map();
-function isVillage(cx,cz){ const k=cx+','+cz; let v=vgCache.get(k); if (v===undefined){ v=fbm(cx*0.12+3.3,cz*0.12+1.7,990,3)>0.5 || !!peakNear(cx*C+C/2,cz*C+C/2,1.05); if (vgCache.size>50000) vgCache.clear(); vgCache.set(k,v); } return v; }
-const COUNTRY=new Set(['olives','rocky','farm','coast','wild','isle']);
+function isVillage(cx,cz){ const k=cx+','+cz; let v=vgCache.get(k); if (v===undefined){ v=!highGround(cx,cz) && seaDist(cx*C+C/2,cz*C+C/2)>-150 && (fbm(cx*0.12+3.3,cz*0.12+1.7,990,3)>0.5 || !!peakNear(cx*C+C/2,cz*C+C/2,1.05)); if (vgCache.size>50000) vgCache.clear(); vgCache.set(k,v); } return v; }
+const COUNTRY=new Set(['olives','rocky','farm','coast','wild','isle','mount']);
 function chunkKind(cx,cz){
   if (seaDist(cx*C+C/2,cz*C+C/2)<-150) return 'isle';
+  if (highGround(cx,cz)) return 'mount';
   if (peakInChunk(cx,cz)) return 'church';
   const hc=baseH(cx*C+C/2,cz*C+C/2), k=core(cx,cz), r=hash(cx,cz,201), onHill=!!peakNear(cx*C+C/2,cz*C+C/2,1.1);
   if (!isVillage(cx,cz)){
     if (hc<2.5) return 'coast';
-    if (hc>75 && r<0.6) return 'wild';
+    if ((hc>75 && r<0.6) || (mtnH(cx*C+C/2,cz*C+C/2)>8 && r<0.85)) return 'wild';   // the foot of the mountains is mostly left wild
     return r<0.5?'olives':r<0.85?'rocky':'farm';
   }
   if (hc<2.5) return 'shore';
@@ -3435,9 +3538,10 @@ function genChunk(cx,cz,lod=0){
   if (ch.kind==='olives'){ ch.name='Uliveto di '+saint; ch.label='Olive grove'; ch.desc='Terraced olive grove held up by dry-stone walls, between the villages.'; }
   if (ch.kind==='rocky'){ ch.name='Pietraia di '+saint; ch.label='Open country'; ch.desc='Limestone outcrops and maquis scrub with carob, holm oak, almond and olive trees between the villages.'; }
   if (ch.kind==='farm'){ ch.name='Podere '+pick(R,['Le Fonti','Il Poggio','La Croce','Il Casale','Le Vigne','San Martino','La Torre','Il Pozzo']); ch.label='Farm'; ch.desc='Stone farmhouse with a barn, a vegetable plot, a fig tree and almond, carob and olive trees.'; }
-  if (ch.kind==='isle'){ const I=islandNear(xc,zc), F=!I&&ch.lights.find(L=>L.kind==='rock'); ch.name=I?I.name:F?'Scoglio del Faro':'Mare aperto'; ch.label=I?'Island':F?'Rock':'Sea'; ch.desc=I?'Small rocky island off the coast with maquis, Aleppo pines, agaves and cypress. The ferry passes on the landward side.':F?'Bare rock at sea with a lighthouse.':'Open sea off the coast.'; }
+  if (ch.kind==='isle'){ const I=islandNear(xc,zc), F=!I&&ch.lights.find(L=>L.kind==='rock'); ch.name=I?I.name:F?'Scoglio del Faro':'Mare aperto'; ch.label=I?'Island':F?'Rock':'Sea'; ch.desc=I?'Rocky island off the coast with maquis, Aleppo pines, agaves and cypress. The ferry passes on the landward side.':F?'Bare rock at sea with a lighthouse.':'Open sea off the coast.'; }
   if (ch.kind==='coast'){ ch.name='Spiaggia di '+saint; ch.label='Shore'; ch.desc='Open beach and rocks between the villages.'; }
   if (ch.kind==='wild'){ ch.name='Monte '+saint.replace(/^Sant[oa’]* ?/,'').replace(/^San /,''); ch.label='Hillside'; ch.desc='Steep slopes above the village with Aleppo pines, holm oaks, cypress, maquis and bare rock.'; }
+  if (ch.kind==='mount'){ ch.name='Monte '+saint.replace(/^Sant[oa’]* ?/,'').replace(/^San /,''); ch.label='Mountain'; ch.desc='Mountainside of the interior: maquis and scattered pines on the lower slopes, scree and bare limestone higher up.'; }
 
   /* --- terrace (bastion) with stairs --- */
   if (ch.kind==='quarter' && R()<0.45+k*0.25){
@@ -3628,9 +3732,30 @@ function genChunk(cx,cz,lod=0){
     }
   }
 
-  const tries=COUNTRY.has(ch.kind)&&ch.kind!=='wild'?0:ch.kind==='wild'?55:70;
+  // on the mountains, outcrops of limestone: a few great angular crags on the steeper ground above 200 m
+  if (ch.kind==='mount') for (let t=0;t<8;t++){ const x=x0+4+R()*(C-8), z=z0+4+R()*(C-8), rot=R()*6.28, s=3+R()*5;
+    const h=heightAt(x,z), sl=Math.hypot(heightAt(x+3,z)-heightAt(x-3,z),heightAt(x,z+3)-heightAt(x,z-3))/6;
+    if (h<200 || sl<0.45 || R()>0.5 || railPerp(x,z)<20+s*2 || ch.place.some(o=>obbCircleDist(o,x,z)<s)) continue;
+    gb.add(T.crag, mat(x,h-s*0.45,z,s*1.5,s*(0.9+0.5*sl),s*1.2,rot,(R()-0.5)*0.5,(R()-0.5)*0.5), shade(MT_SCREE,R,0.12).lerp(MT_ROCK,0.5), null, 12);
+    ch.circles.push({x,z,r:s*0.65,top:h+s*0.4}); ch.place.push({x,z,hw:s*0.7,hd:s*0.7,rot:0}); }
+  const tries=ch.kind==='mount'?90:COUNTRY.has(ch.kind)&&ch.kind!=='wild'?0:ch.kind==='wild'?55:70;
   for (let t=0;t<tries;t++){
     const x=x0+R()*C, z=z0+R()*C, rot=R()*6.28, r=R();
+    // on the mountains the pines and holm oaks thin out into low maquis with height, and give way to scree and bare
+    // rock: nothing grows above about 420 m
+    if (ch.kind==='mount'){
+      const h=heightAt(x,z), veg=1-smooth((h-110)/310), q=R(); if (h<1) continue;
+      if (r<0.55*veg){ if (!canPlace({x,z,hw:0.7,hd:0.7,rot:0},0,{maxRange:12})) continue;
+        if (q<0.4*veg*veg){ const k=q<0.22*veg*veg?'aleppo':'holm'; addTree(gb,ch,x,z,R,(0.6+R()*0.4)*(k in FLORA?1.1:1),undefined,k); ch.place.push({x,z,hw:1.2,hd:1.2,rot:0}); }
+        else { addFlora(gb,ch,x,z,(0.5+R()*0.6)*(0.6+0.4*veg),undefined,'maquis'); ch.place.push({x,z,hw:0.8,hd:0.8,rot:0}); } }
+      else if (r<0.55*veg+0.3){ const s=0.5+R()*R()*2.2, rp=railPerp(x,z);
+        if (rp>6+s*1.6*(railState(x)==='tunnel'?2:1) && !coveCore(x,z)){
+          // rounded stones among the scrub, angular blocks of limestone higher up
+          if (h<230) gb.add(T.sphLo, mat(x,h-s*0.3,z,s*1.6,s*0.9,s*1.3,rot), shade(MT_ROCK,R,0.1), null, 12);
+          else gb.add(T.crag, mat(x,h-s*0.25,z,s*1.7,s*1.1,s*1.4,rot,(R()-0.5)*0.6,(R()-0.5)*0.6), shade(MT_ROCK,R,0.12), null, 12);
+          ch.circles.push({x,z,r:s*0.6,top:h+s*0.2}); } }
+      continue;
+    }
     if (ch.kind==='wild'){
       if (r<0.5){ if (canPlace({x,z,hw:0.7,hd:0.7,rot:0},0,{maxRange:9})){ const sc=0.7+R()*0.5, k=wildKind(ch,x,z,R()); addTree(gb,ch,x,z,R,k in FLORA?sc*1.15:sc,undefined,k); ch.place.push({x,z,hw:1.2,hd:1.2,rot:0}); } }
       else if (r<0.76){ const s=0.8+R()*1.8, h=heightAt(x,z), rp=railPerp(x,z); if (h>1 && rp>6+s*1.6*(railState(x)==='tunnel'?2:1) && !coveCore(x,z) && !(ch.ruin && Math.hypot(x-ch.ruin.x,z-ch.ruin.z)<ch.ruin.r)){ gb.add(T.sphLo, mat(x,h-s*0.25,z,s*1.6,s,s*1.3,rot), shade(C_.rock,R,0.08), null, 12); ch.circles.push({x,z,r:s*0.6,top:h+s*0.25}); } }
@@ -3884,8 +4009,8 @@ function genChunk(cx,cz,lod=0){
     const dx=(hg[gi+1]-hg[gi-1])/(2*step), dz=(hg[gi+G]-hg[gi-G])/(2*step), nl=Math.hypot(dx,1,dz), slope=Math.hypot(dx,dz);
     const n1=vnoise(x*0.3,z*0.3,5), n2=vnoise(x*1.1,z*1.1,6);
     cA.copy(C_.sand).lerp(C_.sand2,n1*0.7+n2*0.3);
-    const g=vnoise(x*0.07,z*0.07,8), gth=0.58-clamp((h-20)/60,0,0.3)-(ch.kind==='wild'?0.3:0);
-    if (g>gth) cA.lerp(ch.kind==='wild'?C_.scrub:C_.grass2,clamp((g-gth)*4,0,ch.kind==='wild'?0.85:0.6));
+    const wildG=ch.kind==='wild'||ch.kind==='mount', g=vnoise(x*0.07,z*0.07,8), gth=0.58-clamp((h-20)/60,0,0.3)-(wildG?0.3:0);
+    if (g>gth) cA.lerp(wildG?C_.scrub:C_.grass2,clamp((g-gth)*4,0,wildG?0.85:0.6));
     let rd=roadDist(x,z); for (const A of ch.alleys) rd=Math.min(rd,Math.abs(alleyS(A,x,z))-A.hw);
     let cob=0, flag=0, pv=0;   // pv: how much of the ground here is paved
     if (rd<0.6 && h>0.3){ const t=clamp((0.6-rd)/1.2,0,1); const country=COUNTRY.has(ch.kind);
@@ -3893,11 +4018,12 @@ function genChunk(cx,cz,lod=0){
     { const dr=railPerp(x,z); if (dr<3.4 && h>0.3 && railState(x)!=='tunnel'){ const t=clamp((3.4-dr)/1.2,0,1); cA.lerp(GRAVEL,t); cob*=1-t; pv*=1-t; }
       else if (dr<16 && stationNear(x,38)){ cA.lerp(C_.piazza,0.85); flag=1; cob=0; pv=Math.max(pv,0.85); } }
     if (ch.field){ const [lu,lv]=obbLocal(ch.field,x,z); if (Math.abs(lu)<ch.field.hw && Math.abs(lv)<ch.field.hd){ cA.copy(((Math.floor(lu/1.4)%2)+2)%2?FIELD_A:FIELD_B); cob=0; pv=0; } }
-    if (COUNTRY.has(ch.kind) && ch.kind!=='coast' && rd>0.6){ const d=vnoise(x*0.05,z*0.05,991); cA.lerp(d>0.55?LIMESTONE:DRYGRASS,ch.kind==='rocky'?0.45:0.3); }
+    if (COUNTRY.has(ch.kind) && ch.kind!=='coast' && ch.kind!=='mount' && rd>0.6){ const d=vnoise(x*0.05,z*0.05,991); cA.lerp(d>0.55?LIMESTONE:DRYGRASS,ch.kind==='rocky'?0.45:0.3); }
     if (P){ const dd=Math.hypot(x-P.x,z-P.z); if (dd<P.r+1.2){ const t=clamp((P.r+1.2-dd)/1.5,0,1); cA.lerp(C_.piazza.clone().multiplyScalar(0.96+n2*0.06),t); if (P.small) cob=Math.max(cob,t); else { flag=t; cob*=1-t; } pv=Math.max(pv,t); } }
     for (const sd of SIDES){ const HB=harbourAt(sd,x); if (HB){ const sh=hbS(HB,x,z); if (sh>=-0.3 && sh<9.5 && Math.abs(x-HB.x)<HB.W/2+3){ const t=clamp((9.5-sh)/1.5,0,1); cA.lerp(C_.piazza,t); flag=Math.max(flag,t); cob=0; pv=Math.max(pv,t); } } }
     if (ch.garden){ const [lu,lv]=obbLocal(ch.garden,x,z); if (Math.abs(lu)<ch.garden.hw-0.4 && Math.abs(lv)<ch.garden.hd-0.4){ cA.copy(C_.grass).lerp(C_.grass2,n1); cob=0; pv=0; } }
     if (slope>0.75){ const t=clamp((slope-0.75)*1.6,0,0.85)*(1-cob); cA.lerp(C_.rock,t); }
+    if (h>120) mtTint(cA,h,slope,n1,vnoise(x*0.025,z*0.025,995));
     const seaRock=ch.kind==='isle' && h>-1 && !islandNear(x,z);
     if (seaRock) cA.copy(C_.rock).lerp(GREY_ROCK,0.5+0.5*n1).multiplyScalar(0.92+n2*0.14);
     cA.multiplyScalar(1-0.1*(1-pv));   // unpaved ground is a tenth darker than its base colours; the beach is not
@@ -3975,11 +4101,11 @@ function updateOrigin(){
 }
 /* The world repeats every WRAP_Z metres from north to south: whoever goes far enough out to sea to the north comes
    in from the open sea to the south shore, and the other way about. The join lies WRAP_Z/2 from the island's middle
-   line, beyond the furthest offshore island (about 2.9 km) by more than the fog and the outermost ring of blocks, so
+   line, beyond the furthest offshore island (about 5.4 km) by more than the fog and the outermost ring of blocks, so
    the sea on either side of it is empty and the same; crossing it moves the player, the camera and whatever travels
    with them by WRAP_Z in one frame, and the blocks round them are rebuilt as on any long move. WRAP_Z is a whole
    number of blocks and of cells of the distant terrain, so both grids fall in the same places after the move. */
-const WRAP_Z=8800, WRAP_J=WRAP_Z/22, wrapHooks=[];
+const WRAP_Z=15840, WRAP_J=WRAP_Z/22, wrapHooks=[];
 function wrapWorld(){
   if (Math.abs(player.z)<=WRAP_Z/2 || onBoard() || descent.t>=0 || ascent.t>=0) return false;
   const d=-Math.sign(player.z)*WRAP_Z;
@@ -5095,7 +5221,7 @@ function farPoint(gi,gj){
   else if (h<1.6) c.copy(C_.beach);
   else if (h<80 && isVillage(Math.floor(x/C),Math.floor(z/C))){ c.copy(C_.walls[1]).lerp(C_.leaf[1],0.35).lerp(C_.sand2,0.25); }   // one even tone of walls and gardens: colours picked at random for each point of the 22 m grid smeared into blotches, roof red into pink ones
   else if (h<80){ const r=hash(gi,gj,901); c.copy(r<0.5?C_.olive:DRYGRASS).lerp(C_.sand2,0.2).multiplyScalar(0.9); }
-  else { c.copy(C_.scrub).lerp(C_.rock,clamp((h-80)/80,0,0.8)).multiplyScalar(0.9); if (hash(gi,gj,903)<0.45) c.lerp(FLC.holm,0.32*(1-clamp((h-80)/140,0,1))); }   // the stands of Aleppo pine and holm oak on the lower hills
+  else { c.copy(C_.scrub).lerp(C_.rock,clamp((h-80)/80,0,0.5)).multiplyScalar(0.9); if (hash(gi,gj,903)<0.45) c.lerp(FLC.holm,0.32*(1-clamp((h-80)/140,0,1))); mtTint(c,h,0.5).multiplyScalar(h>150?0.95:1); }   // the stands of Aleppo pine and holm oak on the lower hills
   let lights=null;
   if (h>=1.6 && h<=80 && isVillage(Math.floor(x/C),Math.floor(z/C)) && hash(gi,gj,905)<=0.55){ lights=[];
     for (let q=0;q<3;q++){ const jx=(hash(Math.round(x),q,906)-0.5)*FS, jz=(hash(Math.round(z),q,907)-0.5)*FS; lights.push(x+jx,baseH(x+jx,z+jz)+2.5+q,z+jz); } }
@@ -5128,7 +5254,7 @@ function rebuildFar0(px,pz){
 }
 
 /* ---------- the whole island, coarse, for views from very high up ---------- */
-const INX=260, INZ=90;
+const INX=260, INZ=240;
 const islandGeo=new THREE.BufferGeometry();
 islandGeo.setAttribute('position',new THREE.Float32BufferAttribute(new Float32Array((INX+1)*(INZ+1)*3),3));
 islandGeo.setAttribute('color',new THREE.Float32BufferAttribute(new Float32Array((INX+1)*(INZ+1)*3),3));
@@ -5142,23 +5268,31 @@ function updateIsland(){ COVE_FAST++; try{ updateIsland0(); } finally{ COVE_FAST
 function updateIsland0(){
   if (dist<700){ islandMesh.visible=false; return; }
   islandMesh.visible=true;
-  const step=Math.max(20,Math.pow(2,Math.ceil(Math.log2(dist/45)))), ox=Math.round(player.x/(step*8))*step*8, k=step+':'+ox;
+  const step=Math.max(20,Math.pow(2,Math.ceil(Math.log2(dist/45)))), ox=Math.round(player.x/(step*8))*step*8, k=step+':'+ox+':'+(dist<2500?Math.round(player.z/200):'');
   if (k+':'+originMoved===islandKey) return; islandKey=k+':'+originMoved; islandMesh.position.copy(ORIGIN);
   const P=islandGeo.attributes.position.array, Co=islandGeo.attributes.color.array, c=new THREE.Color();
   for (let i=0;i<=INX;i++){
-    const x=ox+(i-INX/2)*step, zc=ridgeZ(x), w=halfW(x)+120;
+    const x=ox+(i-INX/2)*step, zc=ridgeZ(x), w=halfW(x)+150;
+    // two fifths of the rows across the land, the rest across the sea either side, out past the furthest islands
     for (let j=0;j<=INZ;j++){
-      const z=zc+(j/INZ*2-1)*w*1.25, h=baseH(x,z), o=(j*(INX+1)+i)*3;
-      // sit just under the detailed terrain near the player so the two never fight
-      const nearPlayer=Math.abs(x-player.x)<1300&&Math.abs(z-player.z)<1300;
-      P[o]=x-ORIGIN.x; P[o+1]=(h<0?Math.max(h,-6):h)-(nearPlayer?6:1.5); P[o+2]=z-ORIGIN.z;
+      const u=j/INZ*2-1, a=Math.abs(u), z=zc+Math.sign(u)*(a<0.4?a/0.4*w:w+(a-0.4)/0.6*3900), h=baseH(x,z), o=(j*(INX+1)+i)*3;
+      P[o]=x-ORIGIN.x; P[o+1]=h<0?Math.max(h,-6):h; P[o+2]=z-ORIGIN.z;
       if (h<0) c.copy(C_.seabed); else if (h<1.6) c.copy(C_.beach);
       else if (h<80 && isVillage(Math.floor(x/C),Math.floor(z/C))){ c.copy(C_.walls[1]).lerp(C_.leaf[1],0.35).lerp(C_.sand2,0.3); }
       else if (h<80) c.copy(C_.olive).lerp(C_.sand2,0.35).multiplyScalar(0.9);
-      else c.copy(C_.scrub).lerp(C_.rock,clamp((h-80)/80,0,0.8)).multiplyScalar(0.9);
+      else mtTint(c.copy(C_.scrub).lerp(C_.rock,clamp((h-80)/80,0,0.5)).multiplyScalar(0.9),h,0.5);
       Co[o]=c.r; Co[o+1]=c.g; Co[o+2]=c.b;
     }
   }
+  // sit just under the detailed terrain near the player, and under the distant terrain while that is drawn, so the
+  // two never fight: there each point is lowered to the lowest of its neighbours, since on a mountainside a coarse
+  // cell can stand well above the finer ground between its corners, easing back towards the edge of the region
+  const W=INX+1, Y=new Float32Array(W*(INZ+1)); for (let q=0;q<Y.length;q++) Y[q]=P[q*3+1];
+  const R0=dist<2500?2300:1300;
+  for (let j=0;j<=INZ;j++) for (let i=0;i<=INX;i++){ const q=j*W+i, o=q*3, ex=Math.max(Math.abs(P[o]+ORIGIN.x-player.x),Math.abs(P[o+2]+ORIGIN.z-player.z));
+    const f=smooth((R0-ex)/300), fl=Math.min(Y[q],0.5); let lo=Y[q];   // the sea beside it does not pull the shore under
+    if (f>0) for (let dj=-1;dj<=1;dj++) for (let di=-1;di<=1;di++){ const jj=j+dj, ii=i+di; if (jj>=0 && jj<=INZ && ii>=0 && ii<=INX) lo=Math.min(lo,Math.max(fl,Y[jj*W+ii])); }
+    P[o+1]=Y[q]-1.5-f*(4.5+Y[q]-lo); }
   islandGeo.attributes.position.needsUpdate=true; islandGeo.attributes.color.needsUpdate=true; islandGeo.computeVertexNormals();
 }
 
@@ -5290,7 +5424,7 @@ function updateChunks(px,pz,budgetMs,loading=budgetMs>=1e8){
 }
 function resetWorld(){ chunkState=''; farCache.clear(); farOrigin=''; for (const T of tiles.values()) disposeTile(T); tiles.clear(); tilesDirty.clear(); tilesUrgent.clear(); for (const ch of chunks.values()) disposeChunk(ch); chunks.clear(); for (const ch of dying) disposeChunk(ch); dying.length=0; pkCache.clear(); pzCache.clear(); alCache.clear(); hbCache.clear(); vgCache.clear(); ryCache.clear(); rzCache.clear(); rrCache.clear(); rsCache.clear(); stCache.clear(); rxCache.clear(); lhCache.clear(); rkCache.clear(); ruCache.clear(); cvCache.clear(); cvMemoN=NaN;
   // the goods lines, the offshore islands, the ferry ports and the ferries' routes all belong to the old island
-  brZones.clear(); brBucket.clear(); isCache.clear(); fpCache.clear(); irCache.clear();
+  brZones.clear(); brBucket.clear(); isCache.clear(); fpCache.clear(); irCache.clear(); hgCache.clear(); sgCache.clear(); mtxCache.clear();
   goods.R=null; goods.check=0; for (const c of goods.cars) c.m.visible=false;
   for (const F of ferries) if (F!==ridden){ F.R=null; F.m.visible=false; }
   beams.t=0; train.init=false; farDirty=true; }
@@ -11228,4 +11362,6 @@ window.__village={ goods, glZone, branchesAt, get mantle(){ return mantle; }, ge
   swimAt(x,z,y,under){ if (sailD) dinghyAshore(true); if (riding()) leaveTrain('street'); if (mode==='ferry'||ridden) leaveFerry('street'); if (mode==='above') toggleView();
     player.x=x; player.z=z; mode='swim'; swimmer.enter({x,y:y??0.2,z,yaw,pitch:fpPitch}); const S=swimmer.state; if (under){ S.mode='under'; S.under=true; S.underT=2; } },
   get swimDebug(){ const S=swimmer.state; return {mode,swim:S.mode,under:S.under,lens:UW.lens,wet:UW.wet,x:S.x,y:S.y,z:S.z,water:S.water,air:S.air,surface:SEA.heightAt(S.x,S.z)}; }};
+// the shape of the land, for tests: the mountains, the islands and how each block is used
+window.__village.terrain={baseH,mtnH,mtLevel,mtSpine,mtCrest,halfW,ridgeZ,coastZ,highGround,isVillage,chunkKind,islandInfo,islandRoute,islandLight,ISL,WRAP_Z,railZ,railY,railState,stationInfo,ST_SP};
 </script>
