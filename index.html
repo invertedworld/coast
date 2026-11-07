@@ -6706,7 +6706,11 @@ ${GLSL} uniform float uPx; attribute vec2 aPar; varying float vA;
     const wu=sea.uniforms.uWind.value, wd=sea.uniforms.uWindDir.value, wa=Math.atan2(wd.y,wd.x), gain=(0.35+0.9*sm(0.5,7,wu))*0.011;
     const fe=sea.fieldAt?sea.fieldAt(U.uCam.value.x+(ctx.offset?ctx.offset.x:0),U.uCam.value.z+(ctx.offset?ctx.offset.z:0)):null, shel=fe?cl(fe[1],0,1):1;
     if (!ctx.paused) st.ctime+=dt*(O.cpace??1)*(0.085+0.1*sm(0.5,9,wu))*(0.55+0.45*shel); U.uCTime.value=st.ctime;
-    for (let i=0;i<NC;i++){ const c=CT[i], a=wa+c.off, sw=1+0.4*Math.sin(st.ctime*c.mw+c.mp); U.uCW.value[i].set(Math.cos(a),Math.sin(a),c.k,c.om); U.uCB.value[i].set(c.a*gain*sw,c.ph); }
+    // the trains keep the direction they had when the water was last entered: their phase is reckoned from the world's
+    // origin, hundreds of metres away, so that a turn of the wind of a hundredth of a radian a second would sweep the
+    // pattern across the bed many times a second
+    if (st.lens==='above' || st.cwa===undefined) st.cwa=wa;
+    for (let i=0;i<NC;i++){ const c=CT[i], a=st.cwa+c.off, sw=1+0.4*Math.sin(st.ctime*c.mw+c.mp); U.uCW.value[i].set(Math.cos(a),Math.sin(a),c.k,c.om); U.uCB.value[i].set(c.a*gain*sw,c.ph); }
     U.uCSteep.value=1.25;
     if (ctx.shadow && ctx.shadow.map){ U.uShadowMap.value=ctx.shadow.map; U.uShadowM.value.copy(ctx.shadow.matrix); U.uHasShadow.value=1; } else U.uHasShadow.value=0;
     // the white balance for the diver's depth, normalised so that it changes the hue and not the brightness
