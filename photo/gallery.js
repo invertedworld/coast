@@ -19,13 +19,16 @@ import * as THREE from 'three';
 
 const KEEP = 24;
 const Q_KEY = 'coast.pictureSettings';
+// the version of the stored settings: version 2 lowered the 3D render's default samples and bounces, and the values
+// kept from version 1 give way to the new defaults
+const Q_VERSION = 2;
 const sl = (k, label, def, min, max, step, fmt = v => '× ' + v.toFixed(2)) => ({ k, label, def, min, max, step, fmt });
 // a slider's value is a multiple of the style's own amount (1 is as designed)
 export const Q_GROUPS = [
   { id: 'render3d', title: '3D render', fields: [
-    { k: 'samples', label: 'Samples per pixel', opts: [64, 128, 256, 512, 1024, 2048, 4096], def: 512 },
+    { k: 'samples', label: 'Samples per pixel', opts: [32, 64, 128, 256, 512, 1024, 2048, 4096], def: 128 },
     { k: 'scale', label: 'Resolution', opts: [0.5, 0.75, 1, 1.5, 2], def: 1, size: true },
-    { k: 'bounces', label: 'Bounces of light', opts: [2, 3, 4, 5, 6, 8, 10], def: 5 },
+    { k: 'bounces', label: 'Bounces of light', opts: [2, 3, 4, 5, 6, 8, 10], def: 3 },
     { k: 'horizonReach', label: 'Draw distance', opts: [[1500, '1.5 km'], [3000, '3 km'], [5000, '5 km'], [8000, '8 km'], [12000, '12 km']], def: 5000 },
     { k: 'hazeVisibility', label: 'Visibility in the haze', opts: [[8000, '8 km'], [15000, '15 km'], [28000, '28 km'], [50000, '50 km'], [100000, '100 km']], def: 28000 },
     { k: 'denoise', label: 'Noise filter', opts: [[0, 'Off'], [2, 'Light'], [5, 'Normal'], [8, 'Strong']], def: 5 },
@@ -65,8 +68,9 @@ export function createGallery({ renderer, scene, camera, origin, onClose }) {
   /* ---------- settings, kept in the browser ---------- */
   const QS = Object.fromEntries(Q_GROUPS.map(g => [g.id, Object.fromEntries(g.fields.map(f => [f.k, f.def]))]));
   try { const v = JSON.parse(localStorage.getItem(Q_KEY) || 'null');
+    if (v && !(v.v >= 2) && v.render3d) { delete v.render3d.samples; delete v.render3d.bounces; }
     if (v) for (const g of Q_GROUPS) for (const f of g.fields) if (v[g.id] && typeof v[g.id][f.k] === typeof f.def) QS[g.id][f.k] = v[g.id][f.k]; } catch (e) { /* storage unavailable */ }
-  const storeQS = () => { try { localStorage.setItem(Q_KEY, JSON.stringify(QS)); } catch (e) { /* storage unavailable */ } };
+  const storeQS = () => { try { localStorage.setItem(Q_KEY, JSON.stringify({ ...QS, v: Q_VERSION })); } catch (e) { /* storage unavailable */ } };
 
   /* ---------- styles ---------- */
   const css = document.createElement('style');
@@ -279,6 +283,7 @@ export function createGallery({ renderer, scene, camera, origin, onClose }) {
   const stage = $(art, '.stage canvas'), g2 = stage.getContext('2d'), form = $(art, 'form'), stateEl = $(art, '.state'), ask = $(art, '.ask');
   // A: the photo, its style, the job in progress and the finished render, and whether it has been saved
   const A = { p: null, style: null, job: null, run: 0, result: null, saved: false, after: null };
+  let ptModule = null;
 
   function setState(text, frac, done) {
     $(stateEl, '.st').textContent = text; $(stateEl, '.bar i').style.width = (frac == null ? 0 : Math.round(frac * 100)) + '%';
@@ -400,11 +405,15 @@ export function createGallery({ renderer, scene, camera, origin, onClose }) {
     const phases = { world: 'Loading the world', scene: 'Gathering the scene', albedo: 'Colours', bvh: 'Building', trace: 'Tracing', denoise: 'Filtering', done: 'Finished' };
     let first = true;
     setState(phases.world, 0);
-    const { pathTrace } = await import('./pathtrace.js');
-    return pathTrace({ renderer, scene, camera: cam, signal, width: W, height: H,
-      samples: Q.samples, bounces: Q.bounces, horizonReach: Q.horizonReach, hazeVisibility: Q.hazeVisibility, denoise: Q.denoise, materials: Q.materials, haze: Q.haze,
-      onProgress: ({ phase, fraction }) => { if (live() && (phase !== 'trace' || first)) setState(phases[phase] || phase, fraction || 0); },
-      onFrame: (c, k) => { if (!live()) return; if (first) { sizeStage(W, H); first = false; } g2.drawImage(c, 0, 0, W, H); setState(`Tracing ${Math.round(k * 100)} %`, k); } });
+    const { pathTrace } = ptModule = await import('./pathtrace.js');
+    // artist mode covers the game, so the game draws nothing while the picture is traced and leaves the GPU to it
+    const draw = renderer.render; renderer.render = () => {};
+    try {
+      return await pathTrace({ renderer, scene, camera: cam, signal, width: W, height: H,
+        samples: Q.samples, bounces: Q.bounces, horizonReach: Q.horizonReach, hazeVisibility: Q.hazeVisibility, denoise: Q.denoise, materials: Q.materials, haze: Q.haze,
+        onProgress: ({ phase, fraction }) => { if (live() && (phase !== 'trace' || first)) setState(phases[phase] || phase, fraction || 0); },
+        onFrame: (c, k) => { if (!live()) return; if (first) { sizeStage(W, H); first = false; } g2.drawImage(c, 0, 0, W, H); setState(`Tracing ${Math.round(k * 100)} %`, k); } });
+    } finally { renderer.render = draw; }
   }
   function save() {
     const r = A.result; if (!r || A.saved || A.job) return;
@@ -416,7 +425,10 @@ export function createGallery({ renderer, scene, camera, origin, onClose }) {
     if (A.result && !A.saved && !A.job) { A.after = then || null; ask.hidden = false; $(ask, '[data-a="ask-save"]').focus(); return; }
     shutArt(); then && then();
   }
-  function shutArt() { if (A.job) stopJob(); A.result = null; ask.hidden = true; art.hidden = true; A.after = null; build(); }
+  // the path tracer keeps the scene of the last view it traced, for another render of it; it is let go on leaving
+  function shutArt() {
+    (A.job ? stopJob() : Promise.resolve()).then(() => { if (ptModule && art.hidden) ptModule.releasePathTrace(); });
+    A.result = null; ask.hidden = true; art.hidden = true; A.after = null; build(); }
   art.addEventListener('click', e => {
     const s = e.target.closest('[data-style]'); if (s) return pickStyle(s.dataset.style);
     const a = e.target.closest('[data-a]')?.dataset.a; if (!a) return;
