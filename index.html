@@ -122,6 +122,19 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
       <div class="row"><span>Hold <kbd>Shift</kbd><kbd>T</kbd></span><span>Reverse time</span></div>
       <div class="row"><span><kbd>P</kbd></span><span>Pause the world</span></div>
     </div>
+    <div class="group"><h3>Camera</h3>
+      <div class="row"><span><kbd>K</kbd></span><span>Raise or lower the camera</span></div>
+      <div class="row"><span><kbd>Enter</kbd></span><span>Take a picture</span></div>
+      <div class="row"><span>Click</span><span>Take a picture, with the mouse captured</span></div>
+      <div class="row"><span><kbd>+</kbd><kbd>−</kbd></span><span>Focal length</span></div>
+      <div class="row"><span>Wheel</span><span>Focal length</span></div>
+      <div class="row"><span><kbd>[</kbd><kbd>]</kbd></span><span>Aperture</span></div>
+      <div class="row"><span><kbd>9</kbd><kbd>0</kbd></span><span>Focus nearer or further</span></div>
+      <div class="row"><span><kbd>Shift</kbd> and wheel</span><span>Focus</span></div>
+      <div class="row"><span><kbd>U</kbd></span><span>Autofocus or manual focus</span></div>
+      <div class="row"><span><kbd>;</kbd><kbd>'</kbd></span><span>Exposure compensation</span></div>
+      <div class="row"><span><kbd>L</kbd></span><span>Pictures taken</span></div>
+    </div>
     <div class="group"><h3>Island</h3>
       <div class="row"><span><kbd>I</kbd></span><span>New island</span></div>
     </div>
@@ -163,6 +176,8 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
 // the cat of Michi-Neko: The Cat Philosopher's Path by c1t1zen1, under the MIT licence (cat/LICENSE)
 import { Cat, catRimUniforms } from './cat/cat.js';
+// the camera for taking pictures (K): lens, depth of field, exposure, viewfinder and gallery; its API is window.__village.photo
+import { createPhoto } from './photo/camera.js';
 
 /* ================= random & noise ================= */
 let SEED = 7;
@@ -9421,7 +9436,7 @@ canvas.addEventListener('dblclick',e=>{ if (mode!=='above') return;
   if (started) lockPointer(); });
 addEventListener('mousemove',e=>{
   const locked=document.pointerLockElement===canvas; if (!locked&&!dragging) return;
-  const dx=locked?e.movementX:e.clientX-lx, dy=locked?e.movementY:e.clientY-ly; lx=e.clientX; ly=e.clientY; look(dx,dy);
+  const dx=locked?e.movementX:e.clientX-lx, dy=locked?e.movementY:e.clientY-ly; lx=e.clientX; ly=e.clientY; const k=PHOTO.lookScale(); look(dx*k,dy*k);
 });
 const cam={y:null,head:0}, chase={d:34,yaw:0,pitch:0.32,fresh:true,lift:0}, _cv=new THREE.Vector3();
 const riding=()=>mode==='train'||mode==='chase';
@@ -9863,7 +9878,10 @@ function diveRender(){
   if (UW.lens!=='under') return UW.render(renderer,scene,camera,diveAbove);
   const v=[farMesh.visible,farGlow.visible,outMesh.visible,sky.visible]; farMesh.visible=farGlow.visible=outMesh.visible=sky.visible=false;
   try { return UW.render(renderer,scene,camera,diveAbove); } finally { [farMesh.visible,farGlow.visible,outMesh.visible,sky.visible]=v; } }
+// the camera, while it is raised, draws the frame through its lens instead
+const PHOTO=createPhoto({renderer,scene,camera,canvas,origin:ORIGIN,onFov:()=>glowScale(),allowed:()=>started});
 function renderMain(){
+  if (PHOTO.on && PHOTO.renderLens()) return;
   if (!(tiltShift && (mode==='above'||mode==='chase'))){ renderer.setRenderTarget(null); renderer.render(scene,camera); return; }
   // the band of sharp focus runs through the player from above, and through the middle of the train when chasing it
   if (mode==='chase'){
@@ -10255,7 +10273,7 @@ function frame(now){
   updateShadowFrame();
   updateHUD();
   updateStats();
-  render();
+  PHOTO.frame(dt,render);
   requestAnimationFrame(frame);
 }
 
@@ -11207,5 +11225,6 @@ window.__village={ goods, glZone, branchesAt, get mantle(){ return mantle; }, ge
   swimmer,UW,get seabedLife(){ return seabedLife; },jumpKey,diveProps,swimLeaveHere,SEA,
   swimAt(x,z,y,under){ if (sailD) dinghyAshore(true); if (riding()) leaveTrain('street'); if (mode==='ferry'||ridden) leaveFerry('street'); if (mode==='above') toggleView();
     player.x=x; player.z=z; mode='swim'; swimmer.enter({x,y:y??0.2,z,yaw,pitch:fpPitch}); const S=swimmer.state; if (under){ S.mode='under'; S.under=true; S.underT=2; } },
+  photo:PHOTO.api,
   get swimDebug(){ const S=swimmer.state; return {mode,swim:S.mode,under:S.under,lens:UW.lens,wet:UW.wet,x:S.x,y:S.y,z:S.z,water:S.water,air:S.air,surface:SEA.heightAt(S.x,S.z)}; }};
 </script>

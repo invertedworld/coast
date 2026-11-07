@@ -10,6 +10,7 @@ The program is contained in `index.html`, apart from the cat in `cat/`. There is
 |---|---|
 | `index.html` | The complete program: markup, styles and one JavaScript module (about 7,400 lines). |
 | `cat/` | The cat from Michi-Neko: The Cat Philosopher's Path by c1t1zen1, under the MIT licence (`cat/LICENSE`). See `cat/README.md`. |
+| `photo/` | The camera for taking pictures (K): the lens, depth of field, exposure, viewfinder and gallery, and the API for picture effects, `window.__village.photo` (documented at the top of `photo/camera.js`). |
 | `sounds.json` | Maps sound identifiers to audio files (see [Sound](#sound)). |
 | `sounds/` | The audio files that `sounds.json` names. |
 | `publish-site.sh` | Publishes the game to markhammond.me (see [Publishing](#publishing)). |
