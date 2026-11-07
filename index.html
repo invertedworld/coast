@@ -6763,11 +6763,24 @@ ${GLSL} uniform float uPx; attribute vec2 aPar; varying float vA;
   function prewarm(r,scene,camera,drawAbove,parent){
     const host=parent||scene; if (st.attached!==host){ host.add(surf,parts,spray); st.attached=host; } spray.visible=true;
     const v0=[surf.visible,parts.visible]; surf.visible=parts.visible=true; const u0=st.under, b0=st.bub;
-    r.compile(scene,camera); st.under=true; st.bub=0; const l0=st.lens; render(r,scene,camera);
+    // the passes draw the scene into half-float targets, for which three.js builds each material's program again
+    // (no tone mapping, linear output), so every material in the scene is compiled for a target as well as for the
+    // screen: drawing alone would compile only those in view at load
+    r.compile(scene,camera); const rt0=r.getRenderTarget(); r.setRenderTarget(sceneRT); r.compile(scene,camera); r.setRenderTarget(rt0);
+    st.under=true; st.bub=0; const l0=st.lens; render(r,scene,camera);
     if (drawAbove){ st.lens='split'; render(r,scene,camera,drawAbove); } st.under=u0; st.bub=b0; st.lens=l0; spray.visible=false;
     surf.visible=v0[0]; parts.visible=v0[1]; }
+  // compiles, in the background, the target programs of materials that have come into the scene since the last call,
+  // so that going into the water does not stop the frame while they are built; it returns the time it took in ms
+  // only the objects whose material has not been seen are passed to the renderer, the scene's lights being taken from
+  // the scene itself
+  const warmed=new WeakSet(), fresh=[], few={traverse(f){ for (const o of fresh) f(o); },traverseVisible(){}};
+  function warm(r,scene,camera){ const t=performance.now(); fresh.length=0;
+    scene.traverse(o=>{ const m=o.material; if (!m) return; const ms=Array.isArray(m)?m:[m]; let n=false; for (const x of ms) if (!warmed.has(x)){ warmed.add(x); n=true; } if (n) fresh.push(o); });
+    if (fresh.length){ const rt0=r.getRenderTarget(); r.setRenderTarget(sceneRT); try { r.compileAsync(few,camera,scene); } finally { r.setRenderTarget(rt0); } }
+    fresh.length=0; return performance.now()-t; }
   function dispose(){ sceneRT.dispose(); splitRT.dispose(); rayRT.dispose(); underRT.dispose(); mixMat.dispose(); rayMat.dispose(); compMat.dispose(); surfMat.dispose(); partMat.dispose(); disc.dispose(); pg.dispose(); tri.dispose(); surf.removeFromParent(); parts.removeFromParent(); }
-  return {update,render,prewarm,splash,isUnder,get lens(){ return st.lens; },get wet(){ return st.lens==='under'?1:st.lens==='above'?0:st.wet; },setOptions,dispose,glsl:GLSL,uniforms:U,surface:surf,particles:parts,options:O,passes:{rayMat,compMat,sceneRT,rayRT},get under(){ return st.under; }};
+  return {update,render,prewarm,warm,splash,isUnder,get lens(){ return st.lens; },get wet(){ return st.lens==='under'?1:st.lens==='above'?0:st.wet; },setOptions,dispose,glsl:GLSL,uniforms:U,surface:surf,particles:parts,options:O,passes:{rayMat,compMat,sceneRT,rayRT},get under(){ return st.under; }};
 }
 /* ================= end of underwater ================= */
 
@@ -9990,8 +10003,11 @@ function swimStepOffOk(mx,mz){ if (!player.grounded) return true;
   if (mz<0.5 || Math.abs(mx)>0.35 || player.y<0.3) return false;
   const fx=-Math.sin(yaw), fz=-Math.cos(yaw), ax=player.x+fx*1.2, az=player.z+fz*1.2;
   return standableAt(ax,az)<-1.0 && -heightAt(ax,az)>0.75; }
+let uwWarmT=3, uwWarmMs=0;
 const _dvSun=new THREE.Color(), _dvSky=new THREE.Color(), _dvEye={x:0,y:0,z:0};
 function diveFrame(dt,wdt){
+  // out of the water, what has come into the scene is compiled for the water's passes every few seconds
+  if (mode!=='swim' && (uwWarmT-=dt)<=0){ uwWarmT=3; uwWarmMs=UW.warm(renderer,scene,camera); }
   if (mode!=='swim'){ if (diveOn){ diveOn=false; UW.uniforms.uUnderOn.value=0; UW.surface.visible=UW.particles.visible=false; if (seabedLife) seabedLife.update(0,{active:false}); } return; }
   diveOn=true; const S=swimmer.state, L=seabedLifeNow();
   UW.update(dt,{under:S.under,camera,parent:world,sunDir:LIGHT_DIR,sunColor:_dvSun.copy(sun.color).multiplyScalar(sun.intensity),skyColor:_dvSky.copy(hemi.color).multiplyScalar(hemi.intensity),
@@ -11204,7 +11220,7 @@ window.__village={ goods, glZone, branchesAt, get mantle(){ return mantle; }, ge
   player,chunks,get mode(){return mode},toggleView,setYaw:v=>yaw=v,setPitch:v=>pitch=v,setFpPitch:v=>fpPitch=v,setDist:v=>dist=v,keys,heightAt,
   // swimming and diving: the swimmer, the water, the seabed's life; swimAt puts the player in the water at (x,z), at the
   // surface or at depth y, under (true) the swimmer's state
-  swimmer,UW,get seabedLife(){ return seabedLife; },jumpKey,diveProps,swimLeaveHere,SEA,
+  swimmer,UW,get uwWarmMs(){ return uwWarmMs; },get seabedLife(){ return seabedLife; },jumpKey,diveProps,swimLeaveHere,SEA,
   swimAt(x,z,y,under){ if (sailD) dinghyAshore(true); if (riding()) leaveTrain('street'); if (mode==='ferry'||ridden) leaveFerry('street'); if (mode==='above') toggleView();
     player.x=x; player.z=z; mode='swim'; swimmer.enter({x,y:y??0.2,z,yaw,pitch:fpPitch}); const S=swimmer.state; if (under){ S.mode='under'; S.under=true; S.underT=2; } },
   get swimDebug(){ const S=swimmer.state; return {mode,swim:S.mode,under:S.under,lens:UW.lens,wet:UW.wet,x:S.x,y:S.y,z:S.z,water:S.water,air:S.air,surface:SEA.heightAt(S.x,S.z)}; }};

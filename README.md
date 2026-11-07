@@ -439,6 +439,8 @@ About a third of each coast's 600 m stretches have a small wreck on the sand 16 
 - **A new island (I).** The player leaves the water first.
 - **R, F, G and Y.** These bring the player out of the water where they are before going on.
 
+The water's passes draw the scene into half-float targets, for which three.js builds a second program for every material, without tone mapping. At load `UW.prewarm` compiles every material in the scene for such a target as well as for the screen, and while the player is out of the water `UW.warm` compiles, every three seconds and in the background, the materials that have come into the scene since. Without them the first dive stopped the frame for several seconds while the programs were built.
+
 ### Walking and collision
 
 The player stands on the highest walkable surface at their position, given by the walkable-surface function (terrain, steps, terraces, moles, platforms and decks). A step up may be at most `STEP = 0.8` m. A walker wading into the sea becomes a swimmer once the water is 0.75 m deep (see [Swimming and diving](#swimming-and-diving)). Deeper water stops a walker, except for a deliberate step forward off an edge towards water that lies straight ahead, or a jump out over it. Buildings and objects are oriented boxes; the collision code pushes the player out along the shortest axis, and treats a position exactly at an obstacle's centre as lying on the positive side, so that the player is never left inside an obstacle.
