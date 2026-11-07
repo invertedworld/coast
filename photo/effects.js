@@ -1,7 +1,7 @@
 /* Picture effects for photographs taken in the village.
 
    applyEffect(name, source, opts) -> Promise<HTMLCanvasElement>
-     name    'watercolour', 'oil' or 'impressionist'
+     name    'watercolour', 'oil', 'impressionist' or 'charcoal'
      source  an HTMLCanvasElement, HTMLImageElement or ImageBitmap holding the picture
      opts    seed (a number, for the random parts), and per-effect settings listed with each effect below
              (opts.debug names an intermediate stage to return instead, for the testbench)
@@ -15,7 +15,7 @@
    picture. */
 import * as THREE from 'three';
 
-export const EFFECTS = ['watercolour', 'oil', 'impressionist'];
+export const EFFECTS = ['watercolour', 'oil', 'impressionist', 'charcoal'];
 
 /* ---------- the private GL context and full-screen passes ---------- */
 let G = null;
@@ -120,13 +120,13 @@ void main(){ float s=max(uSigma,0.3); int r=int(ceil(2.5*s)); vec4 acc=vec4(0.0)
   fragColor=acc/wsum; }`;
 
 // the local orientation from the smoothed tensor: tangent (along edges), its angle, and the anisotropy
-const TFM = `uniform sampler2D tSrc; uniform float uFlat;
+const TFM = `uniform sampler2D tSrc; uniform float uFlat, uDrift;
 void main(){ vec3 g=texture(tSrc,vUv).xyz; float E=g.x, F=g.y, G=g.z;
   float D=sqrt(max(0.0,(E-G)*(E-G)+4.0*F*F)); float l1=0.5*(E+G+D), l2=0.5*(E+G-D);
   vec2 t=vec2(l1-E,-F); t = length(t)>1e-12 ? normalize(t) : vec2(0.0,1.0);
   float A = l1+l2>1e-12 ? (l1-l2)/(l1+l2) : 0.0;
   // where the picture is flat the tensor's direction is noise: there the field drifts slowly about the horizontal
-  vec2 p=vUv*uRes/uS; float a=(fbm3(p*0.003+uSeed+40.0)-0.5)*2.2; vec2 nd=vec2(cos(a),sin(a));
+  vec2 p=vUv*uRes/uS; float a=(fbm3(p*0.003+uSeed+40.0)-0.5)*2.2*uDrift; vec2 nd=vec2(cos(a),sin(a));
   float k=smoothstep(uFlat*0.3,uFlat,sqrt(l1));
   if (dot(nd,t)<0.0) t=-t;
   t=normalize(mix(nd,t,k)+1e-6); A*=k;
@@ -170,11 +170,11 @@ function blur(src, sigma, tmp, out) {
 }
 
 // the orientation field of a picture, smoothed over sigma pixels
-function orientation(srcTex, w, h, sigma, flat = 0.01, seed = 1) {
+function orientation(srcTex, w, h, sigma, flat = 0.01, seed = 1, drift = 1) {
   const st = target(w, h, THREE.FloatType), tmp = target(w, h, THREE.FloatType), tfm = target(w, h, THREE.FloatType);
   pass(ST, { tSrc: srcTex }, st);
   blur(st, sigma, tmp, st);
-  pass(TFM, { tSrc: st, uFlat: flat, uSeed: seed }, tfm);
+  pass(TFM, { tSrc: st, uFlat: flat, uSeed: seed, uDrift: drift }, tfm);
   st.dispose(); tmp.dispose();
   return tfm;
 }
@@ -547,7 +547,110 @@ function impressionist(srcTex, w, h, o) {
   [tfm, tmp, ...soft, small, paint, height].forEach(t => t.dispose()); matC.dispose(); matH.dispose(); geo.dispose();
 }
 
-const RUN = { watercolour, oil, impressionist };
+/* ---------- charcoal ----------
+   A monochrome drawing on laid charcoal paper. The picture's values are gathered into tonal masses from its
+   Kuwahara-simplified copy and drawn with hatching: strokes laid along the flow of the structure tensor, each a
+   line whose breadth and pressure follow the darkness beneath it, with a second set crossing the first in the
+   shadows. The charcoal catches only on the tooth of the paper where the pressure is light and fills it where it
+   is heavy. Middle tones are smudged into a soft grey, contours are drawn as crisp lines of varying pressure,
+   the lightest places are lifted back to bare paper, and stray dust and finger smudges lie on the sheet.
+   opts: abstraction (Kuwahara radius, default 5), hatching (default 1), contour (default 1), smudge (default 1) */
+const CH_TONE = `uniform sampler2D tSrc; uniform float uLo, uHi;
+void main(){ vec3 c=texture(tSrc,vUv).rgb; float L=mix(lum(c),max(c.r,max(c.g,c.b)),0.5);
+  // values pushed apart, as a draughtsman simplifies light and shadow
+  float D=clamp((uHi-L)/max(uHi-uLo,0.1),0.0,1.0); D=pow(D,1.1);
+  fragColor=vec4(D,D,D,1.0); }`;
+
+// hatching: a line integral convolution of sparse noise along the flow (turned by uTurn) draws long strokes that
+// follow the form; the strokes appear where the drawing is darker than each stroke's threshold
+const CH_HATCH = `uniform sampler2D tTfm, tTone, tQuiet; uniform float uLen, uLayer, uTurn, uFrom;
+float seedAt(vec2 x){ vec2 c=floor(x/(1.7*uS)); float h=hash12(c+uSeed*3.0+uLayer*17.0); return step(0.82,h)*(0.6+0.4*hash12(c+9.0)); }
+void main(){
+  vec2 px=vUv*uRes; float cs=cos(uTurn), sn=sin(uTurn);
+  float acc=seedAt(px), wsum=1.0; int n=int(uLen*uS);
+  for (int dir=0; dir<2; dir++){
+    vec2 x=px; vec2 t0=texture(tTfm,vUv).xy; vec2 tp=vec2(cs*t0.x-sn*t0.y,sn*t0.x+cs*t0.y)*(dir==0?1.0:-1.0);
+    for (int i=1;i<=60;i++){ if (i>n) break;
+      vec2 t=texture(tTfm,x/uRes).xy; t=vec2(cs*t.x-sn*t.y,sn*t.x+cs*t.y); if (dot(t,tp)<0.0) t=-t; tp=t; x+=t;
+      float w=1.0-float(i)/float(n+1); acc+=w*seedAt(x); wsum+=w; }
+  }
+  float v=acc/wsum*5.0;                                     // about 1 on a stroke, 0 between strokes
+  float D=texture(tTone,vUv).r;
+  float w=clamp((D-uFrom)/(1.0-uFrom),0.0,1.0);
+  float line=smoothstep(1.0-w,1.0-w+0.35,v)*smoothstep(0.0,0.15,w);
+  // broad quiet passages such as the sky are mostly smudged, with only a few strokes
+  line*=mix(0.5,1.0,smoothstep(0.01,0.12,texture(tQuiet,vUv).r));
+  fragColor=vec4(line*(0.55+0.45*w),w,0.0,1.0); }`;
+
+const CH_FINAL = `uniform sampler2D tTone, tSoft, tH1, tH2, tP1, tP2; uniform float uHatch, uContour, uSmudge;
+float tooth(vec2 p){ // laid paper: fine chain and laid lines, and a granular tooth
+  float laid=0.5+0.5*sin(p.y*2.1+0.6*sin(p.x*0.05));
+  float g=fbm(p*0.9)*0.6+vnoise(p*2.3)*0.4;
+  return clamp(0.25*laid+0.75*g,0.0,1.0); }
+void main(){
+  vec2 px=vUv*uRes, p=px/uS;
+  float D=texture(tTone,vUv).r, Ds=texture(tSoft,vUv).r;
+  D=clamp(D+1.2*(D-Ds),0.0,1.0);                 // local contrast, as the draughtsman separates planes
+  float ph=tooth(p);
+  // the charcoal catches on the peaks of the tooth under light pressure and fills the hollows under heavy
+  float k=0.0;
+  // smudged middle tones: charcoal rubbed into the paper with a finger or stump
+  float sm=uSmudge*smoothstep(0.03,0.9,mix(Ds,D,0.5))*(0.8+0.35*(fbm(p*0.01+uSeed+3.0)-0.5));
+  sm*=0.55+0.45*smoothstep(0.1,0.7,ph);
+  k=1.0-(1.0-k)*(1.0-0.62*sm);
+  // hatching: two sets of strokes, the second crossing the first in the shadows
+  vec4 h1=texture(tH1,vUv), h2=texture(tH2,vUv);
+  float g1=smoothstep(1.0-h1.x*1.5-0.1,1.0-h1.x*1.5+0.25,ph);
+  float g2=smoothstep(1.0-h2.x*1.5-0.1,1.0-h2.x*1.5+0.25,ph);
+  k=1.0-(1.0-k)*(1.0-uHatch*0.7*h1.x*g1)*(1.0-uHatch*0.7*h2.x*g2);
+  // the deepest shadows pressed into a dense black
+  float deep=smoothstep(0.62,0.95,D);
+  k=1.0-(1.0-k)*(1.0-0.8*deep*smoothstep(0.2,0.6,ph+deep*0.4));
+  // contours: crisp lines from the picture's edges, heavier and lighter as the hand presses and lifts
+  float e=lum(texture(tP1,vUv).rgb)-lum(texture(tP2,vUv).rgb);
+  float cl=smoothstep(0.015,0.05,abs(e))*(0.55+0.45*vnoise(p*0.03+uSeed+8.0));
+  cl*=smoothstep(0.25,0.55,ph+0.35*cl);
+  k=1.0-(1.0-k)*(1.0-uContour*0.85*cl);
+  // highlights lifted with a putty rubber: streaks of bare paper in the lightest places
+  float lift=smoothstep(0.1,0.02,Ds)*(0.6+0.4*fbm(vec2(p.x*0.02,p.y*0.08)+uSeed+40.0));
+  k*=1.0-lift;
+  // dust and smudges on the sheet
+  float dust=smoothstep(0.62,0.8,fbm(p*0.004+uSeed+60.0))*0.12+step(0.9985,hash12(floor(p*0.7)+uSeed))*0.5;
+  k=1.0-(1.0-k)*(1.0-dust*smoothstep(0.3,0.7,ph));
+  vec3 paper=vec3(0.93,0.915,0.875), char=vec3(0.11,0.105,0.11);
+  vec3 col=mix(paper,char,clamp(k,0.0,1.0));
+  // the tooth of the paper, lit from the upper left, everywhere the charcoal has not filled it
+  float hx=tooth(p+vec2(1.0,0.0))-ph, hy=tooth(p+vec2(0.0,1.0))-ph;
+  col*=1.0+(1.0-k)*(0.06*(-hx*0.7+hy*0.7)-0.03*(1.0-ph));
+  fragColor=vec4(clamp(col,0.0,1.0),1.0); }`;
+
+function charcoal(srcTex, w, h, o) {
+  const s = h / 800, seed = o.seed ?? 1;
+  const tfm = orientation(srcTex, w, h, 3.0 * s, 0.01, seed);
+  const A = target(w, h), tone = target(w, h), soft = target(w, h), h1 = target(w, h), h2 = target(w, h), tmp = target(w, h),
+    p1 = target(w, h), p2 = target(w, h);
+  kuwahara(srcTex, tfm, (o.abstraction ?? 5) * s, A, 8);
+  // the drawing uses the whole range from paper to black, whatever the picture's own range
+  const sw = 64, sh = Math.max(8, Math.round(64 * h / w)), small = target(sw, sh, THREE.FloatType);
+  pass(COPY, { tSrc: A, uGain: 1 }, small);
+  const px = readTarget(small), Ls = [];
+  for (let i = 0; i < px.length; i += 4) Ls.push(0.5 * (0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2]) + 0.5 * Math.max(px[i], px[i + 1], px[i + 2]));
+  Ls.sort((a, b) => a - b); small.dispose();
+  const lo = Math.min(0.45, Ls[Math.floor(Ls.length * 0.03)]), hi = Math.max(lo + 0.25, Math.min(0.97, Ls[Math.floor(Ls.length * 0.9)]));
+  pass(CH_TONE, { tSrc: A, uLo: lo, uHi: hi }, tone);
+  blur(tone, 5 * s, tmp, soft);
+  const det = target(w, h); pass(OIL_DETAIL, { tSrc: A }, det); blur(det, 6 * s, tmp, det);
+  const tfm2 = orientation(A, w, h, 14.0 * s, 0.02, seed, 0.15);
+  pass(CH_HATCH, { tTfm: tfm2, tQuiet: det, tTone: tone, uLen: 22, uLayer: 0, uTurn: 0.75, uFrom: 0.15, uSeed: seed }, h1);
+  pass(CH_HATCH, { tTfm: tfm2, tQuiet: det, tTone: tone, uLen: 18, uLayer: 1, uTurn: -0.45, uFrom: 0.5, uSeed: seed }, h2);
+  blur(A, 1.0 * s, tmp, p1); blur(A, 1.8 * s, tmp, p2);
+  const dbg = { A, tone, soft, h1, h2 }[o.debug]; if (dbg) { show(dbg, w, h); return; }
+  pass(CH_FINAL, { tTone: tone, tSoft: soft, tH1: h1, tH2: h2, tP1: p1, tP2: p2, uHatch: o.hatching ?? 1, uContour: o.contour ?? 1,
+    uSmudge: o.smudge ?? 1, uSeed: seed }, null, { w, h });
+  [tfm, tfm2, A, tone, soft, h1, h2, tmp, p1, p2, det].forEach(t => t.dispose());
+}
+
+const RUN = { watercolour, oil, impressionist, charcoal };
 
 export async function applyEffect(name, source, opts = {}) {
   const f = RUN[name]; if (!f) throw new Error(`There is no effect called ${name}.`);
