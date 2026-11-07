@@ -202,18 +202,18 @@ import { createPhoto } from './photo/camera.js';
 
 /* ================= random & noise ================= */
 // The island grows from a seed, which may be any text of up to SEED_MAX characters, kept in capitals. A seed of digits
-// alone is the number it spells; any other text is hashed to a number. Without a seed the island is that of seed 7.
-// The seed may be given in the address as ?seed=..., and ?seed=random gives a new island on every load.
-const SEED_MAX=32, SEED_DEFAULT='7';
+// alone is the number it spells; any other text is hashed to a number. Each launch draws a new seed of eight letters and
+// digits at random, unless a seed is given in the address as ?seed=...
+const SEED_MAX=32, SEED_LEN=8, SEED_CHARS='ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
 function seedText(s){ return String(s).trim().toUpperCase().slice(0,SEED_MAX); }
 function seedNumber(s){ s=seedText(s); if (/^\d{1,9}$/.test(s)) return +s;
   let h=0; for (let i=0;i<s.length;i++) h=(((h<<5)-h)+s.charCodeAt(i))|0;
   return Math.abs(h); }
-function randomSeed(){
-  try{ const a=new Uint32Array(2); crypto.getRandomValues(a); return (a[0].toString(36)+a[1].toString(36)).toUpperCase().slice(0,12); }
-  catch(_){ return Math.floor(Math.random()*1e12).toString(36).toUpperCase(); } }
+function randomSeed(){ const a=new Uint32Array(SEED_LEN);
+  try{ crypto.getRandomValues(a); }catch(_){ for (let i=0;i<SEED_LEN;i++) a[i]=Math.floor(Math.random()*4294967296); }
+  let s=''; for (const v of a) s+=SEED_CHARS[v%SEED_CHARS.length]; return s; }
 let SEED_TEXT=(()=>{ try{ const q=new URLSearchParams(location.search).get('seed');
-  if (q && q.trim()) return q.trim().toLowerCase()==='random'?randomSeed():seedText(q); }catch(_){} return SEED_DEFAULT; })();
+  if (q && q.trim() && q.trim().toLowerCase()!=='random') return seedText(q); }catch(_){} return randomSeed(); })();
 let SEED = seedNumber(SEED_TEXT);
 function hash(a,b,c){
   let h = Math.imul(a|0,0x27d4eb2d) ^ Math.imul(b|0,0x165667b1) ^ Math.imul(((c|0)+SEED*977)|0,0x9e3779b1);
@@ -10117,8 +10117,8 @@ async function newIsland(text){ if (seeding) return; seeding=true;
     seedShow(1,'Generating a new island:'); await nextPaint();
   } finally { seeding=false; seedEl.hidden=true; last=performance.now(); }
 }
-// the seed is kept in the address, so that a reload or a shared link gives the same island; the default leaves it out
-function seedToAddress(){ try{ const u=new URL(location.href); if (SEED_TEXT===SEED_DEFAULT) u.searchParams.delete('seed'); else u.searchParams.set('seed',SEED_TEXT);
+// a seed generated from the panel is kept in the address, so that a reload or a shared link gives the same island
+function seedToAddress(){ try{ const u=new URL(location.href); u.searchParams.set('seed',SEED_TEXT);
   history.replaceState(history.state,'',u); }catch(_){} }
 // I opens the island panel, where a seed is typed or drawn at random and the island generated from it; Esc or I closes
 // it unchanged. While it is open the game sees no keys, and a printable key goes to the seed
