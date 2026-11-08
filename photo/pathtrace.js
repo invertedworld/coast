@@ -519,6 +519,12 @@ function classify(g, m, s, e, idx) {
 }
 
 /* ---------- the sea, rebuilt from the game's wave sum ---------- */
+// metres: how far the open water reaches from the centre of the game's disc of sea. A flat sea runs on to the horizon
+// however high the eye stands, and the haze over it becomes all but opaque only some 40 km out from an eye at 350 m and
+// some 100 km out from one at 3 km. The sea is drawn out to this distance, which keeps it within the view depth (below
+// 1e5) that the passes take as a surface, and the haze over the open sea beyond it is worked out where the picture is
+// put together (composeMat), so that the sea meets the horizon with no edge.
+const SEA_REACH = 90000;
 // the shore field the sea shader reads: [swell factor, wind factor, depth], bilinear as the GPU samples it
 function makeFieldReader(U) {
   const tex = U.uField.value, R = U.uFieldR.value, out = U.uOutside.value;
@@ -580,15 +586,17 @@ function buildSea(sea, outerR = 0) {
     const bed = [0.24, 0.24, 0.19];
     for (let c = 0; c < 3; c++) Col[j * 3 + c] = Math.min(0.6, bed[c] * tr[c] + ins[c] * (1 - tr[1]));
   }
-  // beyond the game's disc of sea, a flat ring of open water reaches out to the horizon, in the colour of deep water
+  // beyond the game's disc of sea, a flat ring of open water reaches out towards the horizon, in the colour of deep
+  // water, to outerR metres from the disc's centre. The disc is scaled (in the bird's-eye view it grows with the zoom),
+  // so the radii are worked out in its own units and outerR is brought into them.
   let ring = null;
   if (outerR > 0) {
-    let r0 = 0; const cx = sea.position.x, cz = sea.position.z;
+    let r0 = 0;
     for (let j = 0; j < n; j++) r0 = Math.max(r0, Math.hypot(pos.getX(j), pos.getZ(j)));
-    const c0 = new THREE.Vector3(0, 0, 0).applyMatrix4(M), y0 = c0.y;
+    const c0 = new THREE.Vector3(0, 0, 0).applyMatrix4(M), y0 = c0.y, rOut = outerR / M.elements[0];
     const SEG = 160, radii = [];
-    for (let r = r0 * 0.995; r < outerR; r *= 1.35) radii.push(r);
-    radii.push(outerR);
+    for (let r = r0 * 0.995; r < rOut; r *= 1.35) radii.push(r);
+    radii.push(rOut);
     const kd = 1, lift = 0.25 + 0.75 * smooth(-0.7, 0.9, 0);
     const deepCol = [0, 1, 2].map(q => { const b = [deep.r, deep.g, deep.b][q] + ([mid.r, mid.g, mid.b][q] - [deep.r, deep.g, deep.b][q]) * lift; return Math.min(0.6, b * 0.8 * kd); });
     const rp = [], ri = [];
@@ -1281,6 +1289,14 @@ const composeMat = pass(`uniform sampler2D tE, tP, tApt, tAg, tG, tM, tMp, tO, t
   vec3 skyIn(vec3 d){ return texture2D(tBg,vec2(atan(d.z,d.x)/6.2831853+0.5,1.0-acos(clamp(d.y,-1.0,1.0))/3.1415927)).rgb; }
   bool hit(float z){ return z>0.0 && z<1e5; }
   vec3 viewDir(vec2 uv){ return vec3((uv*2.0-1.0)*vec2(uTanY*uAspect,uTanY),-1.0); }
+  // the transmittance of the haze over a distance dist along the world direction d: the haze thins exponentially with
+  // height, so the optical depth is integrated along the ray between the eye's height and the point's
+  float hazeT(float dist, vec3 d){
+    float y0=max(uCamY,0.0), y1=max(uCamY+d.y*dist,0.0), H=uHazeH;
+    float od = abs(y1-y0)<1.0 ? uSigma*dist*exp(-y0/H) : uSigma*dist*H*(exp(-y0/H)-exp(-y1/H))/(y1-y0);
+    return exp(-od); }
+  // the light of the sky that the haze scatters towards the eye along d
+  vec3 hazeIn(vec3 d){ return skyAt(normalize(vec3(d.x,max(d.y,0.0)*0.25+0.01,d.z))); }
   // a surface at view depth z, seen along the world direction d (dl: the distance along the ray for a unit of depth),
   // lit by E, of the path tracer's colour apt and the game's colour ag
   vec3 surface(vec3 E, vec3 apt, vec3 ag, float z, vec3 d, float dl){
@@ -1291,15 +1307,14 @@ const composeMat = pass(`uniform sampler2D tE, tP, tApt, tAg, tG, tM, tMp, tO, t
     // the scene, but not the sky behind it, takes the gain that matches the game's brightness
     vec3 col=E*mix(a,clamp(ag,a*0.2,a*5.0),rm)*uSceneGain;
     // aerial perspective: light from the surface is dimmed by the haze between, and the haze itself scatters the
-    // light of the sky towards the eye; the haze thins exponentially with height, so the optical depth is integrated
-    // along the ray between the eye's height and the point's
-    if (uHaze>0.5){
-      float dist=z*dl, y0=max(uCamY,0.0), y1=max(uCamY+d.y*dist,0.0), H=uHazeH;
-      float od = abs(y1-y0)<1.0 ? uSigma*dist*exp(-y0/H) : uSigma*dist*H*(exp(-y0/H)-exp(-y1/H))/(y1-y0);
-      float T=exp(-od);
-      vec3 inS=skyAt(normalize(vec3(d.x,max(d.y,0.0)*0.25+0.01,d.z)));
-      col=col*T+inS*(1.0-T); }
+    // light of the sky towards the eye
+    if (uHaze>0.5){ float T=hazeT(z*dl,d); col=col*T+hazeIn(d)*(1.0-T); }
     return col; }
+  // open sky, as the path tracer draws it (c). Below the horizon it is the open sea beyond the end of the sea drawn
+  // (SEA_REACH), so far out that the haze over it, at the distance the ray meets the plane of the sea, all but hides it
+  vec3 openSky(vec3 c, vec3 d){
+    if (uHaze<0.5 || d.y>=0.0 || uCamY<=0.0) return c;
+    float T=hazeT(uCamY/max(-d.y,1e-6),d); return c*T+hazeIn(d)*(1.0-T); }
   float fogAt(float z){ return smoothstep(uFogNear,uFogFar,z); }
   void main(){
     vec4 A=texture2D(tApt,vUv)/uN; vec3 Ag=texture2D(tAg,vUv).rgb/uN; vec3 E=texture2D(tE,vUv).rgb; vec4 g=texture2D(tG,vUv);
@@ -1311,9 +1326,9 @@ const composeMat = pass(`uniform sampler2D tE, tP, tApt, tAg, tG, tM, tMp, tO, t
     if (m>uN-0.5){
       // the whole pixel is on the surface at its centre, or on open sky
       if (scene){ col=surface(E,A.rgb,Ag,g.w,d,dl); fog=fogAt(g.w); }
-      else { vec3 a=max(A.rgb,vec3(0.03)); col=E*clamp(Ag,a*0.2,a*5.0); }
+      else { vec3 a=max(A.rgb,vec3(0.03)); col=openSky(E*clamp(Ag,a*0.2,a*5.0),d); }
     } else {
-      vec3 sky=skyIn(d);
+      vec3 sky=openSky(skyIn(d),d);
       col = m>0.0 ? m*(scene ? surface(E,Mp.rgb/m,M.rgb/m,g.w,d,dl) : sky) : vec3(0.0);
       if (scene) fog+=m*fogAt(g.w);
       col+=so*sky;
@@ -1539,7 +1554,9 @@ export async function pathTrace(opts = {}) {
   if (extend) { opt.farReach = Math.max(opt.farReach, opt.horizonReach); opt.farTerrain = false; opt.skipBlocks = true; }
   if (opt.blockReach == null) opt.blockReach = opt.horizonReach <= 5000 ? 1600 : Math.round(opt.horizonReach * 0.42);
   info.blockReach = Math.min(opt.blockReach, opt.horizonReach);
-  camPT.far = Math.max(camPT.far, opt.horizonReach * 5); camPT.updateProjectionMatrix();
+  // the far plane takes in the whole of the open sea, so that the guide and the colour passes draw it all and its haze
+  // is that of the surface it is (a sea beyond the far plane was traced, but taken for open sky, without its haze)
+  camPT.far = Math.max(camPT.far, opt.horizonReach * 5, SEA_REACH * 1.05); camPT.updateProjectionMatrix();
   const tanY = Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2) / cam.zoom;
   const NJ = Math.max(1, Math.min(MAX_JITTER, Math.round(opt.jitter)));
   // the sub-pixel offsets, in pixels, x to the right and y downwards (as setViewOffset takes them)
@@ -1573,7 +1590,7 @@ export async function pathTrace(opts = {}) {
       col = collect(scene, cam, { ...opt, ptReach: W.nearReach }, info);
       let terrain = null;
       if (extend) { col.parts.push(...W.parts); terrain = distantTerrain(V, cam, opt, info, W.built, W.reach, W.farBuilt); if (terrain) col.parts.push(terrain); }
-      const seaGeo = col.sea ? buildSea(col.sea, opt.horizonReach * 4) : null;
+      const seaGeo = col.sea ? buildSea(col.sea, SEA_REACH) : null;
       mark('tCollect');
       // the page is given a turn between the longer steps
       await yieldPage(); checkAbort(signal);
