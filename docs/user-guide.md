@@ -82,7 +82,7 @@ The new island replaces the present one entirely, and the player begins it on fo
 
 **Enter**, with the camera lowered, takes a quick picture of the view as it is, which is kept in the gallery; the shutter is heard and seen. **C** raises a camera to the eye, and the island is then seen through its lens. The camera remains raised until it is lowered with the button at the top right of the screen, with **C** or with **Esc**. In the water **C** dives instead, and the camera is not raised. While it is raised the mouse is not captured: a drag across the scene turns the view, and the player walks, swims and turns with the usual keys. A click on the scene does not take a picture.
 
-The controls of the lens lie in a panel at the foot of the screen. Each shows its value and a scale, and is adjusted with the **−** and **+** buttons on either side, which repeat while held.
+The controls of the lens lie in a panel at the foot of the screen. Each shows its value and a scale, and is adjusted with the **−** and **+** buttons on either side, which repeat while held, or by dragging along its scale.
 
 **Zoom** sets the focal length, from 16 mm to 300 mm in the equivalent of a 35 mm frame; the default is 35 mm. **+** and **−** on the keyboard, and the mouse wheel, do the same.
 
@@ -132,7 +132,7 @@ The arrow at the top left returns to the gallery, as does **Esc**. If the finish
 
 ## Game controllers and touch screens
 
-A game controller is supported. The left stick walks, swims and steers, and the right stick looks. **A** jumps, and rises in the water; **B** crouches, and dives while held in the water. **X** steps through the views, as **0** does, and **Y** changes to the bird's-eye view, as **5** does; the bumpers bring the view nearer or further. The left trigger takes a quick picture. With the camera raised, the left trigger takes a picture through the lens, the bumpers zoom, the D-pad's up and down set the focus further and nearer, and its left and right set the exposure. At the helm the triggers trim the sail. A press of the left stick changes between running and walking, and **Menu** shows the help panel. On the controller's tab of the help panel, **Invert vertical look** reverses the right stick's up and down, and **Sensitivity** sets how fast it turns the view, from 25 % to 300 %; both are remembered.
+A game controller is supported. The left stick walks, swims and steers, and the right stick looks. **A** jumps, and rises in the water; **B** crouches, and dives while held in the water. **X** steps through the views, as **0** does, and **Y** changes to the bird's-eye view, as **5** does; the bumpers bring the view nearer or further. The right trigger takes a quick picture. With the camera raised, the right trigger takes a picture through the lens, the bumpers zoom, the D-pad's up and down set the focus further and nearer, and its left and right set the exposure. At the helm the triggers trim the sail. A press of the left stick changes between running and walking, and **Menu** shows the help panel. On the controller's tab of the help panel, **Invert vertical look** reverses the right stick's up and down, and **Sensitivity** sets how fast it turns the view, from 25 % to 300 %; both are remembered.
 
 On a touch screen, a touch on the left part of the screen places a joystick there for walking, and a drag elsewhere turns the view.
 

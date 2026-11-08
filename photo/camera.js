@@ -383,7 +383,9 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
 .cam .step{width:34px;height:34px;padding:8px;border-radius:50%;background:rgba(245,233,215,.1)}
 .cam .step:hover{background:rgba(245,233,215,.2)}
 .cam .step:active{background:rgba(245,233,215,.3)}
-.cam .dial s{position:relative;display:block;width:100%;height:3px;border-radius:2px;background:rgba(245,233,215,.18);text-decoration:none}
+.cam .dial s{position:relative;display:block;width:100%;height:3px;border-radius:2px;background:rgba(245,233,215,.18);text-decoration:none;pointer-events:auto;cursor:pointer;touch-action:none}
+.cam .dial s::after{content:"";position:absolute;left:-6px;right:-6px;top:-9px;bottom:-9px}
+.cam .dial s.drag u,.cam .dial s:hover u{transform:scaleX(1.6)}
 .cam .dial s u{position:absolute;top:-3px;width:3px;height:9px;margin-left:-1.5px;border-radius:1.5px;background:#f5e9d7}
 .cam .dial.ev s::before{content:"";position:absolute;left:50%;top:-2px;width:1px;height:7px;background:rgba(245,233,215,.6)}
 .cam .mode{height:20px;padding:0 7px;border-radius:10px;background:rgba(245,233,215,.12);font-size:.68rem;letter-spacing:.1em;color:var(--plaster-dim,#d9c8b0)}
@@ -493,6 +495,23 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
   let held = null;
   function release() { if (held) { clearTimeout(held.t); held = null; } }
   hud.addEventListener('mousedown', e => e.preventDefault());   // the controls never take the keyboard's focus
+  // each dial's scale may be dragged along to set its value directly
+  const fromScale = (k, f) => {
+    if (k === 'focal') setFocal(F_MIN * Math.pow(F_MAX / F_MIN, f));
+    else if (k === 'focus') setFocus(FOCUS_MIN * Math.pow(1000 / FOCUS_MIN, f));
+    else if (k === 'fno') S.fNumber = STOPS[Math.round(f * (STOPS.length - 1))];
+    else if (k === 'ev') setEV(f * 6 - 3);
+    else if (k === 'ratio') setRatio(f * (RATIOS.length - 1));
+    else if (k === 'vig') setVignette(f);
+  };
+  hud.addEventListener('pointerdown', e => {
+    const sc = e.target.closest('.dial s'); if (!sc || e.button > 0) return;
+    e.preventDefault(); const k = sc.querySelector('u').dataset.m, r = sc.getBoundingClientRect(); sc.setPointerCapture(e.pointerId); sc.classList.add('drag');
+    const at = ev => { fromScale(k, clamp((ev.clientX - r.left) / r.width, 0, 1)); updateViewfinder(); };
+    at(e);
+    const up = () => { sc.classList.remove('drag'); sc.removeEventListener('pointermove', at); sc.removeEventListener('pointerup', up); sc.removeEventListener('pointercancel', up); };
+    sc.addEventListener('pointermove', at); sc.addEventListener('pointerup', up); sc.addEventListener('pointercancel', up);
+  });
   hud.addEventListener('pointerdown', e => {
     const b = e.target.closest('[data-c]'); if (!b || e.button > 0) return;
     const c = b.dataset.c, fn = STEP[c]; if (!fn) return;
