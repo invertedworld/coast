@@ -234,6 +234,8 @@ const pick=(R,arr)=>arr[Math.floor(R()*arr.length)];
 const lerp=(a,b,t)=>a+(b-a)*t;
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const smooth=t=>{ t=clamp(t,0,1); return t*t*(3-2*t); };
+const swoop={t:-1,dur:1.8,p:null,q:null,fov:70};
+function startSwoop(cam){ swoop.p=cam.position.clone(); swoop.q=cam.quaternion.clone(); swoop.fov=cam.fov; swoop.t=0; }
 
 /* ================= palette ================= */
 const hex=h=>new THREE.Color(h);
@@ -10169,7 +10171,7 @@ canvas.addEventListener('dblclick',e=>{ if (mode!=='above') return;
   if (top<0.1){ if (sailD || heightAt(x,z)>-1.5) return;
     const H=dgyHarbourNear(x,z), e=H&&dgyMake(H); if (!e) return;
     e.D.moor({x,z,head:Math.atan2(d.x,d.z)}); e.D.moor(null);
-    ridden=null; player.x=x; player.z=z; player.y=0; player.vy=0; eyeY=null; dinghyBoard(e); return; }
+    ridden=null; player.x=x; player.z=z; player.y=0; player.vy=0; eyeY=null; startSwoop(camera); dinghyBoard(e); return; }
   ridden=null;
   player.x=x; player.z=z; player.y=top; player.vy=0; player.grounded=true; player.holdT=2; eyeY=null; fpPitch=0;
   const from={p:camera.position.clone(),q:camera.quaternion.clone(),fov:camera.fov,far:camera.far,fogN:scene.fog.near,fogF:scene.fog.far};
@@ -11140,6 +11142,14 @@ function frame(now){
   if (mode==='coach') tunnelLight(dt,true);
   sitStep(dt);
   sndUpdate(dt);
+  // a swoop from one view into another (from the bird's-eye view down to the helm of a dinghy): the camera eases from
+  // where it was, with its lens, to where the new view puts it this frame
+  if (swoop.t>=0){ swoop.t+=dt; const k=smooth(Math.min(1,swoop.t/swoop.dur)), kk=k*k*(3-2*k);
+    _dq.copy(camera.quaternion); const span=swoop.p.distanceTo(camera.position); camera.position.lerpVectors(swoop.p,camera.position,kk); camera.quaternion.slerpQuaternions(swoop.q,_dq,kk);
+    // the path arcs up over the roofs and keeps clear of the ground until it comes down to the water
+    camera.position.y+=Math.sin(Math.PI*kk)*Math.max(12,span*0.25); if (kk<0.92) camera.position.y=Math.max(camera.position.y,heightAt(camera.position.x,camera.position.z)+18*(1-kk));
+    const fv=camera.fov; camera.fov=lerp(swoop.fov,fv,kk); camera.updateProjectionMatrix(); camera.fov=fv; sky.position.copy(camera.position);
+    if (swoop.t>=swoop.dur){ swoop.t=-1; camera.updateProjectionMatrix(); } }
   if (window.__freeCam){ camera.position.copy(window.__freeCam.p); camLookAt(window.__freeCam.t); sky.position.copy(camera.position); }
   updateBeams(wdt);
   updateDolphins(wdt);
