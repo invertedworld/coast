@@ -70,7 +70,10 @@ export const ICON = {
 
 export function createGallery({ renderer, scene, camera, origin, onClose, onLoad }) {
   const photos = [];
-  let count = 0, sel = null;   // sel: { p: photo, w: artwork or null }
+  let count = 0, sel = null;   // sel: { p: photo, w: artwork or null }, the item shown
+  // the items selected: the one shown, and more added with Cmd or Ctrl (one at a time) or Shift (a run of them)
+  const picked = new Set();
+  let anchor = null;
 
   /* ---------- settings, kept in the browser ---------- */
   const QS = Object.fromEntries(Q_GROUPS.map(g => [g.id, Object.fromEntries(g.fields.map(f => [f.k, f.def]))]));
@@ -122,7 +125,9 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
 .gal .card.sel span{color:var(--verdigris,#7cc3ad)}
 .gal .view{min-width:0;min-height:0;display:flex;flex-direction:column;gap:12px;padding:16px 18px}
 .gal .big{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;border-radius:4px;background:rgba(0,0,0,.18)}
-.gal .big canvas{max-width:100%;max-height:100%;box-shadow:0 6px 26px rgba(0,0,0,.55)}
+.gal .big canvas{max-width:100%;max-height:100%;border:6px solid #f4efe6;box-sizing:border-box;box-shadow:0 6px 26px rgba(0,0,0,.55)}
+.gal .big.stack{position:relative}
+.gal .big.stack canvas{position:absolute;max-width:72%;max-height:72%;transition:transform .2s}
 .gal .big .none{font-size:1rem}
 .gal .foot{display:flex;align-items:center;gap:10px}
 .gal .info{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--plaster-dim,#d9c8b0);font-size:.9rem}
@@ -173,10 +178,11 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
 .art .btns button.ok:hover:not(:disabled){background:#95d3bf}
 .art .stage{min-width:0;min-height:0;display:flex;align-items:center;justify-content:center;padding:22px;background:radial-gradient(ellipse at 50% 40%,#1a2a3a,#0b141d 75%)}
 .art .stage canvas{display:block;box-shadow:0 10px 40px rgba(0,0,0,.6);background:#0e1216}
-.art .ask{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(4,8,12,.6);z-index:2}
-.art .ask>div{width:min(380px,calc(100% - 32px));padding:20px 22px;background:#13212f;border:1px solid var(--g-line);border-radius:6px;box-shadow:0 18px 60px rgba(0,0,0,.5)}
-.art .ask h3{font:400 1.2rem/1.2 var(--font-display,serif);letter-spacing:.04em;text-transform:none;color:var(--plaster,#f5e9d7);margin:0 0 18px}
+.gal .ask,.art .ask{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(4,8,12,.6);z-index:2}
+.gal .ask>div,.art .ask>div{width:min(380px,calc(100% - 32px));padding:20px 22px;background:#13212f;border:1px solid var(--g-line);border-radius:6px;box-shadow:0 18px 60px rgba(0,0,0,.5)}
+.gal .ask h3,.art .ask h3{font:400 1.2rem/1.2 var(--font-display,serif);letter-spacing:.04em;text-transform:none;color:var(--plaster,#f5e9d7);margin:0 0 18px}
 .art .ask .btns{grid-template-columns:repeat(3,1fr)}
+.gal .ask .btns{display:grid;gap:8px;grid-template-columns:repeat(2,1fr)}
 @media (max-width:820px){
   .art .body{grid-template-columns:1fr;grid-template-rows:minmax(180px,42%) 1fr}
   .art .stage{order:-1;padding:10px}
@@ -196,9 +202,11 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
         <div class="foot"><div class="info"></div>
           <button class="pri" data-a="art" title="Artist mode">${ICON.easel}<span>Artist mode</span></button>
           <button data-a="dl" title="Download as PNG">${ICON.download}<span>Download PNG</span></button>
-          <button class="ib" data-a="del" title="Delete" aria-label="Delete">${ICON.trash}</button></div></div></div>`;
+          <button class="ib" data-a="del" title="Delete" aria-label="Delete">${ICON.trash}</button></div></div></div>
+    <div class="ask" hidden><div role="alertdialog" aria-label="Delete"><h3></h3>
+      <div class="btns"><button class="pri" data-a="del-yes">Delete</button><button data-a="del-no">Cancel</button></div></div></div>`;
   const $ = (root, q) => root.querySelector(q);
-  const sheet = $(gal, '.sheet'), big = $(gal, '.big'), info = $(gal, '.info');
+  const sheet = $(gal, '.sheet'), big = $(gal, '.big'), info = $(gal, '.info'), gask = $(gal, '.ask');
   // the divider between the pictures and the preview is dragged to resize them; its place is kept in the browser
   { const SPLIT_KEY = 'coast.gallerySplit', body = $(gal, '.body'), sp = $(gal, '.split');
     const setSplit = f => { f = Math.min(0.8, Math.max(0.15, f)); body.style.setProperty('--split', (f * 100).toFixed(2) + '%'); return f; };
@@ -223,13 +231,13 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
 
   function card(p, w) {
     const item = w || p, b = document.createElement('button'); b.type = 'button';
-    b.className = 'card ' + (w ? 'wk' : 'ph') + (sel && sel.p === p && sel.w === (w || null) ? ' sel' : '');
+    b.className = 'card ' + (w ? 'wk' : 'ph') + (picked.has(item) ? ' sel' : '');
     const im = new Image(); im.src = thumb(item); im.alt = '';
     const lab = document.createElement('span');
     if (w) lab.textContent = styleName(w.style);
     else lab.innerHTML = `Photo ${p.n}<em>${hhmm(p.time)}</em>`;
     b.append(im, lab);
-    b.addEventListener('click', () => select(p, w || null));
+    b.addEventListener('click', e => select(p, w || null, e.shiftKey ? 'range' : (e.metaKey || e.ctrlKey) ? 'toggle' : null));
     return b;
   }
   function buildSheet() {
@@ -248,22 +256,41 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
     big.textContent = ''; info.textContent = '';
     if (!sel) big.innerHTML = photos.length ? '<span class="none">No picture selected</span>' : '';
     else {
-      const item = sel.w || sel.p, m = item.meta; big.appendChild(item.canvas);
+      const item = sel.w || sel.p, m = item.meta;
+      big.classList.toggle('stack', picked.size > 1);
+      if (picked.size > 1){
+        // several selected: they lie in a loose pile, each turned and shifted a little, the one last chosen on top
+        const L = [...picked].filter(it => it !== item).slice(-7); L.push(item);
+        L.forEach((it, k) => { const c = it.canvas, h = (k * 2654435761 >>> 0) / 4294967296, h2 = (k * 40503 + 17) % 97 / 97, top = k === L.length - 1;
+          c.style.transform = top ? 'rotate(-1deg)' : `translate(${((h - 0.5) * 16).toFixed(1)}%, ${((h2 - 0.5) * 12).toFixed(1)}%) rotate(${((h2 - 0.5) * 16).toFixed(1)}deg)`;
+          big.appendChild(c); });
+      } else { item.canvas.style.transform = ''; big.appendChild(item.canvas); }
       const b = document.createElement('b'); b.textContent = sel.w ? styleName(sel.w.style) : `Photo ${sel.p.n}`;
       const rest = sel.w ? `${m.width} × ${m.height} · Photo ${sel.p.n}`
         : `${m.width} × ${m.height}` + (m.on ? ` · ${Math.round(m.focalLength)} mm · ${fmtF(m.fNumber)} · ${fmtDist(m.focusDistance)} · ${fmtEV(m.ev)}` : '');
       info.append(b, rest);
     }
+    const n = picked.size;
+    if (n > 1) info.append(` · ${n} selected`);
+    $(gal, '[data-a="dl"] span').textContent = n > 1 ? `Download ${n} PNGs` : 'Download PNG';
     $(gal, '[data-a="dl"]').disabled = $(gal, '[data-a="del"]').disabled = !sel;
-    $(gal, '[data-a="art"]').disabled = !(sel && !sel.w);
+    $(gal, '[data-a="art"]').disabled = !(sel && !sel.w && n <= 1);
   }
-  function select(p, w) {
-    sel = sel && sel.p === p && sel.w === w ? sel : { p, w };
-    for (const c of sheet.querySelectorAll('.card.sel')) c.classList.remove('sel');
+  // every item in the order of the sheet: each photo, newest first, followed by its artworks
+  const order = () => { const L = []; for (let i = photos.length - 1; i >= 0; i--) { L.push([photos[i], null]); for (const w of photos[i].works) L.push([photos[i], w]); } return L; };
+  function select(p, w, how = null) {
+    const item = w || p;
+    if (how === 'toggle'){ if (picked.has(item) && picked.size > 1){ picked.delete(item); const last = [...picked].pop(); const q = order().find(([a, b]) => (b || a) === last); sel = q ? { p: q[0], w: q[1] } : null; }
+      else { picked.add(item); sel = { p, w }; } anchor = { p, w }; }
+    else if (how === 'range' && anchor){ const L = order(), a = L.findIndex(([x, y]) => x === anchor.p && y === anchor.w), b = L.findIndex(([x, y]) => x === p && y === w);
+      picked.clear(); for (let k = Math.min(a, b); k <= Math.max(a, b); k++) if (k >= 0) picked.add(L[k][1] || L[k][0]); sel = { p, w }; }
+    else { picked.clear(); picked.add(item); sel = { p, w }; anchor = { p, w }; }
     buildSheet(); showSel();
     sheet.querySelector('.card.sel')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }
-  function build() { if (sel && !photos.includes(sel.p)) sel = null; buildSheet(); showSel(); }
+  function build() { if (sel && !photos.includes(sel.p)) sel = null;
+    for (const it of [...picked]) if (!photos.includes(it) && !photos.some(p => p.works.includes(it))) picked.delete(it);
+    if (!sel) picked.clear(); buildSheet(); showSel(); }
 
   function add(c) {
     const meta = { ...c.photo }; delete meta.depth;
@@ -314,7 +341,7 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
     return { put, del, load };
   })();
   store.load();
-  function open() { if (document.pointerLockElement) document.exitPointerLock(); sel = null; build(); gal.hidden = false; }
+  function open() { if (document.pointerLockElement) document.exitPointerLock(); sel = null; picked.clear(); build(); gal.hidden = false; }
   function close() {
     if (!art.hidden) return leaveArt(close);
     gal.hidden = true; big.textContent = ''; onClose && onClose();
@@ -328,10 +355,25 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
   gal.addEventListener('click', e => {
     const a = e.target.closest('[data-a]')?.dataset.a; if (!a) return;
     if (a === 'close') close();
-    else if (a === 'dl' && sel) download(sel.w || sel.p);
+    // the selected items are downloaded one after another, a moment apart, so that the browser takes each of them
+    else if (a === 'dl' && sel) [...picked].forEach((it, k) => setTimeout(() => download(it), k * 250));
     else if (a === 'del' && sel) {
-      if (sel.w){ sel.p.works.splice(sel.p.works.indexOf(sel.w), 1); store.put(sel.p); } else { photos.splice(photos.indexOf(sel.p), 1); store.del(sel.p); }
-      sel = null; build();
+      // a question first: what is to be deleted, counting the artworks that go with a photograph
+      const nP = [...picked].filter(it => photos.includes(it)), nW = [...picked].filter(it => !photos.includes(it) && !nP.some(p => p.works.includes(it))).length;
+      const withW = nP.reduce((k, p) => k + p.works.length, 0), parts = [];
+      if (nP.length) parts.push(`${nP.length} ${nP.length === 1 ? 'photo' : 'photos'}` + (withW ? ` and ${withW} ${withW === 1 ? 'artwork' : 'artworks'} made from ${nP.length === 1 ? 'it' : 'them'}` : ''));
+      if (nW) parts.push(`${nW} ${nW === 1 ? 'artwork' : 'artworks'}`);
+      $(gask, 'h3').textContent = `Delete ${parts.join(' and ')}?`; gask.hidden = false; $(gask, '[data-a="del-no"]').focus();
+    }
+    else if (a === 'del-no') gask.hidden = true;
+    else if (a === 'del-yes' && sel) {
+      gask.hidden = true;
+      const touched = new Set();
+      for (const it of picked) { const i = photos.indexOf(it);
+        if (i >= 0){ photos.splice(i, 1); store.del(it); continue; }
+        const p = photos.find(q => q.works.includes(it)); if (p){ p.works.splice(p.works.indexOf(it), 1); touched.add(p); } }
+      for (const p of touched) if (photos.includes(p)) store.put(p);
+      sel = null; picked.clear(); build();
     }
     else if (a === 'art' && sel && !sel.w) openArt(sel.p);
   });
@@ -533,14 +575,15 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
       if (e.code === 'Escape') { e.preventDefault(); if (!ask.hidden) { ask.hidden = true; A.after = null; } else leaveArt(); }
       return true;
     }
+    if (!gask.hidden){ if (e.code === 'Escape'){ e.preventDefault(); gask.hidden = true; } return true; }
     if (e.code === 'Escape' || (e.code === 'KeyL' && !e.repeat)) { e.preventDefault(); close(); return true; }
     if (!field && (e.code === 'ArrowLeft' || e.code === 'ArrowRight')) {
       e.preventDefault();
-      const list = []; for (let i = photos.length - 1; i >= 0; i--) { list.push([photos[i], null]); for (const w of photos[i].works) list.push([photos[i], w]); }
+      const list = order();
       if (!list.length) return true;
       let i = sel ? list.findIndex(([p, w]) => p === sel.p && w === sel.w) : -1;
       i = e.code === 'ArrowRight' ? Math.min(list.length - 1, i + 1) : Math.max(0, i < 0 ? 0 : i - 1);
-      select(...list[i]);
+      select(...list[i], e.shiftKey ? 'range' : null);
     }
     return true;
   }

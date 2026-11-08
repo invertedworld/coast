@@ -9486,7 +9486,7 @@ async function startAudio(){
     SND.ready=true;
   }catch(err){ console.warn('Sound unavailable:',err); }
 }
-function setMuted(m){ muted=m; try{ localStorage.setItem('borgo-mute',m?'1':'0'); }catch(_){} if (SND.master) SND.master.gain.setTargetAtTime(m?0:1,audioCtx.currentTime,0.08); }
+function setMuted(m){ muted=m; try{ localStorage.setItem('borgo-mute',m?'1':'0'); }catch(_){} if (SND.master) SND.master.gain.setTargetAtTime(m||SND.hushed?0:1,audioCtx.currentTime,0.08); }
 addEventListener('pointerdown',startAudio); addEventListener('keydown',startAudio);
 
 const _sl=new THREE.Vector3(), _sf=new THREE.Vector3(), _sp=new THREE.Vector3();
@@ -9611,6 +9611,9 @@ const SNDS={prevX:null,prevZ:null,grounded:true,vy:0,hour:null,scan:0,trainWait:
 const _bv=new THREE.Vector3();
 
 function sndUpdate(dt){
+  // the island falls silent while the gallery or artist mode covers it, and is heard again when they close
+  { const G=PHOTO.api.studio, h=!!(G && (G.isOpen || G.artOpen));
+    if (h!==!!SND.hushed){ SND.hushed=h; if (SND.master) SND.master.gain.setTargetAtTime(muted||h?0:1,audioCtx.currentTime,0.12); } }
   if (!SND.ready) return;
   const ctx=audioCtx, inCoach=mode==='coach', inCab=mode==='train', inside=inCoach||inCab;
   // while the world is paused the trains and the ferries fall silent, engines and all
