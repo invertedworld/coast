@@ -164,6 +164,7 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
     </div>
     <div class="group"><h3>Camera mode</h3>
       <div class="row"><span>Right trigger</span><span>Take picture</span></div>
+      <div class="row"><span>B</span><span>Leave camera mode</span></div>
       <div class="row"><span>Bumpers</span><span>Zoom in and out</span></div>
       <div class="row"><span>D-pad up and down</span><span>Focus</span></div>
       <div class="row"><span>D-pad left and right</span><span>Exposure</span></div>
@@ -9852,7 +9853,7 @@ addEventListener('keyup',e=>{ keys[e.code]=false; });
 /* ---------- game controller (standard mapping): sticks move and look, buttons stand in for keys ---------- */
 const pad={x:0,y:0,lt:0,rt:0,held:new Set(),armed:true,mode:null,yCode:null,ltOn:false,dOn:{}};
 // the controller (standard mapping): the left stick walks, swims and steers, the right stick looks; A jumps (and rises
-// in the water), B crouches (and dives in the water), X steps through the views (the 0 key), Y is the bird's-eye view
+// in the water), B crouches (and dives in the water, or lowers the camera when it is raised), X steps through the views (the 0 key), Y is the bird's-eye view
 // (5), the bumpers bring the view nearer or further (- and +), and Start shows the help panel. With the camera raised
 // the right trigger takes a picture, the bumpers zoom, the D-pad's up and down focus further and nearer and its left and
 // right change the exposure; with the camera lowered the right trigger takes a quick picture. At the helm the triggers
@@ -9885,11 +9886,11 @@ function pollPad(dt){
   // at the helm the triggers trim the sail
   const helm=mode==='dinghy';
   pad.lt=helm&&gp.buttons[6]?gp.buttons[6].value:0; pad.rt=helm&&gp.buttons[7]?gp.buttons[7].value:0;
-  // B: crouch at street level, and dive while it is held in the water
-  { const on=btn(1);
-    if (on && !pad.yCode){ pad.yCode=mode==='swim'?'KeyC':'KeyZ'; padKey(pad.yCode,true); }
-    else if (!on && pad.yCode){ padKey(pad.yCode,false); pad.yCode=null; } }
   const cam=PHOTO.api, camOn=cam.state.on;
+  // B: lowers the camera when it is raised; otherwise crouches at street level, and dives while it is held in the water
+  { const on=btn(1);
+    if (on && !pad.yCode){ if (camOn){ cam.exit(); pad.yCode='-'; } else { pad.yCode=mode==='swim'?'KeyC':'KeyZ'; padKey(pad.yCode,true); } }
+    else if (!on && pad.yCode){ if (pad.yCode!=='-') padKey(pad.yCode,false); pad.yCode=null; } }
   // the right trigger takes a picture: through the lens with the camera raised, or a quick one of the view as it is
   { const on=!helm && btn(7); if (on && !pad.ltOn){ if (camOn) cam.shoot(); else cam.quick(); } pad.ltOn=on; }
   if (camOn){
