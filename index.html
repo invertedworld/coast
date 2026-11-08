@@ -10191,14 +10191,23 @@ function toggleChase(){ if (ridden) leaveFerry(prevModeF);
   if (mode==='chase' && !chase.side){ chase.side=true; chase.spot=null; chase.fresh=true; return; }
   if (mode==='chase'){ chase.side=false; leaveTrain(prevMode); return; }
   chase.side=false; ride('chase'); }
-// a place beside the line some way ahead of the train, in the open (not on a viaduct nor in a tunnel), on whichever side
-// the ground lies near the level of the rails, with the eye at a person's height or a little above
+// whether the line from one point to another passes clear of the ground and the buildings
+function sightClear(ax,ay,az,bx,by,bz){
+  const n=Math.max(8,Math.ceil(Math.hypot(bx-ax,bz-az)/3));
+  for (let k=1;k<n;k++){ const t=k/n, x=lerp(ax,bx,t), y=lerp(ay,by,t), z=lerp(az,bz,t); if (gullTopAt(x,z)>y-0.4) return false; }
+  return true; }
+// a place beside the line a little ahead of the train, in the open (not on a viaduct nor in a tunnel), on whichever
+// side the ground lies near the level of the rails, clear of buildings, with the eye at a person's height or a little
+// above, and from which the locomotive can be seen now and the line runs in sight to the place itself
 function tracksideSpot(RT){
-  for (let k=0;k<40;k++){ const x=RT.x+RT.dir*(110+Math.random()*120+k*15);
-    if (RT.st(x)!=='open' || RT.st(x+RT.dir*40)!=='open') continue;
+  const L=RT.lead.position;
+  for (let k=0;k<30;k++){ const x=RT.x+RT.dir*(35+Math.random()*30+k*4);
+    if (RT.st(x)!=='open' || RT.st(x+RT.dir*30)!=='open') continue;
     const y=RT.Y(x), z=RT.Z(x), s=(RT.Z(x+1)-RT.Z(x-1))/2, l=Math.hypot(1,s), nx=-s/l, nz=1/l;
-    for (const sd of (Math.random()<0.5?[1,-1]:[-1,1])){ const o=sd*(7+Math.random()*9), px=x+nx*o, pz=z+nz*o, h=heightAt(px,pz);
-      if (h>0.3 && Math.abs(h-y)<5 && gullTopAt(px,pz)<=walkGround(px,pz,1e3)+0.5) return {x:px,y:h+1.7+Math.random()*2.5,z:pz,tx:x}; } }
+    for (const sd of (Math.random()<0.5?[1,-1]:[-1,1])){ const o=sd*(6+Math.random()*8), px=x+nx*o, pz=z+nz*o, h=heightAt(px,pz);
+      if (!(h>0.3 && Math.abs(h-y)<5 && gullTopAt(px,pz)<=walkGround(px,pz,1e3)+0.5)) continue;
+      const ey=h+1.7+Math.random()*2.5, xm=(RT.x+x)/2;
+      if (sightClear(px,ey,pz,L.x,L.y+1.8,L.z) && sightClear(px,ey,pz,xm,RT.Y(xm)+1.8,RT.Z(xm))) return {x:px,y:ey,z:pz,tx:x}; } }
   return null; }
 // the train the cab and chase views ride with: the passenger train, or the goods train when that is the nearer
 let rideGoods=false;
@@ -10773,14 +10782,28 @@ function frame(now){
     cam.y+=(ye+2.9-cam.y)*kf; cam.head+=Math.atan2(Math.sin(head-cam.head),Math.cos(head-cam.head))*kf;
     const rot=cam.head;
     player.x=xe; player.z=RT.Z(xe); player.y=ye; eyeY=player.y;
-    if (mode==='train'){
-      // cab view: the eye rides on the track just in front of the train, which is drawn behind it
-      camera.position.set(xe,cam.y,RT.Z(xe));
-      camera.rotation.set(tPitch, rot+Math.PI+tYaw, 0, 'YXZ');
-    } else if (chase.side){
+    // the trackside view rides in the cab while the locomotive is in a tunnel
+    const inCab=mode==='train' || (chase.side && RT.st(RT.x)==='tunnel');
+    // the trackside view keeps a place from which the locomotive is in sight; where there is none (along a viaduct,
+    // say), it follows from behind until there is
+    let sideOk=false;
+    if (chase.side && !inCab){
       // trackside: the camera stands beside the line ahead of the train and turns to watch it come and pass; once it
       // is well past, the camera moves on to a new place ahead
-      if (!chase.spot || (chase.spot.tx-RT.x)*RT.dir<-70) chase.spot=tracksideSpot(RT)||chase.spot;
+      const loco=RT.lead;
+      // a new place once the train is 40 m past, or as soon as the locomotive has been out of sight for half a second
+      if (chase.spot){ const S=chase.spot; chase.blind=sightClear(S.x,S.y,S.z,loco.position.x,loco.position.y+1.8,loco.position.z)?0:(chase.blind||0)+dt; }
+      chase.retry=(chase.retry||0)-dt;
+      if ((!chase.spot || (chase.spot.tx-RT.x)*RT.dir<-40 || chase.blind>0.5 || chase.cab) && (chase.retry<=0 || chase.cab)){ chase.retry=0.4; const n=tracksideSpot(RT); if (n){ chase.spot=n; chase.fresh=true; chase.blind=0; } }
+      chase.cab=false;
+      sideOk=!!chase.spot && chase.blind<=0.5 && (chase.spot.tx-RT.x)*RT.dir>-40 && Math.hypot(chase.spot.x-loco.position.x,chase.spot.z-loco.position.z)<260;
+    }
+    if (inCab){
+      // cab view: the eye rides on the track just in front of the train, which is drawn behind it
+      if (mode!=='train'){ chase.cab=true; const xc=RT.x+RT.dir*1.2; camera.position.set(xc,cam.y,RT.Z(xc)); } else
+      camera.position.set(xe,cam.y,RT.Z(xe));
+      camera.rotation.set(tPitch, rot+Math.PI+tYaw, 0, 'YXZ');
+    } else if (sideOk){
       const S=chase.spot, loco=RT.lead;
       if (S){ camera.position.set(S.x,S.y,S.z); camPos.copy(camera.position);
         // the view leads the locomotive a little as it approaches, and settles on the middle of the train as it passes
@@ -10802,7 +10825,7 @@ function frame(now){
       camera.position.copy(camPos); camLookAt(camTarget);
     }
     sky.position.copy(camera.position);
-    tunnelLight(dt,mode==='train');
+    tunnelLight(dt,inCab);
   }
   if (mode==='follow') followStep(dt);
   if (mode==='coach') tunnelLight(dt,true);
