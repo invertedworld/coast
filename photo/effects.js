@@ -978,6 +978,7 @@ function woodcut(srcTex, w, h, o) {
    where its colour changes, and in the sky along a field of vortices placed in the open sky and about the sun.
    opts: size (stroke size, default 1), swirl (eddies in the sky, default 1), colour (intensity, default 1),
          outline (dark outlines, default 1), impasto (relief of the paint, default 1),
+         stars (default 1: size and number of the stars painted where the sky has them),
          distort (default 0: how far the forms of the picture are bent into waves and flames before it is painted) */
 const VG_VERT = `precision highp float; in vec3 position; in vec2 uv; in vec3 aC1; in vec3 aC2; in vec2 aP;
 uniform vec2 uRes; out vec2 vUv; out vec3 vC1; out vec3 vC2; out vec2 vP;
@@ -1010,6 +1011,15 @@ void main(){ vec2 p=vUv*uRes/uS;
   float sway=0.6*sin(p.y*0.011+uSeed*3.1)+2.0*(fbm3(p*0.0035+uSeed)-0.5);
   vec2 d=vec2(42.0*sway*(0.4+0.6*vUv.y)+36.0*(fbm3(p*0.009+uSeed+5.0)-0.5), 24.0*(fbm3(p*0.009+uSeed+9.0)-0.5))*uAmt;
   fragColor=texture(tSrc,clamp(vUv+d*uS/uRes,0.0,1.0)); }`;
+
+// how far each point stands out above its surroundings, at half size: the largest excess in each 2 by 2 block, and the
+// share of the block that is bright (large for the moon, small for a star)
+const VG_STAR = `uniform sampler2D tSrc;
+void main(){ vec2 d=1.0/vec2(textureSize(tSrc,0)); vec2 c=vUv; float best=0.0, bright=0.0, m=0.0;
+  for (int y=-6;y<=6;y+=2) for (int x=-6;x<=6;x+=2) m+=lum(texture(tSrc,c+vec2(x,y)*d).rgb);
+  m/=49.0;
+  for (int y=-1;y<=0;y++) for (int x=-1;x<=0;x++){ float l=lum(texture(tSrc,c+(vec2(x,y)+0.5)*d).rgb); best=max(best,l-m); bright+=step(0.6,l)*0.25; }
+  fragColor=vec4(best,bright,0.0,1.0); }`;
 
 const VG_FINAL = `uniform sampler2D tPaint, tHeight; uniform float uImpasto;
 void main(){
@@ -1059,23 +1069,47 @@ function vangogh(srcTex, w, h, o) {
   const T = read(tfm), C = soft.map(read);
   // the sky, found on a small copy of the broad colours
   const mh = Math.min(h, 300), mw = Math.max(8, Math.round(mh * w / h)), sm = target(mw, mh, THREE.FloatType);
-  pass(COPY, { tSrc: soft[0], uGain: 1 }, sm);
+  pass(COPY, { tSrc: soft[1], uGain: 1 }, sm);
   const ss = skyAndSea(readTarget(sm), mw, mh); sm.dispose();
   // pale walls and paving can join the sky's fill; the eddies keep to the parts that are bluer than they are warm
   for (let i = 0; i < mw * mh; i++) if (ss.sky[i] && ss.C[i * 3 + 2] < ss.C[i * 3] + 0.03) ss.sky[i] = 0;
+  // at night the walls and roofs differ only a little from the sky, and its fill runs into them through small steps; there
+  // the sky in each column ends at the first clear step of colour below the top
+  let night = false;
+  { let ls = 0, n = 0; for (let i = 0; i < mw * mh; i++) if (ss.sky[i]) { ls += ss.C[i * 3] + ss.C[i * 3 + 1] + ss.C[i * 3 + 2]; n++; }
+    night = n > 0 && ls / n / 3 < 0.25;
+    if (night) for (let x = 0; x < mw; x++) for (let y = 2; y < mh; y++) { const i = y * mw + x, j = (y - 2) * mw + x;
+      if (Math.max(Math.abs(ss.C[i * 3] - ss.C[j * 3]), Math.abs(ss.C[i * 3 + 1] - ss.C[j * 3 + 1]), Math.abs(ss.C[i * 3 + 2] - ss.C[j * 3 + 2])) > 0.04) {
+        for (let k = y; k < mh; k++) ss.sky[k * mw + x] = 0; break; } } }
   const skyAt = (x, y) => ss.sky[(mh - 1 - Math.min(mh - 1, Math.max(0, Math.floor(y / h * mh)))) * mw + Math.min(mw - 1, Math.max(0, Math.floor(x / w * mw)))];
   const at = (A, x, y) => (Math.min(dh - 1, Math.max(0, Math.floor(y / 2))) * dw + Math.min(dw - 1, Math.max(0, Math.floor(x / 2)))) * 4;
   const sample = (A, x, y) => { const i = at(A, x, y); return [A[i], A[i + 1], A[i + 2], A[i + 3]]; };
   // eddies in the open sky: one about the brightest part (the sun, or the lightest cloud) and a few more of varied size
   const skyPx = []; for (let i = 0; i < mw * mh; i++) if (ss.sky[i]) skyPx.push(i);
   const vort = [];
+  // the stars, in a dark sky only: points much brighter than their surroundings in the sky, found at half size from the sharp picture
+  const stars = [];
+  if (night && skyPx.length > mw * mh * 0.04 && (o.stars ?? 1) > 0) {
+    pass(VG_STAR, { tSrc: srcTex }, small); const S = readTarget(small), cand = [];
+    for (let y = 2; y < dh - 2; y++) for (let x = 2; x < dw - 2; x++) { const i = (y * dw + x) * 4, v = S[i];
+      if (v < 0.06 || !skyAt(x * 2, y * 2)) continue;
+      let peak = true; for (let yy = -2; yy <= 2 && peak; yy++) for (let xx = -2; xx <= 2; xx++) if ((xx || yy) && S[((y + yy) * dw + x + xx) * 4] > v) { peak = false; break; }
+      if (peak) cand.push([x * 2 + 1, y * 2 + 1, v, S[i + 1]]); }
+    cand.sort((a, b) => b[2] - a[2]);
+    const maxN = Math.round(11 * (o.stars ?? 1)), sep = h * 0.09;
+    for (const c of cand) { if (stars.length >= maxN) break; if (stars.some(q => Math.hypot(q.x - c[0], q.y - c[1]) < sep)) continue;
+      stars.push({ x: c[0], y: c[1], v: c[2], big: c[3] }); }
+    // the brightest are drawn largest, with the widest halos
+    stars.forEach((q, i) => { q.r = h * (0.008 + 0.032 * Math.pow(1 - i / Math.max(1, stars.length), 3) * (0.7 + 0.6 * rnd()) + 0.025 * Math.min(1, q.big * 3)) * (o.stars ?? 1) ** 0.5;
+      vort.push({ x: q.x, y: q.y, r: q.r * 1.6, k: 0.9 + 0.3 * rnd(), star: true }); });
+  }
   if (skyPx.length > mw * mh * 0.04 && SW > 0) {
     let bi = skyPx[0], bl = -1;
     for (const i of skyPx) { const l = ss.C[i * 3] + ss.C[i * 3 + 1] + ss.C[i * 3 + 2]; if (l > bl) { bl = l; bi = i; } }
     const toPx = i => { const x = i % mw, y = (i - x) / mw; return [(x + 0.5) / mw * w, (mh - 1 - y + 0.5) / mh * h]; };
-    const [sx, sy] = toPx(bi); vort.push({ x: sx, y: sy, r: h * 0.07, k: 1.2 });
+    const [sx, sy] = toPx(bi); if (!stars.length) vort.push({ x: sx, y: sy, r: h * 0.07, k: 1.2 });
     const n = Math.round((2 + 2.5 * rnd()) * Math.min(1.4, skyPx.length / (mw * mh * 0.3)));
-    for (let tries = 0; vort.length < n + 1 && tries < 200; tries++) {
+    for (let tries = 0; vort.length < n + 1 + stars.length && tries < 200; tries++) {
       const [x, y] = toPx(skyPx[Math.floor(rnd() * skyPx.length)]), r = h * (0.07 + 0.11 * rnd());
       if (vort.some(v => Math.hypot(v.x - x, v.y - y) < (v.r + r) * 0.9)) continue;
       vort.push({ x, y, r, k: (rnd() < 0.7 ? 1 : -1) * (0.8 + 0.5 * rnd()) });
@@ -1132,7 +1166,7 @@ function vangogh(srcTex, w, h, o) {
       col = hsv2rgb(hh + (rnd() - 0.5) * 0.04, sa, Math.min(1, vv * (0.93 + 0.14 * rnd())));
       let c2;
       const r2 = rnd();
-      if (sky && r2 < 0.45) c2 = col.map((v, i) => v * 0.45 + [0.97, 0.96, 0.85][i] * 0.55);
+      if (sky && r2 < 0.45) c2 = col.map((v, i) => v * 0.45 + (lum(col) < 0.3 ? [0.45, 0.62, 0.82] : [0.97, 0.96, 0.85])[i] * 0.55);
       else if (r2 < 0.6) c2 = hsv2rgb(hh + (rnd() < 0.5 ? -1 : 1) * (0.04 + 0.04 * rnd()), Math.min(1, sa * 1.1), Math.min(1, vv * 1.08));
       else if (sa < 0.25 && !sky) c2 = hsv2rgb(rnd() < 0.5 ? 0.1 : 0.05, 0.35 + 0.2 * rnd(), Math.min(1, vv * 0.98));
       else c2 = hsv2rgb(hh, sa * 0.8, Math.min(1, vv * 1.22 + 0.04));
@@ -1141,6 +1175,26 @@ function vangogh(srcTex, w, h, o) {
     }
     for (let i = list.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [list[i], list[j]] = [list[j], list[i]]; }
     strokes.push(...list); ends.push(strokes.length);
+  }
+  // each star as Van Gogh painted them: a core of lemon yellow and white in rings, and a halo of rings around it of
+  // yellow, cream and a pale green-blue, each ring broken into a few curved strokes
+  if (stars.length) {
+    const list = [];
+    for (const q of stars) {
+      const wid = Math.max(2.6 * s, q.r * 0.15), rings = Math.max(3, Math.round(q.r / (wid * 0.55)));
+      for (let k = 0; k < rings; k++) {
+        const rr = (k + 0.4) * q.r / rings, f = k / rings;
+        const col = f < 0.3 ? [1.0, 0.97, 0.82] : f < 0.55 ? [0.96, 0.86, 0.45] : f < 0.75 ? [0.78, 0.8, 0.62] : f < 0.9 ? [0.45, 0.58, 0.7] : [0.26, 0.36, 0.6];
+        const c2 = f < 0.45 ? [1.0, 1.0, 0.92] : f < 0.75 ? [0.92, 0.8, 0.4] : [0.36, 0.5, 0.74];
+        const arcs = rr < wid * 1.2 ? 1 : 2 + Math.floor(rnd() * 2), a0 = rnd() * 6.283;
+        for (let j = 0; j < arcs; j++) {
+          const span = 6.283 / arcs * (0.85 + 0.25 * rnd()), st = a0 + j * 6.283 / arcs, n = Math.max(3, Math.ceil(span * rr / (wid * 0.5))), pts = [];
+          for (let m = 0; m <= n; m++) { const a = st + span * m / n; pts.push([q.x + Math.cos(a) * rr, q.y + Math.sin(a) * rr]); }
+          list.push({ pts, wid: wid * (0.9 + 0.2 * rnd()) * (rr < wid ? 1.6 : 1), col, c2, seed: rnd(), load: 1.1 });
+        }
+      }
+    }
+    strokes.push(...list);
   }
   // dark blue outlines along the strongest edges of the picture
   if (OL > 0) {
