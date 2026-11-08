@@ -40,6 +40,7 @@ html,body{height:100%;margin:0;overflow:hidden;background:var(--sea);color:var(-
 .about h2{margin:0 0 10px;font:400 1.4rem/1.2 var(--font-display,serif);letter-spacing:.04em}
 .about p{margin:0 0 8px}
 .about a{color:var(--plaster)}
+.about .build{font-size:.85rem;color:var(--plaster-dim);font-variant-numeric:lining-nums}
 .about .credits{font-size:.85rem;color:var(--plaster-dim)}
 .stats{position:fixed;z-index:3;top:16px;left:16px;max-width:calc(100vw - 32px);box-sizing:border-box;display:grid;grid-template-columns:auto auto;gap:2px 14px;
   background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:10px 14px;backdrop-filter:blur(8px);pointer-events:none;
@@ -184,6 +185,7 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
 <aside class="about" id="about" hidden role="dialog" aria-label="About">
   <h2>Coast</h2>
   <p>Copyright © 2026 Mark Hammond</p>
+  <p class="build" id="buildNo"></p>
   <p><a href="https://github.com/invertedworld/coast" target="_blank" rel="noopener">github.com/invertedworld/coast</a></p>
   <p class="credits">The cats are from <a href="https://github.com/c1t1zen1/Michi-Neko-The-Cat-Philosophers-Path" target="_blank" rel="noopener">Michi-Neko: The Cat Philosopher’s Path</a> by c1t1zen1, used under the MIT licence.</p>
   <div class="foot"><button type="button" data-a="about-close">Close</button></div>
@@ -9656,8 +9658,10 @@ function currentCell(){
 const keys={};
 let mode='street', started=true;
 const helpEl=document.getElementById('help');
-// the About box, opened from the help panel
+// the About box, opened from the help panel. Its build number is written into the page when it is published
+// (publish-site.sh): the number of commits, and the commit itself
 const aboutEl=document.getElementById('about');
+{ const B='__COAST_BUILD__'; document.getElementById('buildNo').textContent=B.startsWith('__')?'Development build':'Build '+B; }
 helpEl.querySelector('[data-a="about"]').addEventListener('click',()=>{ aboutEl.hidden=false; aboutEl.querySelector('[data-a="about-close"]').focus(); });
 aboutEl.querySelector('[data-a="about-close"]').addEventListener('click',()=>{ aboutEl.hidden=true; });
 { const fi=document.getElementById('fovIn'), fo=document.getElementById('fovOut');

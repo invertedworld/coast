@@ -18,6 +18,7 @@ DEST="$SITE/play/coast"
 FILES=(index.html sounds.json sounds cat photo)
 
 SHA="$(git rev-parse --short "$REV")"
+BUILD="$(git rev-list --count "$REV") ($SHA)"
 [ -d "$DEST/vendor/three" ] && [ -f "$DEST/fonts/fonts.css" ] || { echo "publish-site: $DEST lacks vendor/three or fonts/" >&2; exit 1; }
 # The site's work is done on the branch checked out there (gallery), which is pushed to its own branch and to master,
 # from which the site deploys; master must only move forward.
@@ -30,10 +31,13 @@ tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 chmod 755 "$tmp"   # mktemp's 700 would otherwise be copied onto play/coast
 git archive "$REV" -- "${FILES[@]}" | tar -x -C "$tmp"
 
-# the three replacements that make the page load nothing from other sites
-python3 - "$tmp/index.html" <<'PY'
+# the build number, and the three replacements that make the page load nothing from other sites
+python3 - "$tmp/index.html" "$BUILD" <<'PY'
 import sys
 p = sys.argv[1]; s = open(p).read()
+# the build number shown in the About box: the number of commits, and the commit
+if s.count("'__COAST_BUILD__'") != 1: sys.exit('publish-site: the build number placeholder in index.html is not as expected')
+s = s.replace("'__COAST_BUILD__'", "'" + sys.argv[2] + "'")
 fonts = ('<link rel="preconnect" href="https://fonts.googleapis.com">\n'
          '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n'
          '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Marcellus&family=Alegreya+Sans:ital,wght@0,400;0,500;0,700;1,400&display=swap">')
