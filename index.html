@@ -10457,11 +10457,12 @@ addEventListener('mousemove',e=>{
   const locked=document.pointerLockElement===canvas; if (!locked&&!dragging) return;
   const dx=locked?e.movementX:e.clientX-lx, dy=locked?e.movementY:e.clientY-ly; lx=e.clientX; ly=e.clientY; const k=PHOTO.lookScale();
   // in the bird's-eye view a drag moves over the landscape, the same way whichever way the view faces: pushed up the
-  // screen the view travels forward into it, drawn to the right it travels right; with the right button or Shift held
+  // screen the view travels forward into it, and drawn sideways it carries the landscape with it, as a map is dragged;
+  // with the right button or Shift held
   // the drag turns and tilts the view instead
   if (mode==='above' && !locked && !(e.buttons&2) && !e.shiftKey){
     const m=Math.max(0.05,dist*0.0022), fx=-Math.sin(yaw), fz=-Math.cos(yaw), rx=Math.cos(yaw), rz=-Math.sin(yaw);
-    player.x+=(rx*dx-fx*dy)*m; player.z+=(rz*dx-fz*dy)*m; if (dist>60){ player.y=Math.max(heightAt(player.x,player.z),0); eyeY=player.y; } }
+    player.x+=(-rx*dx-fx*dy)*m; player.z+=(-rz*dx-fz*dy)*m; if (dist>60){ player.y=Math.max(heightAt(player.x,player.z),0); eyeY=player.y; } }
   else look(dx*k,dy*k);
 });
 const cam={y:null,head:0}, chase={d:34,yaw:0,pitch:0.32,fresh:true,lift:0}, _cv=new THREE.Vector3();
