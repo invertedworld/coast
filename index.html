@@ -42,6 +42,15 @@ html,body{height:100%;margin:0;overflow:hidden;background:var(--sea);color:var(-
 .about a{color:var(--plaster)}
 .about .build{font-size:.85rem;color:var(--plaster-dim);font-variant-numeric:lining-nums}
 .about .credits{font-size:.85rem;color:var(--plaster-dim)}
+.share{position:fixed;z-index:6;top:50%;left:50%;transform:translate(-50%,-50%);width:min(440px,calc(100vw - 32px));max-height:calc(100% - 32px);overflow:auto;box-sizing:border-box;
+  background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:18px 22px 16px;backdrop-filter:blur(8px);line-height:1.45}
+.share[hidden]{display:none}
+.share h2{margin:0 0 12px;font:400 1.4rem/1.2 var(--font-display,serif);letter-spacing:.04em}
+.share canvas{display:block;margin:0 auto 12px;width:min(280px,100%);height:auto;aspect-ratio:1;image-rendering:pixelated;border-radius:2px}
+.share .url{margin:0 0 8px;font-size:.78rem;line-height:1.35;color:var(--plaster-dim);word-break:break-all;user-select:all;max-height:5.4em;overflow:auto}
+.share .foot{display:flex;justify-content:flex-end;align-items:center;flex-wrap:wrap;gap:8px;margin-top:6px;padding-top:12px;border-top:1px solid var(--line)}
+.share .foot button{font:inherit;font-size:.85rem;color:var(--plaster);background:rgba(245,233,215,.1);border:1px solid var(--line);border-radius:4px;padding:6px 14px;cursor:pointer}
+.share .foot button:hover{background:rgba(245,233,215,.18)}
 .stats{position:fixed;z-index:3;top:16px;left:16px;max-width:calc(100vw - 32px);box-sizing:border-box;display:grid;grid-template-columns:auto auto;gap:2px 14px;
   background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:10px 14px;backdrop-filter:blur(8px);pointer-events:none;
   font-size:.82rem;line-height:1.35;font-variant-numeric:tabular-nums}
@@ -128,6 +137,7 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
       <div class="row"><span><kbd>Enter</kbd></span><span>Take snapshot</span></div>
       <div class="row"><span><kbd>C</kbd></span><span>Camera mode</span></div>
       <div class="row"><span><kbd>G</kbd></span><span>Gallery</span></div>
+      <div class="row"><span><kbd>L</kbd></span><span>Share this scene</span></div>
     </div>
     <div class="group"><h3>Camera mode</h3>
       <div class="row"><span><kbd>+</kbd><kbd>−</kbd></span><span>Focal length</span></div>
@@ -190,6 +200,12 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
   <p class="credits">The cats are from <a href="https://github.com/c1t1zen1/Michi-Neko-The-Cat-Philosophers-Path" target="_blank" rel="noopener">Michi-Neko: The Cat Philosopher’s Path</a> by c1t1zen1, used under the MIT licence.</p>
   <div class="foot"><button type="button" data-a="about-close">Close</button></div>
 </aside>
+<aside class="share" id="share" hidden role="dialog" aria-label="Share this scene">
+  <h2>Share this scene</h2>
+  <canvas id="shareQR" width="1" height="1" aria-label="QR code"></canvas>
+  <p class="url" id="shareURL"></p>
+  <div class="foot"><button type="button" id="shareCopyQR">Copy QR code</button><button type="button" id="shareCopyURL">Copy URL</button><button type="button" id="shareClose">Close</button></div>
+</aside>
 <aside class="island" id="island" hidden aria-label="New island">
   <h3>New island</h3>
   <label>Seed <input id="seedIn" type="text" maxlength="32" spellcheck="false" autocomplete="off" autocapitalize="characters"></label>
@@ -216,7 +232,17 @@ function seedNumber(s){ s=seedText(s); if (/^\d{1,9}$/.test(s)) return +s;
 function randomSeed(){ const a=new Uint32Array(SEED_LEN);
   try{ crypto.getRandomValues(a); }catch(_){ for (let i=0;i<SEED_LEN;i++) a[i]=Math.floor(Math.random()*4294967296); }
   let s=''; for (const v of a) s+=SEED_CHARS[v%SEED_CHARS.length]; return s; }
-let SEED_TEXT=(()=>{ try{ const q=new URLSearchParams(location.search).get('seed');
+// A shared scene (L) arrives as ?s=..., one JSON object compressed with deflate and written in base64url (see
+// sceneEncode); it is read here, before anything is built, since it carries the seed. A scene that cannot be read is
+// ignored, and the page starts as it would without it
+async function sceneDecode(t){
+  const b=atob(t.replace(/-/g,'+').replace(/_/g,'/')+'==='.slice((t.length+3)%4)), u=Uint8Array.from(b,c=>c.charCodeAt(0));
+  const s=new Blob([u]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+  return JSON.parse(await new Response(s).text()); }
+const SCENE=await (async()=>{ try{ const t=new URLSearchParams(location.search).get('s'); if (!t) return null;
+  const o=await sceneDecode(t); return o && typeof o==='object' && o.v===1 ? o : null; }catch(_){ return null; } })();
+let SEED_TEXT=(()=>{ if (SCENE && typeof SCENE.s==='string' && SCENE.s.trim()) return seedText(SCENE.s);
+  try{ const q=new URLSearchParams(location.search).get('seed');
   if (q && q.trim() && q.trim().toLowerCase()!=='random') return seedText(q); }catch(_){} return randomSeed(); })();
 let SEED = seedNumber(SEED_TEXT);
 function hash(a,b,c){
@@ -10178,7 +10204,7 @@ function pollPad(dt){
 }
 addEventListener('blur',()=>{ for (const k in keys) keys[k]=false; });
 let dragging=false, lx=0, ly=0;
-function lockPointer(){ if (!helpEl.hidden) return; try{ const p=canvas.requestPointerLock(); if (p&&p.catch) p.catch(()=>{}); }catch(_){} }
+function lockPointer(){ if (!helpEl.hidden || !shareEl.hidden) return; try{ const p=canvas.requestPointerLock(); if (p&&p.catch) p.catch(()=>{}); }catch(_){} }
 // with the camera raised the mouse is never captured, so that its controls on the screen can be clicked: a drag turns the view
 canvas.addEventListener('mousedown',e=>{ dragging=true; lx=e.clientX; ly=e.clientY; if (mode!=='above'&&started&&!PHOTO.on&&document.pointerLockElement!==canvas) lockPointer(); });
 addEventListener('mouseup',()=>dragging=false);
@@ -10637,8 +10663,9 @@ async function newIsland(text){ if (seeding) return; seeding=true;
     seedShow(1,'Generating a new island:'); await nextPaint();
   } finally { seeding=false; seedEl.hidden=true; last=performance.now(); }
 }
-// a seed generated from the panel is kept in the address, so that a reload or a shared link gives the same island
-function seedToAddress(){ try{ const u=new URL(location.href); u.searchParams.set('seed',SEED_TEXT);
+// a seed generated from the panel is kept in the address, so that a reload or a shared link gives the same island; a
+// shared scene's own address (?s=) is dropped, since it holds the island left behind
+function seedToAddress(){ try{ const u=new URL(location.href); u.searchParams.delete('s'); u.searchParams.set('seed',SEED_TEXT);
   history.replaceState(history.state,'',u); }catch(_){} }
 // I opens the island panel, where a seed is typed or drawn at random and the island generated from it; Esc or I closes
 // it unchanged. While it is open the game sees no keys, and a printable key goes to the seed
@@ -10663,6 +10690,240 @@ addEventListener('keydown',e=>{ if (!islandShown()) return;
   else if (!field && e.code==='KeyI'){ e.preventDefault(); if (!e.repeat) closeIsland(); }
   else if (!field && e.key.length===1 && !e.ctrlKey && !e.metaKey && !e.altKey){ seedIn.focus(); seedIn.select(); }
   else if (!field && e.code==='Tab') e.preventDefault();
+},true);
+
+/* ================= QR code =================
+   A QR code encoder (ISO/IEC 18004), written for the links of shared scenes after Project Nayuki's account of the
+   method: byte mode, error correction level M (or L, should M need more than version 40 holds), versions 1 to 40, and
+   of the eight masks the one the standard's penalty rules score lowest. qrEncode(text) -> {size, ver, at(x,y)}, with
+   at true for a dark module; x runs to the right and y down. */
+const QR_ECL={
+  M:{bits:0,ecc:[-1,10,16,26,18,24,16,18,22,22,26,30,22,22,24,24,28,28,26,26,26,26,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28],
+    blocks:[-1,1,1,1,2,2,4,4,4,5,5,5,8,9,9,10,10,11,13,14,16,17,17,18,20,21,23,25,26,28,29,31,33,35,37,38,40,43,45,47,49]},
+  L:{bits:1,ecc:[-1,7,10,15,20,26,18,20,24,30,18,20,24,26,30,22,24,28,30,28,28,28,28,30,30,26,28,30,30,30,30,30,30,30,30,30,30,30,30,30,30],
+    blocks:[-1,1,1,1,1,1,2,2,2,2,4,4,4,4,4,6,6,6,6,7,8,8,9,9,10,12,12,12,13,14,15,16,17,18,19,19,20,21,22,24,25]}};
+// the modules of a symbol left for data and error correction, once the fixed patterns are placed
+function qrRaw(v){ let r=(16*v+128)*v+64; if (v>=2){ const a=Math.floor(v/7)+2; r-=(25*a-10)*a-55; if (v>=7) r-=36; } return r; }
+const qrDataCw=(v,E)=>Math.floor(qrRaw(v)/8)-E.ecc[v]*E.blocks[v];
+// the centres of the alignment patterns along each axis
+function qrAlign(v){ if (v===1) return []; const a=Math.floor(v/7)+2, n=v*4+17, step=v===32?26:Math.ceil((v*4+4)/(a*2-2))*2, r=[6];
+  for (let p=n-7; r.length<a; p-=step) r.splice(1,0,p); return r; }
+// Reed-Solomon over GF(2^8) with the polynomial 0x11D
+function qrMul(x,y){ let z=0; for (let i=7;i>=0;i--){ z=(z<<1)^((z>>>7)*0x11D); z^=((y>>>i)&1)*x; } return z; }
+function qrDivisor(d){ const r=new Array(d).fill(0); r[d-1]=1; let root=1;
+  for (let i=0;i<d;i++){ for (let j=0;j<d;j++){ r[j]=qrMul(r[j],root); if (j+1<d) r[j]^=r[j+1]; } root=qrMul(root,2); } return r; }
+function qrRem(data,div){ const r=new Array(div.length).fill(0);
+  for (const b of data){ const f=b^r.shift(); r.push(0); for (let i=0;i<div.length;i++) r[i]^=qrMul(div[i],f); } return r; }
+const QR_MASKS=[(x,y)=>(x+y)%2===0,(x,y)=>y%2===0,(x,y)=>x%3===0,(x,y)=>(x+y)%3===0,(x,y)=>(Math.floor(x/3)+Math.floor(y/2))%2===0,
+  (x,y)=>x*y%2+x*y%3===0,(x,y)=>(x*y%2+x*y%3)%2===0,(x,y)=>((x+y)%2+x*y%3)%2===0];
+// the standard's penalty: runs of five or more alike, 2x2 blocks alike, patterns that resemble a finder, and the
+// imbalance of dark and light
+function qrPenalty(M,n){ let p=0, dark=0;
+  const line=get=>{ let run=0, prev=-1, s=''; for (let i=0;i<n;i++){ const c=get(i); s+=c; if (c===prev){ run++; if (run===5) p+=3; else if (run>5) p++; } else { prev=c; run=1; } }
+    s='0000'+s+'0000'; for (const pat of ['10111010000','00001011101']) for (let k=s.indexOf(pat); k>=0; k=s.indexOf(pat,k+1)) p+=40; };
+  for (let y=0;y<n;y++) line(x=>M[y][x]); for (let x=0;x<n;x++) line(y=>M[y][x]);
+  for (let y=0;y<n-1;y++) for (let x=0;x<n-1;x++){ const c=M[y][x]; if (c===M[y][x+1] && c===M[y+1][x] && c===M[y+1][x+1]) p+=3; }
+  for (let y=0;y<n;y++) for (let x=0;x<n;x++) dark+=M[y][x];
+  return p+Math.floor(Math.abs(dark*100/(n*n)-50)/5)*10; }
+function qrEncode(text){
+  const data=[...new TextEncoder().encode(text)]; let ver=0, E=null;
+  for (const k of ['M','L']){ E=QR_ECL[k]; for (let v=1;v<=40 && !ver;v++) if (4+(v<10?8:16)+data.length*8<=qrDataCw(v,E)*8) ver=v; if (ver) break; }
+  if (!ver) throw new Error('The text is too long for a QR code.');
+  const n=ver*4+17, M=[], F=[]; for (let i=0;i<n;i++){ M.push(new Uint8Array(n)); F.push(new Uint8Array(n)); }
+  const set=(x,y,d)=>{ M[y][x]=d?1:0; F[y][x]=1; };
+  // the fixed patterns: timing, the three finders with their separators, the alignment patterns, the format bits
+  // (written again for each mask tried), the version bits from version 7, and the one dark module
+  for (let i=0;i<n;i++){ set(6,i,i%2===0); set(i,6,i%2===0); }
+  for (const [cx,cy] of [[3,3],[n-4,3],[3,n-4]]) for (let dy=-4;dy<=4;dy++) for (let dx=-4;dx<=4;dx++){ const x=cx+dx, y=cy+dy;
+    if (x>=0 && y>=0 && x<n && y<n){ const d=Math.max(Math.abs(dx),Math.abs(dy)); set(x,y,d!==2&&d!==4); } }
+  const al=qrAlign(ver), na=al.length;
+  for (let i=0;i<na;i++) for (let j=0;j<na;j++){ if ((i===0&&j===0) || (i===0&&j===na-1) || (i===na-1&&j===0)) continue;
+    for (let dy=-2;dy<=2;dy++) for (let dx=-2;dx<=2;dx++) set(al[i]+dx,al[j]+dy,Math.max(Math.abs(dx),Math.abs(dy))!==1); }
+  const format=mask=>{ const d=E.bits<<3|mask; let r=d; for (let i=0;i<10;i++) r=(r<<1)^((r>>>9)*0x537);
+    const b=((d<<10)|r)^0x5412, bit=i=>(b>>>i)&1;
+    for (let i=0;i<=5;i++) set(8,i,bit(i)); set(8,7,bit(6)); set(8,8,bit(7)); set(7,8,bit(8)); for (let i=9;i<15;i++) set(14-i,8,bit(i));
+    for (let i=0;i<8;i++) set(n-1-i,8,bit(i)); for (let i=8;i<15;i++) set(8,n-15+i,bit(i)); set(8,n-8,1); };
+  format(0);
+  if (ver>=7){ let r=ver; for (let i=0;i<12;i++) r=(r<<1)^((r>>>11)*0x1F25); const b=ver<<12|r;
+    for (let i=0;i<18;i++){ const d=(b>>>i)&1, a=n-11+i%3, c=Math.floor(i/3); set(a,c,d); set(c,a,d); } }
+  // the bit stream: the byte mode, the count, the bytes, the terminator and the padding
+  const bits=[], put=(v,k)=>{ for (let i=k-1;i>=0;i--) bits.push((v>>>i)&1); }, cap=qrDataCw(ver,E)*8;
+  put(4,4); put(data.length,ver<10?8:16); for (const b of data) put(b,8);
+  put(0,Math.min(4,cap-bits.length)); put(0,(8-bits.length%8)%8); for (let p=0xEC; bits.length<cap; p^=0xEC^0x11) put(p,8);
+  const cw=[]; for (let i=0;i<bits.length;i+=8){ let v=0; for (let j=0;j<8;j++) v=v<<1|bits[i+j]; cw.push(v); }
+  // split into blocks, each with its error correction, and interleaved
+  const nb=E.blocks[ver], ec=E.ecc[ver], raw=Math.floor(qrRaw(ver)/8), nShort=nb-raw%nb, sLen=Math.floor(raw/nb), div=qrDivisor(ec), B=[];
+  for (let i=0,k=0;i<nb;i++){ const d=cw.slice(k,k+sLen-ec+(i<nShort?0:1)); k+=d.length; const e=qrRem(d,div); if (i<nShort) d.push(0); B.push(d.concat(e)); }
+  const all=[]; for (let i=0;i<B[0].length;i++) for (let j=0;j<nb;j++) if (i!==sLen-ec || j>=nShort) all.push(B[j][i]);
+  // laid in pairs of columns from the right, up and down in turn, skipping the fixed patterns
+  let k=0; for (let right=n-1; right>=1; right-=2){ if (right===6) right=5;
+    for (let v=0;v<n;v++) for (let j=0;j<2;j++){ const x=right-j, y=((right+1)&2)===0?n-1-v:v;
+      if (!F[y][x] && k<all.length*8){ M[y][x]=(all[k>>>3]>>>(7-(k&7)))&1; k++; } } }
+  const flip=m=>{ for (let y=0;y<n;y++) for (let x=0;x<n;x++) if (!F[y][x] && QR_MASKS[m](x,y)) M[y][x]^=1; };
+  let best=0, bp=Infinity; for (let m=0;m<8;m++){ flip(m); format(m); const p=qrPenalty(M,n); if (p<bp){ bp=p; best=m; } flip(m); }
+  flip(best); format(best);
+  return {size:n,ver,at:(x,y)=>M[y][x]===1}; }
+// the code drawn into a canvas, dark on white, with the quiet zone of four modules round it, at s pixels a module
+function qrDraw(cv,Q,s){ const n=Q.size+8; cv.width=cv.height=n*s; const g=cv.getContext('2d');
+  g.fillStyle='#fff'; g.fillRect(0,0,n*s,n*s); g.fillStyle='#000';
+  for (let y=0;y<Q.size;y++) for (let x=0;x<Q.size;x++) if (Q.at(x,y)) g.fillRect((x+4)*s,(y+4)*s,s,s);
+  return cv; }
+
+/* ================= sharing the scene =================
+   L shows a QR code of a link to the scene as it is: the island's seed, the time of day, where the player is, the view
+   and what they are doing, with the train, the ferry or the dinghy they are aboard where it is at that moment.
+   Opening the link puts the viewer in the same scene. The state is one JSON object with short keys and rounded
+   numbers, compressed with deflate and written in base64url as ?s=...; the keys are listed below. What lives by its
+   own simulation (the gulls, the dolphins, the other boats, the wind's gusts) is not carried: a gull or a dolphin
+   followed is found again as the nearest one to where it was.
+   v the format (1); s the seed; h the hour; z paused; m the mode: walk, above, swim, cab, chase, side (trackside),
+   coach, ferry, stern (the ferry from astern), helm, astern (the dinghy from astern), gull or dolphin; p the player
+   [x,y,z] (in the water the eye; following a creature, the creature); l the look in the mode's own terms (see
+   sceneRestore); T the passenger train [x,dir,v,wait]; G the goods train [side,line's x0,x,dir,lead,v,wait,toB,leg x,
+   leg wait]; C the coach [car,lx,lz]; S the trackside spot [x,y,z,tx]; F the ferry [island x,island z,s,at,next,v,
+   wait]; E the ferry's deck [lx,lz,level,eye]; D the dinghy [harbour n,side,x,z,head,u,boom,sheet,the wind's
+   direction]; x the seat (in the world [x,y,z,L0], in a coach or the ferry [index,L0]); r the place to return to
+   [x,y,z,yaw]; c the camera [focal,f-number,focus (0 autofocus),ev,ratio] */
+const sr1=v=>Math.round(v*10)/10, sr2=v=>Math.round(v*100)/100;
+function sceneState(){
+  const o={v:1,s:SEED_TEXT,h:sr2(hour)}; if (paused) o.z=1;
+  const P=(x,y,z)=>[sr1(x),sr1(y),sr1(z)], A=(...a)=>a.map(sr2);
+  o.p=P(player.x,player.y,player.z);
+  const T=()=>{ o.T=[sr1(train.x),train.dir,sr1(train.v),sr1(Math.max(0,train.wait))]; };
+  const G=()=>{ const g=goods, L=g.legs[0]; o.G=[g.R.sd,sr1(g.R.x0),sr1(g.x),g.dir,g.lead,sr1(g.v),sr1(Math.max(0,g.wait)),g.toB?1:0]; if (L) o.G.push(sr1(L.x),sr1(L.wait)); };
+  const Fy=()=>{ const F=ridden; o.F=[sr1(F.R.I.x),sr1(F.R.I.z),sr1(F.s),F.at,F.next,sr2(F.v),sr1(Math.max(0,F.wait))]; o.E=A(fe.lx,fe.lz,fe.lv,fe.ey); };
+  const seat=()=>{ if (!sit || sit.dir<0) return; const s=sit.s;
+    if (sit.fr==='world') o.x=[...A(s.x,s.y,s.z),sr2(sit.L0)];
+    else { const i=(sit.fr==='coach'?COACH_SEATS:FERRY_SEATS).indexOf(s); if (i>=0) o.x=[i,sr2(sit.L0)]; } };
+  const ret=R=>{ if (R) o.r=[...P(R.x,R.y,R.z),sr2(R.yaw)]; };
+  if (mode==='above'){ o.m='above'; o.l=[sr2(yaw),sr2(pitch),Math.round(dist),sr2(aerUp)]; if (ridden) Fy(); }
+  else if (mode==='swim'){ const S=swimmer.state; o.m='swim'; o.p=P(S.x,S.y,S.z); o.l=[...A(yaw,fpPitch),S.under?1:0]; ret(uwReturn); }
+  else if (mode==='train'||mode==='chase'){
+    if (rideGoods){ if (!goods.R){ o.m='walk'; o.l=A(yaw,fpPitch); return o; } G(); } else T();
+    if (mode==='train'){ o.m='cab'; o.l=A(tYaw,tPitch); }
+    else if (chase.side){ o.m='side'; const S=chase.spot; if (S) o.S=[...P(S.x,S.y,S.z),sr1(S.tx)]; }
+    else { o.m='chase'; o.l=[...A(chase.yaw,chase.pitch),sr1(chase.d)]; } }
+  else if (mode==='coach'){ T(); o.m='coach'; o.C=[co.car,...A(co.lx,co.lz)]; o.l=A(co.yaw,co.pitch); seat(); }
+  else if (mode==='ferry' && ridden){ Fy(); if (feChase){ o.m='stern'; o.l=[...A(feLook.yaw,feLook.pitch),sr1(feChaseD)]; } else { o.m='ferry'; o.l=A(fe.yaw,fe.pitch); seat(); } }
+  else if (mode==='dinghy' && sailD){ const e=[...dinghies.values()].find(q=>q.D===sailD), S=sailD.state;
+    if (e){ o.D=[e.H.n,e.H.sd,...A(S.x,S.z,S.head,S.u,S.boom,S.sheet,WIND.options.dir)]; o.m=dgyChase?'astern':'helm'; o.l=dgyChase?[...A(dgyLook.yaw,dgyLook.pitch),sr1(dgyChaseD)]:A(dgyLook.yaw,dgyLook.pitch); }
+    else { o.m='walk'; o.l=A(yaw,fpPitch); } }
+  else if (mode==='follow' && FOL.kind){ o.m=FOL.kind; o.p=P(FOL.p.x,FOL.p.y,FOL.p.z); o.l=[...A(FOL.yaw,FOL.pitch),sr1(FOL.d)]; ret(FOL.ret); }
+  else { o.m='walk'; o.l=A(yaw,fpPitch); seat(); }
+  const ph=PHOTO.api.state; if (ph.on) o.c=[sr1(ph.focal),ph.fNumber,ph.autofocus?0:sr2(ph.focus),sr2(ph.ev),ph.ratio];
+  return o; }
+async function sceneLink(){
+  const j=JSON.stringify(sceneState()), z=new Blob([j]).stream().pipeThrough(new CompressionStream('deflate-raw'));
+  const u=new Uint8Array(await new Response(z).arrayBuffer()); let b=''; for (const c of u) b+=String.fromCharCode(c);
+  return location.href.split(/[?#]/)[0]+'?s='+btoa(b).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); }
+// the goods line and the ferry's crossing named in a link, found again by where they lie
+function sceneGoodsLine(sd,x0){ for (let zi=Math.floor(x0/GL_ZONE)-1; zi<=Math.floor(x0/GL_ZONE)+1; zi++) for (const B of glZone(sd,zi)) if (Math.abs(B.x0-x0)<1) return B; return null; }
+function sceneRoute(ix,iz){ const m0=Math.floor(ix/ISL);
+  for (const sd of SIDES) for (let m=m0-2;m<=m0+2;m++){ const R=islandRoute(sd,m); if (R && Math.abs(R.I.x-ix)<1 && Math.abs(R.I.z-iz)<1) return R; } return null; }
+const sceneNum=(a,i,d=0)=>Array.isArray(a) && Number.isFinite(+a[i]) ? +a[i] : d;
+// at the start, before the first blocks are built: the clock, and where the player stands (following a creature,
+// where the creature was)
+function scenePlace(o){
+  if (Number.isFinite(o.h)){ hour=((o.h%24)+24)%24; SNDS.hour=Math.floor(hour); }
+  const p=o.p;
+  if (Array.isArray(p) && [0,1,2].every(i=>Number.isFinite(+p[i]))){ player.x=+p[0]; player.y=+p[1]-(o.m==='swim'?1.62:0); player.z=+p[2]; }
+  player.vy=0; player.holdT=3; player.grounded=true; eyeY=null; }
+// once the blocks round the player are built: the vehicles where they were, and the player in the same mode and view.
+// l is, by mode: walk and swim [yaw,pitch(,under)], above [yaw,pitch,distance,rise], cab [yaw,pitch] in the cab,
+// chase [yaw,pitch,distance], coach and ferry [yaw,pitch] in the vehicle's frame, stern and astern [yaw,pitch,
+// distance], helm [yaw,pitch] from the bow, gull and dolphin [yaw,pitch,distance]
+function sceneRestore(o){
+  const N=sceneNum, l=Array.isArray(o.l)?o.l:[], m=o.m;
+  const walk=()=>{ mode='street'; yaw=N(l,0,yaw); fpPitch=clamp(N(l,1),-1.2,1.2); };
+  if (o.z){ paused=true; lastClock=null; }
+  if (Array.isArray(o.T)){ train.init=true; train.x=N(o.T,0,train.x); train.dir=N(o.T,1,1)<0?-1:1; train.v=N(o.T,2,train.sp); train.wait=N(o.T,3); updateTrain(0); }
+  if (Array.isArray(o.G)){ const R=sceneGoodsLine(N(o.G,0,1)<0?-1:1,N(o.G,1)), g=goods;
+    if (R){ goodsStart(R,0); g.x=N(o.G,2,g.x); g.dir=N(o.G,3,-1)<0?-1:1; g.lead=N(o.G,4)?1:0; g.v=N(o.G,5); g.wait=N(o.G,6); g.toB=!!N(o.G,7);
+      g.legs=o.G.length>9?[{x:N(o.G,8),wait:N(o.G,9)}]:[]; g.tail=undefined; g.check=2; updateGoods(0); } }
+  let F=null;
+  if (Array.isArray(o.F)){ const R=sceneRoute(N(o.F,0),N(o.F,1));
+    if (R){ F=ferries.find(q=>q.R===R)||ferries.find(q=>!q.R)||ferries[0]; ferryStart(F,R,N(o.F,3)?1:0,0);
+      Object.assign(F,{s:N(o.F,2),at:N(o.F,3)?1:0,next:N(o.F,4)?1:0,v:N(o.F,5),wait:N(o.F,6)}); ferryCheck=2; updateFerries(0); } }
+  const deck=()=>{ const E=Array.isArray(o.E)?o.E:[]; fe.yaw=N(l,0); fe.pitch=N(l,1,-0.06); prevModeF='street'; feChase=false;
+    enterFerry(F,N(E,0,0.9),N(E,1,FL/2-5.4)); fe.lv=N(E,2); fe.ey=N(E,3,FD0); fe.px=fe.lx; fe.pz=fe.lz; };
+  // a seat in a coach or the ferry, taken at once rather than eased into
+  const seatIn=(fr,list,home)=>{ const s=list[N(o.x,0,-1)]; if (!Array.isArray(o.x) || !s) return;
+    const [L,p]=sitLookGet(fr); sitKey({s,fr,home}); if (!sit) return; sit.L0=N(o.x,1,sit.L0); sitLookSet(fr,L,p); sit.k=1; };
+  if (m==='above'){
+    if (F){ deck(); toggleView(); } else { walk(); toggleView(); }
+    yaw=N(l,0,yaw); pitch=clamp(N(l,1,0.25),0.25,1.35); dist=clamp(N(l,2,45),7,60000); aerUp=clamp(N(l,3),0,1.2);
+    ascent.t=descent.t=-1; firstCam=true; aboveY=null; }
+  else if (m==='swim'){ walk(); mode='swim'; swimmer.enter({x:player.x,y:player.y+1.62,z:player.z,yaw,pitch:fpPitch});
+    if (N(l,2)){ const S=swimmer.state; S.mode='under'; S.under=true; S.underT=2; diveQuiet=true; }
+    uwReturn=Array.isArray(o.r)?{x:N(o.r,0),y:N(o.r,1),z:N(o.r,2),yaw:N(o.r,3)}:null; }
+  else if ((m==='cab'||m==='chase'||m==='side') && (o.T || (o.G && goods.R))){
+    ride(m==='cab'?'train':'chase',o.G?'goods':'pass'); prevMode='street';
+    if (m==='cab'){ tYaw=clamp(N(l,0),-2.6,2.6); tPitch=N(l,1,-0.04); }
+    else if (m==='chase'){ chase.side=false; chase.yaw=N(l,0); chase.pitch=clamp(N(l,1,0.32),0.02,1.3); chase.d=clamp(N(l,2,34),10,160); chase.fresh=true; }
+    else { chase.side=true; chase.fresh=true; chase.blind=0; chase.retry=0.4; chase.cab=false;
+      chase.spot=Array.isArray(o.S)?{x:N(o.S,0),y:N(o.S,1),z:N(o.S,2),tx:N(o.S,3)}:null; } }
+  else if (m==='coach' && o.T && Array.isArray(o.C)){
+    ride('train','pass'); prevMode='street'; coachFrom='street';
+    const i=clamp(Math.round(N(o.C,0,1)),1,train.cars.length-2); coachEnter(i,N(o.C,1),N(o.C,2)); co.yaw=N(l,0); co.pitch=N(l,1);
+    camera.fov=FOV; camera.near=0.1; camera.updateProjectionMatrix(); glowScale(); tunnelK=0; sky.visible=true; scene.fog.near=90; scene.fog.far=1500;
+    coachStep(0,0); seatIn('coach',COACH_SEATS,[0,co.lz,1.3]); }
+  else if ((m==='ferry'||m==='stern') && F){ deck();
+    if (m==='stern'){ feChase=true; feLook.yaw=N(l,0); feLook.pitch=clamp(N(l,1,0.3),0.02,1.3); feChaseD=clamp(N(l,2,70),25,400); feSnap=true; }
+    else seatIn('ferry',FERRY_SEATS,[fe.lx,fe.lz,fe.ey]); }
+  else if ((m==='helm'||m==='astern') && Array.isArray(o.D)){
+    const H=harbourInfo(N(o.D,1,1)<0?-1:1,Math.round(N(o.D,0))), e=H && dinghyBerth(H) && dgyMake(H);
+    if (e){ const x=N(o.D,2), z=N(o.D,3); e.D.moor({x,z,head:N(o.D,4)}); e.D.moor(null);
+      ridden=null; player.x=x; player.z=z; player.y=0; player.vy=0; eyeY=null; dinghyBoard(e); { const S=e.D.state; S.u=N(o.D,5); S.boom=N(o.D,6,S.boom); S.sheet=N(o.D,7,S.sheet); } if (Number.isFinite(+o.D[8])) WIND.set({dir:+o.D[8]});
+      dgyLook.yaw=N(l,0); dgyLook.pitch=N(l,1,-0.1); if (m==='astern'){ dgyChase=true; dgyChaseD=clamp(N(l,2,11),5,80); } firstCam=true; }
+    else walk(); }
+  else if (m==='gull'||m==='dolphin'){
+    // the gulls and the dolphins come about the player only after the start, so the view waits above the place where
+    // the creature was (over the water, where a walker would fall in) until one is there, for up to four seconds, and
+    // then follows the nearest one; failing that, the player is set down at the place to return to
+    const R=Array.isArray(o.r)?{x:N(o.r,0),y:N(o.r,1),z:N(o.r,2),yaw:N(o.r,3)}:{x:player.x,y:player.y,z:player.z,yaw};
+    mode='street'; yaw=R.yaw; fpPitch=0; toggleView(); dist=120; ascent.t=-1; firstCam=true;
+    let k=0; const go=()=>{ if (mode!=='above') return; k++;
+      if (k<240 && (k<45 || followTarget(m)===null)){ requestAnimationFrame(go); return; }
+      followKey(m); if (mode!=='follow'){ mode='street'; followBack(R); return; }
+      FOL.yaw=N(l,0); FOL.pitch=clamp(N(l,1,0.15),-0.3,1.3); FOL.d=clamp(N(l,2,6),4,120); FOL.ret=R; };
+    requestAnimationFrame(go); }
+  else { walk();
+    // a seat in the world is found among those of the blocks and rooms round the player, as they are built
+    if (Array.isArray(o.x) && o.x.length>=4){ const sx=N(o.x,0), sy=N(o.x,1), sz=N(o.x,2); let k=0;
+      const find=()=>{ if (mode!=='street' || sit) return; let best=null, bd=0.3;
+        const all=[]; for (const ch of nearbyChunks()) if (ch.seats) all.push(...ch.seats); for (const D of rooms) if (D.seats) all.push(...D.seats);
+        for (const s of all){ const d=Math.hypot(s.x-sx,s.y-sy,s.z-sz); if (d<bd){ bd=d; best=s; } }
+        if (!best){ if (++k<120) requestAnimationFrame(find); return; }
+        const L=yaw-Math.PI, p=fpPitch; sitKey({s:best,fr:'world',home:[player.x,player.z,player.y]}); if (!sit) return;
+        sit.L0=N(o.x,3,sit.L0); sitLookSet('world',L,p); sit.k=1; };
+      find(); } }
+  if (Array.isArray(o.c)){ const A=PHOTO.api; A.enter(); A.setFocal(N(o.c,0,35)); A.setAperture(N(o.c,1,2.8)); A.setFocus(N(o.c,2)>0?N(o.c,2):null); A.setEV(N(o.c,3)); if (typeof o.c[4]==='string') A.setRatio(o.c[4]); }
+}
+// the panel: the QR code, the link, and the two ways of copying them
+const shareEl=document.getElementById('share'), shareQR=document.getElementById('shareQR'), shareURL=document.getElementById('shareURL');
+let shareLink='', shareN=0;
+const shareShown=()=>!shareEl.hidden;
+async function openShare(){ if (seeding) return; const n=++shareN;
+  if (document.pointerLockElement) document.exitPointerLock();
+  helpEl.hidden=true; aboutEl.hidden=true;
+  let link; try{ link=await sceneLink(); }catch(err){ console.warn('The scene could not be written into a link:',err); return; }
+  if (n!==shareN) return;
+  shareLink=link; shareURL.textContent=link; qrDraw(shareQR,qrEncode(link),4); shareEl.hidden=false; }
+function closeShare(){ shareN++; shareEl.hidden=true; }
+function shareDone(btn,ok){ const t=btn.dataset.t||(btn.dataset.t=btn.textContent); btn.textContent=ok?'Copied':'Not copied'; clearTimeout(btn._t); btn._t=setTimeout(()=>{ btn.textContent=t; },1500); }
+document.getElementById('shareCopyURL').addEventListener('click',e=>{ const b=e.currentTarget;
+  try{ navigator.clipboard.writeText(shareLink).then(()=>shareDone(b,true),()=>shareDone(b,false)); }catch(_){ shareDone(b,false); } });
+// the image copied is drawn larger than the one shown, at 10 pixels a module
+document.getElementById('shareCopyQR').addEventListener('click',e=>{ const b=e.currentTarget;
+  try{ const cv=qrDraw(document.createElement('canvas'),qrEncode(shareLink),10);
+    navigator.clipboard.write([new ClipboardItem({'image/png':new Promise(r=>cv.toBlob(r,'image/png'))})]).then(()=>shareDone(b,true),()=>shareDone(b,false)); }catch(_){ shareDone(b,false); } });
+document.getElementById('shareClose').addEventListener('click',closeShare);
+// L opens and closes the panel and Esc closes it; registered before the camera's own keys, so that Esc closes the
+// panel alone while the camera is raised
+addEventListener('keydown',e=>{ if (islandShown()) return;
+  const el=document.activeElement; if (el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return;
+  if (e.code==='KeyL' && !e.ctrlKey && !e.metaKey && !e.altKey){ e.preventDefault(); e.stopImmediatePropagation(); if (!e.repeat){ if (shareShown()) closeShare(); else openShare(); } return; }
+  if (e.code==='Escape' && shareShown()){ e.preventDefault(); e.stopImmediatePropagation(); closeShare(); }
 },true);
 
 /* ================= HUD ================= */
@@ -12130,13 +12391,16 @@ if (new URLSearchParams(location.search).has('perf')){
 /* ================= boot ================= */
 requestAnimationFrame(()=>setTimeout(()=>{
   spawnPlayer();
+  // a shared scene (L) puts the player where it was before the first blocks are built round them
+  if (SCENE) try{ scenePlace(SCENE); }catch(err){ console.warn('The shared scene could not be placed:',err); }
   updateChunks(player.x,player.z,400); updateTiles(1e9);
   rebuildFar(player.x,player.z); farDirty=true;
   try { divePrewarm(); } catch(err){ console.warn('The water could not be prepared:',err); }
   document.getElementById('loading').remove();
+  if (SCENE) try{ sceneRestore(SCENE); }catch(err){ console.warn('The shared scene could not be restored:',err); }
   requestAnimationFrame(frame);
 },30));
-window.__village={ get seed(){ return SEED_TEXT; }, get paused(){ return paused; }, set paused(v){ if (!!v!==paused){ paused=!!v; lastClock=null; } }, goods, glZone, branchesAt, get mantle(){ return mantle; }, get colRoof(){ return colRoof; }, roofAt, roofSlope, topAt, get sit(){ return sit; }, get indoors(){ return indoors; }, roomFns:{flight,localToWorld,obbLocal,roomCeil}, sitKey, sitFind, sitStand, sitSpotOk, beachStretch, BCH_SP, COACH_SEATS, FERRY_SEATS, coachEnter, genChunk, coastRoadZ, brZ, brY, heightAt, player, chunks, rooms, doorMesh, keys, setYaw:v=>{yaw=v;}, get yaw(){return yaw;}, fe, co, lightsNear, beams, ruinIn, cats, catHome, get ridden(){ return ridden; },
+window.__village={ get seed(){ return SEED_TEXT; }, share:{state:sceneState,link:sceneLink,qrEncode,get shared(){ return SCENE; }}, get paused(){ return paused; }, set paused(v){ if (!!v!==paused){ paused=!!v; lastClock=null; } }, goods, glZone, branchesAt, get mantle(){ return mantle; }, get colRoof(){ return colRoof; }, roofAt, roofSlope, topAt, get sit(){ return sit; }, get indoors(){ return indoors; }, roomFns:{flight,localToWorld,obbLocal,roomCeil}, sitKey, sitFind, sitStand, sitSpotOk, beachStretch, BCH_SP, COACH_SEATS, FERRY_SEATS, coachEnter, genChunk, coastRoadZ, brZ, brY, heightAt, player, chunks, rooms, doorMesh, keys, setYaw:v=>{yaw=v;}, get yaw(){return yaw;}, fe, co, lightsNear, beams, ruinIn, cats, catHome, get ridden(){ return ridden; },
   findHarbour(){ for (let d=0;d<12;d++) for (const sd of SIDES) for (const n of [Math.floor(player.x/HARB)+d,Math.floor(player.x/HARB)-d]){ const H=harbourInfo(sd,n); if (H) return {x:H.x,z:coastZ(sd,H.x)+sd*7,W:H.W,sd,qz:coastZ(sd,H.x+H.W/2-1)+sd*2.5}; } return null; },
   findBeach(){ for (let x=player.x; x<player.x+3000; x+=10) for (const sd of SIDES){ const z=coastZ(sd,x)+sd*5; if (heightAt(x,z)<0.6 && heightAt(x,z)>0.1 && !harbourAt(sd,x)) return {x,z,sd}; } return null; },
   ridge(x){ return {x,z:ridgeZ(x)}; },
