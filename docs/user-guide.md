@@ -28,7 +28,7 @@ A double click on land in the bird's-eye view brings the camera down to street l
 
 ## Walking
 
-**W A S D** walk, and **Shift** held with them runs. **Q** and **E** turn the view. **Space** jumps; a jump towards a wall, a ledge or the eaves of a roof whose top is within reach climbs onto it, so that roofs may be walked upon. **Z** crouches, lowering the eye to 0.95 m and reducing the speed to 45 per cent, and **Z** again stands up.
+**W A S D** walk, the up and down arrow keys also walk forward and back, and **Shift** held with them runs. **Q** and **E** turn the view. **Space** jumps; a jump towards a wall, a ledge or the eaves of a roof whose top is within reach climbs onto it, so that roofs may be walked upon. **Z** crouches, lowering the eye to 0.95 m and reducing the speed to 45 per cent, and **Z** again stands up.
 
 Doors open when they are walked into. A door swings away from the side from which it is pushed, as far as it is pushed, and closes about a second after nobody stands in its way. The interiors of houses, churches and towers may be entered. Indoors, the sound of the world outside is muffled.
 

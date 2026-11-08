@@ -69,6 +69,7 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
   <div class="controls">
     <div class="group"><h3>Walking</h3>
       <div class="row"><span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><span>Walk</span></div>
+      <div class="row"><span><kbd>↑</kbd><kbd>↓</kbd></span><span>Walk forward and back</span></div>
       <div class="row"><span><kbd>Shift</kbd></span><span>Run</span></div>
       <div class="row"><span><kbd>Space</kbd></span><span>Jump</span></div>
       <div class="row"><span><kbd>Z</kbd></span><span>Crouch</span></div>
@@ -7953,7 +7954,7 @@ function updateDinghies(dt,wdt){
   // the input at the helm: A and D steer, W and S paddle when she is nearly stopped (and trim the sail in the
   // realistic setting), the triggers trim, Q and E turn the head
   const I=dgyCtx.input;
-  if (sailD && started){ const ws=(keys.KeyW?1:0)-(keys.KeyS?1:0)-pad.y-joy.y;
+  if (sailD && started){ const ws=(keys.KeyW||keys.ArrowUp?1:0)-(keys.KeyS||keys.ArrowDown?1:0)-pad.y-joy.y;
     I.steer=clamp((keys.KeyD?1:0)-(keys.KeyA?1:0)+pad.x+joy.x,-1,1); I.paddle=clamp(ws,-1,1);
     I.trim=clamp((sailD.state.mode==='realistic'?ws:0)+pad.rt-pad.lt,-1,1);
     if (mode==='dinghy') dgyLook.yaw+=((keys.KeyQ?1:0)-(keys.KeyE?1:0))*dt*1.8; }
@@ -10035,7 +10036,7 @@ function coachStep(dt,turnIn){
     return; }
   if (mode!=='coach') return;
   co.yaw+=turnIn*dt*1.8;
-  let wx=(keys.KeyD?1:0)-(keys.KeyA?1:0)+joy.x+pad.x, wz=(keys.KeyW?1:0)-(keys.KeyS?1:0)-joy.y-pad.y; const wl=Math.hypot(wx,wz);
+  let wx=(keys.KeyD?1:0)-(keys.KeyA?1:0)+joy.x+pad.x, wz=(keys.KeyW||keys.ArrowUp?1:0)-(keys.KeyS||keys.ArrowDown?1:0)-joy.y-pad.y; const wl=Math.hypot(wx,wz);
   if (wl>0.05){ if (wl>1){ wx/=wl; wz/=wl; } const sp=((keys.ShiftLeft||keys.ShiftRight)?2.6:1.5)*dt, sy=Math.sin(co.yaw), cy=Math.cos(co.yaw);
     const nx=co.lx+(sy*wz-cy*wx)*sp, nz=co.lz+(cy*wz+sy*wx)*sp;
     if (coachValid(nx,nz)){ co.lx=nx; co.lz=nz; }
@@ -10540,7 +10541,7 @@ function swimToStreet(out){
 function swimLeaveHere(){ const S=swimmer.state; swimToStreet({x:S.x,y:Math.max(0,heightAt(S.x,S.z)),z:S.z}); }
 function swimStep(dt){
   const I=swimIn;
-  I.fwd=clamp((keys.KeyW?1:0)-(keys.KeyS?1:0)-joy.y-pad.y,-1,1); I.strafe=clamp((keys.KeyD?1:0)-(keys.KeyA?1:0)+joy.x+pad.x,-1,1);
+  I.fwd=clamp((keys.KeyW||keys.ArrowUp?1:0)-(keys.KeyS||keys.ArrowDown?1:0)-joy.y-pad.y,-1,1); I.strafe=clamp((keys.KeyD?1:0)-(keys.KeyA?1:0)+joy.x+pad.x,-1,1);
   I.rise=clamp((keys.Space?1:0)-(keys.KeyC?1:0)+pad.rt-pad.lt,-1,1); I.sprint=!!(keys.ShiftLeft||keys.ShiftRight); I.yaw=yaw; I.pitch=fpPitch;
   // the ladders of the harbours near by, the ways out where a wall stands out of the water
   swimExitT-=dt; if (swimExitT<=0){ swimExitT=0.5; const L=swimmer.options.exits; L.length=0; const cx=Math.floor(player.x/C), cz=Math.floor(player.z/C);
@@ -10632,7 +10633,7 @@ function frame(now){
   if (mode==='above'){ if (keys.ArrowUp) pitch=clamp(pitch+dt,0.25,1.35); if (keys.ArrowDown) pitch=clamp(pitch-dt,0.25,1.35);
     const zk=((keys.Minus||keys.NumpadSubtract)?1:0)-((keys.Equal||keys.NumpadAdd)?1:0);
     if (zk) dist=clamp(dist*Math.exp(zk*dt*1.8),7,60000); }
-  let mx=(keys.KeyD?1:0)-(keys.KeyA?1:0)+joy.x+pad.x, mz=(keys.KeyW?1:0)-(keys.KeyS?1:0)-joy.y-pad.y;
+  let mx=(keys.KeyD?1:0)-(keys.KeyA?1:0)+joy.x+pad.x, mz=(keys.KeyW||(mode!=="above"&&keys.ArrowUp)?1:0)-(keys.KeyS||(mode!=="above"&&keys.ArrowDown)?1:0)-joy.y-pad.y;
   if (sit && sit.dir>0 && Math.hypot(mx,mz)>0.3) sitStand();   // a step stands the sitter up
   const ml=Math.hypot(mx,mz), moving=started&&ml>0.05&&!onBoard()&&!sailD&&mode!=='swim'&&!(sit&&sit.dir>0);
   player.ox=player.x; player.oz=player.z;
@@ -10790,7 +10791,7 @@ function frame(now){
   if (mode==='ferry'){
     // walking about the main deck relative to where one looks; the eye rides the ferry's gentle motion
     fe.yaw+=turn*dt*1.8;
-    { let wx=(keys.KeyD?1:0)-(keys.KeyA?1:0)+joy.x+pad.x, wz=(keys.KeyW?1:0)-(keys.KeyS?1:0)-joy.y-pad.y; const wl=Math.hypot(wx,wz);
+    { let wx=(keys.KeyD?1:0)-(keys.KeyA?1:0)+joy.x+pad.x, wz=(keys.KeyW||keys.ArrowUp?1:0)-(keys.KeyS||keys.ArrowDown?1:0)-joy.y-pad.y; const wl=Math.hypot(wx,wz);
       if (started && wl>0.05){ if (wl>1){ wx/=wl; wz/=wl; } const sp=((keys.ShiftLeft||keys.ShiftRight)?3.4:1.9)*dt, sy=Math.sin(fe.yaw), cy=Math.cos(fe.yaw);
         fe.lx+=(sy*wz-cy*wx)*sp; fe.lz+=(cy*wz+sy*wx)*sp; } }
     const fox=fe.lx, foz=fe.lz;

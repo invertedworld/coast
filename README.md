@@ -57,7 +57,7 @@ The panel opened with **H** lists the controls. They are reproduced here for ref
 
 | Key | Action |
 |---|---|
-| W A S D | Walk |
+| W A S D | Walk. The up and down arrow keys do the same as W and S, except in the bird's-eye view, where they tilt it. |
 | Shift | Run |
 | Space | Jumps. Jumping at a wall, a ledge or the eaves of a roof whose top is within reach climbs onto it. See [Roofs and climbing](#roofs-and-climbing). |
 | Z | Crouches, or stands up again. Crouching at street level lowers the eye from 1.62 m to 0.95 m and slows walking and running to 45 per cent. |
