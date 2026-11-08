@@ -59,8 +59,13 @@
    surface colour of the game: the radiance P is divided by the flat surface colour A_pt of the converted scene, the
    quotient (the light falling on each surface) is filtered by an edge-aware a-trous filter guided by normals, depth
    and an estimate of its own noise, and the result is multiplied by the surface colour A_game drawn with the game's
-   own materials under a flat white light. Both colour passes are drawn with the same sub-pixel offsets, so that edges
-   agree. The sky, the sea, glass and metal are taken from the path tracer directly. In the far field the light is
+   own materials under a flat white light. Both colour passes, and the guide a second time, are drawn at the same
+   sub-pixel offsets, and the path tracer's camera rays pass through the same offsets in turn, so that the light, the
+   colours and the guide of a pixel all come from the same parts of it. Where the samples of a pixel fall on more than
+   one surface, at the edges of things, the pixel is made of up to three parts, added in proportion to their samples:
+   the surface at its centre, open sky, and the other surfaces, each with the colour of its own samples, the light of
+   the pixels nearby that lie on it, and its own haze (splitMat, composeMat). The sky, the sea, glass and metal are
+   taken from the path tracer directly. In the far field the light is
    the model's in place of the path tracer's. Aerial perspective is added from
    the depth (extinction by a haze that thins with height, and in-scattered light of the sky's horizon colour), and
    the picture is tone mapped with ACES Filmic at the game's exposure. */
@@ -114,7 +119,7 @@ const DEFAULTS = {
   frustumWiden: 1.3,       // the view frustum used for culling is this much wider than the camera's
   frustumWidenFar: 1.12,   // and this much wider beyond widenReach
   widenReach: 320,         // metres
-  jitter: 16,              // sub-pixel offsets for the two colour passes
+  jitter: 16,              // sub-pixel offsets for the colour passes, the guide and the path tracer's camera rays (at most 64)
   denoise: 5,              // a-trous iterations (0 turns the filter off)
   sampleClamp: 40,         // per-sample limit on the brightest channel, against fireflies
   skyGain: null,           // gain on the sky light; null works it out from the game's hemisphere light
@@ -139,6 +144,7 @@ const DEFAULTS = {
 };
 
 /* ---------- the renderer and the path tracer, kept between calls ---------- */
+const MAX_JITTER = 64;   // the most sub-pixel offsets
 let ctx = null;
 function getContext(w, h) {
   if (!ctx) {
@@ -167,14 +173,29 @@ function getContext(w, h) {
     m.uniforms.uFarEvery = { value: 1 };
     m.uniforms.uSkyEvery = { value: 1 };
     m.uniforms.uFarBounces = { value: 8 };
-    // the far field, which the raster passes light: a pixel with a surface at its centre and in its colour pass (uCover,
-    // the colour pass's coverage summed over uCoverN offsets), whose surface lies beyond uSkipDist, is not traced at all
-    m.uniforms.uCover = { value: null };
-    m.uniforms.uCoverN = { value: 1 };
+    // the far field, which the raster passes light: a pixel whose surface at its centre lies beyond uSkipDist, and is
+    // drawn in the colour pass (uDrawn, see drawnMat), is not traced at all
+    m.uniforms.uDrawn = { value: null };
     m.uniforms.uView = { value: new THREE.Vector2(1, 1) };
     m.uniforms.uSkipDist = { value: 1e9 };
+    // the camera ray passes through one of the colour passes' sub-pixel offsets (uJit, uJitN of them) in place of a
+    // random point under a tent two pixels wide, so that the light of a pixel comes from the very part of the scene
+    // the colour passes and the guide's sub-pixel samples see there. Each pixel takes the offsets in turn, from a
+    // place of its own in the sequence; with uJitN 0 the ray takes the pixel's centre
+    m.uniforms.uJit = { value: Array.from({ length: MAX_JITTER }, () => new THREE.Vector2()) };
+    m.uniforms.uJitN = { value: 0 };
     m.fragmentShader = m.fragmentShader
-      .replace('void main() {', 'uniform float uSampleClamp;\nuniform vec3 uSpecSky;\nuniform sampler2D uGuide, uCover;\nuniform float uRateOn, uFarDist, uFarEvery, uSkyEvery, uCoverN, uSkipDist;\nuniform vec2 uView;\nuniform int uFarBounces;\nvoid main() {')
+      .replace('Ray getCameraRay() {', `uniform vec2 uJit[ ${MAX_JITTER} ];
+        uniform float uJitN;
+        vec2 pixelJitter() {
+          if ( uJitN < 0.5 ) return vec2( 0.0 );
+          float k = floor( 1.0 / opacity - 0.5 );
+          float r = floor( fract( sin( dot( floor( gl_FragCoord.xy ), vec2( 12.9898, 78.233 ) ) ) * 43758.5453 ) * uJitN );
+          return uJit[ int( mod( k + r, uJitN ) ) ];
+        }
+        Ray getCameraRay() {`)
+      .replace('vec2 jitteredUv = vUv + vec2( tentFilter( ruv.x ) * ssd.x, tentFilter( ruv.y ) * ssd.y );', 'vec2 jitteredUv = vUv + pixelJitter() * ssd;')
+      .replace('void main() {', 'uniform float uSampleClamp;\nuniform vec3 uSpecSky;\nuniform sampler2D uGuide, uDrawn;\nuniform float uRateOn, uFarDist, uFarEvery, uSkyEvery, uSkipDist;\nuniform vec2 uView;\nuniform int uFarBounces;\nvoid main() {')
       .replace('Ray ray = getCameraRay();', `Ray ray = getCameraRay();
           float pxOpacity = opacity; bool pxFar = false;
           if ( uRateOn > 0.5 ) {
@@ -188,7 +209,7 @@ function getContext(w, h) {
               if ( z > 0.0 && z < 1e5 ) dmin = min( dmin, z * rayK );
             }
             float zc = texelFetch( uGuide, gp, 0 ).w;
-            if ( dmin > uSkipDist && dmin < 1e8 && zc > 0.0 && zc < 1e5 && texelFetch( uCover, gp, 0 ).a > 0.02 * uCoverN ) discard;
+            if ( dmin > uSkipDist && dmin < 1e8 && zc > 0.0 && zc < 1e5 && texelFetch( uDrawn, gp, 0 ).r > 0.5 ) discard;
             pxFar = dmin > uFarDist;
             float every = dmin > 1e8 ? uSkyEvery : pxFar ? uFarEvery : 1.0;
             if ( every > 1.5 ) {
@@ -1141,6 +1162,33 @@ const accumulateMat = pass(`uniform sampler2D tA, tB; uniform float uWhich; vary
   { tA: { value: null }, tB: { value: null }, uWhich: { value: 0 } },
   { blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor, blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.OneFactor, transparent: true });
 
+// sorts one sub-pixel sample of the colour passes and the guide (tGj, drawn at the offset uJit, in pixels with y up)
+// by whether it lies on the surface at the centre of the pixel (tG): on the same plane, facing the same way, or, at a
+// centre of open sky, on open sky too. Three running sums are kept (uWhich): the game's colour of the samples on the
+// centre's surface and their number; the path tracer's colour of the same samples, and the number of samples of open
+// sky elsewhere plus 128 times the number of the centre's samples the colour pass draws (it leaves the sky, the sea,
+// glass and metal undrawn, and counts them as white, as accumulateMat does); and the normal and the depth of the
+// samples on other surfaces, summed
+const splitMat = pass(`uniform sampler2D tA, tB, tG, tGj; uniform float uWhich, uTanY, uAspect; uniform vec2 uTexel, uJit; uniform mat3 uCamRot; varying vec2 vUv;
+  vec3 viewPos(vec2 uv, float z){ return vec3((uv*2.0-1.0)*vec2(uTanY*uAspect,uTanY)*z, -z); }
+  bool hit(float z){ return z>0.0 && z<1e5; }
+  void main(){
+    vec4 a=texture2D(tA,vUv); vec3 b=texture2D(tB,vUv).rgb; vec4 g=texture2D(tG,vUv), q=texture2D(tGj,vUv);
+    vec3 apt=mix(vec3(1.0),a.rgb,a.a), ag=mix(vec3(1.0),b,a.a);
+    bool hc=hit(g.w), hq=hit(q.w), same=hc==hq;
+    if (hc && hq){ vec3 d=uCamRot*(viewPos(vUv+uJit*uTexel,q.w)-viewPos(vUv,g.w));
+      same = dot(g.xyz,q.xyz)>0.98 && abs(dot(g.xyz,d))<0.002*g.w+0.005; }
+    float m=same?1.0:0.0, o=same?0.0:1.0;
+    gl_FragColor = uWhich<0.5 ? vec4(ag*m,m) : uWhich<1.5 ? vec4(apt*m, (hq?0.0:o)+128.0*m*a.a) : hq ? vec4(q.xyz*o,q.w*o) : vec4(0.0); }`,
+  { tA: { value: null }, tB: { value: null }, tG: { value: null }, tGj: { value: null }, uWhich: { value: 0 }, uTanY: { value: 1 }, uAspect: { value: 1 },
+    uTexel: { value: new THREE.Vector2() }, uJit: { value: new THREE.Vector2() }, uCamRot: { value: new THREE.Matrix3() } },
+  { blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor, blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.OneFactor, transparent: true });
+
+// whether the colour pass draws the surface at the centre of each pixel, in most of the sub-pixel samples on it
+const drawnMat = pass(`uniform sampler2D tM, tMp; varying vec2 vUv;
+  void main(){ float m=texture2D(tM,vUv).a; gl_FragColor=vec4(m>0.5 && floor((texture2D(tMp,vUv).a+0.5)/128.0)>0.5*m ? 1.0 : 0.0); }`,
+  { tM: { value: null }, tMp: { value: null } }, { blending: THREE.NoBlending });
+
 // every other pixel of every other row, for reading back a quarter of a buffer
 const packMat = pass(`uniform sampler2D t; void main(){ gl_FragColor=texelFetch(t,ivec2(gl_FragCoord.xy)*2,0); }`, { t: { value: null } }, { blending: THREE.NoBlending });
 const copyMat = pass(`uniform sampler2D t; varying vec2 vUv; void main(){ gl_FragColor=texture2D(t,vUv); }`, { t: { value: null } }, { blending: THREE.NoBlending });
@@ -1148,35 +1196,33 @@ const copyMat = pass(`uniform sampler2D t; varying vec2 vUv; void main(){ gl_Fra
 // the light falling on each surface (radiance over flat colour) and the variance of its mean, from the two halves of
 // the samples
 // the far field: a surface beyond uBand.x (at the centre of the pixel) takes the light of the far field, entirely
-// beyond uBand.y. Where the surface covers only part of the pixel, the rest is the sky as the path tracer shows it,
-// which is mixed in by the share the surface leaves uncovered (the colour passes count what they leave uncovered as
-// white)
+// beyond uBand.y. Where the surface covers only part of the pixel, the rest is added by the picture's pass
+// (composeMat), from the pixels round about, so the light here is that of the surface alone
 // With uPreview, before any sample is taken, every surface takes the light of the far field and the rest is sky.
-const demodMat = pass(`uniform sampler2D tP, tH, tApt, tG, tFar, tBg; uniform float uN, uHybrid, uPreview, uTanY, uAspect; uniform vec2 uTexel, uBand; uniform vec3 uKSun, uKSky;
+const demodMat = pass(`uniform sampler2D tP, tH, tApt, tG, tFar, tBg, tDrawn; uniform float uN, uHybrid, uPreview, uTanY, uAspect; uniform vec2 uTexel, uBand; uniform vec3 uKSun, uKSky;
   uniform mat3 uCamRot; varying vec2 vUv;
   float lum(vec3 c){ return dot(c,vec3(0.2126,0.7152,0.0722)); }
   vec3 viewDir(vec2 uv){ return vec3((uv*2.0-1.0)*vec2(uTanY*uAspect,uTanY),-1.0); }
-  float farShare(vec2 uv, float cover){
-    if (uHybrid<0.5 || cover<0.02) return 0.0;
+  bool drawn(vec2 uv){ return texture2D(tDrawn,uv).r>0.5; }
+  float farShare(vec2 uv){
+    if (uHybrid<0.5 || !drawn(uv)) return 0.0;
     float z=texture2D(tG,uv).w; if (z<=0.0 || z>1e5) return 0.0;
     return smoothstep(uBand.x,uBand.y,z*length(viewDir(uv))); }
   // the sky behind the pixel, as the path tracer draws it
   vec3 skyIn(vec3 d){ return texture2D(tBg,vec2(atan(d.z,d.x)/6.2831853+0.5,1.0-acos(clamp(d.y,-1.0,1.0))/3.1415927)).rgb; }
   vec3 skyAt(vec2 uv){ return skyIn(normalize(uCamRot*viewDir(uv))); }
-  // the light of the far field on the pixel's surface, as the light to multiply its colour (A, with cover) by
-  vec3 farLight(vec2 uv, vec4 A){ vec4 b=texture2D(tFar,uv); vec3 E=uKSun*b.a+uKSky*b.rgb;
-    if (A.a>0.99) return E;
-    vec3 sky=skyAt(uv), alb=max(A.rgb-(1.0-A.a),vec3(0.0));
-    return (alb*E+(1.0-A.a)*sky)/max(A.rgb,vec3(0.03)); }
+  // the light of the far field on the pixel's surface
+  vec3 farLight(vec2 uv, vec4 A){ vec4 b=texture2D(tFar,uv); return uKSun*b.a+uKSky*b.rgb; }
   vec3 light(vec2 uv){ vec4 A=texture2D(tApt,uv)/uN; vec3 E=texture2D(tP,uv).rgb/max(A.rgb,vec3(0.03));
-    float t=farShare(uv,A.a); return t>0.0 ? mix(E,farLight(uv,A),t) : E; }
+    float t=farShare(uv); return t>0.0 ? mix(E,farLight(uv,A),t) : E; }
   void main(){ vec3 P=texture2D(tP,vUv).rgb, H=texture2D(tH,vUv).rgb; vec4 A=texture2D(tApt,vUv)/uN;
     // (the sea, glass and metal, which the colour passes leave uncovered, take a dim reflection of the sky)
     if (uPreview>0.5){ vec4 g=texture2D(tG,vUv); bool hit=g.w>0.0 && g.w<1e5;
-      vec3 E = hit && A.a>0.02 ? farLight(vUv,A) : hit ? 0.35*skyIn(reflect(normalize(uCamRot*viewDir(vUv)),normalize(g.xyz))) : skyAt(vUv);
-      gl_FragColor=vec4(E/(hit && A.a>0.02 ? vec3(1.0) : max(A.rgb,vec3(0.03))),0.0); return; }
+      bool dr=hit && drawn(vUv);
+      vec3 E = dr ? farLight(vUv,A) : hit ? 0.35*skyIn(reflect(normalize(uCamRot*viewDir(vUv)),normalize(g.xyz))) : skyAt(vUv);
+      gl_FragColor=vec4(E/(dr ? vec3(1.0) : max(A.rgb,vec3(0.03))),0.0); return; }
     vec3 a=max(A.rgb,vec3(0.03)); vec3 E=P/a; float d=lum(P-H)/max(lum(a),0.03);
-    float t=farShare(vUv,A.a); if (t>0.0){ E=mix(E,farLight(vUv,A),t); d*=1.0-t; }
+    float t=farShare(vUv); if (t>0.0){ E=mix(E,farLight(vUv,A),t); d*=1.0-t; }
     // a pixel far brighter than every one of its eight neighbours is a firefly: it takes their mean instead
     vec3 s=vec3(0.0); float mx=0.0;
     for (int y=-1;y<=1;y++) for (int x=-1;x<=1;x++){ if (x==0&&y==0) continue; vec3 q=light(vUv+vec2(float(x),float(y))*uTexel); s+=q; mx=max(mx,lum(q)); }
@@ -1184,11 +1230,14 @@ const demodMat = pass(`uniform sampler2D tP, tH, tApt, tG, tFar, tBg; uniform fl
     gl_FragColor=vec4(E,d*d); }`,
   { tP: { value: null }, tH: { value: null }, tApt: { value: null }, tG: { value: null }, tFar: { value: null }, uN: { value: 1 }, uTexel: { value: new THREE.Vector2() },
     uHybrid: { value: 0 }, uPreview: { value: 0 }, uTanY: { value: 1 }, uAspect: { value: 1 }, uBand: { value: new THREE.Vector2(1e9, 1e9) }, uKSun: { value: new THREE.Vector3() }, uKSky: { value: new THREE.Vector3() },
-    tBg: { value: null }, uCamRot: { value: new THREE.Matrix3() } }, { blending: THREE.NoBlending });
+    tBg: { value: null }, tDrawn: { value: null }, uCamRot: { value: new THREE.Matrix3() } }, { blending: THREE.NoBlending });
 
 // one step of the edge-aware a-trous filter (a 5x5 B3 spline at a spacing of uStep pixels), weighted by the plane of
-// the surface, its normal and the difference in light measured against the estimated noise
-const atrousMat = pass(`uniform sampler2D tC, tG; uniform vec2 uTexel; uniform float uStep, uSigL, uTanY, uAspect; varying vec2 vUv;
+// the surface, its normal and the difference in light measured against the estimated noise. A pixel only part of
+// which its centre's surface covers (tM: the number of its uN sub-pixel samples on that surface) holds the light of
+// the other surfaces in it too, and is weighted by the square of that share, so that the light of a surface at its
+// edges comes from the pixels it covers
+const atrousMat = pass(`uniform sampler2D tC, tG, tM; uniform vec2 uTexel; uniform float uStep, uSigL, uTanY, uAspect, uN; varying vec2 vUv;
   float lum(vec3 c){ return dot(c,vec3(0.2126,0.7152,0.0722)); }
   vec3 viewPos(vec2 uv, float z){ return vec3((uv*2.0-1.0)*vec2(uTanY*uAspect,uTanY)*z, -z); }
   void main(){
@@ -1209,48 +1258,95 @@ const atrousMat = pass(`uniform sampler2D tC, tG; uniform vec2 uTexel; uniform f
       float wn=pow(max(0.0,dot(g.xyz,gq.xyz)),64.0);
       float wp=exp(-abs(dot(g.xyz,viewPos(uv,gq.w)-p))/(0.003*g.w*uStep+0.01));
       float wl=exp(-abs(lc-lum(q.rgb))/sl);
-      float w=h[x<0?-x:x]*h[y<0?-y:y]*wn*wp*wl;
+      float pm=max(texture2D(tM,uv).a/uN,0.05);
+      float w=h[x<0?-x:x]*h[y<0?-y:y]*wn*wp*wl*pm*pm;
       sum+=q.rgb*w; vs+=q.a*w*w; ws+=w; }
     gl_FragColor = ws>1e-6 ? vec4(sum/ws, vs/(ws*ws)) : c; }`,
-  { tC: { value: null }, tG: { value: null }, uTexel: { value: new THREE.Vector2() }, uStep: { value: 1 }, uSigL: { value: 4 }, uTanY: { value: 1 }, uAspect: { value: 1 } }, { blending: THREE.NoBlending });
+  { tC: { value: null }, tG: { value: null }, tM: { value: null }, uTexel: { value: new THREE.Vector2() }, uStep: { value: 1 }, uSigL: { value: 4 }, uTanY: { value: 1 }, uAspect: { value: 1 }, uN: { value: 1 } }, { blending: THREE.NoBlending });
 
-// the light filtered, times the game's own surface colour; then the game's fog, tone mapping and sRGB
-const composeMat = pass(`uniform sampler2D tE, tP, tApt, tAg, tG; uniform float uN, uFog, uFogNear, uFogFar, uTanY, uAspect, uSceneGain; uniform vec3 uHor, uMid;
-  uniform mat3 uCamRot; uniform vec2 uRemod; uniform float uHaze, uSigma, uHazeH, uCamY, uDay; uniform vec3 uTop, uSun, uSunCol; varying vec2 vUv;
+// the light filtered, times the game's own surface colour; then the game's fog, tone mapping and sRGB.
+// A pixel is made of up to three parts, by its sub-pixel samples (splitMat): the surface at its centre, open sky
+// elsewhere in it, and other surfaces. The surface at the centre takes the light of the pixel (tE) and the colour of
+// its own samples (tM, tMp); open sky takes the sky as the path tracer draws it; the other surfaces take the light of
+// the nearby pixels whose centres lie on them, matched by plane and normal to the mean of their samples (tO), and the
+// colour of the rest of the samples. Each part is given the scene's gain and its own aerial perspective before they
+// are added, so that the edges of things are smoothed as the colour passes smooth them
+const composeMat = pass(`uniform sampler2D tE, tP, tApt, tAg, tG, tM, tMp, tO, tBg; uniform float uN, uFog, uFogNear, uFogFar, uTanY, uAspect, uSceneGain; uniform vec3 uHor, uMid;
+  uniform mat3 uCamRot; uniform vec2 uRemod, uTexel; uniform float uHaze, uSigma, uHazeH, uCamY, uDay; uniform vec3 uTop, uSun, uSunCol; varying vec2 vUv;
   // the sky's colour in a direction, as the game's sky shader works it out, without the sun's disc
   vec3 skyAt(vec3 d){ float y=d.y;
     vec3 c = y>0.12 ? mix(uMid,uTop,clamp((y-0.12)/0.6,0.0,1.0)) : mix(uHor,uMid,clamp((y+0.04)/0.16,0.0,1.0));
     float sd=max(dot(d,uSun),0.0); return c+uSunCol*(pow(sd,12.0)*0.35+pow(sd,3.0)*0.12*(1.0-uDay)); }
-  void main(){
-    vec4 A=texture2D(tApt,vUv)/uN; vec3 Ag=texture2D(tAg,vUv).rgb/uN; vec3 E=texture2D(tE,vUv).rgb; vec4 g=texture2D(tG,vUv);
-    vec3 a=max(A.rgb,vec3(0.03));
+  // the sky in a direction, as the path tracer draws it
+  vec3 skyIn(vec3 d){ return texture2D(tBg,vec2(atan(d.z,d.x)/6.2831853+0.5,1.0-acos(clamp(d.y,-1.0,1.0))/3.1415927)).rgb; }
+  bool hit(float z){ return z>0.0 && z<1e5; }
+  vec3 viewDir(vec2 uv){ return vec3((uv*2.0-1.0)*vec2(uTanY*uAspect,uTanY),-1.0); }
+  // a surface at view depth z, seen along the world direction d (dl: the distance along the ray for a unit of depth),
+  // lit by E, of the path tracer's colour apt and the game's colour ag
+  vec3 surface(vec3 E, vec3 apt, vec3 ag, float z, vec3 d, float dl){
+    vec3 a=max(apt,vec3(0.03));
     // the game's colour, kept within reach of the path tracer's where the two scenes disagree; its patterns fade
     // with distance in the game, and the colour is the path tracer's own beyond that
-    float rm=1.0-smoothstep(uRemod.x,uRemod.y,g.w);
-    vec3 col=E*mix(a,clamp(Ag,a*0.2,a*5.0),rm);
-    bool scene=g.w>0.0 && g.w<1e5;
+    float rm=1.0-smoothstep(uRemod.x,uRemod.y,z);
     // the scene, but not the sky behind it, takes the gain that matches the game's brightness
-    if (scene) col*=uSceneGain;
+    vec3 col=E*mix(a,clamp(ag,a*0.2,a*5.0),rm)*uSceneGain;
     // aerial perspective: light from the surface is dimmed by the haze between, and the haze itself scatters the
     // light of the sky towards the eye; the haze thins exponentially with height, so the optical depth is integrated
     // along the ray between the eye's height and the point's
-    if (scene && uHaze>0.5){
-      vec3 vd=vec3((vUv*2.0-1.0)*vec2(uTanY*uAspect,uTanY),-1.0); vec3 d=normalize(uCamRot*vd);
-      float dist=g.w*length(vd), y0=max(uCamY,0.0), y1=max(uCamY+d.y*dist,0.0), H=uHazeH;
+    if (uHaze>0.5){
+      float dist=z*dl, y0=max(uCamY,0.0), y1=max(uCamY+d.y*dist,0.0), H=uHazeH;
       float od = abs(y1-y0)<1.0 ? uSigma*dist*exp(-y0/H) : uSigma*dist*H*(exp(-y0/H)-exp(-y1/H))/(y1-y0);
       float T=exp(-od);
       vec3 inS=skyAt(normalize(vec3(d.x,max(d.y,0.0)*0.25+0.01,d.z)));
       col=col*T+inS*(1.0-T); }
+    return col; }
+  float fogAt(float z){ return smoothstep(uFogNear,uFogFar,z); }
+  void main(){
+    vec4 A=texture2D(tApt,vUv)/uN; vec3 Ag=texture2D(tAg,vUv).rgb/uN; vec3 E=texture2D(tE,vUv).rgb; vec4 g=texture2D(tG,vUv);
+    vec4 M=texture2D(tM,vUv), Mp=texture2D(tMp,vUv), O=texture2D(tO,vUv);
+    vec3 vd=viewDir(vUv), d=normalize(uCamRot*vd); float dl=length(vd);
+    bool scene=hit(g.w);
+    float m=M.a, so=Mp.a-128.0*floor((Mp.a+0.5)/128.0), no=max(uN-m-so,0.0);
+    vec3 col; float fog=0.0;
+    if (m>uN-0.5){
+      // the whole pixel is on the surface at its centre, or on open sky
+      if (scene){ col=surface(E,A.rgb,Ag,g.w,d,dl); fog=fogAt(g.w); }
+      else { vec3 a=max(A.rgb,vec3(0.03)); col=E*clamp(Ag,a*0.2,a*5.0); }
+    } else {
+      vec3 sky=skyIn(d);
+      col = m>0.0 ? m*(scene ? surface(E,Mp.rgb/m,M.rgb/m,g.w,d,dl) : sky) : vec3(0.0);
+      if (scene) fog+=m*fogAt(g.w);
+      col+=so*sky;
+      if (no>0.5){
+        // the light of the other surfaces, from the pixels round about whose centres lie on their plane; should none
+        // do, from those whose centres lie off the surface at the centre of this pixel
+        vec3 nO=normalize(O.xyz); float zO=O.w/no; vec3 pO=uCamRot*(vd*zO), pC=uCamRot*(vd*g.w);
+        vec3 Es=vec3(0.0); float ws=0.0;
+        for (int y=-2;y<=2;y++) for (int x=-2;x<=2;x++){
+          if (x==0 && y==0) continue;
+          vec2 uv=vUv+vec2(float(x),float(y))*uTexel; vec4 gq=texture2D(tG,uv);
+          if (!hit(gq.w)) continue;
+          float pq=max(texture2D(tM,uv).a/uN,0.05);
+          vec3 pw=uCamRot*(viewDir(uv)*gq.w);
+          bool onC = scene && dot(g.xyz,gq.xyz)>0.98 && abs(dot(g.xyz,pw-pC))<0.004*g.w+0.01;
+          float w=pow(max(dot(nO,gq.xyz),0.0),8.0)*exp(-abs(dot(nO,pw-pO))/(0.01*zO+0.02)) + (onC ? 0.0 : 1e-3);
+          w*=pq*pq*(abs(x)+abs(y)>2 ? 0.3 : 1.0);
+          Es+=texture2D(tE,uv).rgb*w; ws+=w; }
+        vec3 Eo = ws>1e-7 ? Es/ws : E;
+        vec3 aptO=max(A.rgb*uN-Mp.rgb-so,vec3(0.0))/no, agO=max(Ag*uN-M.rgb-so,vec3(0.0))/no;
+        col+=no*surface(Eo,aptO,agO,zO,d,dl);
+        fog+=no*fogAt(zO);
+      }
+      col/=uN; fog/=uN;
+    }
     gl_FragColor=vec4(col,1.0);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
     // the game mixes in its fog after tone mapping, with the fog colour taken as it stands, and so does this
-    if (g.w>0.0 && g.w<1e5 && uFog>0.5){
-      vec3 d=normalize(uCamRot*vec3((vUv*2.0-1.0)*vec2(uTanY*uAspect,uTanY),-1.0));
-      float f=smoothstep(uFogNear,uFogFar,g.w);
-      gl_FragColor.rgb=mix(gl_FragColor.rgb,mix(uHor,uMid,clamp((d.y+0.04)/0.16,0.0,1.0)),f); }
+    if (uFog>0.5 && fog>0.0) gl_FragColor.rgb=mix(gl_FragColor.rgb,mix(uHor,uMid,clamp((d.y+0.04)/0.16,0.0,1.0)),fog);
   }`,
-  { tE: { value: null }, tP: { value: null }, tApt: { value: null }, tAg: { value: null }, tG: { value: null }, uN: { value: 1 }, uSceneGain: { value: 1 }, uRemod: { value: new THREE.Vector2(250, 420) }, uHaze: { value: 1 }, uSigma: { value: 1e-4 }, uHazeH: { value: 1200 }, uCamY: { value: 0 },
+  { tE: { value: null }, tP: { value: null }, tApt: { value: null }, tAg: { value: null }, tG: { value: null }, tM: { value: null }, tMp: { value: null }, tO: { value: null }, tBg: { value: null },
+    uN: { value: 1 }, uSceneGain: { value: 1 }, uRemod: { value: new THREE.Vector2(250, 420) }, uTexel: { value: new THREE.Vector2() }, uHaze: { value: 1 }, uSigma: { value: 1e-4 }, uHazeH: { value: 1200 }, uCamY: { value: 0 },
     uDay: { value: 1 }, uTop: { value: new THREE.Color() }, uSun: { value: new THREE.Vector3(0, 1, 0) }, uSunCol: { value: new THREE.Color() }, uFog: { value: 1 }, uFogNear: { value: 90 }, uFogFar: { value: 1500 },
     uTanY: { value: 1 }, uAspect: { value: 1 }, uHor: { value: new THREE.Color() }, uMid: { value: new THREE.Color() }, uCamRot: { value: new THREE.Matrix3() } },
   { blending: THREE.NoBlending, toneMapped: true });
@@ -1319,7 +1415,7 @@ function precompilePasses() {
   if (ctx.precompiled) return; ctx.precompiled = true;
   const { R } = ctx, sc = new THREE.Scene(), cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1), geo = new THREE.PlaneGeometry(2, 2);
   const add = mat => { const mesh = new THREE.Mesh(geo, mat); mesh.frustumCulled = false; sc.add(mesh); };
-  [accumulateMat, copyMat, packMat, demodMat, atrousMat, farBasisMat, shadowDepthMat, guideMaterial(), albedoMaterial({ color: new THREE.Color(1, 1, 1), map: null }, false)].forEach(add);
+  [accumulateMat, splitMat, drawnMat, copyMat, packMat, demodMat, atrousMat, farBasisMat, shadowDepthMat, guideMaterial(), albedoMaterial({ color: new THREE.Color(1, 1, 1), map: null }, false)].forEach(add);
   const tm = R.toneMapping;
   const compile = mapping => { R.toneMapping = mapping; const sc2 = new THREE.Scene(); const mesh = new THREE.Mesh(geo, composeMat); mesh.frustumCulled = false; sc2.add(mesh); return R.compileAsync(sc2, cam); };
   try {
@@ -1444,13 +1540,20 @@ export async function pathTrace(opts = {}) {
   if (opt.blockReach == null) opt.blockReach = opt.horizonReach <= 5000 ? 1600 : Math.round(opt.horizonReach * 0.42);
   info.blockReach = Math.min(opt.blockReach, opt.horizonReach);
   camPT.far = Math.max(camPT.far, opt.horizonReach * 5); camPT.updateProjectionMatrix();
-  const NJ = Math.max(1, opt.jitter);
+  const tanY = Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2) / cam.zoom;
+  const NJ = Math.max(1, Math.min(MAX_JITTER, Math.round(opt.jitter)));
+  // the sub-pixel offsets, in pixels, x to the right and y downwards (as setViewOffset takes them)
+  const halton = (i, b) => { let f = 1, r = 0; while (i > 0) { f /= b; r += f * (i % b); i = Math.floor(i / b); } return r; };
+  const jits = Array.from({ length: NJ }, (_, j) => NJ > 1 ? [halton(j + 1, 2) - 0.5, halton(j + 1, 3) - 0.5] : [0, 0]);
   const key = sceneKey(cam, extend ? worldGroup(V) : null, w, h, opt);
   // (a scene whose BVH was not finished, because the picture was stopped, is not kept)
   let S = kept && kept.key === key && kept.bvh ? kept : null;
   info.sceneKept = !!S;
   // the colour passes' sums and the filter's guide, drawn once for each scene
   const accPt = target('accPt', w, h, THREE.FloatType), accGame = target('accGame', w, h, THREE.FloatType);
+  // how the sub-pixel samples of each pixel divide between the surface at its centre and the rest (see splitMat)
+  const accM = target('accM', w, h, THREE.FloatType), accMp = target('accMp', w, h, THREE.FloatType), accO = target('accO', w, h, THREE.FloatType);
+  const tDrawn = target('drawn', w, h, THREE.HalfFloatType);
   const tG = target('guide', w, h, THREE.FloatType, true), tLit = target('lit', w, h, THREE.FloatType, true);
   const wantLit = opt.autoExposure && opt.exposure == null;
 
@@ -1493,33 +1596,42 @@ export async function pathTrace(opts = {}) {
       for (const mesh of farScene.meshes) rasterScene.add(mesh);
       const tA = target('a', w, h, THREE.HalfFloatType, true), tB = target('b', w, h, THREE.HalfFloatType, true);
       R.setClearColor(0x000000, 0);
-      for (const t of [accPt, accGame]) { R.setRenderTarget(t); R.clear(); }
+      for (const t of [accPt, accGame, accM, accMp, accO]) { R.setRenderTarget(t); R.clear(); }
       R.setRenderTarget(null);
-      const halton = (i, b) => { let f = 1, r = 0; while (i > 0) { f /= b; r += f * (i % b); i = Math.floor(i / b); } return r; };
       // the programs of the game's materials, which this renderer has not drawn before, are compiled in the background
       try { await R.compileAsync(rasterScene, camPT); await R.compileAsync(scene, cam); } catch (e) { /* compiled as they are drawn */ }
       checkAbort(signal);
+      // the guide for the filter: normals and depth at the centre of each pixel
+      const guideMat = guideMaterial(), tGj = target('guideJ', w, h, THREE.FloatType, true);
+      rasterScene.overrideMaterial = guideMat;
+      R.setClearColor(0x000000, 0); R.setRenderTarget(tG); R.clear(); R.render(rasterScene, camPT); R.setRenderTarget(null);
+      rasterScene.overrideMaterial = null;
+      const su = splitMat.uniforms;
+      su.tA.value = tA.texture; su.tB.value = tB.texture; su.tG.value = tG.texture; su.tGj.value = tGj.texture;
+      su.uTexel.value.set(1 / w, 1 / h); su.uTanY.value = tanY; su.uAspect.value = w / h; su.uCamRot.value.setFromMatrix4(cam.matrixWorld);
       // one offset at a time, with the game's scene set up for it and put back each time, so that the page has a
       // turn between them
       for (let j = 0; j < NJ; j++) {
-        const jx = NJ > 1 ? halton(j + 1, 2) - 0.5 : 0, jy = NJ > 1 ? halton(j + 1, 3) - 0.5 : 0;
+        const [jx, jy] = jits[j];
         cam.setViewOffset(w, h, jx, jy, w, h); camPT.setViewOffset(w, h, jx, jy, w, h);
         R.setClearColor(0xffffff, 0); R.setRenderTarget(tA); R.clear(); R.render(rasterScene, camPT);
+        rasterScene.overrideMaterial = guideMat;
+        R.setClearColor(0x000000, 0); R.setRenderTarget(tGj); R.clear(); R.render(rasterScene, camPT);
+        rasterScene.overrideMaterial = null;
         withTemps(V, W.temps, col, () => withGameScene(scene, col, true, () => drawGame(scene, cam, tB)));
         accumulateMat.uniforms.tA.value = tA.texture; accumulateMat.uniforms.tB.value = tB.texture;
         accumulateMat.uniforms.uWhich.value = 0; R.autoClear = false; runPass(accumulateMat, accPt);
-        accumulateMat.uniforms.uWhich.value = 1; runPass(accumulateMat, accGame); R.autoClear = true;
+        accumulateMat.uniforms.uWhich.value = 1; runPass(accumulateMat, accGame);
+        su.uJit.value.set(jx, -jy);
+        for (const [k, t] of [accM, accMp, accO].entries()) { su.uWhich.value = k; runPass(splitMat, t); }
+        R.autoClear = true;
         cam.clearViewOffset(); camPT.clearViewOffset();
         await yieldPage(); checkAbort(signal);
       }
-      withTemps(V, W.temps, col, () => {
-        // the guide for the filter: normals and depth at the centre of each pixel
-        rasterScene.overrideMaterial = guideMaterial();
-        R.setClearColor(0x000000, 0); R.setRenderTarget(tG); R.clear(); R.render(rasterScene, camPT); R.setRenderTarget(null);
-        rasterScene.overrideMaterial.dispose(); rasterScene.overrideMaterial = null;
-        // the game's own lighting of the same surfaces, for matching the brightness later
-        if (wantLit) withGameScene(scene, col, false, () => drawGame(scene, cam, tLit));
-      });
+      guideMat.dispose();
+      drawnMat.uniforms.tM.value = accM.texture; drawnMat.uniforms.tMp.value = accMp.texture; runPass(drawnMat, tDrawn);
+      // the game's own lighting of the same surfaces, for matching the brightness later
+      if (wantLit) withTemps(V, W.temps, col, () => withGameScene(scene, col, false, () => drawGame(scene, cam, tLit)));
       await gpuIdle(R);
       mark('tAlbedo');
     } catch (e) {
@@ -1578,15 +1690,15 @@ export async function pathTrace(opts = {}) {
   pt.alpha = !R.extensions.get('EXT_float_blend');
   // the rate of sampling by distance needs the running mean blended on the GPU, which the alpha mode does not do
   const rate = !pt.alpha && (opt.farEvery > 1 || opt.skyEvery > 1 || opt.farBounces < opt.bounces);
-  const tanY = Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2) / cam.zoom;
   // the far field is lit by the raster passes when there is one
   const hybrid = !!(S.farScene && S.nearReach < Infinity);
   const nearR = hybrid ? S.nearReach : Infinity;
+  jits.forEach(([x, y], j) => m.uniforms.uJit.value[j].set(x, -y)); m.uniforms.uJitN.value = NJ > 1 ? NJ : 0;
   m.uniforms.uRateOn.value = rate || hybrid ? 1 : 0; m.uniforms.uGuide.value = tG.texture;
   m.uniforms.uFarDist.value = hybrid ? nearR * 0.7 : opt.farField > 0 ? opt.farField : 1e9;
   m.uniforms.uFarEvery.value = rate ? Math.max(1, Math.round(opt.farEvery)) : 1; m.uniforms.uSkyEvery.value = rate ? Math.max(1, Math.round(opt.skyEvery)) : 1;
   m.uniforms.uFarBounces.value = Math.max(1, Math.round(opt.farBounces));
-  m.uniforms.uCover.value = accPt.texture; m.uniforms.uCoverN.value = NJ; m.uniforms.uView.value.set(tanY * w / h, tanY);
+  m.uniforms.uDrawn.value = tDrawn.texture; m.uniforms.uView.value.set(tanY * w / h, tanY);
   m.uniforms.uSkipDist.value = hybrid ? nearR : 1e9;
   const tFarB = target('farBasis', w, h);
   if (hybrid) {
@@ -1626,7 +1738,7 @@ export async function pathTrace(opts = {}) {
   R.setClearColor(0x000000, 0); R.setRenderTarget(tH); R.clear(); R.setRenderTarget(null);
   const du = demodMat.uniforms;
   du.uTexel.value.set(1 / w, 1 / h); du.tP.value = tP.texture; du.tH.value = tH.texture; du.tApt.value = accPt.texture; du.uN.value = NJ;
-  du.tG.value = tG.texture; du.tFar.value = tFarB.texture; du.uHybrid.value = hybrid ? 1 : 0; du.uTanY.value = tanY; du.uAspect.value = w / h;
+  du.tG.value = tG.texture; du.tDrawn.value = tDrawn.texture; du.tFar.value = tFarB.texture; du.uHybrid.value = hybrid ? 1 : 0; du.uTanY.value = tanY; du.uAspect.value = w / h;
   du.uBand.value.set(nearR * 0.7, nearR * 0.95); du.tBg.value = sky.bgTex; du.uCamRot.value.setFromMatrix4(cam.matrixWorld);
   // the far field's light, fitted to the path-traced light of the surfaces at the edge of the near field: for each
   // colour, the light E = P / A_pt there is fitted as kSun * (the sun's share) + kSky * (the sky's irradiance), by least
@@ -1697,7 +1809,7 @@ export async function pathTrace(opts = {}) {
   };
   const tE0 = target('e0', w, h), tE1 = target('e1', w, h);
   atrousMat.uniforms.tG.value = tG.texture; atrousMat.uniforms.uTexel.value.set(1 / w, 1 / h);
-  atrousMat.uniforms.uTanY.value = tanY; atrousMat.uniforms.uAspect.value = w / h;
+  atrousMat.uniforms.uTanY.value = tanY; atrousMat.uniforms.uAspect.value = w / h; atrousMat.uniforms.tM.value = accM.texture; atrousMat.uniforms.uN.value = NJ;
   // the light on each surface, filtered with the given number of a-trous steps; returns the target holding it
   const filtered = iters => {
     runPass(demodMat, tE0);
@@ -1707,6 +1819,7 @@ export async function pathTrace(opts = {}) {
   };
   const cu = composeMat.uniforms;
   cu.tP.value = tP.texture; cu.tApt.value = accPt.texture; cu.tAg.value = accGame.texture; cu.tG.value = tG.texture;
+  cu.tM.value = accM.texture; cu.tMp.value = accMp.texture; cu.tO.value = accO.texture; cu.tBg.value = sky.bgTex; cu.uTexel.value.set(1 / w, 1 / h);
   cu.uRemod.value.set(opt.remodReach[0], opt.remodReach[1]);
   cu.uHaze.value = opt.haze ? 1 : 0; cu.uSigma.value = 3.912 / opt.hazeVisibility; cu.uHazeH.value = opt.hazeHeight; cu.uCamY.value = origin.y;
   cu.uDay.value = SU.uDay.value; cu.uTop.value.copy(SU.uTop.value); cu.uSun.value.copy(SU.uSun.value); cu.uSunCol.value.copy(SU.uSunCol.value);
@@ -1910,6 +2023,8 @@ export async function pathTrace(opts = {}) {
     opt.debug.albedoGame = show(accGame.texture, [1, 0, 0, 0], 1, NJ);
     opt.debug.normal = show(tG.texture, [0, 1, 0, 0]);
     opt.debug.depth = show(tG.texture, [0, 0, 1, 0], 300);
+    // the share of each pixel's sub-pixel samples on the surface at its centre
+    opt.debug.split = show(accM.texture, [0, 0, 0, 0], 1, NJ);
     if (hybrid) { opt.debug.farSun = show(tFarB.texture, [0, 0, 0, 0]); opt.debug.farSky = show(tFarB.texture, [1, 0, 0, 0], 0.3); }
   }
   R.toneMapping = THREE.NoToneMapping;
