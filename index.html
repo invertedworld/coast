@@ -7858,6 +7858,8 @@ function dinghyAshore(force){
     // another harbour, the dinghy that lay here goes to the berth it came from, so that each harbour keeps one
     if (L && inHarbour && dinghyBerth(HB)) dgyBerthIn(D,HB); }
   if (!L){ if (!force) return false; D.state.crewed=false; L={x:D.state.x,y:Math.max(0,heightAt(D.state.x,D.state.z)),z:D.state.z,head:D.state.head}; }
+  // the player stands on the quay or the beach right beside the boat
+  { const P=dgyStandNear(D.state.x,D.state.z); if (P){ L={...L,x:P.x,z:P.z,y:P.y}; } }
   sailD=null; dgyChase=false; player.x=L.x; player.z=L.z; player.y=L.y; player.vy=0; player.holdT=1.5; eyeY=null;
   // looking back at the dinghy where she lies (or, left where she was at sea, away from her bow)
   { const bx=D.state.x-L.x, bz=D.state.z-L.z; yaw=Math.hypot(bx,bz)>0.5?Math.atan2(-bx,-bz):L.head+Math.PI; fpPitch=-0.3; }
@@ -7915,7 +7917,20 @@ async function dgyTravel(H,B){
 }
 // the nearest point to the berth's quay point, out to 8 m, that is dry ground or paving no lower than the terrain and
 // not inside a wall, with the height of its topmost walkable surface
+// the nearest dry, open place on a quay or a beach to the boat at (x,z), within 8 m: where the player steps ashore
+function dgyStandNear(x0,z0){
+  const walls=[]; for (const ch of chunks.values()) if (Math.abs(ch.cx*C+C/2-x0)<C*1.5 && Math.abs(ch.cz*C+C/2-z0)<C*1.5)
+    for (const o of ch.obbs) if (o.top===Infinity) walls.push(o);
+  for (let r=1.0;r<=8;r+=0.35){ const n=Math.max(12,Math.round(r*8)); let best=null, bg=-1e9;
+    for (let k=0;k<n;k++){ const a=k/n*Math.PI*2, x=x0+Math.cos(a)*r, z=z0+Math.sin(a)*r, g=walkGround(x,z,1e3), h=heightAt(x,z);
+      if (g<0.3 || g<h-0.05 || g>4) continue;
+      if (walls.some(o=>{ const [lu,lv]=obbLocal(o,x,z); return Math.abs(lu)<o.hw+0.35 && Math.abs(lv)<o.hd+0.35; })) continue;
+      // of the places at this distance, the lowest: the quay's edge rather than the top of a parapet
+      if (best===null || g<bg){ best={x,z,y:g}; bg=g; } }
+    if (best) return best; }
+  return null; }
 function dgyArrival(B){
+  { const P=dgyStandNear(B.x,B.z); if (P) return P; }
   const tries=[[0,0]]; for (const r of [0.8,1.6,2.5,3.5,5,6.5,8]) for (let k=0;k<12;k++){ const a=k/12*Math.PI*2; tries.push([Math.cos(a)*r,Math.sin(a)*r]); }
   const walls=[]; for (const ch of chunks.values()) if (Math.abs(ch.cx*C+C/2-B.quay.x)<C*1.5 && Math.abs(ch.cz*C+C/2-B.quay.z)<C*1.5)
     for (const o of ch.obbs) if (o.top===Infinity) walls.push(o);
