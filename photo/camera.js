@@ -40,7 +40,7 @@
    photo.shoot() -> Promise<HTMLCanvasElement>
        The shutter: a capture with the effect hooks, a flash, and the picture added to the gallery.
        Enter with the camera lowered takes a quick picture of the game's frame in the same way, with the shutter's
-       sound and no flash.
+       sound and flash.
    photo.addEffectHook(fn) -> remove()
        fn(canvas, meta) is called on every picture taken with the shutter, in the order added. It may return (or
        resolve to) a canvas, which replaces the picture for the next hook and for the gallery, or nothing to keep it.
@@ -344,7 +344,7 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
       return pic;
     });
   }
-  function quickShot() { if (onShutter) try { onShutter(); } catch (e) { /* the host's own sound */ } return capture({ effects: true, gallery: true }).then(c => { setRoll(c); return c; }); }
+  function quickShot() { flash(); if (onShutter) try { onShutter(); } catch (e) { /* the host's own sound */ } return capture({ effects: true, gallery: true }).then(c => { setRoll(c); return c; }); }
   function shoot() { flash(); if (onShutter) try { onShutter(); } catch (e) { /* the host's own sound */ } return capture({ effects: true, gallery: true }).then(c => { setRoll(c); return c; }); }
 
   /* ---------- the controls on the screen: the lens, the shutter, the pictures and the way out ---------- */
@@ -517,7 +517,7 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
     if (G.handleKey(e)) return;
     if (e.code === 'KeyK') { if (!e.repeat) toggle(); return stop(e); }
     if (e.code === 'KeyL') { if (!e.repeat) openGallery(); return stop(e); }
-    // Enter with the camera lowered takes a quick picture of the game's own frame: the shutter is heard, with no flash
+    // Enter with the camera lowered takes a quick picture of the game's own frame, with the shutter's sound and flash
     // and no viewfinder (not while a field or a panel has the keyboard)
     if (!S.on && (e.code === 'Enter' || e.code === 'NumpadEnter')) {
       const el = document.activeElement, busy = el && /^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(el.tagName) || (quickOk && !quickOk());

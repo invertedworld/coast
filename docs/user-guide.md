@@ -80,7 +80,7 @@ The new island replaces the present one entirely, and the player begins it on fo
 
 ## The camera and the gallery
 
-**Enter**, with the camera lowered, takes a quick picture of the view as it is, which is kept in the gallery; the shutter is heard. **K** raises a camera to the eye, and the island is then seen through its lens. The camera remains raised until it is lowered with the button at the top right of the screen, with **K** or with **Esc**. While it is raised the mouse is not captured: a drag across the scene turns the view, and the player walks, swims and turns with the usual keys. A click on the scene does not take a picture.
+**Enter**, with the camera lowered, takes a quick picture of the view as it is, which is kept in the gallery; the shutter is heard and seen. **K** raises a camera to the eye, and the island is then seen through its lens. The camera remains raised until it is lowered with the button at the top right of the screen, with **K** or with **Esc**. While it is raised the mouse is not captured: a drag across the scene turns the view, and the player walks, swims and turns with the usual keys. A click on the scene does not take a picture.
 
 The controls of the lens lie in a panel at the foot of the screen. Each shows its value and a scale, and is adjusted with the **−** and **+** buttons on either side, which repeat while held.
 
