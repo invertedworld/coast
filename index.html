@@ -3638,7 +3638,8 @@ function genChunk(cx,cz,lod=0){
       const a=R()*6.28, r=P.r*(0.55+R()*0.25), x=px+Math.cos(a)*r, z=pz+Math.sin(a)*r, rot=Math.atan2(-Math.cos(a),-Math.sin(a));
       const H=mat(x,0,z,1,1,1,rot), cv=[C_.canvasA,C_.canvasB,C_.canvasC][Math.floor(R()*3)];
       gb.add(T.box, mm(H,mat(0,0,0,2.2,0.9,1.1)), C_.trunk, 0, SW);
-      for (const sx of [-1,1]) for (const sz of [-1,1]) gb.add(T.box, mm(H,mat(sx*1.05,0,sz*0.5,0.08,2.2,0.08)), C_.trunk, null);
+      // the roof slopes down to the front (0.18 rad), so each post rises to meet it where it stands
+      for (const sx of [-1,1]) for (const sz of [-1,1]) gb.add(T.box, mm(H,mat(sx*1.05,0,sz*0.5,0.08,2.25-sz*0.5*Math.tan(0.18),0.08)), C_.trunk, null);
       gb.add(T.boxC, mm(H,mat(0,2.25,0,2.6,0.08,1.6,0,0.18)), cv, null);
       gb.add(T.sphLo, mm(H,mat(-0.5,0.95,0,0.5,0.3,0.4)), C_.roofOrange, null);
       gb.add(T.sphLo, mm(H,mat(0.4,0.95,0.1,0.5,0.3,0.4)), C_.olive, null);
