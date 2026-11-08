@@ -9820,7 +9820,8 @@ addEventListener('keydown',e=>{ keys[e.code]=true;
   if (code==='Home' && !e.repeat) homeKey();
   if (code==='KeyB') setTilt(!tiltShift);
   if (code==='KeyP' && !e.repeat){ paused=!paused; lastClock=null; }
-  if (code==='KeyH' && !e.repeat){ helpEl.hidden=!helpEl.hidden; lastCell=null; }
+  // the help panel frees the mouse, so that its tabs can be clicked
+  if (code==='KeyH' && !e.repeat){ helpEl.hidden=!helpEl.hidden; lastCell=null; if (!helpEl.hidden && document.pointerLockElement) document.exitPointerLock(); }
   if (code==='Escape' && !helpEl.hidden){ helpEl.hidden=true; lastCell=null; }
   if (code==='KeyI' && !e.repeat) openIsland();
   if (code==='KeyZ' && !e.repeat) crouch=!crouch;
@@ -9870,7 +9871,7 @@ function pollPad(dt){
 }
 addEventListener('blur',()=>{ for (const k in keys) keys[k]=false; });
 let dragging=false, lx=0, ly=0;
-function lockPointer(){ try{ const p=canvas.requestPointerLock(); if (p&&p.catch) p.catch(()=>{}); }catch(_){} }
+function lockPointer(){ if (!helpEl.hidden) return; try{ const p=canvas.requestPointerLock(); if (p&&p.catch) p.catch(()=>{}); }catch(_){} }
 // with the camera raised the mouse is never captured, so that its controls on the screen can be clicked: a drag turns the view
 canvas.addEventListener('mousedown',e=>{ dragging=true; lx=e.clientX; ly=e.clientY; if (mode!=='above'&&started&&!PHOTO.on&&document.pointerLockElement!==canvas) lockPointer(); });
 addEventListener('mouseup',()=>dragging=false);
