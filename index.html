@@ -1012,7 +1012,7 @@ function cvFloor(cv,u,s,d,hNat,G){
     return h; }
   // along the rocky coast the bed is cut away below the cliffs and slopes, and ledges of rock stand at the waterline,
   // wider in some places than others and broken into skerries
-  const e=cvExtF(cv,u); if (e<=0) return hNat;
+  const e=cvExtF(cv,u)*smooth((s-cv.s0g)/12); if (e<=0) return hNat;   // easing back to the natural bed at the edge of the cove's ground
   const wd=Math.max(0,-d); let h=Math.min(hNat,Math.max(-7,0.1-wd*0.55));
   if (G){ const n=vnoise((cv.X+u)*0.2,s*0.2,cv.seed+16), lw=1.2+4.5*vnoise((cv.X+u)*0.03,2,cv.seed+17);
     if (n>0.48 && wd<lw) h=Math.max(h,0.2+0.9*(n-0.48)-0.05*wd); }
