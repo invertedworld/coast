@@ -123,6 +123,7 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
     </div>
     <div class="group"><h3>Swimming and diving</h3>
       <div class="row"><span>Walk into the sea</span><span>Swim</span></div>
+      <div class="row"><span><kbd>6</kbd></span><span>Under the water, or back</span></div>
       <div class="row"><span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><span>Swim</span></div>
       <div class="row"><span>Look down and swim</span><span>Dive</span></div>
       <div class="row"><span><kbd>C</kbd></span><span>Dive</span></div>
@@ -7708,6 +7709,31 @@ function dgyHarbourNear(x,z){
 function dgyNearest(x,z){ let best=null, bd=1e9; for (const e of dinghies.values()){ const d=Math.hypot(e.D.state.x-x,e.D.state.z-z); if (d<bd){ bd=d; best=e; } } return best&&{e:best,d:bd}; }
 // Y: step ashore while sailing near land, or out at sea return to the quay beside the dinghy's berth; board a dinghy
 // within 6 m; otherwise go to the quay beside the nearest one
+// the underwater view (6): from wherever the player is, down to the nearest open water between 4.5 and 9 m deep, under
+// the surface and facing the shore, where the seabed and its life are in view; 6 again brings the player back to where
+// they were before, at street level
+let uwReturn=null;
+function underwaterKey(){
+  if (mode==='swim' && uwReturn){ const R=uwReturn; uwReturn=null; swimToStreet(R); yaw=R.yaw; fpPitch=0; return; }
+  if (sailD) dinghyAshore(true); if (riding()) leaveTrain('street'); if (mode==='ferry'||ridden) leaveFerry('street'); if (mode==='above') toggleView();
+  if (mode==='swim') swimLeaveHere();
+  const x0=player.x, z0=player.z;
+  let best=null;
+  for (let r=10; r<=1500 && !best; r+=10){ const n=Math.max(8,Math.round(r*2*Math.PI/12));
+    for (let k=0;k<n;k++){ const a=k/n*2*Math.PI, x=x0+Math.cos(a)*r, z=z0+Math.sin(a)*r, d=-heightAt(x,z);
+      if (d<4.5 || d>9 || dgyHarbourAt(x,z)) continue;
+      // open water outside the harbours, deeper than 2 m for 15 m all round, so that the swimmer is not put in a rock
+      // pool, a harbour basin or under a quay
+      let open=true; for (let q=0;q<12&&open;q++){ const b=q/12*2*Math.PI; for (const rr of [6,15]) if (-heightAt(x+Math.cos(b)*rr,z+Math.sin(b)*rr)<2) open=false; }
+      if (open){ best={x,z,d}; break; } } }
+  if (!best) return;
+  uwReturn={x:player.x,y:player.y,z:player.z,yaw};
+  // facing up the slope of the seabed, towards the shore
+  const e=4, gx=heightAt(best.x+e,best.z)-heightAt(best.x-e,best.z), gz=heightAt(best.x,best.z+e)-heightAt(best.x,best.z-e);
+  yaw=Math.atan2(-gx,-gz); fpPitch=-0.25;
+  player.x=best.x; player.z=best.z; mode='swim';
+  swimmer.enter({x:best.x,y:-Math.min(3,best.d*0.45),z:best.z,yaw,pitch:fpPitch});
+  const S=swimmer.state; S.mode='under'; S.under=true; S.underT=2; }
 function dinghyKey(){
   if (sailD){ if (!dinghyAshore(false)){ const HB=dgyHarbourAt(sailD.state.x,sailD.state.z); if (HB) dinghyDock(HB); else dinghyHome(); } return; }
   const N=dgyNearest(player.x,player.z);
@@ -9668,10 +9694,10 @@ function sndFerries(dt){
   }
 }
 // the views are on the number keys: 1 the passenger train, 2 the goods train, 3 the ferry, 4 the dinghy, 5 the bird's-eye
-// view, and 0 the view from behind (the train followed, the ferry or the dinghy from astern). Each is translated to the
+// view, 6 under the water, and 0 the view from behind (the train followed, the ferry or the dinghy from astern). Each is translated to the
 // name the handlers below use; the letters that once did the same no longer do (C is still held to dive)
 const VIEW_KEY={Digit1:'KeyR',Numpad1:'KeyR',Digit2:'KeyG',Numpad2:'KeyG',Digit3:'KeyF',Numpad3:'KeyF',Digit4:'KeyY',Numpad4:'KeyY',
-  Digit5:'KeyV',Numpad5:'KeyV',Digit0:'KeyC',Numpad0:'KeyC'};
+  Digit5:'KeyV',Numpad5:'KeyV',Digit6:'Under',Numpad6:'Under',Digit0:'KeyC',Numpad0:'KeyC'};
 const OLD_VIEW=new Set(['KeyR','KeyG','KeyF','KeyY','KeyV','KeyC']);
 addEventListener('keydown',e=>{ keys[e.code]=true;
   const code=VIEW_KEY[e.code]||(OLD_VIEW.has(e.code)?'':e.code);
@@ -9691,6 +9717,7 @@ addEventListener('keydown',e=>{ keys[e.code]=true;
   if (code==='KeyF' && !e.repeat) toggleFerry();
   if (code==='KeyG' && !e.repeat) toggleGoods(); }
   if (code==='KeyY' && !e.repeat) dinghyKey();
+  if (code==='Under' && !e.repeat) underwaterKey();
   if (code==='KeyB') setTilt(!tiltShift);
   if (code==='KeyP' && !e.repeat){ paused=!paused; lastClock=null; }
   if (code==='KeyH' && !e.repeat){ helpEl.hidden=!helpEl.hidden; lastCell=null; }
