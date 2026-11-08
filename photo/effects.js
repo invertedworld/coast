@@ -318,7 +318,8 @@ function watercolour(srcTex, w, h, o) {
    end and is grooved by the bristles; the height field is lit so that the impasto catches the light, and the
    canvas weave shows where the paint is thin. Broad strokes cover the picture, and smaller ones are laid where
    it has detail.
-   opts: radius (Kuwahara radius, default 6), stroke (stroke size, default 1), impasto (relief, default 1) */
+   opts: radius (Kuwahara radius, default 6), stroke (stroke size, default 1), impasto (relief, default 1),
+         mixing (0: colours mixed on the palette, the default; 1: optical mixing, described below) */
 const OIL_STROKES = `uniform sampler2D tTfm, tPaint; uniform float uCell, uLen, uWidth, uLayer, uTol, uCut;
 float bristle(float s, float id){ return 0.4*vnoise(vec2(s*4.0,id*13.1))+0.35*vnoise(vec2(s*11.0,id*7.3))+0.25*vnoise(vec2(s*23.0,id*3.1)); }
 void main(){
@@ -402,6 +403,7 @@ void main(){ vec2 d=1.0/uRes; vec3 a=texture(tSrc,vUv-vec2(d.x,0)).rgb, b=textur
   float g=length(b-a)+length(e-c); fragColor=vec4(vec3(clamp(g*6.0,0.0,1.0)),1.0); }`;
 
 function oil(srcTex, w, h, o) {
+  if (o.mixing === 1) return opticalOil(srcTex, w, h, o);
   const s = h / 800, seed = o.seed ?? 1, S = o.stroke ?? 1;
   const tfm = orientation(srcTex, w, h, 2.5 * s, 0.01, seed);
   const A = target(w, h), B = target(w, h), base = target(w, h), mid = target(w, h), fine = target(w, h), det = target(w, h), tmp = target(w, h),
@@ -428,6 +430,228 @@ function oil(srcTex, w, h, o) {
     pass(OIL_FINAL, { tBase: T[0], tMid: T[1], tFine: T[2], tDetail: det, uLayers: layers, uBaseDone: baseDone, uImpasto: o.impasto ?? 1, uSeed: seed, uT: t }, null, { w, h });
   };
   return { dispose, frame };
+}
+
+/* ---------- oil painting with optical mixing (divisionism) ----------
+   In the manner of the later Signac and Cross, no colour of the picture is mixed on the palette. The picture is
+   divided into a lattice of cells, and each cell receives one small, square-ended stroke of a single pigment from a
+   limited palette: thirteen pure hues round the colour circle, each straight from the tube, lightened with white
+   or deepened, with white and three deep shadow colours. The pigment of each cell is chosen so that the
+   strokes, averaged over a neighbourhood, reproduce the picture's colour: the difference between
+   the colour wanted and the pigment laid is carried to the neighbouring cells (Floyd-Steinberg error diffusion,
+   along alternate directions on alternate rows), and a pigment already laid beside a cell costs more there, so
+   that neighbouring strokes differ and the colour is built from several pigments side by side. Some cells take an
+   accent instead: in the shadows the complement of the local hue or ultramarine and violet, and elsewhere a
+   pigment of the opposite warmth, warm beside cold and cold beside warm. Every pigment is kept close to the value
+   of the place where it is laid, so that the picture's light holds together however it is viewed. Smaller strokes
+   are laid over the broad ones where the picture has detail. The strokes follow the flow of the structure tensor
+   and carry the bristle grooves and impasto of the oil style, lit in the same way.
+   opts: radius (the brush size: the strokes are about 1.35 times as large in pixels), stroke (stroke length),
+         impasto (relief) */
+const OPT_VERT = `in vec3 position; in vec2 uv; in vec4 iA; in vec4 iB; in vec4 iC;
+uniform vec2 uRes; uniform float uFirst;
+out vec2 vUv; out vec3 vCol; out vec2 vP;
+void main(){
+  // iA: centre (px), length, width; iB: direction, seed, unused; iC: colour (sRGB), unused
+  vec2 dir=iB.xy, nrm=vec2(-dir.y,dir.x);
+  vec2 q=(position.xy-vec2(0.5,0.0))*vec2(iA.z,iA.w);
+  vec2 px=iA.xy+dir*q.x+nrm*q.y;
+  vUv=uv; vCol=iC.rgb; vP=vec2(iB.z,iA.w);
+  gl_Position=vec4(px/uRes*2.0-1.0,0.0,1.0);
+  if (float(gl_InstanceID)<uFirst) gl_Position=vec4(2.0,2.0,2.0,1.0);      // already on the canvas
+}`;
+
+// one stroke, opaque: its colour, and its height in alpha
+const OPT_FRAG = `precision highp float; in vec2 vUv; in vec3 vCol; in vec2 vP; out vec4 fragColor;
+float h1(float n){ return fract(sin(n)*43758.5453); }
+float vn1(float x, float s){ float i=floor(x), f=fract(x); f=f*f*(3.0-2.0*f); return mix(h1(i+s),h1(i+1.0+s),f); }
+void main(){
+  float u=vUv.x, v=vUv.y*2.0-1.0, seed=vP.x*97.0;
+  // a square-ended dab with slightly ragged sides and ends
+  float sideN=0.1*(vn1(u*6.0,seed)-0.5), endN=0.08*(vn1(v*5.0,seed+3.0)-0.5);
+  if (abs(v)+sideN>0.92 || u+endN<0.04 || u-endN>0.95) discard;
+  // bristle grooves along the stroke; the paint piles up where the brush lifts, at the end (u = 1)
+  float br=vn1(v*9.0+seed,seed)*0.55+vn1(v*21.0,seed+7.0)*0.45;
+  float h=0.55+0.08*(h1(seed+11.0)-0.5)+0.4*(br-0.5)+0.22*smoothstep(0.6,0.92,u)*(1.0-v*v);
+  h=mix(0.3,h,smoothstep(0.92,0.65,abs(v)+sideN)*smoothstep(0.02,0.16,u)*smoothstep(0.97,0.86,u));
+  fragColor=vec4(vCol*(0.94+0.12*br),clamp(h,0.02,1.0)); }`;
+
+// the strokes lit as in the oil style, without its grading of colour, so that the strokes keep the pigments chosen
+const OPT_FINAL = `uniform sampler2D tPaint; uniform float uImpasto, uFill;
+void main(){
+  vec2 p=vUv*uRes/uS, e=1.0/uRes;
+  vec4 P=texture(tPaint,vUv); vec3 c=P.rgb; float h=P.a;
+  // once the broad strokes are all laid, the slivers of ground left between them take the paint beside them, as
+  // the edges of wet strokes close over a narrow gap
+  if (uFill>0.5 && h<0.06){ vec4 acc=vec4(0.0);
+    for (int y=-2;y<=2;y+=2) for (int x=-2;x<=2;x+=2){ vec4 q=texture(tPaint,vUv+vec2(x,y)*e); if (q.a>=0.06) acc+=vec4(q.rgb,1.0); }
+    if (acc.w>0.0){ c=acc.rgb/acc.w; h=0.2; } }
+  float hx=(texture(tPaint,vUv+vec2(e.x,0.0)).a-texture(tPaint,vUv-vec2(e.x,0.0)).a)*0.5;
+  float hy=(texture(tPaint,vUv+vec2(0.0,e.y)).a-texture(tPaint,vUv-vec2(0.0,e.y)).a)*0.5;
+  vec3 n=normalize(vec3(-hx*uImpasto*2.2/uS,-hy*uImpasto*2.2/uS,1.0));
+  vec3 Ld=normalize(vec3(-0.45,0.55,0.7));
+  float diff=dot(n,Ld)/Ld.z;
+  float spec=pow(max(dot(n,normalize(Ld+vec3(0.0,0.0,1.0))),0.0),30.0)*smoothstep(0.35,0.75,h);
+  float wv=0.5+0.25*sin(p.x*1.9+sin(p.y*0.95)*1.2)*sin(p.y*0.25)+0.25*sin(p.y*1.9+sin(p.x*0.95)*1.2)*sin(p.x*0.25);
+  c*=1.0-0.07*(1.0-smoothstep(0.0,0.4,h))*wv;
+  c=c*(1.0+0.2*(diff-1.0))+vec3(1.0,0.97,0.92)*spec*0.06*uImpasto;
+  fragColor=vec4(clamp(c,0.0,1.0),1.0); }`;
+
+const toLin = c => c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+const toSrgb = c => { c = Math.min(1, Math.max(0, c)); return c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055; };
+// Oklab from linear sRGB (Ottosson), into o[k..k+2]
+function oklab(r, g, b, o, k = 0) {
+  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b), m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b),
+    s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+  o[k] = 0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s; o[k + 1] = 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s;
+  o[k + 2] = 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s; return o;
+}
+
+// the divisionist palette, in sRGB: the pure hues with whether each is warm, then white and the deep shadow colours
+const HUES = [[1.0, 0.92, 0.2, 1], [1.0, 0.76, 0.08, 1], [0.99, 0.52, 0.08, 1], [0.92, 0.26, 0.1, 1], [0.84, 0.16, 0.36, 1], [0.8, 0.36, 0.62, 1],
+  [0.52, 0.24, 0.66, 0], [0.2, 0.22, 0.7, 0], [0.16, 0.42, 0.8, 0], [0.2, 0.64, 0.82, 0], [0.06, 0.52, 0.44, 0], [0.18, 0.66, 0.3, 0], [0.62, 0.8, 0.16, 1]];
+let PALETTE = null;
+function palette() {
+  if (PALETTE) return PALETTE;
+  const P = [], white = [0.98, 0.97, 0.93].map(toLin), deep = [0.1, 0.1, 0.32].map(toLin);
+  const add = (lin, fam, warm, accent) => { const lab = oklab(lin[0], lin[1], lin[2], [0, 0, 0]);
+    P.push({ lin, lab, fam, warm, accent, srgb: lin.map(toSrgb), hue: Math.atan2(lab[2], lab[1]), C: Math.hypot(lab[1], lab[2]) }); };
+  HUES.forEach(([r, g, b, warm], fam) => {
+    const lin = [r, g, b].map(toLin);
+    // lightened with white (mixed, as pigments mix, in linear reflectance), and deepened towards ultramarine
+    for (const k of [0, 0.3, 0.55, 0.75, 0.88]) add(lin.map((v, i) => v * (1 - k) + white[i] * k), fam, warm, k < 0.8);
+    // the yellows are not deepened, as they turn to olive, and orange and vermilion only as far as the deep cadmiums,
+    // as further they turn to the earth colours, which the divisionists left out; a warm shadow is built from these
+    // beside deep cool colours
+    if (fam >= 2 && fam <= 11) for (const m of fam === 2 ? [0.6] : fam === 3 ? [0.55] : [0.55, 0.3]) add(lin.map((v, i) => (v * 0.85 + deep[i] * 0.15) * m), fam, warm, true);
+  });
+  add(white, 20, 0.5, false);
+  add([0.08, 0.08, 0.24].map(toLin), 7, 0, true); add([0.18, 0.07, 0.22].map(toLin), 6, 0, true); add([0.04, 0.17, 0.16].map(toLin), 10, 0, true);
+  return (PALETTE = P);
+}
+
+// chooses a pigment for every cell of a cols x rows lattice whose colours (linear sRGB) are in T; returns indices
+// into the palette
+function divide(T, cols, rows, rnd) {
+  const P = palette(), n = P.length, E = new Float32Array(cols * rows * 3), out = new Int16Array(cols * rows).fill(-1);
+  const tl = [0, 0, 0], Tl = [0, 0, 0];
+  // the colours are averaged in linear light raised to the power 0.7: the eye mixes the strokes in linear light when
+  // the picture is seen from a distance, but a reduced copy on a screen is mostly averaged in the display's own
+  // values, which are nearer to the power 0.45; between the two, the mixture comes out close in both
+  const Wf = v => Math.sign(v) * Math.pow(Math.abs(v), 0.7), Wi = v => Math.sign(v) * Math.pow(Math.abs(v), 1 / 0.7);
+  const KV = 4, KR = 0.004, KF = 0.0025, KH = 0.06, KC = 0.6, ACC = 0.18;
+  for (let y = 0; y < rows; y++) {
+    const ltr = (y & 1) === 0;
+    for (let xi = 0; xi < cols; xi++) {
+      const x = ltr ? xi : cols - 1 - xi, i = y * cols + x, dx = ltr ? 1 : -1;
+      const r0 = T[i * 3], g0 = T[i * 3 + 1], b0 = T[i * 3 + 2];
+      const rw = Math.min(1.1, Math.max(-0.1, Wf(r0) + E[i * 3])), gw = Math.min(1.1, Math.max(-0.1, Wf(g0) + E[i * 3 + 1])), bw = Math.min(1.1, Math.max(-0.1, Wf(b0) + E[i * 3 + 2]));
+      const r = Wi(rw), g = Wi(gw), b = Wi(bw);
+      oklab(r, g, b, tl); oklab(r0, g0, b0, Tl);
+      const L = Tl[0], C = Math.hypot(Tl[1], Tl[2]), hue = Math.atan2(Tl[2], Tl[1]);
+      // the region's warmth: reds, oranges and yellows are warm (an Oklab hue from about -20 to 110 degrees)
+      const warmth = C < 0.025 ? 0.5 : (hue > -0.35 && hue < 1.9 ? 1 : 0);
+      // pigments already laid beside this cell: the one before it on the row and the three above
+      const nb = [];
+      if (xi > 0) nb.push(out[i - dx]);
+      if (y > 0) for (const o of [-1, 0, 1]) { const xx = x + o; if (xx >= 0 && xx < cols) nb.push(out[i - cols + o]); }
+      // an accent: in the shadows the complement of the local hue, or ultramarine and violet; elsewhere a pigment of
+      // the opposite warmth
+      const shadow = L < 0.5 ? Math.min(1, (0.5 - L) / 0.15) : 0;
+      const accent = rnd() < ACC * (0.6 + 0.6 * shadow);
+      let best = -1, bc = Infinity;
+      for (let j = 0; j < n; j++) {
+        const p = P[j];
+        if (accent) {
+          if (!p.accent) continue;
+          const comp = C > 0.03 && Math.cos(p.hue - hue) < -0.6 && p.C > 0.06;
+          const cool = p.fam === 6 || p.fam === 7;
+          if (shadow > 0.3 ? !(comp || cool) : !(warmth === 0.5 ? true : p.warm !== warmth && p.C > 0.05)) continue;
+        }
+        const d0 = tl[0] - p.lab[0], d1 = tl[1] - p.lab[1], d2 = tl[2] - p.lab[2], dv = L - p.lab[0];
+        let c = d0 * d0 + d1 * d1 + d2 * d2 + KV * dv * dv * (accent ? 2 : 1);
+        // the strokes keep to the axis of the local hue: that hue, its neighbours and its complement
+        if (!accent) { const sn = Math.sin(p.hue - hue); c += KH * p.C * sn * sn; }
+        // an accent is no more vivid than the place where it is laid allows
+        else { const ex = Math.max(0, p.C - C - 0.08); c += KC * ex * ex; }
+        for (const q of nb) if (q === j) c += KR; else if (q >= 0 && P[q].fam === p.fam) c += KF;
+        if (c < bc) { bc = c; best = j; }
+      }
+      if (best < 0) best = n - 1;
+      out[i] = best;
+      // the difference between the colour wanted and the pigment laid goes to the cells not yet painted
+      const q = P[best].lin, er = rw - Wf(q[0]), eg = gw - Wf(q[1]), eb = bw - Wf(q[2]);
+      const spread = (xx, yy, k) => { if (xx < 0 || xx >= cols || yy >= rows) return; const m = (yy * cols + xx) * 3; E[m] += er * k; E[m + 1] += eg * k; E[m + 2] += eb * k; };
+      spread(x + dx, y, 7 / 16); spread(x - dx, y + 1, 3 / 16); spread(x, y + 1, 5 / 16); spread(x + dx, y + 1, 1 / 16);
+    }
+  }
+  return out;
+}
+
+function opticalOil(srcTex, w, h, o) {
+  const g = ctx(), s = h / 800, seed = o.seed ?? 1, rnd = mulberry(seed * 104729 + 7), S = o.stroke ?? 1, imp = o.impasto ?? 1;
+  const cell = (o.radius ?? 6) * 1.35 * s, fine = Math.max(2 * s, cell * 0.55);
+  const tfm = orientation(srcTex, w, h, 2.5 * s, 0.01, seed);
+  const A = target(w, h), tmp = target(w, h), cb = target(w, h), cf = target(w, h), det = target(w, h);
+  kuwahara(srcTex, tfm, Math.max(2 * s, cell * 0.6), A, 8);
+  const tfm2 = orientation(A, w, h, 5.0 * s, 0.006, seed);
+  // the colours wanted, averaged over a cell of each lattice
+  blur(A, 0.45 * cell, tmp, cb); blur(A, 0.45 * fine, tmp, cf);
+  pass(OIL_DETAIL, { tSrc: srcTex }, det); blur(det, 3 * s, tmp, det);
+  const dw = Math.ceil(w / 2), dh = Math.ceil(h / 2), small = target(dw, dh, THREE.FloatType);
+  const read = rt => { pass(COPY, { tSrc: rt, uGain: 1 }, small); return readTarget(small); };
+  const RB = read(cb), RF = read(cf), RT = read(tfm2), RD = read(det);
+  small.dispose();
+  // x, y in pixels with y up, as the targets are read
+  const at = (x, y) => (Math.min(dh - 1, Math.max(0, Math.floor(y / 2))) * dw + Math.min(dw - 1, Math.max(0, Math.floor(x / 2)))) * 4;
+  const P = palette(), strokes = [], ends = [];
+  // a broad lattice over the whole picture, then a fine one laid only where the picture has detail
+  for (const [li, cs] of [[0, cell], [1, fine]]) {
+    const cols = Math.ceil(w / cs) + 1, rows = Math.ceil(h / cs) + 1, R = li ? RF : RB, T = new Float32Array(cols * rows * 3);
+    for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) { const k = at((x + 0.5) * cs, (y + 0.5) * cs), m = (y * cols + x) * 3;
+      T[m] = toLin(R[k]); T[m + 1] = toLin(R[k + 1]); T[m + 2] = toLin(R[k + 2]); }
+    const pick = divide(T, cols, rows, rnd), layer = [];
+    for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
+      const cx = (x + 0.5 + (rnd() - 0.5) * 0.5) * cs, cy = (y + 0.5 + (rnd() - 0.5) * 0.5) * cs;
+      if (li && RD[at(cx, cy)] < 0.3 + 0.15 * rnd()) continue;
+      const t = at(cx, cy); let ang = Math.atan2(RT[t + 1], RT[t]) + (rnd() - 0.5) * 0.5;
+      const sgn = rnd() < 0.5 ? 1 : -1, c = P[pick[y * cols + x]].srgb;
+      const len = cs * (1.15 + 0.45 * S) * (0.9 + 0.2 * rnd()), wid = cs * (1.25 + 0.15 * rnd());
+      // the order of painting: a slow sweep across the canvas, broken up at random
+      const ord = 0.5 * (Math.sin(cx / w * 2.3 + seed) * Math.cos(cy / h * 1.7 - seed) + 1) * 0.5 + rnd() * 0.5;
+      layer.push([ord, cx, cy, len, wid, Math.cos(ang) * sgn, Math.sin(ang) * sgn, rnd(), 0, c[0], c[1], c[2], 1]);
+    }
+    layer.sort((a, b) => a[0] - b[0]);
+    for (const k of layer) strokes.push(k);
+    ends.push(strokes.length);
+  }
+  const n = strokes.length, iA = new Float32Array(n * 4), iB = new Float32Array(n * 4), iC = new Float32Array(n * 4);
+  strokes.forEach((k, i) => { iA.set(k.slice(1, 5), i * 4); iB.set(k.slice(5, 9), i * 4); iC.set(k.slice(9, 13), i * 4); });
+  const geo = new THREE.PlaneGeometry(1, 1); geo.translate(0.5, 0, 0);
+  const ig = new THREE.InstancedBufferGeometry(); ig.index = geo.index; ig.attributes.position = geo.attributes.position; ig.attributes.uv = geo.attributes.uv;
+  ig.setAttribute('iA', new THREE.InstancedBufferAttribute(iA, 4)); ig.setAttribute('iB', new THREE.InstancedBufferAttribute(iB, 4)); ig.setAttribute('iC', new THREE.InstancedBufferAttribute(iC, 4));
+  const mat = new THREE.RawShaderMaterial({ glslVersion: THREE.GLSL3, vertexShader: `precision highp float;\n` + OPT_VERT, fragmentShader: OPT_FRAG,
+    uniforms: { uRes: { value: new THREE.Vector2(w, h) }, uFirst: { value: 0 } }, depthTest: false, depthWrite: false, blending: THREE.NoBlending });
+  const mesh = new THREE.Mesh(ig, mat); mesh.frustumCulled = false;
+  const sc = new THREE.Scene(); sc.add(mesh);
+  // the canvas: a pale primed ground, with no paint on it
+  const paint = target(w, h);
+  g.renderer.setRenderTarget(paint); g.renderer.setClearColor(new THREE.Color(0.9, 0.87, 0.8), 0.05); g.renderer.clear();
+  const all = [tfm, tfm2, A, tmp, cb, cf, det, paint];
+  const dispose = () => { all.forEach(t => t.dispose()); mat.dispose(); geo.dispose(); ig.dispose(); };
+  // progressive: the broad strokes over the bare ground, then the fine ones
+  const span = [[0.02, 0.8], [0.8, 1.0]];
+  const countAt = t => { if (t >= 1) return n; let c = 0;
+    for (let i = 0; i < 2; i++) { const lo = i ? ends[i - 1] : 0, [t0, t1] = span[i]; c = t <= t0 ? c : lo + Math.round((ends[i] - lo) * Math.min(1, (t - t0) / (t1 - t0))); if (t < t1) break; }
+    return c; };
+  let drawn = 0;
+  const frame = t => {
+    const upto = countAt(t);
+    if (upto > drawn) { ig.instanceCount = upto; mat.uniforms.uFirst.value = drawn; g.renderer.setRenderTarget(paint); g.renderer.render(sc, g.cam); drawn = upto; }
+    const dbg = { A, paint, det }[o.debug]; if (dbg) return show(dbg, w, h);
+    pass(OPT_FINAL, { tPaint: paint, uImpasto: imp, uFill: upto >= ends[0] ? 1 : 0 }, null, { w, h });
+  };
+  return { frame, dispose };
 }
 
 /* ---------- impressionist ----------

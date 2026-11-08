@@ -42,7 +42,7 @@ export const Q_GROUPS = [
   { id: 'watercolour', title: 'Watercolour', fields: [
     sl('abstraction', 'Simplification', 8, 2, 16, 1, v => v + ' px'), sl('washes', 'Washes', 1, 0, 2, 0.05), sl('bleed', 'Bleeding', 1, 0, 2, 0.05),
     sl('edge', 'Dark edges', 1, 0, 2, 0.05), sl('granulation', 'Granulation', 1, 0, 2, 0.05), sl('pencil', 'Pencil', 1, 0, 2, 0.05), sl('margin', 'Paper margin', 1, 0, 2, 0.05) ] },
-  { id: 'oil', title: 'Oil', fields: [ sl('radius', 'Brush size', 6, 2, 14, 1, v => v + ' px'), sl('stroke', 'Stroke length', 1, 0.25, 2, 0.05), sl('impasto', 'Impasto', 1, 0, 2, 0.05) ] },
+  { id: 'oil', title: 'Oil', fields: [ { k: 'mixing', label: 'Colour mixing', opts: [[0, 'On the palette'], [1, 'Optical']], def: 0 }, sl('radius', 'Brush size', 6, 2, 14, 1, v => v + ' px'), sl('stroke', 'Stroke length', 1, 0.25, 2, 0.05), sl('impasto', 'Impasto', 1, 0, 2, 0.05) ] },
   { id: 'impressionist', title: 'Impressionist', fields: [ sl('size', 'Dab size', 1, 0.4, 2.5, 0.05), sl('strokes', 'Number of dabs', 1, 0.3, 2, 0.05), sl('jitter', 'Broken colour', 1, 0, 2, 0.05) ] },
   { id: 'charcoal', title: 'Charcoal', fields: [ sl('abstraction', 'Simplification', 5, 2, 12, 1, v => v + ' px'), sl('hatching', 'Hatching', 1, 0, 2, 0.05),
     sl('smudge', 'Smudging', 1, 0, 2, 0.05), sl('contour', 'Contour lines', 1, 0, 2, 0.05) ] },
