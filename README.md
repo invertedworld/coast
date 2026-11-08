@@ -112,6 +112,7 @@ The panel opened with **H** lists the controls. They are reproduced here for ref
 | T, Shift+T (camera raised) | Aspect ratio of the frame: Full, 16:9, 3:2, 4:3, 5:4, 1:1, 4:5, 2:3 or 9:16. |
 | , . (camera raised) | Vignette, from off to 100 per cent in tenths. |
 | G | Shows or hides the gallery, from anywhere, without raising the camera. |
+| L | Shows a QR code of a link to the scene as it is, with the link beneath it; **Copy QR code** copies the code as a PNG image and **Copy URL** copies the link. L again, Esc or **Close** hides it. Opening the link puts the viewer in the same scene. See [Shared scenes](#shared-scenes). |
 | H | Shows or hides the help panel; Esc also hides it. Its foot holds the field of view (`FOV`, 50° to 100°, 70° by default, kept in localStorage as `coast.fov`), used at street level, in the water, at the helm and in a coach, and the About box. |
 
 A game controller is supported through the Gamepad API (`pollPad`). The left stick walks, swims and steers and the right stick looks, at a sensitivity and with an inversion of its vertical axis set on the controller's tab of the help panel and kept in localStorage (`coast.padLook`). A jumps (Space), B crouches (Z) or, in the water, dives while held (C), X steps through the views (0), Y is the bird's-eye view (5), the bumpers bring the view nearer or further (- and +) and Menu shows the help panel (H). The right trigger takes a quick picture, or with the camera raised a picture through the lens; with the camera raised B lowers it, Y opens the gallery, the bumpers zoom, the D-pad's up and down focus and its left and right change the exposure, through the camera's API, since the camera ignores keys the program presses itself. At the helm the triggers trim the sail, and a press of the left stick changes between running and walking.
@@ -145,6 +146,36 @@ The program is a single ES module. Its main sections appear in the following ord
 9. Collision and the walkable surface.
 10. Sound.
 11. Input, the riding modes, the camera, tilt-shift and the frame loop.
+
+### Shared scenes
+
+**L** writes the scene into a link (`sceneLink`) and shows it with its QR code. The link is the page's own address (its origin and path, so that it works locally and on markhammond.me alike) with one parameter, `?s=`, which holds the scene as one JSON object, compressed with deflate (`CompressionStream('deflate-raw')`) and written in base64url without padding. On loading, `sceneDecode` reverses this with `DecompressionStream` before the seed is chosen, through a top-level `await`; an object whose `v` is not 1, or that cannot be read, is ignored. The seed travels inside the object, and a plain `?seed=` link works as before. Choosing a new island (**I**) removes `s` from the address.
+
+The keys are short and the numbers rounded, positions to 0.1 m and angles to 0.01 rad, to keep the code small; a link to markhammond.me is typically 150 to 200 characters, which needs a QR code of version 8 to 10 at level M. The object's keys (`sceneState`):
+
+| Key | Contents |
+|---|---|
+| `v` | The format, 1. |
+| `s` | The seed text. |
+| `h` | The hour, to 0.01 h. |
+| `z` | 1 if the world is paused. |
+| `m` | The mode: `walk`, `above`, `swim`, `cab`, `chase`, `side` (trackside), `coach`, `ferry`, `stern` (the ferry from astern), `helm`, `astern` (the dinghy from astern), `gull` or `dolphin`. Riding the goods train is `cab`, `chase` or `side` with `G` given instead of `T`. |
+| `p` | The player `[x, y, z]`: the feet, or in the water the eye, or following a creature the creature. |
+| `l` | The look in the mode's own terms: `walk`, `swim` `[yaw, pitch, under]`; `above` `[yaw, pitch, dist, aerUp]`; `cab` `[tYaw, tPitch]`; `chase` `[yaw, pitch, d]`; `coach` `[co.yaw, co.pitch]`; `ferry` `[fe.yaw, fe.pitch]`; `stern` `[feLook.yaw, feLook.pitch, feChaseD]`; `helm` `[dgyLook.yaw, dgyLook.pitch]`; `astern` the same and `dgyChaseD`; `gull`, `dolphin` `[FOL.yaw, FOL.pitch, FOL.d]`. |
+| `T` | The passenger train `[x, dir, v, wait]`. |
+| `G` | The goods train `[side, x0 of its line, x, dir, lead, v, wait, toB, leg x, leg wait]`; the line is found again by its side and `x0` (`sceneGoodsLine`). |
+| `C` | The coach `[car, lx, lz]`. |
+| `S` | The trackside place `[x, y, z, tx]`. |
+| `F` | The ferry `[island x, island z, s, at, next, v, wait]`; the crossing is found again by its island (`sceneRoute`). |
+| `E` | The passenger on the ferry's deck `[lx, lz, level, eye]`. |
+| `D` | The dinghy `[harbour n, side, x, z, head, u, boom, sheet, wind direction]`; she is the dinghy of harbour `harbourInfo(side, n)`, brought to that place. |
+| `x` | The seat: in the world `[x, y, z, L0]`, found again among the seats of the blocks and rooms within 0.3 m; in a coach or the ferry `[index in COACH_SEATS or FERRY_SEATS, L0]`. |
+| `r` | The place to return to `[x, y, z, yaw]`, after diving (**6**) or following a creature. |
+| `c` | The camera, if raised `[focal, f-number, focus (0 for autofocus), EV, ratio]`. |
+
+`scenePlace` sets the clock and the player's position before the first blocks are built, and `sceneRestore` then sets the vehicles where they were and enters the mode through the game's own functions (`ride`, `coachEnter`, `enterFerry`, `toggleView`, `dinghyBoard`, `followKey`, `sitKey`, `swimmer.enter`). A seat is taken at once rather than eased into. The trains, the ferry and the dinghy are restored exactly, as are the views, the time and the pause. What lives by its own simulation is not carried: the other boats and ferries, the gulls, the dolphins, the cats, and the wind's gusts and wander. A gull or a dolphin followed is therefore found again as the nearest one to where it was, some 45 frames after the start, and the view of it is only approximate.
+
+The QR code is made by `qrEncode`, a compact encoder written for the game after Project Nayuki's description of the method: byte mode, error correction level M (L only if M would need more than version 40), versions 1 to 40, and the mask chosen by the standard's penalty rules. `qrDraw` draws it with its quiet zone, at 4 px a module on the panel and 10 px a module for the copied PNG. No library is loaded.
 
 ### Floating origin
 

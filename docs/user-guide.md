@@ -74,9 +74,19 @@ The clock runs continuously. **T** held speeds time forty times; **Shift** and *
 
 **I** opens the island panel, which shows the seed of the present island. The seed may be any text of up to 32 characters, letters being kept in capitals; a seed of digits alone stands for the number it spells. **Random** replaces the seed with one drawn at random, and **Copy** copies it to the clipboard. **Generate**, or **Enter**, generates the island from the seed shown; it is unavailable while the seed is that of the present island. **Esc**, **Cancel** or **I** again closes the panel and leaves the island unchanged. While the panel is open, any other key is taken as part of the seed.
 
-The new island replaces the present one entirely, and the player begins it on foot. The same seed always produces the same island. The seed is added to the address of the page, so that the island is kept when the page is reloaded and may be shared as a link. An island may also be opened directly by adding `?seed=` and the seed to the address. Without a seed in the address, each launch opens on a new island whose seed is eight letters and digits drawn at random. The seed of the present island is also shown in the statistics panel (**O**).
+The new island replaces the present one entirely, and the player begins it on foot. The same seed always produces the same island. The seed is added to the address of the page, so that the island is kept when the page is reloaded and may be shared as a link. An island may also be opened directly by adding `?seed=` and the seed to the address. A whole scene may be shared with **L** (see Sharing a scene). Without a seed in the address, each launch opens on a new island whose seed is eight letters and digits drawn at random. The seed of the present island is also shown in the statistics panel (**O**).
 
 > **Example:** To return to an island seen earlier, open the panel with **I**, type the seed noted from the statistics panel, and press **Enter**.
+
+## Sharing a scene
+
+**L** shows a QR code of a link to the scene as it is at that moment, with the link written beneath it. The link records the island's seed, the time of day, the player's position, the view, and the activity: walking or sitting, the bird's-eye view, swimming or diving, riding in a train's cab or coach or watching it from behind or from the trackside, standing or sitting aboard a ferry, sailing a dinghy, or following a gull or a dolphin. A train, ferry or dinghy that is being ridden is recorded where it is, with its speed. A raised camera is recorded with its lens settings. If the world is paused, the scene opens paused.
+
+**Copy QR code** copies the code to the clipboard as an image, and **Copy URL** copies the link. **L** again, **Esc** or **Close** hides the panel.
+
+Opening the link, on a telephone or in another browser, generates the same island and places the viewer in the same scene, aboard the same vehicle at the same place. The gulls, the dolphins, the other boats and the gusts of the wind are not recorded, since each is simulated afresh; a gull or a dolphin that was being followed is replaced by the one nearest to where it was, so that view is approximate.
+
+> **Example:** To show a friend the view from the ferry's saloon, board the ferry with **3**, press **0** twice to sit at a window seat, press **P** to hold the moment, press **L**, and scan the code with the friend's telephone.
 
 ## The camera and the gallery
 
