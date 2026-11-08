@@ -103,7 +103,7 @@ The panel opened with **H** lists the controls. They are reproduced here for ref
 | O | Shows or hides an overlay with the frame rate, the frame time and the slowest frame of the last half second, the draw distance, the number of blocks at each level of detail, the draw calls, the triangles, the player's position and the seed. |
 | K | Raises the camera to the eye, or lowers it. While it is raised the frame is drawn through its lens and its controls are on the screen; the mouse is not captured, and a drag on the scene turns the view. See [Photographs, the gallery and artist mode](#photographs-the-gallery-and-artist-mode). |
 | Esc (camera raised) | Lowers the camera. |
-| Enter (camera raised) | Takes a picture, as the shutter button does. |
+| Enter | With the camera raised, takes a picture as the shutter button does. With it lowered, takes a quick picture of the game's own frame, with the shutter's sound and no flash, without raising the camera (not while the island panel or a field has the keyboard). |
 | + − (camera raised) | Focal length, from 16 to 300 mm. The mouse wheel does the same. |
 | [ ] (camera raised) | Aperture, from f/1.4 to f/22. |
 | 9 0 (camera raised) | Focus nearer or further, which sets manual focus. Shift and the mouse wheel do the same. |

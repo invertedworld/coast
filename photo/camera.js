@@ -39,6 +39,8 @@
          gallery: true  keeps the picture in the gallery (as the shutter does)
    photo.shoot() -> Promise<HTMLCanvasElement>
        The shutter: a capture with the effect hooks, a flash, and the picture added to the gallery.
+       Enter with the camera lowered takes a quick picture of the game's frame in the same way, with the shutter's
+       sound and no flash.
    photo.addEffectHook(fn) -> remove()
        fn(canvas, meta) is called on every picture taken with the shutter, in the order added. It may return (or
        resolve to) a canvas, which replaces the picture for the next hook and for the gallery, or nothing to keep it.
@@ -72,7 +74,7 @@ const DEPTH_FN = `
   uniform float uNear, uFar;
   float linZ(float d){ return uNear*uFar/(uFar-d*(uFar-uNear)); }`;
 
-export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, allowed = () => true, onShutter = null }) {
+export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, allowed = () => true, onShutter = null, quickOk = null }) {
   const S = { on: false, focal: 35, fNumber: 2.8, focus: 5, autofocus: true, ev: 0, vignette: 0, ratio: 0, afTarget: 5, afT: 0, af: false };
   // the frame within the window, as fractions of its width and height, centred; set from the viewfinder's layout
   const FR = { x: 1, y: 1 };
@@ -342,6 +344,7 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
       return pic;
     });
   }
+  function quickShot() { if (onShutter) try { onShutter(); } catch (e) { /* the host's own sound */ } return capture({ effects: true, gallery: true }).then(c => { setRoll(c); return c; }); }
   function shoot() { flash(); if (onShutter) try { onShutter(); } catch (e) { /* the host's own sound */ } return capture({ effects: true, gallery: true }).then(c => { setRoll(c); return c; }); }
 
   /* ---------- the controls on the screen: the lens, the shutter, the pictures and the way out ---------- */
@@ -514,6 +517,12 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
     if (G.handleKey(e)) return;
     if (e.code === 'KeyK') { if (!e.repeat) toggle(); return stop(e); }
     if (e.code === 'KeyL') { if (!e.repeat) openGallery(); return stop(e); }
+    // Enter with the camera lowered takes a quick picture of the game's own frame: the shutter is heard, with no flash
+    // and no viewfinder (not while a field or a panel has the keyboard)
+    if (!S.on && (e.code === 'Enter' || e.code === 'NumpadEnter')) {
+      const el = document.activeElement, busy = el && /^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(el.tagName) || (quickOk && !quickOk());
+      if (busy || !allowed()) return;
+      if (!e.repeat) quickShot(); return stop(e); }
     if (!S.on) return;
     const c = e.code;
     if (c === 'Escape') exit();
