@@ -1194,9 +1194,6 @@ function coveNoWalk(cv,x,z){ const G=cv.geo; if (!G) return false; const u=cvU(c
 // whether a step from (ox,oz), standing on gO, to (nx,nz), whose standing height is gN, is allowed
 function coveMoveOk(ox,oz,y,gO,nx,nz,gN){
   const cv=coveAtXZ(nx,nz); if (!cv || !cv.geo) return true;
-  // off the path on the ravine's slope a walker may only go down, or back towards the path, so that whoever stands
-  // there can always leave
-  if (coveNoWalk(cv,nx,nz) && (!coveNoWalk(cv,ox,oz) || gN>gO+0.02 && cvPathDist(cv.geo,cvU(cv,nx,nz),cvS(cv,nx,nz))>cvPathDist(cv.geo,cvU(cv,ox,oz),cvS(cv,ox,oz))-0.001)) return false;
   if (gN-Math.max(y,gO)>STEP) return false;
   if (gO-gN>1.4) return false;
   return true; }
@@ -1204,7 +1201,7 @@ function coveMoveOk(ox,oz,y,gO,nx,nz,gN){
 function coveHere(x,z,y){ const cv=coveAtXZ(x,z); if (!cv || !cv.geo) return null; const G=cv.geo, u=cvU(cv,x,z), s=cvS(cv,x,z);
   if (cvCaveFloor(G.cave,u,s,y)!==null) return {id:'cave'+cv.key,label:'Sea cave',name:cv.cave,desc:'Cave worn into the foot of the cliff by the sea, with a floor of pebbles and fallen rock and a pool of sea water at the back.'};
   const land=cvLand(cv,u,s);
-  if (!land && s>cv.Bh-0.5 && Math.abs(u-cvGAxis(cv,s))<cv.Ag0+2 || cvOnPath(G,u,s)) return {id:'path'+cv.key,label:'Cliff path',name:'Sentiero della '+cv.name,desc:'Rough path that zigzags down the ravine at the head of the cove, with steps of loose stone where it is steep.'};
+  if (!land && s>cv.Bh-0.5 && Math.abs(u-cvGAxis(cv,s))<cv.Ag0+2 || cvOnPath(G,u,s)) return {id:'path'+cv.key,label:'Cliff path',name:'Sentiero della '+cv.name,desc:'Trodden footpath of earth and grit that zigzags down the ravine at the head of the cove.'};
   if (!land && s>-cv.R && Math.abs(u-cvAxis(cv,s))<cv.Amax+1) return {id:'cove'+cv.key,label:'Cove',name:cv.name,
     desc:cv.Bw>0?'Small bay between limestone cliffs, with a '+(cv.shingle?'shingle':'sand')+' beach at its head and a shelf of rock along one side, below a cave.':'Small bay between limestone cliffs, with shelves of bare rock at its head and along one side, below a cave.'};
   return null; }
@@ -1349,24 +1346,23 @@ function buildCoveChunk(gb,ch,cx,cz,lod){
             for (let j=0;j<M-1;j++) gbQuad(gb,Q,QN,QC,j,M+j,M+j+1,j+1,[0,1,0],12); } } } }
     /* --- the caves --- */
     for (const A of G.caves){ const [mx,mz]=cvL2W(cv,A.u,A.s); if (own(mx,mz)) buildCave(gb,ch,cv,A,lod); }
-    /* --- the path: steps of loose stone where it is steep, and low dry-stone walls at the most exposed turns --- */
+    /* --- the path: a trodden footpath of earth and grit laid on the ground --- */
     { const W=(u,s)=>cvL2W(cv,u,s);
-      for (const Lg of G.legs){ const len=Math.hypot(Lg.u1-Lg.u0,Lg.s1-Lg.s0), dy=Lg.y1-Lg.y0, grade=Math.abs(dy)/Math.max(0.1,len); if (grade<0.16) continue;
-        const du=(Lg.u1-Lg.u0)/len, ds=(Lg.s1-Lg.s0)/len, rs=rng(Math.round((Lg.u0*31+Lg.s0*17)*10)), nst=Math.max(1,Math.round(len/(0.55+0.25*rs())));
-        for (let i=0;i<nst;i++){ const t=(i+0.3+0.4*rs())/nst, u=Lg.u0+du*len*t+(rs()-0.5)*0.25*-ds, s=Lg.s0+ds*len*t+(rs()-0.5)*0.25*du, [x,z]=W(u,s); if (!own(x,z)) continue;
-          if (G.lands.some(P=>Math.hypot(P.u-u,P.s-s)<2.4)) continue;   // the turns are left clear, where the flights above and below meet
-          if (G.legs.some(M=>{ if (M.id===Lg.id) return false; const mu=M.u1-M.u0, ms=M.s1-M.s0, tt=clamp(((u-M.u0)*mu+(s-M.s0)*ms)/(mu*mu+ms*ms),0,1); return Math.hypot(u-M.u0-mu*tt,s-M.s0-ms*tt)<1.5; })) continue;
-          // a stone set flush with the path's surface, so that it is walked over without a bump
-          const [x2,z2]=W(u+du,s+ds), rot=Math.atan2(x2-x,z2-z)+(rs()-0.5)*0.6, top=lerp(Lg.y0,Lg.y1,t)+0.02, w=1.0+rs()*0.5, dp=0.4+rs()*0.3, bot=top-0.3;
-          const cl=GREY_ROCK.clone().lerp(LIMESTONE,0.3+0.4*rs()).multiplyScalar(0.8+rs()*0.15);
-          gb.add(T.sphLo, mat(x,bot,z,w*1.15,(top-bot)*1.6,dp*1.2,rot,(rs()-0.5)*0.1,(rs()-0.5)*0.1), cl, bot, 12); } }
-      // landings: the two with the longest drop below them get a low wall of rough stones on their downhill side
-      const drops=G.lands.map((P,k)=>({P,k,dr:P.y-cvFloor(cv,P.u,P.s-2.2,-3,0,null)})).sort((a,b)=>b.dr-a.dr).slice(0,2);
-      for (const {P} of drops){ const rs=rng(Math.round(P.u*101+P.s*37));
-        for (let a=-2.6;a<=-0.5;a+=0.25+rs()*0.12){ const cu=P.u+Math.cos(a)*(CV_PL+0.45), cs=P.s+Math.sin(a)*(CV_PL+0.45); if (cvPathDist(G,cu,cs)<CV_PW+0.35 || cvLand(cv,cu,cs)) continue;
-          const [x,z]=W(cu,cs); if (!own(x,z)) continue; const sz=0.3+rs()*0.25, cl=GREY_ROCK.clone().lerp(LIMESTONE,rs()*0.6).multiplyScalar(0.85+rs()*0.15);
-          // a low wall of loose stones laid in two or three rough courses
-          for (let c=0;c<2+(rs()<0.5?1:0);c++) gb.add(T.sphLo, mat(x+(rs()-0.5)*0.15,P.y-0.15+c*0.24,z+(rs()-0.5)*0.15,sz*1.6,0.32,sz*1.2,rs()*3), cl.clone().multiplyScalar(0.9+rs()*0.2), P.y-0.2, 12); } } }
+      // the strip follows the ground's mesh exactly: the height within each cell of the terrain's grid is found as the
+      // terrain's own two triangles give it, and the strip is drawn 4 cm above that
+      if (lod<=1){ const st=C/(lod===0?40:20), mh=(x,z)=>{ const i=Math.floor((x-x0)/st), j=Math.floor((z-z0)/st), ax=x0+i*st, az=z0+j*st, fx=(x-ax)/st, fz=(z-az)/st;
+          const ha=heightAt(ax,az), hb=heightAt(ax+st,az), hc=heightAt(ax,az+st), hd=heightAt(ax+st,az+st);
+          return fx+fz<=1?ha+fx*(hb-ha)+fz*(hc-ha):hd+(1-fx)*(hc-hd)+(1-fz)*(hb-hd); };
+        const line=[]; for (const Lg of G.legs){ const len=Math.hypot(Lg.u1-Lg.u0,Lg.s1-Lg.s0), m=Math.max(1,Math.ceil(len/0.5));
+          for (let i=line.length?1:0;i<=m;i++) line.push([lerp(Lg.u0,Lg.u1,i/m),lerp(Lg.s0,Lg.s1,i/m)]); }
+        const L=[], Rt=[];
+        for (let k=0;k<line.length;k++){ const a=line[Math.max(0,k-1)], b=line[Math.min(line.length-1,k+1)], du=b[0]-a[0], ds=b[1]-a[1], l=Math.hypot(du,ds)||1, nu=-ds/l, ns=du/l;
+          const [u,s]=line[k], w=0.5+0.12*(vnoise(k*0.37,3,cv.seed+54)-0.5), e=0.1*(vnoise(k*0.29,7,cv.seed+55)-0.5);
+          for (const [arr,sg] of [[L,1],[Rt,-1]]){ const [x,z]=W(u+nu*(sg*w+e),s+ns*(sg*w+e)); arr.push([x,mh(x,z)+0.04,z]); } }
+        for (let k=0;k<line.length-1;k++){ const [cu,cs]=line[k], [mx,mz]=W(cu,cs); if (!own(mx,mz)) continue;
+          const P=[L[k],Rt[k],Rt[k+1],L[k+1]], hk=hash(Math.round(mx*3),Math.round(mz*3),7415), cl=CV_TRODDEN.clone().lerp(GRAVEL,0.2+0.35*hk).multiplyScalar(0.9+0.14*vnoise(mx*0.8,mz*0.8,cv.seed+56)), c=[cl.r,cl.g,cl.b];
+          gbQuad(gb,P,[[0,1,0],[0,1,0],[0,1,0],[0,1,0]],[c,c,c,c],0,1,2,3,[0,1,0],0); } }
+    }
     /* --- boulders, scree and scrub --- */
     for (const B of G.boulders){ const [x,z]=cvL2W(cv,B.u,B.s); if (!own(x,z)) continue; const g=heightAt(x,z), r=B.r;
       gb.add(T.sphLo, mat(x,g-r*0.35,z,r*(1.4+0.6*R()),r*(0.8+0.6*R()),r*(1.1+0.5*R()),R()*6.28,(R()-0.5)*0.5,(R()-0.5)*0.5), shade(CV_ROCK[R()<0.5?0:R()<0.5?1:6],R,0.1).multiplyScalar(g<0.4?0.8:0.95), null, 12);
@@ -1435,8 +1431,9 @@ function coveGroundCol(x,z,h,cA){ const cv=coveAtXZ(x,z); if (!cv || !cv.geo) re
   if (d>=0){ if (Math.abs(u-G.pathTop.u)<0.8 && s>cv.sHead && s<G.roadS){ cA.lerp(DIRT,0.75); return 0.12; }
     if (d<CV_LZ+1.5 && h<0.2){ cA.copy(GREY_ROCK).multiplyScalar(0.55); return 0; }   // the low ground behind a face, should any of it show
     if (d<17){ cA.lerp(LIMESTONE.clone().multiplyScalar(0.84+0.1*n1),0.4*smooth((17-d)/6)); if (n2>0.55) cA.lerp(hex('#5e6b37'),0.35*smooth((n2-0.55)/0.2)); } return null; }
-  if (s>=cv.Bh && Math.abs(u-cvGAxis(cv,s))<cv.Ag0+3){ if (cvPathAt(G,u,s) && _pW>0.5){ cA.copy(DIRT).lerp(GREY_ROCK,0.35+0.3*n1); return 0.12; }
-    cA.copy(GREY_ROCK).lerp(LIMESTONE,0.1+0.3*n1).multiplyScalar(0.66+0.14*vnoise(x*0.35,z*0.35,cv.seed+52)); if (n2>0.42) cA.lerp(hex('#66703e'),0.7*smooth((n2-0.42)/0.15)); return 0; }
+  if (s>=cv.Bh && Math.abs(u-cvGAxis(cv,s))<cv.Ag0+3){ 
+    cA.copy(GREY_ROCK).lerp(LIMESTONE,0.1+0.3*n1).multiplyScalar(0.66+0.14*vnoise(x*0.35,z*0.35,cv.seed+52)); if (n2>0.42) cA.lerp(hex('#66703e'),0.7*smooth((n2-0.42)/0.15));
+    return 0; }
   if (h>-0.2 && s>-cv.R){ const sg=u<cvAxis(cv,s)?-1:1, shelf=(sg===G.caveSide && s>G.shA-2 && s<G.shB+2 && -d<G.shW*1.3 && h>0.35) || cv.Bw===0 || -d<2.4&&h>0.5;
     if (shelf) cA.copy(GREY_ROCK).lerp(LIMESTONE,0.35+0.4*n1).multiplyScalar(0.9+0.12*n2);
     else if (cv.shingle) cA.copy(CV_PEBBLE[0]).lerp(CV_PEBBLE[1],n1).lerp(CV_PEBBLE[2],n2*0.5);
@@ -4503,7 +4500,7 @@ function genChunk(cx,cz,lod=0){
   return ch;
 }
 
-const DIRT=hex('#c4a57c'), GRAVEL=hex('#8f8577'), FIELD_A=hex('#7f9145'), FIELD_B=hex('#8a6a4a'), LIMESTONE=hex('#cfc7b6'), DRYGRASS=hex('#a8a465');
+const CV_TRODDEN=hex('#8e7356'), DIRT=hex('#c4a57c'), GRAVEL=hex('#8f8577'), FIELD_A=hex('#7f9145'), FIELD_B=hex('#8a6a4a'), LIMESTONE=hex('#cfc7b6'), DRYGRASS=hex('#a8a465');
 /* ================= renderer & scene ================= */
 const canvas=document.getElementById('scene');
 const renderer=new THREE.WebGLRenderer({canvas,antialias:true,stencil:true,powerPreference:'high-performance'});
