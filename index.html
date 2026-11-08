@@ -21,6 +21,10 @@ html,body{height:100%;margin:0;overflow:hidden;background:var(--sea);color:var(-
   background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:18px 22px 20px;backdrop-filter:blur(8px);font-size:clamp(.92rem,.62rem + .4vw,1.08rem);line-height:1.4;
   display:block}
 .help .controls{columns:280px;column-gap:28px}
+.help .controls[hidden]{display:none}
+.help .tabs{display:flex;gap:4px;margin:0 0 16px;border-bottom:1px solid var(--line)}
+.help .tabs button{font:inherit;font-size:.82rem;letter-spacing:.06em;color:var(--plaster-dim);background:none;border:0;border-bottom:2px solid transparent;padding:6px 12px 8px;margin-bottom:-1px;cursor:pointer}
+.help .tabs button[aria-selected="true"]{color:var(--plaster);border-bottom-color:var(--verdigris)}
 .stats{position:fixed;z-index:3;top:16px;left:16px;max-width:calc(100vw - 32px);box-sizing:border-box;display:grid;grid-template-columns:auto auto;gap:2px 14px;
   background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:10px 14px;backdrop-filter:blur(8px);pointer-events:none;
   font-size:.82rem;line-height:1.35;font-variant-numeric:tabular-nums}
@@ -66,131 +70,99 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
 <div class="joy" id="joy" hidden><i></i></div>
 
 <aside class="help" id="help" hidden aria-label="Help">
-  <div class="controls">
-    <div class="group"><h3>Walking</h3>
+  <div class="tabs" role="tablist"><button type="button" role="tab" data-tab="keys" aria-selected="true">Keyboard and mouse</button><button type="button" role="tab" data-tab="pad" aria-selected="false">Controller</button></div>
+  <div class="controls" data-panel="keys">
+    <div class="group"><h3>Movement</h3>
       <div class="row"><span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><span>Walk</span></div>
-      <div class="row"><span><kbd>↑</kbd><kbd>↓</kbd></span><span>Walk forward and back</span></div>
-      <div class="row"><span><kbd>Shift</kbd></span><span>Run</span></div>
+      <div class="row"><span><kbd>Q</kbd><kbd>E</kbd></span><span>Turn</span></div>
       <div class="row"><span><kbd>Space</kbd></span><span>Jump</span></div>
       <div class="row"><span><kbd>Z</kbd></span><span>Crouch</span></div>
-      <div class="row"><span><kbd>X</kbd></span><span>Sit or stand</span></div>
-      <div class="row"><span>Jump at a ledge</span><span>Climb onto it</span></div>
-      <div class="row"><span><kbd>Q</kbd><kbd>E</kbd></span><span>Turn</span></div>
-      <div class="row"><span><kbd>Mouse</kbd></span><span>Look</span></div>
-      <div class="row"><span>Click</span><span>Capture the mouse</span></div>
-      <div class="row"><span><kbd>Esc</kbd></span><span>Release the mouse</span></div>
-      <div class="row"><span>Walk into a door</span><span>Open the door</span></div>
+      <div class="row"><span><kbd>X</kbd></span><span>Sit</span></div>
+      <div class="row"><span>Mouse</span><span>Look</span></div>
     </div>
-    <div class="group"><h3>Bird’s-eye view</h3>
-      <div class="row"><span><kbd>5</kbd></span><span>Bird’s-eye view or street level</span></div>
-      <div class="row"><span><kbd>+</kbd><kbd>−</kbd></span><span>Zoom</span></div>
-      <div class="row"><span>Pinch</span><span>Zoom</span></div>
-      <div class="row"><span>Two-finger drag</span><span>Pan</span></div>
-      <div class="row"><span><kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd></span><span>Turn and tilt</span></div>
-      <div class="row"><span>Double click</span><span>Down to street level here</span></div>
-      <div class="row"><span><kbd>B</kbd></span><span>Tilt-shift</span></div>
+    <div class="group"><h3>Scenes</h3>
+      <div class="row"><span><kbd>1</kbd></span><span>Passenger train</span></div>
+      <div class="row"><span><kbd>2</kbd></span><span>Freight train</span></div>
+      <div class="row"><span><kbd>3</kbd></span><span>Ferry</span></div>
+      <div class="row"><span><kbd>4</kbd></span><span>Sailing dinghy (press again to sail)</span></div>
+      <div class="row"><span><kbd>5</kbd></span><span>Aerial</span></div>
+      <div class="row"><span><kbd>6</kbd></span><span>Shipwreck</span></div>
+      <div class="row"><span><kbd>7</kbd></span><span>Seagull</span></div>
+      <div class="row"><span><kbd>8</kbd></span><span>Dolphin</span></div>
+      <div class="row"><span><kbd>9</kbd></span><span>Return to origin</span></div>
     </div>
-    <div class="group"><h3>Following</h3>
-      <div class="row"><span><kbd>7</kbd></span><span>Follow a gull, or return</span></div>
-      <div class="row"><span><kbd>8</kbd></span><span>Follow a dolphin, or return</span></div>
-      <div class="row"><span><kbd>+</kbd><kbd>−</kbd></span><span>Distance</span></div>
-      <div class="row"><span><kbd>9</kbd></span><span>Back to the start</span></div>
-    </div>
-    <div class="group"><h3>Passenger train</h3>
-      <div class="row"><span><kbd>1</kbd></span><span>Ride in the cab</span></div>
-      <div class="row"><span><kbd>0</kbd></span><span>Follow from behind</span></div>
-      <div class="row"><span><kbd>+</kbd><kbd>−</kbd></span><span>Following distance</span></div>
-      <div class="row"><span><kbd>B</kbd></span><span>Tilt-shift</span></div>
-      <div class="row"><span><kbd>5</kbd></span><span>Step off</span></div>
-    </div>
-    <div class="group"><h3>Goods train</h3>
-      <div class="row"><span><kbd>2</kbd></span><span>Ride in the cab</span></div>
-      <div class="row"><span><kbd>0</kbd></span><span>Follow from behind</span></div>
-      <div class="row"><span><kbd>B</kbd></span><span>Tilt-shift</span></div>
-      <div class="row"><span><kbd>5</kbd></span><span>Step off</span></div>
-    </div>
-    <div class="group"><h3>Ferry</h3>
-      <div class="row"><span><kbd>3</kbd></span><span>Board the nearest ferry</span></div>
-      <div class="row"><span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><span>Walk about the decks</span></div>
-      <div class="row"><span><kbd>3</kbd></span><span>Step ashore</span></div>
-      <div class="row"><span><kbd>0</kbd></span><span>Deck or view from astern</span></div>
-      <div class="row"><span><kbd>+</kbd><kbd>−</kbd></span><span>Distance from astern</span></div>
-      <div class="row"><span><kbd>5</kbd></span><span>Bird’s-eye view</span></div>
+    <div class="group"><h3>Underwater</h3>
+      <div class="row"><span><kbd>J</kbd></span><span>Jump in</span></div>
+      <div class="row"><span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><span>Swim</span></div>
+      <div class="row"><span><kbd>C</kbd></span><span>Descend</span></div>
+      <div class="row"><span><kbd>Space</kbd></span><span>Ascend</span></div>
+      <div class="row"><span><kbd>F</kbd></span><span>Flashlight</span></div>
     </div>
     <div class="group"><h3>Sailing</h3>
-      <div class="row"><span><kbd>4</kbd></span><span>Go to the nearest dinghy</span></div>
-      <div class="row"><span><kbd>4</kbd></span><span>Board, within 6 m</span></div>
       <div class="row"><span><kbd>A</kbd><kbd>D</kbd></span><span>Steer</span></div>
       <div class="row"><span><kbd>W</kbd><kbd>S</kbd></span><span>Paddle</span></div>
-      <div class="row"><span><kbd>Q</kbd><kbd>E</kbd></span><span>Turn the head</span></div>
-      <div class="row"><span><kbd>0</kbd></span><span>Helm or view from astern</span></div>
-      <div class="row"><span><kbd>+</kbd><kbd>−</kbd></span><span>Distance from astern</span></div>
-      <div class="row"><span><kbd>5</kbd></span><span>Bird’s-eye view</span></div>
-      <div class="row"><span><kbd>4</kbd></span><span>Step ashore, or back to the quay</span></div>
-    </div>
-    <div class="group"><h3>Swimming and diving</h3>
-      <div class="row"><span>Walk into the sea</span><span>Swim</span></div>
-      <div class="row"><span><kbd>6</kbd></span><span>Under the water, or back</span></div>
-      <div class="row"><span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><span>Swim</span></div>
-      <div class="row"><span>Look down and swim</span><span>Dive</span></div>
-      <div class="row"><span><kbd>C</kbd></span><span>Dive</span></div>
-      <div class="row"><span><kbd>F</kbd></span><span>Torch, under the water</span></div>
-      <div class="row"><span><kbd>Space</kbd></span><span>Rise</span></div>
-      <div class="row"><span><kbd>Shift</kbd></span><span>Swim faster</span></div>
-      <div class="row"><span><kbd>J</kbd></span><span>Jump in from a quay or a boat</span></div>
-      <div class="row"><span>Swim to a beach or a ladder</span><span>Climb out</span></div>
-    </div>
-    <div class="group"><h3>Time</h3>
-      <div class="row"><span><kbd>N</kbd></span><span>Night or day</span></div>
-      <div class="row"><span>Hold <kbd>T</kbd></span><span>Speed up time</span></div>
-      <div class="row"><span>Hold <kbd>Shift</kbd><kbd>T</kbd></span><span>Reverse time</span></div>
-      <div class="row"><span><kbd>P</kbd></span><span>Pause the world</span></div>
+      <div class="row"><span><kbd>Q</kbd><kbd>E</kbd></span><span>Turn head</span></div>
     </div>
     <div class="group"><h3>Camera</h3>
-      <div class="row"><span><kbd>C</kbd></span><span>Raise or lower the camera</span></div>
-      <div class="row"><span><kbd>Esc</kbd></span><span>Lower the camera</span></div>
-      <div class="row"><span><kbd>Enter</kbd></span><span>Take a picture, with the camera raised or not</span></div>
-      <div class="row"><span>Drag</span><span>Turn the camera</span></div>
+      <div class="row"><span><kbd>0</kbd></span><span>Switch view</span></div>
+      <div class="row"><span><kbd>+</kbd><kbd>−</kbd></span><span>Zoom in and out</span></div>
+      <div class="row"><span><kbd>B</kbd></span><span>Tilt-shift effect</span></div>
+    </div>
+    <div class="group"><h3>Pictures</h3>
+      <div class="row"><span><kbd>Enter</kbd></span><span>Take snapshot</span></div>
+      <div class="row"><span><kbd>C</kbd></span><span>Camera mode</span></div>
+      <div class="row"><span><kbd>G</kbd></span><span>Gallery</span></div>
+    </div>
+    <div class="group"><h3>Camera mode</h3>
       <div class="row"><span><kbd>+</kbd><kbd>−</kbd></span><span>Focal length</span></div>
-      <div class="row"><span>Wheel</span><span>Focal length</span></div>
       <div class="row"><span><kbd>[</kbd><kbd>]</kbd></span><span>Aperture</span></div>
-      <div class="row"><span><kbd>9</kbd><kbd>0</kbd></span><span>Focus nearer or further</span></div>
-      <div class="row"><span><kbd>Shift</kbd> and wheel</span><span>Focus</span></div>
-      <div class="row"><span><kbd>U</kbd></span><span>Autofocus or manual focus</span></div>
-      <div class="row"><span><kbd>;</kbd><kbd>'</kbd></span><span>Exposure compensation</span></div>
-      <div class="row"><span><kbd>G</kbd></span><span>Gallery and artist mode</span></div>
+      <div class="row"><span><kbd>9</kbd><kbd>0</kbd></span><span>Focus near and far</span></div>
+      <div class="row"><span><kbd>U</kbd></span><span>Autofocus</span></div>
+      <div class="row"><span><kbd>;</kbd><kbd>'</kbd></span><span>Exposure</span></div>
+      <div class="row"><span><kbd>G</kbd></span><span>Gallery</span></div>
     </div>
-    <div class="group"><h3>Island</h3>
-      <div class="row"><span><kbd>I</kbd></span><span>New island from a seed</span></div>
-    </div>
-    <div class="group"><h3>Draw distance</h3>
-      <div class="row"><span><kbd>PgUp</kbd></span><span>Increase</span></div>
-      <div class="row"><span><kbd>PgDn</kbd></span><span>Reduce</span></div>
-      <div class="row"><span><kbd>Home</kbd></span><span>Automatic</span></div>
-      <div class="row"><span><kbd>O</kbd></span><span>Frame rate</span></div>
-    </div>
-    <div class="group"><h3>Sound and screen</h3>
-      <div class="row"><span><kbd>M</kbd></span><span>Mute</span></div>
+    <div class="group"><h3>Other</h3>
       <div class="row"><span><kbd>Tab</kbd></span><span>Full screen</span></div>
-      <div class="row"><span><kbd>H</kbd></span><span>This panel</span></div>
+      <div class="row"><span><kbd>M</kbd></span><span>Mute sound</span></div>
+      <div class="row"><span><kbd>P</kbd></span><span>Pause</span></div>
+      <div class="row"><span><kbd>T</kbd></span><span>Advance time</span></div>
+      <div class="row"><span><kbd>Shift</kbd>+<kbd>T</kbd></span><span>Reverse time</span></div>
+      <div class="row"><span><kbd>N</kbd></span><span>Toggle night time</span></div>
+      <div class="row"><span><kbd>I</kbd></span><span>Generate new world seed</span></div>
+      <div class="row"><span><kbd>Page Up</kbd><kbd>Page Down</kbd></span><span>Adjust draw distance</span></div>
+      <div class="row"><span><kbd>Home</kbd></span><span>Automatic draw distance</span></div>
+      <div class="row"><span><kbd>O</kbd></span><span>Performance overlay</span></div>
+      <div class="row"><span><kbd>H</kbd></span><span>Show this help page</span></div>
     </div>
-    <div class="group"><h3>Controller</h3>
+  </div>
+  <div class="controls" data-panel="pad" hidden>
+    <div class="group"><h3>Movement</h3>
       <div class="row"><span>Left stick</span><span>Move</span></div>
       <div class="row"><span>Right stick</span><span>Look</span></div>
       <div class="row"><span>Press left stick</span><span>Run or walk</span></div>
       <div class="row"><span>A</span><span>Jump</span></div>
-      <div class="row"><span>B</span><span>Bird’s-eye view</span></div>
-      <div class="row"><span>X</span><span>Ferry</span></div>
-      <div class="row"><span>Y</span><span>Passenger train, or dinghy when near one</span></div>
-      <div class="row"><span>Press right stick</span><span>Dinghy</span></div>
-      <div class="row"><span>LB</span><span>Follow the train</span></div>
-      <div class="row"><span>RB</span><span>Tilt-shift</span></div>
-      <div class="row"><span>Triggers</span><span>Zoom; trim the sail when sailing</span></div>
-      <div class="row"><span>Right and left triggers</span><span>Rise and dive in the water</span></div>
       <div class="row"><span>D-pad</span><span>Turn and tilt</span></div>
       <div class="row"><span>D-pad down</span><span>Sit or stand</span></div>
-      <div class="row"><span>Back</span><span>Mute</span></div>
-      <div class="row"><span>Start</span><span>This panel</span></div>
+    </div>
+    <div class="group"><h3>Scenes</h3>
+      <div class="row"><span>Y</span><span>Passenger train, or dinghy when near one</span></div>
+      <div class="row"><span>X</span><span>Ferry</span></div>
+      <div class="row"><span>Press right stick</span><span>Sailing dinghy</span></div>
+      <div class="row"><span>B</span><span>Aerial</span></div>
+    </div>
+    <div class="group"><h3>Camera</h3>
+      <div class="row"><span>LB</span><span>Switch view</span></div>
+      <div class="row"><span>RB</span><span>Tilt-shift effect</span></div>
+      <div class="row"><span>Triggers</span><span>Zoom in and out</span></div>
+    </div>
+    <div class="group"><h3>Sailing and underwater</h3>
+      <div class="row"><span>Left stick</span><span>Steer and paddle, or swim</span></div>
+      <div class="row"><span>Triggers</span><span>Trim the sail</span></div>
+      <div class="row"><span>Right and left triggers</span><span>Ascend and descend</span></div>
+    </div>
+    <div class="group"><h3>Other</h3>
+      <div class="row"><span>Back</span><span>Mute sound</span></div>
+      <div class="row"><span>Start</span><span>Show this help page</span></div>
     </div>
   </div>
   <p class="credits">The cats are from <a href="https://github.com/c1t1zen1/Michi-Neko-The-Cat-Philosophers-Path" target="_blank" rel="noopener">Michi-Neko: The Cat Philosopher’s Path</a> by c1t1zen1, used under the MIT licence.</p>
@@ -9429,6 +9401,11 @@ function currentCell(){
 const keys={};
 let mode='street', started=true;
 const helpEl=document.getElementById('help');
+// the help panel's two tabs: the keyboard and mouse, and the controller; the one last shown is remembered
+function helpTab(t){ for (const b of helpEl.querySelectorAll('.tabs button')) b.setAttribute('aria-selected',String(b.dataset.tab===t));
+  for (const d of helpEl.querySelectorAll('[data-panel]')) d.hidden=d.dataset.panel!==t; try{ localStorage.setItem('coast.helpTab',t); }catch(_){} }
+helpEl.querySelector('.tabs').addEventListener('click',e=>{ const b=e.target.closest('[data-tab]'); if (b) helpTab(b.dataset.tab); });
+try{ const t=localStorage.getItem('coast.helpTab'); if (t==='pad') helpTab('pad'); }catch(_){}
 /* ---------- sound ----------
    Sound files are listed in sounds.json as {"id": "path"} or {"id": ["path", ...]}; several files for one id are
    played in random turn. A sound with no file stays silent. The engine starts on the first click or key press,
