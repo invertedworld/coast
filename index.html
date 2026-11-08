@@ -10170,10 +10170,36 @@ canvas.addEventListener('touchend',endTouch); canvas.addEventListener('touchcanc
 // riding the train: the cab view (R) and the chase view (C); each key again steps off beside the track
 // R: the passenger train's cab; G: the goods train's cab; C: the chase view of the train being ridden, or else of the
 // nearer of the two
-function toggleTrain(){ if (ridden) leaveFerry(prevModeF); if (mode==='train' && !rideGoods) leaveTrain(prevMode); else { if (riding() && rideGoods) leaveTrain(prevMode); ride('train','pass'); } }
+// 1 steps through the passenger train's views: the cab, then a seat by a window in the first coach, then off the train
+let coachFrom=null;
+function toggleTrain(){ if (ridden) leaveFerry(prevModeF);
+  if (mode==='train' && !rideGoods){ coachFrom=prevMode; leaveTrain('street'); trainSeat(); return; }
+  if (mode==='coach'){ if (sit) sit=null; mode='train'; rideGoods=false; cam.y=null; leaveTrain(coachFrom||'street'); coachFrom=null; return; }
+  if (riding() && rideGoods) leaveTrain(prevMode); ride('train','pass'); }
+function trainSeat(){
+  const i=Math.min(1,train.cars.length-1), m=train.cars[i].m, ws=COACH_SEATS.filter(q=>Math.abs(q.x)>0.5);
+  const q=ws.length?ws[Math.floor(ws.length/2)]:{x:0,z:0};
+  yaw=m.rotation.y+Math.PI+(q.x>0?-1:1)*Math.PI/2; fpPitch=-0.05;
+  coachEnter(i,0,q.z);
+  camera.fov=70; camera.near=0.1; camera.updateProjectionMatrix(); glowScale();
+  // sitting down needs the eye placed in the coach, which the next frame does
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{ if (mode==='coach' && !sit) sitKey(); })); }
 function toggleGoods(){ if (ridden) leaveFerry(prevModeF); if (mode==='train' && rideGoods){ leaveTrain(prevMode); return; }
   const pm=riding()?prevMode:mode==='above'?'above':'street'; jumpToGoods(); if (!goods.R) return; ride('train','goods'); prevMode=pm; }
-function toggleChase(){ if (ridden) leaveFerry(prevModeF); if (mode==='chase') leaveTrain(prevMode); else ride('chase'); }
+// 0 with a train: following from behind, then the trackside view, then off the train
+function toggleChase(){ if (ridden) leaveFerry(prevModeF);
+  if (mode==='chase' && !chase.side){ chase.side=true; chase.spot=null; chase.fresh=true; return; }
+  if (mode==='chase'){ chase.side=false; leaveTrain(prevMode); return; }
+  chase.side=false; ride('chase'); }
+// a place beside the line some way ahead of the train, in the open (not on a viaduct nor in a tunnel), on whichever side
+// the ground lies near the level of the rails, with the eye at a person's height or a little above
+function tracksideSpot(RT){
+  for (let k=0;k<40;k++){ const x=RT.x+RT.dir*(110+Math.random()*120+k*15);
+    if (RT.st(x)!=='open' || RT.st(x+RT.dir*40)!=='open') continue;
+    const y=RT.Y(x), z=RT.Z(x), s=(RT.Z(x+1)-RT.Z(x-1))/2, l=Math.hypot(1,s), nx=-s/l, nz=1/l;
+    for (const sd of (Math.random()<0.5?[1,-1]:[-1,1])){ const o=sd*(7+Math.random()*9), px=x+nx*o, pz=z+nz*o, h=heightAt(px,pz);
+      if (h>0.3 && Math.abs(h-y)<5 && gullTopAt(px,pz)<=walkGround(px,pz,1e3)+0.5) return {x:px,y:h+1.7+Math.random()*2.5,z:pz,tx:x}; } }
+  return null; }
 // the train the cab and chase views ride with: the passenger train, or the goods train when that is the nearer
 let rideGoods=false;
 function rideTrain(){ if (rideGoods){ const g=goods, R=g.R;
@@ -10751,6 +10777,15 @@ function frame(now){
       // cab view: the eye rides on the track just in front of the train, which is drawn behind it
       camera.position.set(xe,cam.y,RT.Z(xe));
       camera.rotation.set(tPitch, rot+Math.PI+tYaw, 0, 'YXZ');
+    } else if (chase.side){
+      // trackside: the camera stands beside the line ahead of the train and turns to watch it come and pass; once it
+      // is well past, the camera moves on to a new place ahead
+      if (!chase.spot || (chase.spot.tx-RT.x)*RT.dir<-70) chase.spot=tracksideSpot(RT)||chase.spot;
+      const S=chase.spot, loco=RT.lead;
+      if (S){ camera.position.set(S.x,S.y,S.z); camPos.copy(camera.position);
+        // the view leads the locomotive a little as it approaches, and settles on the middle of the train as it passes
+        _cv.set(loco.position.x,loco.position.y+1.6,loco.position.z); camTarget.lerp(_cv,chase.fresh?1:1-Math.exp(-dt*5)); chase.fresh=false;
+        camLookAt(camTarget); }
     } else {
       // chase view: behind and above the locomotive, orbited with the mouse, kept clear of the ground
       const zk=((keys.Minus||keys.NumpadSubtract)?1:0)-((keys.Equal||keys.NumpadAdd)?1:0);

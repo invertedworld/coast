@@ -38,7 +38,7 @@ Doors open when they are walked into. A door swings away from the side from whic
 
 A passenger railway runs along the coast, with stations in the villages and tunnels through the headlands. Goods lines branch from it.
 
-**1** rides in the cab of the passenger train. **2** rides in the cab of the goods train working the nearest goods line, and sets one to work there if none is near. **0** follows the train being ridden, or otherwise the nearer train, from behind; the mouse moves the camera round the train and **+** and **−** set its distance. In each case the same key, or **5**, steps off beside the track.
+**1** rides in the cab of the passenger train; **1** again takes the player to a seat by a window in the first coach, and **1** once more steps off. **2** rides in the cab of the goods train working the nearest goods line, and sets one to work there if none is near. **0** follows the train being ridden, or otherwise the nearer train, from behind; the mouse moves the camera round the train and **+** and **−** set its distance. While following, **0** again changes to a view from beside the line, which turns to watch the train pass and then moves on to a new place ahead; **0** once more steps off. In each case **5** also steps off beside the track.
 
 ## Travelling by ferry
 
