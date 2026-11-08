@@ -1695,7 +1695,7 @@ const core=(cx,cz)=>vnoise(cx*0.23+0.5,cz*0.23+0.5,77);
 const vgCache=new Map();
 function isVillage(cx,cz){ const k=cx+','+cz; let v=vgCache.get(k); if (v===undefined){ v=!highGround(cx,cz) && seaDist(cx*C+C/2,cz*C+C/2)>-150 && (fbm(cx*0.12+3.3,cz*0.12+1.7,990,3)>0.5 || !!peakNear(cx*C+C/2,cz*C+C/2,1.05)); if (vgCache.size>50000) vgCache.clear(); vgCache.set(k,v); } return v; }
 const COUNTRY=new Set(['olives','rocky','farm','coast','wild','isle','mount']);
-// The kind each block would have on its own, drawn from the seed before every village is given its one church: a
+// The kind each block would have on its own, drawn from the seed before every village and district is given its church: a
 // summit, and about one block of town in six, would hold a church here.
 function kind0(cx,cz){
   if (seaDist(cx*C+C/2,cz*C+C/2)<-150) return 'isle';
@@ -1714,22 +1714,29 @@ function kind0(cx,cz){
   if (r<0.48+k*0.08) return 'piazza';
   return 'quarter';
 }
-/* ---------- one church to each village ----------
+/* ---------- the churches of the villages ----------
    A village is a group of village blocks joined at their sides or corners (eight neighbours), so that two blocks
    which touch only across a crossroads belong to the same village. A group with fewer than HAMLET blocks of houses
    (quarters, squares and church blocks; beaches and wild hillsides do not count) is a hamlet and has no church,
-   unless it holds a summit. Each village has exactly one church:
-   - on a summit within it, where it has one, so that the hill town's church on the top is the church of the whole
-     village; where there are two or more summits, on the highest, and the others keep a plain square;
+   unless it holds a summit. A village with fewer than TOWN blocks of houses has exactly one church. A larger town is
+   divided into districts (parishes) of about PARISH blocks of houses each, by gathering its blocks of houses round
+   centres that are moved to the middle of their blocks until they settle, so that the districts follow the shape of
+   the town along the coast and up the hills. Each district has exactly one church:
+   - on a summit within it, where it has one, so that the hill town's church on the top is the church of its
+     district; where there are two or more summits, on the highest, and the others keep a plain square;
    - otherwise in one of its blocks drawn as a church block by the seed (kind0), then in one of its squares, then in
-     one of its quarters, and within each of these the block nearest the middle of its houses, where a church will
-     fit beside its square (churchSite). The other church blocks of the village become squares of the same size, so
-     that their ground and layout are as before.
+     one of its quarters, and within each of these the block nearest the middle of the district's houses, where a
+     church will fit beside its square (churchSite) and which is at least CH_APART blocks from the churches already
+     placed. The other church blocks of the village become squares of the same size, so that their ground and layout
+     are as before.
+   Where a district can find no such block, the town is divided again into one district fewer, so that no district
+   is left without a church and no two churches of a town stand closer than CH_APART blocks. The blocks are taken in
+   the order of their positions, so that the districts do not depend on the block from which the village was reached.
    The group is found once by a flood fill and cached for every block in it; one that would grow beyond VG_MAX blocks
    is divided at fixed lines VG_W blocks apart, so that the result never depends on the block it was reached from.
-   While a village's church is being chosen its blocks report the kind they would have without it (V.pending), and
-   anything cached for the chosen block in that time is forgotten afterwards. */
-const HAMLET=6, VG_MAX=8000, VG_W=120, vmCache=new Map(), ckCache=new Map(), TOWN_TIER={church:2,piazza:1,quarter:0};
+   While a village's churches are being chosen its blocks report the kind they would have without them (V.pending),
+   and anything cached for the chosen blocks in that time is forgotten afterwards. */
+const HAMLET=6, TOWN=150, PARISH=100, CH_APART=8.5, VG_MAX=8000, VG_W=120, vmCache=new Map(), ckCache=new Map(), TOWN_TIER={church:2,piazza:1,quarter:0};
 let vgPend=0;
 // the deterministic places tried for a church once the block's own random tries have failed: the nave set beside the
 // square in each of 24 directions, at five lengths from 16 m down to the 10.5 m of the shortest random try
@@ -1746,27 +1753,56 @@ function villageOf(cx,cz){
     return cells; };
   const cells=fill(null)||fill(Math.floor(cx/VG_W));
   if (vmCache.size+cells.length/2>60000 && !vgPend) vmCache.clear();
-  const V={n:cells.length/2,cells,church:null,pending:true};
+  const V={n:cells.length/2,cells,churches:new Set(),pending:true};
   for (let q=0;q<cells.length;q+=2) vmCache.set(cells[q]*1048576+cells[q+1],V);
   vgPend++;
-  try { V.church=pickChurch(V); } finally { vgPend--; V.pending=false; }
-  if (V.church){ const k=V.church.cx*1048576+V.church.cz; pzCache.delete(k); alCache.delete(k); ckCache.delete(k); }
+  try { for (const B of pickChurches(V)) V.churches.add(B.cx*1048576+B.cz); } finally { vgPend--; V.pending=false; }
+  for (const k of V.churches){ pzCache.delete(k); alCache.delete(k); ckCache.delete(k); }
   return V;
 }
-function pickChurch(V){
-  const c=V.cells; let best=null;
-  for (let q=0;q<c.length;q+=2){ const PK=peakInChunk(c[q],c[q+1]);
-    if (PK && (!best || PK.H>best.H) && piazzaFor(c[q],c[q+1],'church')) best={cx:c[q],cz:c[q+1],H:PK.H}; }
-  if (best) return best;
-  const list=[]; let mx=0, mz=0;
-  for (let q=0;q<c.length;q+=2){ const a=c[q], b=c[q+1], kd=kind0(a,b), t=TOWN_TIER[kd];
-    if (t!==undefined){ list.push({cx:a,cz:b,t,d:0}); mx+=a; mz+=b; } }
-  if (list.length<HAMLET) return null;
-  mx/=list.length; mz/=list.length;
-  for (const B of list) B.d=Math.hypot(B.cx-mx,B.cz-mz);
-  list.sort((u,v)=>v.t-u.t || u.d-v.d || u.cx-v.cx || u.cz-v.cz);
-  for (const B of list) if (churchSite(B.cx,B.cz)) return {cx:B.cx,cz:B.cz};
-  return null;
+// the blocks that hold the village's churches: one, or one to each district of a large town
+function pickChurches(V){
+  const c=V.cells, list=[], site=new Map();
+  for (let q=0;q<c.length;q+=2){ const a=c[q], b=c[q+1], t=TOWN_TIER[kind0(a,b)], PK=peakInChunk(a,b);
+    if (t!==undefined || PK) list.push({cx:a,cz:b,t:t===undefined?-1:t,H:PK?PK.H:null,d:0}); }
+  list.sort((u,v)=>u.cx-v.cx || u.cz-v.cz);
+  const houses=list.filter(B=>B.t>=0).length;
+  // whether a block can hold a church, worked out once for each block however many divisions are tried
+  const fits=B=>{ const k=B.cx*1048576+B.cz; let v=site.get(k);
+    if (v===undefined){ v=B.H!==null ? !!piazzaFor(B.cx,B.cz,'church') : churchSite(B.cx,B.cz); site.set(k,v); } return v; };
+  if (houses<HAMLET){   // a hamlet has a church only on a summit
+    let best=null; for (const B of list) if (B.H!==null && (!best || B.H>best.H) && fits(B)) best=B;
+    return best?[best]:[]; }
+  for (let n=houses<TOWN?1:Math.round(houses/PARISH); n>=1; n--){ const R=placeChurches(list,n,fits); if (R) return R; }
+  return [];
+}
+// the churches of a village divided into n districts, or null where one of several districts has no block for its
+// church
+function placeChurches(list,n,fits){
+  const H=list.filter(B=>B.t>=0), cen=[], near=B=>{ let g=0, gd=1e9;
+    for (let i=0;i<cen.length;i++){ const d=Math.hypot(B.cx-cen[i].x,B.cz-cen[i].z); if (d<gd){ gd=d; g=i; } } return [g,gd]; };
+  let mx=0, mz=0; for (const B of H){ mx+=B.cx; mz+=B.cz; } mx/=H.length; mz/=H.length;
+  if (n===1) cen.push({x:mx,z:mz});
+  else {
+    // the first centre is the block of houses furthest from their middle and each further one the block furthest
+    // from the centres already chosen; then each block of houses joins its nearest centre, and each centre moves to
+    // the middle of its blocks, twelve times over
+    let f=null, fd=-1; for (const B of H){ const d=Math.hypot(B.cx-mx,B.cz-mz); if (d>fd){ fd=d; f=B; } } cen.push({x:f.cx,z:f.cz});
+    while (cen.length<n){ f=null; fd=-1; for (const B of H){ const d=near(B)[1]; if (d>fd){ fd=d; f=B; } } cen.push({x:f.cx,z:f.cz}); }
+    for (let it=0; it<12; it++){ const S=cen.map(()=>({x:0,z:0,m:0}));
+      for (const B of H){ const g=near(B)[0]; S[g].x+=B.cx; S[g].z+=B.cz; S[g].m++; }
+      for (let i=0;i<n;i++) if (S[i].m){ cen[i].x=S[i].x/S[i].m; cen[i].z=S[i].z/S[i].m; } } }
+  const D=cen.map((P,i)=>({i,B:[],top:-1e9}));
+  for (const B of list){ const [g,gd]=near(B); B.d=gd; D[g].B.push(B); if (B.H!==null) D[g].top=Math.max(D[g].top,B.H); }
+  for (const d of D) d.B.sort((u,v)=>v.t-u.t || u.d-v.d || u.cx-v.cx || u.cz-v.cz);
+  // the districts with a summit place their churches first, the highest first, and then the others, the largest first
+  D.sort((u,v)=>v.top-u.top || v.B.length-u.B.length || u.i-v.i);
+  const out=[], apart=B=>out.every(A=>Math.hypot(A.cx-B.cx,A.cz-B.cz)>=CH_APART);
+  for (const d of D){ let got=null;
+    for (const B of d.B.filter(B=>B.H!==null).sort((u,v)=>v.H-u.H)) if (apart(B) && fits(B)){ got=B; break; }
+    if (!got) for (const B of d.B) if (B.t>=0 && B.H===null && apart(B) && fits(B)){ got=B; break; }
+    if (got) out.push(got); else if (n>1) return null; }
+  return out;
 }
 // whether a church will fit beside the square of a block if it is made the church block: the same tests as the
 // block's own (blockSiteOk), with the ground worked out as it will be, the square and alleys of a church block in
@@ -1802,13 +1838,13 @@ function blockSiteOk(cx,cz,o,alleys,circles,piazza,hAt,maxRange,hMin){
   for (const p of pts){ const h=hAt(p[0],p[1]); hmin=Math.min(hmin,h); hmax=Math.max(hmax,h); }
   return hmin>=hMin && hmax-hmin<=maxRange;
 }
-// the kind of a block: its kind0, but with the church of its village in one block alone
+// the kind of a block: its kind0, but with the churches of its village in the blocks chosen for them alone
 function chunkKind(cx,cz){
   const key=cx*1048576+cz; { const v=ckCache.get(key); if (v!==undefined) return v; }
   let k=kind0(cx,cz);
   if (k==='church'||k==='piazza'||k==='quarter'){ const V=villageOf(cx,cz);
     if (V && V.pending) return k==='church'?'piazza':k;
-    k = V && V.church && V.church.cx===cx && V.church.cz===cz ? 'church' : k==='church' ? 'piazza' : k; }
+    k = V && V.churches.has(key) ? 'church' : k==='church' ? 'piazza' : k; }
   if (ckCache.size>50000) ckCache.clear();
   ckCache.set(key,k); return k;
 }
