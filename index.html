@@ -8021,7 +8021,9 @@ function followStep(dt){
 function homeKey(){ leaveModes(); uwReturn=null; spawnPlayer(); player.vy=0; player.holdT=1.5; eyeY=null; lastCell=null; mode='street';
   camera.fov=FOV; camera.near=0.1; camera.far=3600; camera.updateProjectionMatrix(); glowScale(); }
 function dinghyKey(){
-  if (sailD){ if (!dinghyAshore(false)){ const HB=dgyHarbourAt(sailD.state.x,sailD.state.z); if (HB) dinghyDock(HB); else dinghyHome(); } return; }
+  // sailing: ashore where she lies within reach of land; in a harbour, moored at its berth; out at sea, the dinghy is left
+  // afloat and the view rises to the bird's-eye view, as 5 does
+  if (sailD){ if (!dinghyAshore(false)){ const HB=dgyHarbourAt(sailD.state.x,sailD.state.z); if (HB) dinghyDock(HB); else toggleView(); } return; }
   const N=dgyNearest(player.x,player.z);
   if (mode==='street' && N && N.e.D.canBoard(player.x,player.z)){ dinghyBoard(N.e); return; }
   // within 100 m of a dinghy (from the street, the water or the bird's-eye view), the player takes her helm where she

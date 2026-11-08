@@ -52,7 +52,7 @@ At the helm, **A** turns the bow to port and **D** turns it to starboard; the ti
 
 **0** changes between the helm and a view from astern, which the mouse moves round the boat and **+** and **−** bring nearer or further, between 5 m and 80 m.
 
-**4** steps ashore when the boat lies within 3 m of a quay, a mole or a beach. Within a harbour the dinghy is moored again at that harbour's berth. Out at sea, **4** returns the dinghy to its own berth and places the player on the quay beside it.
+**4** steps ashore when the boat lies within 3 m of a quay, a mole or a beach. Within a harbour the dinghy is moored again at that harbour's berth. Out at sea, **4** leaves the dinghy afloat where she is and rises to the bird's-eye view.
 
 ## Swimming and diving
 
