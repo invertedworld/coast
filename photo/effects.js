@@ -571,7 +571,7 @@ function divide(T, cols, rows, rnd) {
   // the picture is seen from a distance, but a reduced copy on a screen is mostly averaged in the display's own
   // values, which are nearer to the power 0.45; between the two, the mixture comes out close in both
   const Wf = v => Math.sign(v) * Math.pow(Math.abs(v), 0.7), Wi = v => Math.sign(v) * Math.pow(Math.abs(v), 1 / 0.7);
-  const KV = 4, KR = 0.004, KF = 0.0025, KH = 0.06, KC = 0.6, ACC = 0.18;
+  const KV = 7, KR = 0.004, KF = 0.0025, KH = 0.22, KC = 0.6, ACC = 0.06, ED = 0.72;
   for (let y = 0; y < rows; y++) {
     const ltr = (y & 1) === 0;
     for (let xi = 0; xi < cols; xi++) {
@@ -602,8 +602,8 @@ function divide(T, cols, rows, rnd) {
         }
         const d0 = tl[0] - p.lab[0], d1 = tl[1] - p.lab[1], d2 = tl[2] - p.lab[2], dv = L - p.lab[0];
         let c = d0 * d0 + d1 * d1 + d2 * d2 + KV * dv * dv * (accent ? 2 : 1);
-        // the strokes keep to the axis of the local hue: that hue, its neighbours and its complement
-        if (!accent) { const sn = Math.sin(p.hue - hue); c += KH * p.C * sn * sn; }
+        // the strokes keep near the local hue and its neighbours; a contrasting hue is left to the occasional accent
+        if (!accent) c += KH * p.C * Math.min(1, C * 12) * (1 - Math.cos(p.hue - hue));
         // an accent is no more vivid than the place where it is laid allows
         else { const ex = Math.max(0, p.C - C - 0.08); c += KC * ex * ex; }
         for (const q of nb) if (q === j) c += KR; else if (q >= 0 && P[q].fam === p.fam) c += KF;
@@ -612,7 +612,8 @@ function divide(T, cols, rows, rnd) {
       if (best < 0) best = n - 1;
       out[i] = best;
       // the difference between the colour wanted and the pigment laid goes to the cells not yet painted
-      const q = P[best].lin, er = rw - Wf(q[0]), eg = gw - Wf(q[1]), eb = bw - Wf(q[2]);
+      // (damped, so that the neighbours do not swing to contrasting colours to make up for it)
+      const q = P[best].lin, er = (rw - Wf(q[0])) * ED, eg = (gw - Wf(q[1])) * ED, eb = (bw - Wf(q[2])) * ED;
       const spread = (xx, yy, k) => { if (xx < 0 || xx >= cols || yy >= rows) return; const m = (yy * cols + xx) * 3; E[m] += er * k; E[m + 1] += eg * k; E[m + 2] += eb * k; };
       spread(x + dx, y, 7 / 16); spread(x - dx, y + 1, 3 / 16); spread(x, y + 1, 5 / 16); spread(x + dx, y + 1, 1 / 16);
     }

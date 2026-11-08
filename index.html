@@ -7802,14 +7802,18 @@ function followStep(dt){
       b.lead={x,z,y:top+15+Math.random()*20}; } }
   const zk=((keys.Minus||keys.NumpadSubtract)?1:0)-((keys.Equal||keys.NumpadAdd)?1:0);
   if (zk) FOL.d=clamp(FOL.d*Math.exp(zk*dt*1.5),4,120);
-  const P=FOL.p, a=h+Math.PI+FOL.yaw, cp=Math.cos(FOL.pitch), wet=FOL.kind==='dolphin';
-  camTarget.set(P.x,P.y,P.z);
+  // the gull's heading and position are eased, so that the camera does not swing with every turn and wingbeat
+  const P=FOL.p, wet=FOL.kind==='dolphin', kh=FOL.kind==='gull'?1.2:3;
+  if (FOL.fresh || FOL.h===undefined){ FOL.h=h; FOL.tp=(FOL.tp||new THREE.Vector3()).copy(P); }
+  FOL.h+=Math.atan2(Math.sin(h-FOL.h),Math.cos(h-FOL.h))*(1-Math.exp(-dt*kh)); FOL.tp.lerp(P,1-Math.exp(-dt*(FOL.kind==='gull'?3:8)));
+  const a=FOL.h+Math.PI+FOL.yaw, cp=Math.cos(FOL.pitch);
+  camTarget.copy(FOL.tp);
   const want=_cv.set(P.x+Math.sin(a)*cp*FOL.d, camTarget.y+Math.sin(FOL.pitch)*FOL.d, P.z+Math.cos(a)*cp*FOL.d);
   // the dolphin's camera is under the water while it swims under, and comes up with it as it surfaces or leaps
   const sub=wet && P.y<-0.3;
   if (wet) want.y=sub?Math.min(want.y,-0.7):Math.max(want.y,1.2);
   want.y=Math.max(want.y,heightAt(want.x,want.z)+(wet?0.8:2));
-  if (FOL.fresh || camPos.distanceTo(want)>60){ camPos.copy(want); FOL.fresh=false; } else camPos.lerp(want,1-Math.exp(-dt*4));
+  if (FOL.fresh || camPos.distanceTo(want)>60){ camPos.copy(want); FOL.fresh=false; } else camPos.lerp(want,1-Math.exp(-dt*(FOL.kind==='gull'?1.6:4)));
   camPos.y=Math.max(camPos.y,heightAt(camPos.x,camPos.z)+(wet?0.6:1.5));
   camera.position.copy(camPos); camLookAt(camTarget);
   // the player is carried with the creature, so that the world, the flock and the pods are built and kept round it
