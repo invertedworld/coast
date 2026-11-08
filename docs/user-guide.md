@@ -122,7 +122,7 @@ The woodcut is printed as from a carved block of wood, in black ink on off-white
 
 The arrow at the top left returns to the gallery, as does **Esc**. If the finished artwork has not been saved, a choice is offered first: **Save** keeps it, **Delete** discards it and **Cancel** remains in artist mode.
 
-> **Note:** Pictures and artworks are kept only until the page is closed or reloaded. Any that are to be kept should be downloaded.
+> **Note:** Photographs and artworks are kept in the browser's own storage. Clearing the browser's data for the site removes them; any that are to be kept for certain should be downloaded.
 
 ## Display and sound
 

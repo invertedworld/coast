@@ -412,7 +412,7 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
   hud.innerHTML = `<div class="fr"><i></i><i></i><i></i><i></i></div><div class="af"></div>
     <button class="exit" data-c="exit" title="Leave the camera (K)" aria-label="Leave the camera">${ic('<path d="M6 6l12 12M18 6L6 18"/>')}</button>
     <div class="rail"><button class="shut" data-c="shoot" title="Take a picture (Enter)" aria-label="Take a picture"><i></i></button>
-      <button class="roll" data-c="gallery" title="Pictures (L)" aria-label="Pictures">${ic('<rect x="3.5" y="5.5" width="17" height="13" rx="1.5"/><path d="M3.5 15.5l5-4.5 4 3.5 3-2.5 5 4"/>')}<b></b></button></div>
+      <button class="roll" data-c="gallery" title="Gallery (G)" aria-label="Gallery">${ic('<rect x="3.5" y="5.5" width="17" height="13" rx="1.5"/><path d="M3.5 15.5l5-4.5 4 3.5 3-2.5 5 4"/>')}<b></b></button></div>
     <div class="deck">${dial('focal', 'Zoom', 'zoom-', 'zoom+', 'Wider (−)', 'Longer (+)')}
       ${dial('focus', 'Focus', 'near', 'far', 'Nearer (9)', 'Further (0)', '<button class="mode" data-c="af" title="Autofocus or manual focus (U)">AF</button>')}
       ${dial('fno', 'Aperture', 'open', 'close', 'Wider aperture ([)', 'Narrower aperture (])')}

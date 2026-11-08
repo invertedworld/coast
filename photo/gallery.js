@@ -195,8 +195,8 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
 
   /* ---------- the gallery ---------- */
   const gal = document.createElement('div'); gal.className = 'gal'; gal.hidden = true;
-  gal.setAttribute('role', 'dialog'); gal.setAttribute('aria-label', 'Pictures');
-  gal.innerHTML = `<header><h2>Pictures</h2><span class="sum"></span><button class="ib" data-a="close" title="Close (L)" aria-label="Close">${ICON.close}</button></header>
+  gal.setAttribute('role', 'dialog'); gal.setAttribute('aria-label', 'Gallery');
+  gal.innerHTML = `<header><h2>Gallery</h2><span class="sum"></span><button class="ib" data-a="close" title="Close (G)" aria-label="Close">${ICON.close}</button></header>
     <div class="body"><div class="sheet"></div><div class="split" role="separator" aria-orientation="vertical" aria-label="Resize"></div>
       <div class="view"><div class="big"></div>
         <div class="foot"><div class="info"></div>
