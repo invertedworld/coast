@@ -602,7 +602,8 @@ function headlandLight0(sd,n){
         if (clear && baseH(x,z)>1.4 && railPerp(x,z)>16 && !stationNear(x,120)){ L=lhMake(k,sd,x,z,0,sd,'head',R); break; } } } }
   lhCache.set(k,L); return L;
 }
-function islandLight(sd,m){
+function islandLight(sd,m){ return noCove(()=>islandLight0(sd,m)); }
+function islandLight0(sd,m){
   const k='i'+sd+':'+m; if (lhCache.has(k)) return lhCache.get(k);
   const o=sd>0?0:40, R=q=>hash(m,q,1761+o), I=islandInfo(sd,m); let L=null;
   if (I && hash(m,0,1751+o)<0.22){
@@ -650,7 +651,7 @@ function ruinIn(cx,cz){
    through the face. Sites are chosen with the coves themselves left out of the ground (NO_COVE), and the features
    they keep clear of (goods lines, ferry crossings, headland lights) are worked out the same way. ---------- */
 const CV_SP=1600, CV_LZ=5, cvCache=new Map();
-let NO_COVE=0, COVE_FAST=0, cvMemoN=NaN, cvMemoA=null, cvMemoB=null;
+let NO_COVE=0, COVE_FAST=0, cvBusy=0, cvMemoN=NaN, cvMemoL=[];
 function noCove(f){ NO_COVE++; try{ return f(); } finally{ NO_COVE--; } }
 function baseH0(x,z){ NO_COVE++; try{ return baseH(x,z); } finally{ NO_COVE--; } }
 const CALA=['dei Gabbiani','Azzurra','del Corallo','Bianca','delle Sirene','del Pesce','dei Colombi','Rossa','del Faraglione','della Luna','delle Monache','del Turco','dei Pini','del Moro','Fonda','Scura'];
@@ -660,13 +661,27 @@ function coveInfo(sd,n){
   // while a site is being chosen its slot counts as having no cove, since the features it is checked against
   // (a headland light's cottage, say) may ask after the coast road beside it
   if (cvCache.size>4000) cvCache.clear(); cvCache.set(k,null);
-  const cv=noCove(()=>coveSite(sd,n)); cvCache.set(k,cv); return cv;
+  cvBusy++; let cv; try{ cv=noCove(()=>coveSite(sd,n)); } finally{ cvBusy--; }
+  cvCache.set(k,cv); return cv;
 }
 function coveSite(sd,n){
   const o=sd>0?0:60, hh=q=>hash(n,q,2101+o);
   if (hh(0)>=0.8) return null;
+  const P=coveShape(hh,{sd,n,seed:2150+n*13+o,hn:n,ho:2201+o,key:n+':'+sd});
+  for (let t=0;t<10;t++){ const X=n*CV_SP+P.UX+110+hash(n,t,2120+o)*(CV_SP-2*P.UX-220), m=(coastZ(sd,X+60)-coastZ(sd,X-60))/120, l=Math.hypot(1,m);
+    cvFrame(P,X,coastZ(sd,X),1/l,m/l,sd);
+    if (coveSiteOk(P)){
+      // the head of the ravine sits at the level of the ground there, within limits
+      const h0=baseH(X,coastZ(sd,X)+sd*P.sRoad); P.Thead=clamp(Math.max(P.Thead,h0-2),10,14);
+      for (const S of P.side) S.T=Math.max(S.T,P.Thead+4); P.Tarm=Math.max(P.side[0].T,P.side[1].T);
+      return P; } }
+  return null;
+}
+// the shape of a cove, drawn from hh, apart from where it lies: B gives its side, seed, the slot and salt the
+// cave's draws are hashed from (hn, ho) and the key that names it
+function coveShape(hh,B){
   const k=0.75+0.55*hh(1);   // the cove's overall size
-  const P={sd,n,k,seed:2150+n*13+o,geo:null,Bh:-4+hh(2)*5,Lg:(12+hh(3)*5)*Math.sqrt(k),Ag0:5+hh(4)*2.5,bend:(hh(5)-0.5)*20*k,gbend:(hh(6)-0.5)*6,
+  const P={...B,k,geo:null,Bh:-4+hh(2)*5,Lg:(12+hh(3)*5)*Math.sqrt(k),Ag0:5+hh(4)*2.5,bend:(hh(5)-0.5)*20*k,gbend:(hh(6)-0.5)*6,
     Thead:10+hh(7)*4,bt:1.3,lean:0.4+hh(8)*1.4,bed:1.3+hh(9)*1.1,
     Bw:hh(10)<0.22?0:3+hh(11)*8*k, shingle:hh(12)<0.5, tint:hh(13), nCaves:1+(hh(14)<0.5?1:0)+(hh(15)<0.18?1:0), pathSide:hh(16)<0.5?1:-1,
     name:'Cala '+CALA[Math.floor(hh(17)*CALA.length)],cave:'Grotta '+GROTTA[Math.floor(hh(18)*GROTTA.length)]};
@@ -688,13 +703,7 @@ function coveSite(sd,n){
   P.notch=[]; for (let i=0;i<6;i++) P.notch.push({side:i%2?1:-1,t:i<2?0.1+hh(200+i)*0.25:0.35+hh(200+i)*0.65,d:i<2?3+hh(210+i)*4:2+hh(210+i)*3.5,w:i<2?0.9+hh(220+i)*1.2:1.3+hh(220+i)*2});
   P.inlet=[]; for (let i=0;i<2;i++) P.inlet.push({side:hh(72+i)<0.5?1:-1,t:0.3+hh(74+i)*0.45,d:1.5+hh(76+i)*3,w:1.2+hh(78+i)*1.6});
   { let am=0; for (let s=-P.R;s<=P.Bh;s+=1) am=Math.max(am,cvA(P,s,1),cvA(P,s,-1)); P.Amax=am+Math.abs(P.bend); }
-  for (let t=0;t<10;t++){ const X=n*CV_SP+P.UX+110+hash(n,t,2120+o)*(CV_SP-2*P.UX-220); P.X=X; cvFrame(P);
-    if (coveSiteOk(P)){
-      // the head of the ravine sits at the level of the ground there, within limits
-      const h0=baseH(X,coastZ(sd,X)+sd*P.sRoad); P.Thead=clamp(Math.max(P.Thead,h0-2),10,14);
-      for (const S of P.side) S.T=Math.max(S.T,P.Thead+4); P.Tarm=Math.max(P.side[0].T,P.side[1].T);
-      return P; } }
-  return null;
+  return P;
 }
 function coveSiteOk(P){
   const sd=P.sd, X=P.X;
@@ -709,6 +718,80 @@ function coveSiteOk(P){
     if (h>(Math.abs(u)<P.Ag0+10?P.Thead+12:P.Tarm+8)) return false; }
   return true;
 }
+/* ---------- coves on the offshore islands ----------
+   An island of 210 m radius or more may hold a cove, and one of 320 m or more a second. The island's shore is traced
+   along rays from its centre every 2.5 degrees, and its points are tried in an order drawn from the seed. At each the
+   cove's frame is set with its origin on the shore and s square to the shore, taken from the points either side, with
+   u running anticlockwise round the island; the origin is then moved along s to the middle of the shore's spread over
+   the width of the cove, since the shore of an island is curved. A site must meet the mainland's rules for the
+   straightness of the shore and the height of the ground behind it, with the island's land behind the head as far
+   inland as the cove reaches and open water in front of its headlands, and it keeps clear of the ferry's jetty and
+   crossing, of the island's lighthouse and ruin, and of the island's other cove. The island's coves are worked out
+   with the coves left out of the ground, the first time any of them is asked for, and kept on their own. ---------- */
+const icvCache=new Map();
+function isleCoves(sd,m){
+  const k=m*4+sd; { const v=icvCache.get(k); if (v!==undefined) return v; }
+  if (icvCache.size>4000) icvCache.clear(); icvCache.set(k,[]);
+  cvBusy++; let L; try{ L=noCove(()=>isleCoveSites(sd,m)); } finally{ cvBusy--; }
+  icvCache.set(k,L); return L; }
+function isleCoveSites(sd,m){
+  const I=islandInfo(sd,m); if (!I || I.R<210) return [];
+  const o=sd>0?0:60, out=[], NA=144, IR=islandRoute(sd,m), J=IR&&IR.jetty, L=islandLight(sd,m);
+  // the island's ruin, where it has one, as ruinIn places it
+  const Ru=hash(m,sd>0?1:2,1911)<0.4?(a=>{ const r=I.R*(0.25+0.3*hash(m,4,1913)); return [I.x+Math.cos(a)*r,I.z+Math.sin(a)*r]; })(hash(m,3,1912)*6.283):null;
+  let shore=null;
+  for (let c=0;c<(I.R>=320?2:1);c++){
+    const hh=q=>hash(m*4+c,q,2601+o); if (hh(0)>=0.8) continue;
+    const P=coveShape(hh,{sd,n:m,isle:I,seed:5150+m*13+c*7+o,hn:m*4+c,ho:2651+o,key:'i'+m+'.'+c+':'+sd});
+    if (!shore){ shore=[];
+      for (let i=0;i<NA;i++){ const an=i/NA*Math.PI*2, cx=Math.cos(an), cz=Math.sin(an); let r=I.ext+40;
+        while (r>0 && islandH(sd,I.x+cx*r,I.z+cz*r)<=0.06) r-=8;
+        if (r>0){ r+=8; while (r>0 && islandH(sd,I.x+cx*r,I.z+cz*r)<=0.06) r-=1; } shore.push([I.x+cx*r,I.z+cz*r,r]); } }
+    const i0=Math.floor(hh(90)*NA);
+    for (let t=0;t<NA;t++){ const i=(i0+t*41)%NA, p=shore[i], a=shore[(i-3+NA)%NA], b=shore[(i+3)%NA];
+      if (p[2]<=0 || a[2]<=0 || b[2]<=0) continue;
+      const l=Math.hypot(b[0]-a[0],b[1]-a[1]); if (l<1) continue;
+      const tx=(b[0]-a[0])/l, tz=(b[1]-a[1])/l;
+      cvFrame(P,p[0],p[1],tx,tz,1); if (cvS(P,I.x,I.z)<P.sRoad+50) continue;
+      // a first look along the traced shore: how far it strays from the line over the width of the cove
+      let lo=1e9, hi=-1e9, ok=true;
+      for (const q of shore){ if (q[2]<=0) continue; const u=cvU(P,q[0],q[1]), s=cvS(P,q[0],q[1]); if (Math.abs(u)>P.Uc || s>60) continue; lo=Math.min(lo,s); hi=Math.max(hi,s); }
+      if (hi-lo>22) continue;
+      const mid=(lo+hi)/2; cvFrame(P,p[0]+P.nx*mid,p[1]+P.nz*mid,tx,tz,1);
+      for (const Q of out) if (Math.hypot(Q.X-P.X,Q.Z0-P.Z0)<Q.UX+P.UX+60) ok=false;
+      if (!ok || !isleCoveOk(P,sd,J,L,Ru)) continue;
+      // the head of the ravine sits at the level of the ground there, within limits
+      const [hx,hz]=cvL2W(P,0,P.sRoad), h0=islandH(sd,hx,hz); P.Thead=clamp(Math.max(P.Thead,h0-2),10,14);
+      for (const S of P.side) S.T=Math.max(S.T,P.Thead+4); P.Tarm=Math.max(P.side[0].T,P.side[1].T);
+      out.push(P); break; } }
+  return out; }
+function isleCoveOk(P,sd,J,L,Ru){
+  const isl=(u,s)=>{ const [x,z]=cvL2W(P,u,s); return islandH(sd,x,z); };
+  // the shore, where the ground first rises from the sea coming in from open water, lies close to the line
+  for (let u=-P.UX;u<=P.UX;u+=8){ const lim=Math.abs(u)<P.Uc?10:22; let q=null; for (let s=-lim-2;s<=lim+2;s+=1) if (isl(u,s)>0.06){ q=s; break; }
+    if (q===null || Math.abs(q)>lim) return false; }
+  // the island's land behind the head as far inland as the cove reaches, and open water in front of the headlands
+  for (let u=-P.Uc;u<=P.Uc;u+=10){ for (let s=12;s<=P.sRoad+50;s+=10) if (isl(u,s)<0.5) return false;
+    for (let s=-14;s>=P.s0g;s-=8) if (isl(u,s)>-0.3) return false; }
+  for (let u=-P.Uc;u<=P.Uc;u+=10) for (const s of [10,P.sRoad,P.sRoad+20]) if (isl(u,s)>(Math.abs(u)<P.Ag0+10?P.Thead+12:P.Tarm+8)) return false;
+  // how far a point lies outside the cove's ground
+  const out=(x,z)=>{ const u=cvU(P,x,z), s=cvS(P,x,z); return Math.max(Math.abs(u)-P.UX,s-P.s1g,P.s0g-s); };
+  if (J && (out(J.sx,J.sz)<60 || out(J.hx,J.hz)<60)) return false;
+  if (L && out(L.x,L.z)<40) return false;
+  if (Ru && out(Ru[0],Ru[1])<40) return false;
+  for (let u=-P.Uc-10;u<=P.Uc+10;u+=10){ const [x,z]=cvL2W(P,u,-(P.R+P.rt+14)); if (nearFerryRoute(x,z,70)) return false; }
+  return true; }
+// the coves whose ground may reach into the slot n of CV_SP: the slot's own cove on each coast and those of the
+// islands either side. The list is kept, except while a cove is being sited, when it may lack that cove
+const cvSlots=new Map();
+function covesIn(n){ { const v=cvSlots.get(n); if (v) return v; }
+  const L=[], x0=n*CV_SP, x1=x0+CV_SP;
+  for (const sd of SIDES){ const cv=coveInfo(sd,n); if (cv) L.push(cv); }
+  for (const sd of SIDES) for (let m=Math.floor(x0/ISL)-1;m<=Math.floor((x1-1)/ISL)+1;m++) for (const cv of isleCoves(sd,m)) if (cv.bb[1]>=x0 && cv.bb[0]<x1) L.push(cv);
+  if (!cvBusy){ if (cvSlots.size>4000) cvSlots.clear(); cvSlots.set(n,L); }
+  return L; }
+// the coves whose ground may reach into the stretch from x0 to x1, each once
+function covesAlong(x0,x1){ const L=[]; for (let n=Math.floor(x0/CV_SP);n<=Math.floor(x1/CV_SP);n++) for (const cv of covesIn(n)) if (!L.includes(cv)) L.push(cv); return L; }
 // the bay's axis, bent so that its mouth lies off to one side of its head; the ravine's axis above the head
 function cvAxis(cv,s){ const t=clamp((cv.Bh-s)/(cv.Bh+cv.R),0,1); return cv.bend*t*t; }
 function cvGAxis(cv,s){ return cv.gbend*Math.pow(clamp((s-cv.Bh)/cv.Lg,0,1),1.5); }
@@ -746,11 +829,15 @@ function cvTop(cv,u,s,hNat){ const vw=cv.Vw+Math.max(0,s-cv.sHead)*1.6, Ts=lerp(
   T+=3*(fbm((cv.X+u)*0.03,s*0.03,cv.seed+7,3)-0.5);
   for (const K of cv.stacks){ const d=Math.hypot(u-K.u,s-K.s); if (d<K.r*1.6+1) T*=lerp(1,0.45+0.3*hash(Math.round(K.u*10),Math.round(K.s*10),2401),smooth((K.r*1.6+1-d)/1.5)); }   // the stacks stand lower than the headlands
   return lerp(hNat,T,cvW(cv,u,s)); }
-// the cove's frame is straight: u along the shore's general line through X, s square to it, inland
+// the cove's frame is straight: its origin (X,Z0) on the shore, u along the shore's general line through it, s square
+// to it, inland
 const cvL2W=(cv,u,s)=>[cv.X+u*cv.tx+s*cv.nx,cv.Z0+u*cv.tz+s*cv.nz];
 const cvU=(cv,x,z)=>(x-cv.X)*cv.tx+(z-cv.Z0)*cv.tz, cvS=(cv,x,z)=>(x-cv.X)*cv.nx+(z-cv.Z0)*cv.nz;
-function cvFrame(P){ const sd=P.sd, X=P.X, m=(coastZ(sd,X+60)-coastZ(sd,X-60))/120, l=Math.hypot(1,m);
-  P.Z0=coastZ(sd,X); P.tx=1/l; P.tz=m/l; P.nx=-sd*m/l; P.nz=sd/l;
+// sets the frame from its origin and the unit direction (tx,tz) of u; s runs hand times a quarter turn from u, so
+// that on the mainland, where u runs eastward on both coasts, hand is the side of the coast. The cove's bounding box
+// in the world is kept for a quick test
+function cvFrame(P,X,Z0,tx,tz,hand){
+  P.X=X; P.Z0=Z0; P.tx=tx; P.tz=tz; P.nx=hand*-tz; P.nz=hand*tx;
   let x0=1e9,x1=-1e9,z0=1e9,z1=-1e9; for (const u of [-P.UX-3,P.UX+3]) for (const s of [P.s0g,P.s1g]){ const [x,z]=cvL2W(P,u,s); x0=Math.min(x0,x); x1=Math.max(x1,x); z0=Math.min(z0,z); z1=Math.max(z1,z); }
   P.bb=[x0,x1,z0,z1]; }
 // the floor of the bay and of the ravine: a beach or a shelf of rock at the head, deepening towards the mouth, scree
@@ -888,7 +975,7 @@ function cvBuild(cv){
     const ht=cvGAxis(cv,cv.sHead); leg(e,{u:ht,s:cv.sHead+2.5,y:top(ht,cv.sHead+2.5)},true);
     G.pathTop={u:ht,s:cv.sHead+2.5}; G.pathFoot={u:pts[0].u,s:pts[0].s-1.5}; }
   // the shelf of rock that leads along one wall of the bay to its cave
-  const hh=q=>hash(cv.n,q,2201+(cv.sd>0?0:60));
+  const hh=q=>hash(cv.hn,q,cv.ho);
   G.caveSide=-cv.pathSide; G.caves=[];
   { const want=Math.max(-cv.side[G.caveSide<0?0:1].R+7,cv.Bh-Math.max(cv.Bw,2.5)-2.5-hh(1)*6); let ic=-1, bd=1e9;
     for (let i=0;i<n;i++) if (K[i]===3 && Math.sign(U[i]-cvAxis(cv,S[i]))===G.caveSide && Math.abs(S[i]-want)<bd){ bd=Math.abs(S[i]-want); ic=i; }
@@ -962,7 +1049,8 @@ function cvBuild(cv){
     for (let t=0;t<40;t++){ const s=cv.Bh+R()*cv.Lg*0.9, sg=R()<0.5?1:-1, u=cvGAxis(cv,s)+sg*R()*cvAg(cv,s,sg);
       if (cvLand(cv,u,s) || cvPathAt(G,u,s)&&_pW>0) continue; V.push({u,s,r:0.35+R()*0.5,gully:true}); }
     G.boulders=B; G.scrub=V; }
-  G.roadS=cvS(cv,cv.X,coastRoadZ(cv.sd,cv.X));
+  // on the mainland the path's trodden line runs on to the coast road; on an island it fades into the ground beyond
+  G.roadS=cv.isle?cv.sHead+14:cvS(cv,cv.X,coastRoadZ(cv.sd,cv.X));
   G.cols={};
   return (cv.geo=G);
   } finally{ NO_COVE--; }
@@ -994,8 +1082,8 @@ function cvCaveFloor(A,u,s,y){ if (!A || !A.walk) return null; const [a,b]=cvCav
   const B=A.band[clamp(Math.round(Math.max(a,0)/0.25),0,A.band.length-1)]; if (b<B[0] || b>B[1]) return null;
   const f=a<0?A.fM:cvCaveF(A,a); if (y>f+1.9) return null; return f; }
 // the cove whose ground covers a point
-function coveAtXZ(x,z){ const n=Math.floor(x/CV_SP); if (n!==cvMemoN){ cvMemoN=n; cvMemoA=coveInfo(1,n); cvMemoB=coveInfo(-1,n); }
-  for (const cv of [cvMemoA,cvMemoB]){ if (!cv || x<cv.bb[0] || x>cv.bb[1] || z<cv.bb[2] || z>cv.bb[3]) continue;
+function coveAtXZ(x,z){ const n=Math.floor(x/CV_SP); let L=cvMemoL; if (n!==cvMemoN){ L=covesIn(n); if (!cvBusy){ cvMemoN=n; cvMemoL=L; } }
+  for (const cv of L){ if (!cv || x<cv.bb[0] || x>cv.bb[1] || z<cv.bb[2] || z>cv.bb[3]) continue;
     const u=cvU(cv,x,z), s=cvS(cv,x,z); if (Math.abs(u)<cv.UX && s>cv.s0g && s<cv.s1g) return cv; }
   return null; }
 // the height of the clifftop just behind the edge, where its line rises and falls
@@ -1045,10 +1133,10 @@ function coveMoveOk(ox,oz,y,gO,nx,nz,gN){
   return true; }
 // what the help panel says of a point in a cove
 function coveHere(x,z,y){ const cv=coveAtXZ(x,z); if (!cv || !cv.geo) return null; const G=cv.geo, u=cvU(cv,x,z), s=cvS(cv,x,z);
-  if (cvCaveFloor(G.cave,u,s,y)!==null) return {id:'cave'+cv.n+':'+cv.sd,label:'Sea cave',name:cv.cave,desc:'Cave worn into the foot of the cliff by the sea, with a floor of pebbles and fallen rock and a pool of sea water at the back.'};
+  if (cvCaveFloor(G.cave,u,s,y)!==null) return {id:'cave'+cv.key,label:'Sea cave',name:cv.cave,desc:'Cave worn into the foot of the cliff by the sea, with a floor of pebbles and fallen rock and a pool of sea water at the back.'};
   const land=cvLand(cv,u,s);
-  if (!land && s>cv.Bh-0.5 && Math.abs(u-cvGAxis(cv,s))<cv.Ag0+2 || cvOnPath(G,u,s)) return {id:'path'+cv.n+':'+cv.sd,label:'Cliff path',name:'Sentiero della '+cv.name,desc:'Rough path that zigzags down the ravine at the head of the cove, with steps of loose stone where it is steep.'};
-  if (!land && s>-cv.R && Math.abs(u-cvAxis(cv,s))<cv.Amax+1) return {id:'cove'+cv.n+':'+cv.sd,label:'Cove',name:cv.name,
+  if (!land && s>cv.Bh-0.5 && Math.abs(u-cvGAxis(cv,s))<cv.Ag0+2 || cvOnPath(G,u,s)) return {id:'path'+cv.key,label:'Cliff path',name:'Sentiero della '+cv.name,desc:'Rough path that zigzags down the ravine at the head of the cove, with steps of loose stone where it is steep.'};
+  if (!land && s>-cv.R && Math.abs(u-cvAxis(cv,s))<cv.Amax+1) return {id:'cove'+cv.key,label:'Cove',name:cv.name,
     desc:cv.Bw>0?'Small bay between limestone cliffs, with a '+(cv.shingle?'shingle':'sand')+' beach at its head and a shelf of rock along one side, below a cave.':'Small bay between limestone cliffs, with shelves of bare rock at its head and along one side, below a cave.'};
   return null; }
 function coveInCave(x,z,y){ const cv=coveAtXZ(x,z); if (!cv || !cv.geo) return false; return cvCaveFloor(cv.geo.cave,cvU(cv,x,z),cvS(cv,x,z),y)!==null; }
@@ -1147,7 +1235,7 @@ function cvFaceCols(cv,lod){
   return (G.cols[lod]=out); }
 function buildCoveChunk(gb,ch,cx,cz,lod){
   const x0=cx*C, z0=cz*C, own=(x,z)=>x>=x0&&x<x0+C&&z>=z0&&z<z0+C;
-  for (const sd of SIDES){ const cv=coveInfo(sd,Math.floor((x0+C/2)/CV_SP)); if (!cv) continue;
+  for (const cv of covesAlong(x0,x0+C)){
     if (x0+C<cv.bb[0] || x0>cv.bb[1] || z0+C<cv.bb[2] || z0>cv.bb[3]) continue;
     const G=cvBuild(cv), R=rng(cv.seed+cx*31+cz*17);
     /* --- the cliff face and its cap of rock --- */
@@ -1290,6 +1378,11 @@ function coveGroundCol(x,z,h,cA){ const cv=coveAtXZ(x,z); if (!cv || !cv.geo) re
 // the heading that points from there out to sea along the bay
 function coveLanding(cv){ const q=cv.Bw>0?cv.Bw+0.5:4, s=cv.Bh-q, u=cvAxis(cv,s), s2=s-6, u2=cvAxis(cv,s2), [x,z]=cvL2W(cv,u,s), [x2,z2]=cvL2W(cv,u2,s2), l=Math.hypot(x2-x,z2-z)||1;
   return {x,z,heading:Math.atan2(x2-x,z2-z),dx:(x2-x)/l,dz:(z2-z)/l}; }
+// a cove's places, for tests: its beach, landing, cave mouth, a point inside the cave and the top and foot of its path
+function coveReport(cv){ const G=cvBuild(cv), A=G.cave, W=(u,s)=>{ const [x,z]=cvL2W(cv,u,s); return {x,z}; };
+  return {cv,sd:cv.sd,X:cv.X,Z0:cv.Z0,isle:!!cv.isle,key:cv.key,name:cv.name,cave:cv.cave,out:{x:-cv.nx,z:-cv.nz},beach:W(cvAxis(cv,cv.Bh-Math.max(cv.Bw,2.5)*0.5),cv.Bh-Math.max(cv.Bw,2.5)*0.5),
+    pathTop:cv.isle?W(G.pathTop.u,G.pathTop.s):W(G.pathTop.u,G.roadS-CR_HW-0.5),pathFoot:W(G.pathFoot.u,G.pathFoot.s),landing:coveLanding(cv),
+    mouth:A&&{...W(A.u+A.au*-1.5,A.s+A.as*-1.5),y:A.fM},inside:A&&{...W(A.u+A.au*A.aMax*0.7,A.s+A.as*A.aMax*0.7)},caves:G.caves.length}; }
 function lightsNear(x,z,r){
   const out=[];
   for (const sd of SIDES){
@@ -4099,6 +4192,7 @@ function genChunk(cx,cz,lod=0){
         const ra=shoreR(k), rb=shoreR(k+1); if (ra<=0 || rb<=0 || Math.abs(ra-rb)>12) continue;
         const aa=k/N*Math.PI*2, ab=(k+1)/N*Math.PI*2, xm=I.x+Math.cos((aa+ab)/2)*(ra+rb)/2, zm=I.z+Math.sin((aa+ab)/2)*(ra+rb)/2;
         if (xm<x0||xm>=x0+C||zm<z0||zm>=z0+C) continue;
+        { const cv=coveAtXZ(xm,zm); if (cv && Math.abs(cvU(cv,xm,zm))<cv.Uc+4) continue; }   // nor along an island's cove
         const base=spos.length/3;
         for (const [an,r] of [[aa,ra],[ab,rb]]) for (const o of OFFS){ spos.push(I.x+Math.cos(an)*(r-o),0,I.z+Math.sin(an)*(r-o)); ssv.push((o+9)/10.5); }
         for (let q=0;q<nr-1;q++){ const a=base+q, b=a+1, d=a+nr, e=d+1; sidx.push(a,b,d,b,e,d); }
@@ -5609,7 +5703,7 @@ function updateChunks(px,pz,budgetMs,loading=budgetMs>=1e8){
     if (ch.lod>=2 && ch.fade>=1) tilesDirty.add(tileKey(ch));
   }
 }
-function resetWorld(){ chunkState=''; farCache.clear(); farOrigin=''; for (const T of tiles.values()) disposeTile(T); tiles.clear(); tilesDirty.clear(); tilesUrgent.clear(); for (const ch of chunks.values()) disposeChunk(ch); chunks.clear(); for (const ch of dying) disposeChunk(ch); dying.length=0; pkCache.clear(); pzCache.clear(); alCache.clear(); hbCache.clear(); vgCache.clear(); ryCache.clear(); rzCache.clear(); rrCache.clear(); rsCache.clear(); stCache.clear(); rxCache.clear(); lhCache.clear(); rkCache.clear(); ruCache.clear(); cvCache.clear(); cvMemoN=NaN;
+function resetWorld(){ chunkState=''; farCache.clear(); farOrigin=''; for (const T of tiles.values()) disposeTile(T); tiles.clear(); tilesDirty.clear(); tilesUrgent.clear(); for (const ch of chunks.values()) disposeChunk(ch); chunks.clear(); for (const ch of dying) disposeChunk(ch); dying.length=0; pkCache.clear(); pzCache.clear(); alCache.clear(); hbCache.clear(); vgCache.clear(); ryCache.clear(); rzCache.clear(); rrCache.clear(); rsCache.clear(); stCache.clear(); rxCache.clear(); lhCache.clear(); rkCache.clear(); ruCache.clear(); cvCache.clear(); icvCache.clear(); cvSlots.clear(); cvMemoN=NaN; cvMemoL=[];
   // the goods lines, the offshore islands, the ferry ports and the ferries' routes all belong to the old island
   brZones.clear(); brBucket.clear(); isCache.clear(); fpCache.clear(); irCache.clear(); hgCache.clear(); sgCache.clear(); mtxCache.clear();
   goods.R=null; goods.check=0; for (const c of goods.cars) c.m.visible=false;
@@ -12006,9 +12100,11 @@ window.__village={ get seed(){ return SEED_TEXT; }, get paused(){ return paused;
         seen.set(kk,1); q.push([ii,jj,g]); } }
     return {ok:false,steps:n}; },
   // the nearest cove: its beach, the top and foot of its path, and the mouth of its cave with a point inside
-  findCove(){ const n0=Math.floor(player.x/CV_SP); for (let k=0;k<60;k++) for (const n of [n0+k,n0-k]) for (const sd of SIDES){ const cv=coveInfo(sd,n); if (!cv) continue; const G=cvBuild(cv), A=G.cave, W=(u,s)=>{ const [x,z]=cvL2W(cv,u,s); return {x,z}; };
-      return {cv,sd,X:cv.X,name:cv.name,cave:cv.cave,beach:W(cvAxis(cv,cv.Bh-Math.max(cv.Bw,2.5)*0.5),cv.Bh-Math.max(cv.Bw,2.5)*0.5),pathTop:W(G.pathTop.u,G.roadS-CR_HW-0.5),pathFoot:W(G.pathFoot.u,G.pathFoot.s),landing:coveLanding(cv),
-        mouth:A&&{...W(A.u+A.au*-1.5,A.s+A.as*-1.5),y:A.fM},inside:A&&{...W(A.u+A.au*A.aMax*0.7,A.s+A.as*A.aMax*0.7)},caves:G.caves.length}; } return null; },
+  findCove(){ const n0=Math.floor(player.x/CV_SP); for (let k=0;k<60;k++) for (const n of [n0+k,n0-k]) for (const sd of SIDES){ const cv=coveInfo(sd,n); if (cv) return coveReport(cv); } return null; },
+  // the island coves within 20 slots, nearest first, or the k-th of them
+  findIsleCove(k=0){ const m0=Math.floor(player.x/ISL), L=[]; for (let d=0;d<20;d++) for (const m of d?[m0+d,m0-d]:[m0]) for (const sd of SIDES) for (const cv of isleCoves(sd,m)) L.push(cv);
+    L.sort((a,b)=>Math.hypot(a.X-player.x,a.Z0-player.z)-Math.hypot(b.X-player.x,b.Z0-player.z)); return L[k]?coveReport(L[k]):null; },
+  isleCoves,
   coveLanding, coveFns:{cvOnPath,cvLand,cvU,cvS,cvL2W,cvAxis,cvBuild,coveAtXZ,coveCaveCell,cvCaveLocal,coveNoWalk},
   coveInfo, walkGround, coveMoveOk, standableAt, get spawnInfo(){ return spawnInfo; }, shoreWalk, spawnPlayer, get holdT(){ return player.holdT; },
   findIsland(){ const m0=Math.floor(player.x/ISL); for (let k=0;k<20;k++) for (const m of [m0+k,m0-k]) for (const sd of SIDES){ const I=islandInfo(sd,m); if (I) return I; } return null; },
