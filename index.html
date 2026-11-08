@@ -8161,6 +8161,15 @@ function dgyStandNear(x0,z0){
       if (best===null || g<bg){ best={x,z,y:g}; bg=g; } }
     if (best) return best; }
   return null; }
+// the nearest place to (x0,z0), within 25 m, that is dry ground clear of the walls of any building by the player's width:
+// the spot itself when it is already open
+function openSpotNear(x0,z0){
+  const walls=[]; for (let j=-1;j<=1;j++) for (let i=-1;i<=1;i++){ const ch=chunks.get(key(Math.floor(x0/C)+i,Math.floor(z0/C)+j)); if (ch) for (const o of ch.obbs) if (o.top===Infinity) walls.push(o); }
+  const ok=(x,z)=>{ if (heightAt(x,z)<0.2) return false; return !walls.some(o=>{ const [lu,lv]=obbLocal(o,x,z); return Math.abs(lu)<o.hw+0.45 && Math.abs(lv)<o.hd+0.45; }); };
+  if (ok(x0,z0)) return null;
+  for (let r=0.75;r<=25;r+=0.75){ const n=Math.max(8,Math.round(r*6));
+    for (let k=0;k<n;k++){ const a=k/n*Math.PI*2, x=x0+Math.cos(a)*r, z=z0+Math.sin(a)*r; if (ok(x,z)) return {x,z,y:surfaceTopAt(x,z)}; } }
+  return null; }
 function dgyArrival(B){
   { const P=dgyStandNear(B.x,B.z); if (P) return P; }
   const tries=[[0,0]]; for (const r of [0.8,1.6,2.5,3.5,5,6.5,8]) for (let k=0;k<12;k++){ const a=k/12*Math.PI*2; tries.push([Math.cos(a)*r,Math.sin(a)*r]); }
@@ -10231,23 +10240,31 @@ canvas.addEventListener('dblclick',e=>{ if (mode!=='above') return;
   let a=0, b=-1; for (let t=st;t<camera.far;t+=st) if (above(t)<=0){ a=t-st; b=t; break; }
   if (b<0) return;
   for (let k=0;k<12;k++){ const m=(a+b)/2; if (above(m)>0) a=m; else b=m; }
-  const x=o.x+d.x*b, z=o.z+d.z*b, top=surfaceTopAt(x,z);
+  let x=o.x+d.x*b, z=o.z+d.z*b, top=surfaceTopAt(x,z);
   // on open water at least 1.5 m deep, the nearest harbour's dinghy is brought there, heading the way the view looks,
   // and the player takes the helm
   if (top<0.1){ if (sailD || heightAt(x,z)>-1.5) return;
     const H=dgyHarbourNear(x,z), e=H&&dgyMake(H); if (!e) return;
     e.D.moor({x,z,head:Math.atan2(d.x,d.z)}); e.D.moor(null);
     ridden=null; player.x=x; player.z=z; player.y=0; player.vy=0; eyeY=null; startSwoop(camera); dinghyBoard(e); return; }
+  // never inside a building: the nearest open ground outside its walls, within 25 m
+  { const o=openSpotNear(x,z); if (o){ x=o.x; z=o.z; top=o.y; } }
   ridden=null;
   player.x=x; player.z=z; player.y=top; player.vy=0; player.grounded=true; player.holdT=2; eyeY=null; fpPitch=0;
   const from={p:camera.position.clone(),q:camera.quaternion.clone(),fov:camera.fov,far:camera.far,fogN:scene.fog.near,fogF:scene.fog.far};
   toggleView(); Object.assign(descent,{t:0,fov:from.fov,far:from.far,fogN:from.fogN,fogF:from.fogF}); descent.p.copy(from.p); descent.q.copy(from.q);
   if (started) lockPointer(); });
+canvas.addEventListener('contextmenu',e=>{ if (mode==='above') e.preventDefault(); });
 addEventListener('mousemove',e=>{
   const locked=document.pointerLockElement===canvas; if (!locked&&!dragging) return;
   const dx=locked?e.movementX:e.clientX-lx, dy=locked?e.movementY:e.clientY-ly; lx=e.clientX; ly=e.clientY; const k=PHOTO.lookScale();
-  // in the bird's-eye view a drag takes hold of the landscape: it turns and tilts the opposite way to a look
-  if (mode==='above' && !locked) look(-dx*k,-dy*k); else look(dx*k,dy*k);
+  // in the bird's-eye view a drag moves over the landscape, the same way whichever way the view faces: pushed up the
+  // screen the view travels forward into it, drawn to the right it travels right; with the right button or Shift held
+  // the drag turns and tilts the view instead
+  if (mode==='above' && !locked && !(e.buttons&2) && !e.shiftKey){
+    const m=Math.max(0.05,dist*0.0022), fx=-Math.sin(yaw), fz=-Math.cos(yaw), rx=Math.cos(yaw), rz=-Math.sin(yaw);
+    player.x+=(rx*dx-fx*dy)*m; player.z+=(rz*dx-fz*dy)*m; if (dist>60){ player.y=Math.max(heightAt(player.x,player.z),0); eyeY=player.y; } }
+  else look(dx*k,dy*k);
 });
 const cam={y:null,head:0}, chase={d:34,yaw:0,pitch:0.32,fresh:true,lift:0}, _cv=new THREE.Vector3();
 const riding=()=>mode==='train'||mode==='chase';
