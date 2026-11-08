@@ -1844,8 +1844,15 @@ function flight(D,f){
   const stepZ=k=>up?[st.z0-k*ST_G,st.z0-(k-1)*ST_G]:[st.z1+(k-1)*ST_G,st.z1+k*ST_G];
   const well=up?[st.z0-(ST_N-1)*ST_G,st.z0-ST_G]:[st.z1+ST_G,st.z1+(ST_N-1)*ST_G];   // headroom from the second step
   const xi=side>0?x0:x1, lowZ=up?well[1]:well[0];
-  const rails=[[xi-0.03,xi+0.03,well[0],well[1]],[x0,x1,lowZ-0.03,lowZ+0.03]];
-  return {side,x0,x1,up,stepZ,well,rails,xi,lowZ};
+  // where the head lies too close to the end wall for the walker to turn out between the wall and the end of the rail,
+  // the rail along the open side stops two steps short of the head, so that the top steps can be left sideways
+  const cramp=up?well[0]-D.zb<0.7:D.zf-well[1]<0.7, ra=up&&cramp?well[0]+2*ST_G:well[0], rb=!up&&cramp?well[1]-2*ST_G:well[1];
+  const rails=[[xi-0.03,xi+0.03,ra,rb],[x0,x1,lowZ-0.03,lowZ+0.03]];
+  // the floor of the storey above on which the walker steps off the flight: beyond the head, and beside the top steps
+  // where the rail stops short, clear of its end
+  const head=[up?[x0,x1,well[0]-0.45,well[0]]:[x0,x1,well[1],well[1]+0.45]];
+  if (cramp) head.push([side>0?xi-0.5:xi,side>0?xi:xi+0.5,up?well[0]:rb+0.35,up?ra-0.35:well[1]]);
+  return {side,x0,x1,up,stepZ,well,rails,xi,lowZ,cramp,head};
 }
 /* ---------- churches that can be entered ----------
    The nave keeps its walls, roof and windows; at full detail its front wall has the doorway, with a pair of leaves,
@@ -9016,11 +9023,17 @@ function roofSlide(dt){
 let colRoof=null;   // the roof the player last stood on, from collide, for sliding
 function collide(){
   const near=nearbyChunks(), r=player.r, py=player.y;
-  const pushOut=o=>{
+  const pushOut=(o,wall)=>{
       if (o.top<=py+STEP) return;
       if (o.bot!==undefined && py+1.75<o.bot) return;   // clear underneath
       if (Math.abs(o.x-player.x)>o.hw+o.hd+1||Math.abs(o.z-player.z)>o.hw+o.hd+1) return;
       const [lu,lv]=obbLocal(o,player.x,player.z), cu=clamp(lu,-o.hw,o.hw), cv=clamp(lv,-o.hd,o.hd), du=lu-cu, dv=lv-cv, d=Math.hypot(du,dv);
+      // a wall of a room holds the player on the side of it where they stood at the start of the frame, beyond one of
+      // its faces and level with it, however far a jump, a fall or a push from another collider has since carried them
+      // into the wall or through it; otherwise they are pushed out by the nearest face
+      if (wall){ const [ou,ov]=obbLocal(o,player.ox??player.x,player.oz??player.z), su=ou<0?-1:1, sv=ov<0?-1:1;
+        if (Math.abs(ou)>o.hw && Math.abs(ov)<=o.hd && Math.abs(lv)<=o.hd){ if (lu*su<o.hw+r) [player.x,player.z]=localToWorld(o,su*(o.hw+r),lv); return; }
+        if (Math.abs(ov)>o.hd && Math.abs(ou)<=o.hw && Math.abs(lu)<=o.hw){ if (lv*sv<o.hd+r) [player.x,player.z]=localToWorld(o,lu,sv*(o.hd+r)); return; } }
       if (d>=r) return;
       let pu,pv;
       if (d<1e-6){ const ex=o.hw-Math.abs(lu), ez=o.hd-Math.abs(lv), sg=v=>v<0?-1:1; if (ex<ez){ pu=sg(lu)*(o.hw+r); pv=lv; } else { pu=lu; pv=sg(lv)*(o.hd+r); } }
@@ -9035,7 +9048,9 @@ function collide(){
       if (o.roof && py>o.roof.y0-0.3){ if (Math.abs(o.x-player.x)>o.hw+o.hd+1||Math.abs(o.z-player.z)>o.hw+o.hd+1) continue;
         const [lu,lv]=obbLocal(o,player.x,player.z); let s=roofAt(o.roof,lu,lv); if (s===null) s=roofAt(o.roof,clamp(lu,-o.hw,o.hw),clamp(lv,-o.hd,o.hd));
         if (s>py+STEP) pushOut(o); continue; }
-      if (o.room){ if (Math.abs(o.x-player.x)<o.hw+o.hd+1 && Math.abs(o.z-player.z)<o.hw+o.hd+1) for (const q of o.room.walls) pushOut(q); } else pushOut(o); }
+      if (o.room){ if (Math.abs(o.x-player.x)<o.hw+o.hd+1 && Math.abs(o.z-player.z)<o.hw+o.hd+1) { for (const q of o.room.walls) if (q.top!==Infinity) pushOut(q);
+        // the walls have the last word, so that nothing inside can push the player through them
+        for (const q of o.room.walls) if (q.top===Infinity) pushOut(q,true); } } else pushOut(o); }
     for (const c of ch.circles){
       if (c.top<=py+STEP) continue;
       const dx=player.x-c.x, dz=player.z-c.z, d=Math.hypot(dx,dz), m=c.r+r;
@@ -9059,6 +9074,14 @@ function collide(){
   }
   return g;
 }
+// The ceiling over (x,z) in room D for a walker with their feet at y: that of the storey they are on, or over the
+// stairwell of its flight up, that of the storey above. A church or a lighthouse, which has no storeys, sets none.
+function roomCeil(D,x,z,y){
+  const L=D.levels; if (!L) return Infinity;
+  let f=0; for (let i=1;i<L.length;i++) if (D.base+L[i].F<=y+0.5) f=i;
+  if (f<L.length-1 && D.st){ const S=flight(D,f), [u,v]=obbLocal(D,x,z); if (u>S.x0 && u<S.x1 && v>S.well[0] && v<S.well[1]) return D.base+L[f+1].Hc; }
+  return D.base+L[f].Hc; }
+const HEAD=1.77;   // the top of the head above the feet, 15 cm above the eye
 /* ================= doors and rooms ================= */
 // Every door of the blocks at full detail is one instance of a single mesh. A door swings either way, away from
 // whoever pushes it, as far as it is pushed; once nobody is within its sweep it eases shut. A door whose room has
@@ -9119,6 +9142,7 @@ function playerRadius(dt){
   let want=0.6; indoors=null;
   for (const ch of nearbyChunks()) if (ch.rooms) for (const D of ch.rooms){ const A=D.area||D, [lu,lv]=obbLocal(A,player.x,player.z);
     if (Math.abs(lu)<(A.hw??D.w/2) && Math.abs(lv)<(A.hd??D.d/2) && player.y>D.fl-1.2 && player.y<D.base+D.top){ indoors=D; break; } }
+  if (indoors) want=0.3;
   for (const ch of nearbyChunks()){ if (!ch.doors) continue;
     for (const D of ch.doors){ if (Math.hypot(D.hx-player.x,D.hz-player.z)<3.5){ want=0.3; break; }
       const [lu,lv]=obbLocal(D,player.x,player.z); if (Math.abs(lu)<D.w/2+0.3 && Math.abs(lv)<D.d/2+0.3){ want=0.3; break; } }
@@ -9200,9 +9224,9 @@ function buildRoomGeo(D){
     for (let z=zb+0.6; z<zf-0.3; z+=0.85){ if (wellHere && z>wellHere[2]-0.1 && z<wellHere[3]+0.1) continue; B(0,Hc-0.16,z,2*iw,0.16,0.14,dark,SW); }
     // the flight up to the next storey: solid steps along the wall, with a handrail on the open side
     if (here){ for (let k=1;k<ST_N;k++){ const [za,zz]=here.stepZ(k); B((here.x0+here.x1)/2,F,(za+zz)/2,ST_W,k*ST_R,ST_G+0.002,stairC,stairC===wood?SW:SS); }
-      const [a0,a1]=here.stepZ(1), [b0,b1]=here.stepZ(ST_N-1), zs=here.up?a1:a0, ze=here.up?b0:b1, xr=here.xi-(here.side>0?0.04:-0.04);
-      segBox(gb,LP(xr,F+ST_R+0.9,zs),LP(xr,F+(ST_N-1)*ST_R+0.9,ze),0.05,0.05,dark,SW);
-      for (const [z,y] of [[zs,F+ST_R],[ze,F+(ST_N-1)*ST_R]]) B(xr,y,z,0.06,0.9,0.06,dark,SW); }
+      const ke=here.cramp?ST_N-3:ST_N-1, [a0,a1]=here.stepZ(1), [b0,b1]=here.stepZ(ke), zs=here.up?a1:a0, ze=here.up?b0:b1, xr=here.xi-(here.side>0?0.04:-0.04);
+      segBox(gb,LP(xr,F+ST_R+0.9,zs),LP(xr,F+ke*ST_R+0.9,ze),0.05,0.05,dark,SW);
+      for (const [z,y] of [[zs,F+ST_R],[ze,F+ke*ST_R]]) B(xr,y,z,0.06,0.9,0.06,dark,SW); }
     // a rail round the stairwell of the flight below
     if (below) for (const r of below.rails){ const lx=r[1]-r[0], lz=r[3]-r[2], cx=(r[0]+r[1])/2, cz=(r[2]+r[3])/2, n=Math.max(1,Math.round(Math.max(lx,lz)/0.12));
       B(cx,F+0.92,cz,Math.max(lx,0.06),0.05,Math.max(lz,0.06),dark,SW);
@@ -9210,7 +9234,26 @@ function buildRoomGeo(D){
     // furniture, kept clear of the door's sweep, the flights and the stairwells
     const free=[];
     const clearOfDoor=(x,z,w2,d2)=>fi>0 || Math.hypot(clamp(hingeX,x-w2,x+w2)-hingeX, clamp(zf,z-d2,z+d2)-zf)>DOOR_W+0.25;
-    const fits=(x,z,w2,d2)=>x-w2>=-iw-1e-6 && x+w2<=iw+1e-6 && z-d2>=zb-1e-6 && z+d2<=zf+1e-6 && clearOfDoor(x,z,w2,d2) && !free.some(q=>Math.abs(q[0]-x)<q[2]+w2 && Math.abs(q[1]-z)<q[3]+d2);
+    // The stairs are kept within reach. A walker of the player's indoor radius, with a little to spare, who comes in by
+    // the doorway or arrives on this storey at the head of the flight from below, must still reach the foot of the
+    // flight up: its first four steps, which can be climbed onto from the end or from the open side. The walk is
+    // searched over 10 cm squares of the floor, round the walls, the furniture already placed, the higher steps, and
+    // the stairwell with its rails; a piece of furniture that would cut the foot off is put elsewhere or left out.
+    const RW=0.33, GS=0.1, nu=Math.max(1,Math.floor(2*iw/GS)), nv=Math.max(1,Math.floor((zf-zb)/GS)), stBlock=[], stFrom=[], stTo=[];
+    if (here){ const s5=here.stepZ(5), s12=here.stepZ(ST_N-1), s1=here.stepZ(1), s4=here.stepZ(4);
+      stBlock.push([here.x0,here.x1,Math.min(s5[0],s12[0]),Math.max(s5[1],s12[1])]); stTo.push([here.x0,here.x1,Math.min(s1[0],s4[0]),Math.max(s1[1],s4[1])]); }
+    if (below){ stBlock.push([below.x0,below.x1,below.well[0],below.well[1]],...below.rails); stFrom.push(...below.head); }
+    else stFrom.push([D.dx-0.15,D.dx+0.15,zf-0.5,zf-RW]);
+    const walkable=(u,v,ex)=>u>=-iw+RW && u<=iw-RW && v>=zb+RW && v<=zf-RW && !stBlock.some(q=>u>q[0]-RW && u<q[1]+RW && v>q[2]-RW && v<q[3]+RW)
+      && !solid.some(q=>q[4]===F && Math.abs(u-q[0])<q[2]+RW && Math.abs(v-q[1])<q[3]+RW) && !(ex && Math.abs(u-ex[0])<ex[2]+RW && Math.abs(v-ex[1])<ex[3]+RW);
+    const stReach=ex=>{ const seen=new Uint8Array(nu*nv), q=[], at=k=>[-iw+(k%nu+0.5)*GS,zb+(Math.floor(k/nu)+0.5)*GS], inR=(r,u,v)=>u>=r[0] && u<=r[1] && v>=r[2] && v<=r[3], hit=stTo.map(()=>false);
+      for (let k=0;k<nu*nv;k++){ const [u,v]=at(k); if (stFrom.some(r=>inR(r,u,v)) && walkable(u,v,ex)){ seen[k]=1; q.push(k); } }
+      while (q.length){ const k=q.pop(), i=k%nu, [u,v]=at(k); stTo.forEach((r,n)=>{ if (inR(r,u,v)) hit[n]=true; });
+        for (const kk of [i>0?k-1:-1,i<nu-1?k+1:-1,k-nu,k+nu]){ if (kk<0 || kk>=nu*nv || seen[kk]) continue; seen[kk]=1; const [u2,v2]=at(kk); if (walkable(u2,v2,ex)) q.push(kk); } }
+      return hit; };
+    const stNeed=stTo.length?stReach(null):[];
+    const keepsStairs=(x,z,w2,d2)=>!stNeed.some(h=>h) || stReach([x,z,w2,d2]).every((h,n)=>h || !stNeed[n]);
+    const fits=(x,z,w2,d2)=>x-w2>=-iw-1e-6 && x+w2<=iw+1e-6 && z-d2>=zb-1e-6 && z+d2<=zf+1e-6 && clearOfDoor(x,z,w2,d2) && !free.some(q=>Math.abs(q[0]-x)<q[2]+w2 && Math.abs(q[1]-z)<q[3]+d2) && keepsStairs(x,z,w2,d2);
     const take=(x,z,w2,d2,pad=0)=>{ free.push([x,z,w2+pad,d2+pad]); solid.push([x,z,w2,d2,F]); };
     for (const L of [here,below]) if (L){ const za=Math.min(D.st.z0,D.st.z1)-1.0, zz=Math.max(D.st.z0,D.st.z1)+1.0; free.push([(L.x0+L.x1)/2,(za+zz)/2,ST_W/2+0.1,(zz-za)/2]); }
     if (hearth && fi>0){ const {x,z}=hearth; if (fits(x,z,0.25,0.75)){ B(x,F,z,0.5,Hc-F,1.5,wallC); take(x,z,0.25,0.75,0.05); } }
@@ -10123,9 +10166,9 @@ function sitEye(s,L,p,P,Q){ const ey=s.kind==='lounger'?s.y-s.h+0.8:s.y+0.7;
 // whether the walking rules let the player stand at (x,z) on a floor at fy: collision leaves them where they are, and
 // the ground there is that floor and dry
 function sitSpotOk(x,z,fy){
-  const sx=player.x, sz=player.z, sy=player.y; player.x=x; player.z=z; player.y=fy;
+  const sx=player.x, sz=player.z, sy=player.y, ox=player.ox, oz=player.oz; player.x=player.ox=x; player.z=player.oz=z; player.y=fy;
   let g=-99; try { g=collide(); } catch(_){}
-  const moved=Math.hypot(player.x-x,player.z-z); player.x=sx; player.z=sz; player.y=sy;
+  const moved=Math.hypot(player.x-x,player.z-z); player.x=sx; player.z=sz; player.y=sy; player.ox=ox; player.oz=oz;
   return moved<0.03 && Math.abs(g-fy)<0.35 && g>-0.3; }
 const sitInside=(D,x,z)=>{ const [u,v]=obbLocal(D.area||{x:D.x,z:D.z,hw:D.w/2,hd:D.d/2,rot:D.rot},x,z), A=D.area||{hw:D.w/2,hd:D.d/2}; return Math.abs(u)<=A.hw && Math.abs(v)<=A.hd; };
 function sitFind(){
@@ -10712,6 +10755,10 @@ function frame(now){
     if (player.y<=ground){ player.y=ground; player.vy=0; player.grounded=true; } else player.grounded=false;
   }
   if (player.y<ground) player.y=ground;
+  // indoors the head stays below the ceiling, the eye 15 cm under it, over the body's width: a jump stops short of the
+  // ceiling or the floor above, and the walker falls back from it
+  if (indoors && !held){ let cy=Infinity; for (const [a,b] of [[0,0],[0.3,0],[-0.3,0],[0,0.3],[0,-0.3]]) cy=Math.min(cy,roomCeil(indoors,player.x+a,player.z+b,player.y)-HEAD);
+    if (player.y>cy){ player.y=Math.max(ground,cy); if (player.vy>0) player.vy=0; } }
   eyeY = (eyeY===null||Math.abs(eyeY-player.y)>3) ? player.y : eyeY+(player.y-eyeY)*(1-Math.exp(-dt*14));
   // into the sea: in the air over deep water, the swimmer takes the fall; wading on the seabed, it takes over once the
   // water reaches the thigh
@@ -11842,7 +11889,7 @@ requestAnimationFrame(()=>setTimeout(()=>{
   document.getElementById('loading').remove();
   requestAnimationFrame(frame);
 },30));
-window.__village={ get seed(){ return SEED_TEXT; }, get paused(){ return paused; }, set paused(v){ if (!!v!==paused){ paused=!!v; lastClock=null; } }, goods, glZone, branchesAt, get mantle(){ return mantle; }, get colRoof(){ return colRoof; }, roofAt, roofSlope, topAt, get sit(){ return sit; }, sitKey, sitFind, sitStand, sitSpotOk, beachStretch, BCH_SP, COACH_SEATS, FERRY_SEATS, coachEnter, genChunk, coastRoadZ, brZ, brY, heightAt, player, chunks, rooms, doorMesh, keys, setYaw:v=>{yaw=v;}, get yaw(){return yaw;}, fe, co, lightsNear, beams, ruinIn, cats, catHome, get ridden(){ return ridden; },
+window.__village={ get seed(){ return SEED_TEXT; }, get paused(){ return paused; }, set paused(v){ if (!!v!==paused){ paused=!!v; lastClock=null; } }, goods, glZone, branchesAt, get mantle(){ return mantle; }, get colRoof(){ return colRoof; }, roofAt, roofSlope, topAt, get sit(){ return sit; }, get indoors(){ return indoors; }, roomFns:{flight,localToWorld,obbLocal,roomCeil}, sitKey, sitFind, sitStand, sitSpotOk, beachStretch, BCH_SP, COACH_SEATS, FERRY_SEATS, coachEnter, genChunk, coastRoadZ, brZ, brY, heightAt, player, chunks, rooms, doorMesh, keys, setYaw:v=>{yaw=v;}, get yaw(){return yaw;}, fe, co, lightsNear, beams, ruinIn, cats, catHome, get ridden(){ return ridden; },
   findHarbour(){ for (let d=0;d<12;d++) for (const sd of SIDES) for (const n of [Math.floor(player.x/HARB)+d,Math.floor(player.x/HARB)-d]){ const H=harbourInfo(sd,n); if (H) return {x:H.x,z:coastZ(sd,H.x)+sd*7,W:H.W,sd,qz:coastZ(sd,H.x+H.W/2-1)+sd*2.5}; } return null; },
   findBeach(){ for (let x=player.x; x<player.x+3000; x+=10) for (const sd of SIDES){ const z=coastZ(sd,x)+sd*5; if (heightAt(x,z)<0.6 && heightAt(x,z)>0.1 && !harbourAt(sd,x)) return {x,z,sd}; } return null; },
   ridge(x){ return {x,z:ridgeZ(x)}; },
