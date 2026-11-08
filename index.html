@@ -165,6 +165,7 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
     <div class="group"><h3>Camera mode</h3>
       <div class="row"><span>Right trigger</span><span>Take picture</span></div>
       <div class="row"><span>B</span><span>Leave camera mode</span></div>
+      <div class="row"><span>Y</span><span>Gallery</span></div>
       <div class="row"><span>Bumpers</span><span>Zoom in and out</span></div>
       <div class="row"><span>D-pad up and down</span><span>Focus</span></div>
       <div class="row"><span>D-pad left and right</span><span>Exposure</span></div>
@@ -9899,8 +9900,10 @@ function pollPad(dt){
     if (btn(12)) cam.setFocus(st.focus*Math.exp(dt*1.5)); if (btn(13)) cam.setFocus(st.focus*Math.exp(-dt*1.5));
     for (const [i,d] of [[14,-1],[15,1]]){ const on=btn(i); if (on && !pad.dOn[i]) cam.setEV(st.ev+d/3); pad.dOn[i]=on; }
   }
+  // Y opens the gallery while the camera is raised
+  { const on=camOn && btn(3); if (on && !pad.dOn.y) cam.openGallery(); pad.dOn.y=on; }
   for (const [i,code] of Object.entries(PAD_KEYS)){ const b=gp.buttons[i]; if (!b) continue;
-    const on=(b.pressed||b.value>0.5) && !(camOn && (i==='4'||i==='5'));
+    const on=(b.pressed||b.value>0.5) && !(camOn && (i==='3'||i==='4'||i==='5'));
     if (on && !pad.held.has(code)){ pad.held.add(code); padKey(code,true); }
     else if (!on && pad.held.has(code)){ pad.held.delete(code); padKey(code,false); } }
 }
