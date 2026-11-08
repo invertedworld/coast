@@ -9833,6 +9833,7 @@ addEventListener('keydown',e=>{ keys[e.code]=true;
   if (code==='KeyB') setTilt(!tiltShift);
   if (code==='KeyP' && !e.repeat){ paused=!paused; lastClock=null; }
   if (code==='KeyH' && !e.repeat){ helpEl.hidden=!helpEl.hidden; lastCell=null; }
+  if (code==='Escape' && !helpEl.hidden){ helpEl.hidden=true; lastCell=null; }
   if (code==='KeyI' && !e.repeat) openIsland();
   if (code==='KeyZ' && !e.repeat) crouch=!crouch;
   if (code==='KeyX' && !e.repeat) sitKey();
