@@ -8793,9 +8793,9 @@ function updateFerries(dt){
     const len=F.R.loop.len;
     if (F.wait>0){ F.wait-=dt; F.v=0; }
     else {
-      // ease away from the berth, cruise at 9 m/s, and brake to rest alongside the next landing
-      const d=((F.R.stops[F.next]-F.s)%len+len)%len, target=Math.min(9,Math.sqrt(2*0.35*d));
-      F.v+=clamp(target-F.v,-0.8*dt,0.4*dt);
+      // ease away from the berth, cruise at 5.5 m/s (about 11 knots), and brake to rest alongside the next landing
+      const d=((F.R.stops[F.next]-F.s)%len+len)%len, target=Math.min(5.5,Math.sqrt(2*0.3*d));
+      F.v+=clamp(target-F.v,-0.6*dt,0.25*dt);
       const step=F.v*dt;
       if (step>=d || (d<0.01 && F.v<0.1)){ F.s=F.R.stops[F.next]; F.v=0; F.wait=20; F.at=F.next; F.next=1-F.next; }
       else F.s=(F.s+step)%len;

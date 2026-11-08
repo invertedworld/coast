@@ -298,7 +298,7 @@ The train brakes at a constant 0.7 m/s² to come to rest with the locomotive nea
 
 ### Ferries and islands
 
-Each mainland ferry port serves the island nearest to it. A ferry (`FL = 26` m long, `FB = 6.4` m beam) eases away from its berth, cruises at 9 m/s and brakes to rest alongside the next landing. Its course is made of the shortest turn-straight-turn paths between poses, with the widest turns that keep the whole hull in deep water.
+Each mainland ferry port serves the island nearest to it. A ferry (`FL = 26` m long, `FB = 6.4` m beam) eases away from its berth, cruises at 5.5 m/s and brakes to rest alongside the next landing. Its course is made of the shortest turn-straight-turn paths between poses, with the widest turns that keep the whole hull in deep water.
 
 The ferry has an open foredeck and after deck, a saloon with side decks 1.3 m wide, an upper deck reached by a stair from the after deck, a wheelhouse, a funnel and a lifeboat each side. A gangway, a plank without handrails, is run out from the opening in the bulwark to the quay while the ferry lies alongside, and the opening is closed by a gate while it is under way.
 
