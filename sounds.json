@@ -1,4 +1,5 @@
 {
+  "camera_shutter": "sounds/camera-shutter.mp3",
   "amb_day": "sounds/day.mp3",
   "amb_night": "sounds/night.mp3",
   "water_lap": "sounds/shore-waves.mp3",

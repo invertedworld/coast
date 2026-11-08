@@ -72,7 +72,7 @@ const DEPTH_FN = `
   uniform float uNear, uFar;
   float linZ(float d){ return uNear*uFar/(uFar-d*(uFar-uNear)); }`;
 
-export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, allowed = () => true }) {
+export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, allowed = () => true, onShutter = null }) {
   const S = { on: false, focal: 35, fNumber: 2.8, focus: 5, autofocus: true, ev: 0, vignette: 0, ratio: 0, afTarget: 5, afT: 0, af: false };
   // the frame within the window, as fractions of its width and height, centred; set from the viewfinder's layout
   const FR = { x: 1, y: 1 };
@@ -342,7 +342,7 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
       return pic;
     });
   }
-  function shoot() { flash(); return capture({ effects: true, gallery: true }).then(c => { setRoll(c); return c; }); }
+  function shoot() { flash(); if (onShutter) try { onShutter(); } catch (e) { /* the host's own sound */ } return capture({ effects: true, gallery: true }).then(c => { setRoll(c); return c; }); }
 
   /* ---------- the controls on the screen: the lens, the shutter, the pictures and the way out ---------- */
   const css = document.createElement('style');
@@ -422,7 +422,7 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
   const afEl = hud.querySelector('.af'), modeEl = hud.querySelector('.mode'), rollEl = hud.querySelector('.roll'), deckEl = hud.querySelector('.deck');
   const vignette = document.querySelector('.vignette');
 
-  const G = createGallery({ renderer, scene, camera, origin, onClose: () => { canvas.focus && canvas.focus(); } });
+  const G = createGallery({ renderer, scene, camera, origin, onClose: () => { canvas.focus && canvas.focus(); }, onLoad: () => setRoll() });
   function setRoll(c) {
     const n = G.photos.length; rollEl.querySelector('b').textContent = n ? String(n) : '';
     const p = G.photos[n - 1]; rollEl.classList.toggle('has', !!p);

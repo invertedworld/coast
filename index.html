@@ -9444,7 +9444,7 @@ const SOUND_DEF={
   amb_day:{g:1}, amb_night:{g:1}, amb_dawn:{g:0.8}, amb_cicadas:{g:0.7}, amb_crickets:{g:0.6},
   wind_trees:{g:0.6}, wind_open:{g:0.8}, owl:{g:0.8,ref:12}, gulls:{g:0.7,ref:18},
   water_lap:{g:1,ref:14}, surf:{g:1,ref:14}, waves_rocks:{g:1,ref:10}, hull_slap:{g:0.7,ref:3}, boat_creak:{g:0.6,ref:3}, rigging:{g:0.5,ref:3},
-  door_open:{g:0.7,ref:3}, door_close:{g:0.7,ref:3}, sit_down:{g:0.5,ref:2}, stand_up:{g:0.5,ref:2},
+  camera_shutter:{g:0.8}, door_open:{g:0.7,ref:3}, door_close:{g:0.7,ref:3}, sit_down:{g:0.5,ref:2}, stand_up:{g:0.5,ref:2},
   fountain:{g:0.8,ref:3}, cat_mew:{g:0.8,ref:2.5}, clock_bell:{g:1,ref:30}, church_bell:{g:1,ref:45}, cafe:{g:0.7,ref:5},
   step_pavement:{g:0.5}, step_sand:{g:0.5}, step_soil:{g:0.5}, step_grass:{g:0.5}, step_wood:{g:0.5}, step_metal:{g:0.5}, land:{g:0.7},
   rail_joint:{g:0.8,ref:5}, train_start:{g:1,ref:15}, train_run:{g:1,ref:15}, train_stop:{g:1,ref:15}, train_idle:{g:0.7,ref:8},
@@ -10440,7 +10440,7 @@ function diveRender(){
   const v=[farMesh.visible,farGlow.visible,outMesh.visible,sky.visible]; farMesh.visible=farGlow.visible=outMesh.visible=sky.visible=false;
   try { return UW.render(renderer,scene,camera,diveAbove); } finally { [farMesh.visible,farGlow.visible,outMesh.visible,sky.visible]=v; } }
 // the camera, while it is raised, draws the frame through its lens instead
-const PHOTO=createPhoto({renderer,scene,camera,canvas,origin:ORIGIN,onFov:()=>glowScale(),allowed:()=>started});
+const PHOTO=createPhoto({renderer,scene,camera,canvas,origin:ORIGIN,onFov:()=>glowScale(),allowed:()=>started,onShutter:()=>sndPlay('camera_shutter','player',null)});
 function renderMain(){
   if (PHOTO.on && PHOTO.renderLens()) return;
   if (!(tiltShift && (mode==='above'||mode==='chase'))){ renderer.setRenderTarget(null); renderer.render(scene,camera); return; }

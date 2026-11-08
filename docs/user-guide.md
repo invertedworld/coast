@@ -98,11 +98,11 @@ The controls of the lens lie in a panel at the foot of the screen. Each shows it
 
 The four crop marks show the frame of the picture. The part of the screen outside them is darkened and is not included in the picture.
 
-The large round button on the right is the shutter; **Enter** also takes a picture. Beneath it the latest picture is shown with the number of pictures taken, and a click on it opens the gallery.
+The large round button on the right is the shutter, which sounds as it is pressed; **Enter** also takes a picture. Beneath it the latest picture is shown with the number of pictures taken, and a click on it opens the gallery.
 
 > **Example:** To photograph a bell tower against the sea, raise the camera with **K**, walk until the tower stands against the water, set the zoom to about 85 mm, close the aperture to f/8 so that both are sharp, and press the shutter.
 
-The gallery is opened with **L** or from the camera. Each row holds one photograph, with its number and the time it was taken, followed by the artworks made from it, each labelled with its style. A click on an item selects it and shows it enlarged with its details. **Download PNG** saves the selected item as a PNG file, and the bin deletes it; deleting a photograph also deletes its artworks. Neither is available while nothing is selected. Up to 24 photographs are kept for the duration of the session.
+The gallery is opened with **L** or from the camera. Each row holds one photograph, with its number and the time it was taken, followed by the artworks made from it, each labelled with its style. A click on an item selects it and shows it enlarged with its details. **Download PNG** saves the selected item as a PNG file, and the bin deletes it; deleting a photograph also deletes its artworks. Neither is available while nothing is selected. Up to 24 photographs are kept, with their artworks, in the browser's own storage, so that they remain when the browser is closed and opened again. The divider between the pictures and the preview may be dragged to resize them; its place is remembered, and a double click on it restores the default.
 
 ### Artist mode
 

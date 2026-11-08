@@ -68,7 +68,7 @@ export const ICON = {
   stop: svg('<rect x="7" y="7" width="10" height="10" rx="1.2"/>'),
 };
 
-export function createGallery({ renderer, scene, camera, origin, onClose }) {
+export function createGallery({ renderer, scene, camera, origin, onClose, onLoad }) {
   const photos = [];
   let count = 0, sel = null;   // sel: { p: photo, w: artwork or null }
 
@@ -102,8 +102,11 @@ export function createGallery({ renderer, scene, camera, origin, onClose }) {
 .gal button.pri:hover:not(:disabled),.art button.pri:hover:not(:disabled){background:var(--coral-deep,#b9463d)}
 .gal button.ib,.art button.ib{width:40px;padding:0;background:transparent}
 .gal button:focus-visible,.art button:focus-visible,.art input:focus-visible,.art select:focus-visible{outline:2px solid var(--verdigris,#7cc3ad);outline-offset:2px}
-.gal .body{flex:1;min-height:0;display:grid;grid-template-columns:minmax(300px,5fr) 7fr}
-.gal .sheet{overflow-y:auto;padding:14px 16px 20px;border-right:1px solid var(--g-line);display:flex;flex-direction:column;gap:10px}
+.gal .body{flex:1;min-height:0;display:grid;grid-template-columns:var(--split,41.6%) 7px minmax(0,1fr)}
+.gal .split{cursor:col-resize;position:relative;touch-action:none}
+.gal .split::after{content:"";position:absolute;top:0;bottom:0;left:3px;width:1px;background:var(--g-line)}
+.gal .split:hover::after,.gal .split.drag::after{left:2px;width:3px;background:rgba(124,195,173,.7)}
+.gal .sheet{overflow-y:auto;padding:14px 16px 20px;display:flex;flex-direction:column;gap:10px}
 .gal .none{margin:auto;color:var(--plaster-dim,#d9c8b0);font-family:var(--font-display,serif);font-size:1.1rem;letter-spacing:.04em}
 .gal .set{display:flex;align-items:stretch;gap:12px;padding:10px;background:var(--g-raise);border-radius:5px}
 .gal .works{flex:1;display:flex;flex-wrap:wrap;align-content:flex-start;gap:6px;padding-left:12px;border-left:1px solid var(--g-line);min-width:0}
@@ -127,6 +130,7 @@ export function createGallery({ renderer, scene, camera, origin, onClose }) {
 @media (max-width:820px){
   .gal{inset:8px}
   .gal .body{grid-template-columns:1fr;grid-template-rows:minmax(200px,48%) 1fr}
+  .gal .split{display:none}
   .gal .view{order:-1;padding:10px 12px;border-bottom:1px solid var(--g-line)}
   .gal .sheet{border-right:0;padding:10px 12px}
   .gal .card img{height:64px;min-width:104px} .gal .card.wk img{height:52px;min-width:86px}
@@ -187,7 +191,7 @@ export function createGallery({ renderer, scene, camera, origin, onClose }) {
   const gal = document.createElement('div'); gal.className = 'gal'; gal.hidden = true;
   gal.setAttribute('role', 'dialog'); gal.setAttribute('aria-label', 'Pictures');
   gal.innerHTML = `<header><h2>Pictures</h2><span class="sum"></span><button class="ib" data-a="close" title="Close (L)" aria-label="Close">${ICON.close}</button></header>
-    <div class="body"><div class="sheet"></div>
+    <div class="body"><div class="sheet"></div><div class="split" role="separator" aria-orientation="vertical" aria-label="Resize"></div>
       <div class="view"><div class="big"></div>
         <div class="foot"><div class="info"></div>
           <button class="pri" data-a="art" title="Artist mode">${ICON.easel}<span>Artist mode</span></button>
@@ -195,6 +199,17 @@ export function createGallery({ renderer, scene, camera, origin, onClose }) {
           <button class="ib" data-a="del" title="Delete" aria-label="Delete">${ICON.trash}</button></div></div></div>`;
   const $ = (root, q) => root.querySelector(q);
   const sheet = $(gal, '.sheet'), big = $(gal, '.big'), info = $(gal, '.info');
+  // the divider between the pictures and the preview is dragged to resize them; its place is kept in the browser
+  { const SPLIT_KEY = 'coast.gallerySplit', body = $(gal, '.body'), sp = $(gal, '.split');
+    const setSplit = f => { f = Math.min(0.8, Math.max(0.15, f)); body.style.setProperty('--split', (f * 100).toFixed(2) + '%'); return f; };
+    try { const v = parseFloat(localStorage.getItem(SPLIT_KEY)); if (v > 0) setSplit(v); } catch (e) { /* storage unavailable */ }
+    sp.addEventListener('pointerdown', e => { e.preventDefault(); sp.setPointerCapture(e.pointerId); sp.classList.add('drag');
+      const r = body.getBoundingClientRect(); let f = null;
+      const move = ev => { f = setSplit((ev.clientX - r.left) / r.width); };
+      const up = () => { sp.classList.remove('drag'); sp.removeEventListener('pointermove', move); sp.removeEventListener('pointerup', up); sp.removeEventListener('pointercancel', up);
+        if (f !== null) try { localStorage.setItem(SPLIT_KEY, String(f)); } catch (e) { /* storage unavailable */ } };
+      sp.addEventListener('pointermove', move); sp.addEventListener('pointerup', up); sp.addEventListener('pointercancel', up); });
+    sp.addEventListener('dblclick', () => { body.style.removeProperty('--split'); try { localStorage.removeItem(SPLIT_KEY); } catch (e) { /* storage unavailable */ } }); }
 
   const fmtDist = m => m >= 1000 ? '∞' : m < 10 ? m.toFixed(1) + ' m' : Math.round(m) + ' m';
   const fmtEV = ev => (Math.abs(ev) < 0.05 ? '±0.0' : (ev > 0 ? '+' : '−') + Math.abs(ev).toFixed(1)) + ' EV';
@@ -252,10 +267,53 @@ export function createGallery({ renderer, scene, camera, origin, onClose }) {
 
   function add(c) {
     const meta = { ...c.photo }; delete meta.depth;
-    photos.push({ n: ++count, canvas: c, meta, time: meta.time || Date.now(), works: [] });
-    while (photos.length > KEEP) photos.shift();
+    const p = { n: ++count, canvas: c, meta, time: meta.time || Date.now(), works: [] };
+    photos.push(p); store.put(p);
+    while (photos.length > KEEP) store.del(photos.shift());
     if (!gal.hidden) build();
   }
+
+  /* ---------- keeping the pictures: the photos and their artworks are kept in the browser's IndexedDB as PNG images,
+     so that they are still there when the browser is closed and opened again ---------- */
+  const store = (() => {
+    const DB = 'coast-pictures', OS = 'photos';
+    let dbp = null;
+    const db = () => dbp || (dbp = new Promise((res, rej) => { const q = indexedDB.open(DB, 1);
+      q.onupgradeneeded = () => q.result.createObjectStore(OS, { keyPath: 'id' }); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); }));
+    const tx = (mode, fn) => db().then(d => new Promise((res, rej) => { const t = d.transaction(OS, mode), r = fn(t.objectStore(OS)); t.oncomplete = () => res(r && r.result); t.onerror = () => rej(t.error); }));
+    const png = c => new Promise(res => c.toBlob(res, 'image/png'));
+    const clean = m => { const o = { ...m }; delete o.depth; return JSON.parse(JSON.stringify(o)); };
+    const idOf = p => p.id || (p.id = `${p.time}-${p.n}`);
+    // each photo is written once with its own picture; its artworks are written with it whenever one is added or removed
+    async function put(p) {
+      try {
+        if (!p.blob) p.blob = await png(p.canvas);
+        for (const w of p.works) if (!w.blob) w.blob = await png(w.canvas);
+        const rec = { id: idOf(p), n: p.n, time: p.time, meta: clean(p.meta), png: p.blob,
+          works: p.works.map(w => ({ time: w.time, style: w.style, meta: clean(w.meta || {}), png: w.blob })) };
+        await tx('readwrite', s => s.put(rec));
+      } catch (e) { console.warn('The picture could not be kept:', e); }
+    }
+    function del(p) { tx('readwrite', s => s.delete(idOf(p))).catch(() => {}); }
+    const toCanvas = async b => { const bm = await createImageBitmap(b), c = document.createElement('canvas'); c.width = bm.width; c.height = bm.height; c.getContext('2d').drawImage(bm, 0, 0); bm.close && bm.close(); return c; };
+    async function load() {
+      try {
+        const recs = (await tx('readonly', s => s.getAll())) || [];
+        recs.sort((a, b) => a.time - b.time);
+        for (const r of recs.slice(-KEEP)) {
+          const c = await toCanvas(r.png); c.photo = r.meta;
+          const works = [];
+          for (const w of r.works || []) { const wc = await toCanvas(w.png); wc.photo = w.meta; works.push({ canvas: wc, meta: w.meta, time: w.time, style: w.style, blob: w.png }); }
+          photos.push({ id: r.id, n: r.n, canvas: c, meta: r.meta, time: r.time, works, blob: r.png }); count = Math.max(count, r.n);
+        }
+        photos.sort((a, b) => a.time - b.time);
+        if (!gal.hidden) build();
+        onLoad && onLoad();
+      } catch (e) { console.warn('The pictures kept could not be read:', e); }
+    }
+    return { put, del, load };
+  })();
+  store.load();
   function open() { if (document.pointerLockElement) document.exitPointerLock(); sel = null; build(); gal.hidden = false; }
   function close() {
     if (!art.hidden) return leaveArt(close);
@@ -272,7 +330,7 @@ export function createGallery({ renderer, scene, camera, origin, onClose }) {
     if (a === 'close') close();
     else if (a === 'dl' && sel) download(sel.w || sel.p);
     else if (a === 'del' && sel) {
-      if (sel.w) sel.p.works.splice(sel.p.works.indexOf(sel.w), 1); else photos.splice(photos.indexOf(sel.p), 1);
+      if (sel.w){ sel.p.works.splice(sel.p.works.indexOf(sel.w), 1); store.put(sel.p); } else { photos.splice(photos.indexOf(sel.p), 1); store.del(sel.p); }
       sel = null; build();
     }
     else if (a === 'art' && sel && !sel.w) openArt(sel.p);
@@ -443,7 +501,7 @@ export function createGallery({ renderer, scene, camera, origin, onClose }) {
   }
   function save() {
     const r = A.result; if (!r || A.saved || A.job) return;
-    r.p.works.push({ canvas: r.canvas, meta: r.canvas.photo, time: r.canvas.photo.time, style: r.style });
+    r.p.works.push({ canvas: r.canvas, meta: r.canvas.photo, time: r.canvas.photo.time, style: r.style }); store.put(r.p);
     A.saved = true; setState('Saved', 1, true); syncButtons(); build();
   }
   // leaving artist mode: an unsaved finished render is offered to be saved first; then() runs once it has closed
