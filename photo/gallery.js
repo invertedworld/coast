@@ -19,16 +19,19 @@ import * as THREE from 'three';
 
 const KEEP = 24;
 const Q_KEY = 'coast.pictureSettings';
-// the version of the stored settings: version 2 lowered the 3D render's default samples and bounces, and the values
-// kept from version 1 give way to the new defaults
-const Q_VERSION = 2;
+// the version of the stored settings: version 2 lowered the 3D render's default samples and bounces, and version 3
+// gave the 3D render a time limit, with the samples per pixel its upper bound; the values kept from an earlier
+// version give way to the new defaults
+const Q_VERSION = 3;
 const sl = (k, label, def, min, max, step, fmt = v => '× ' + v.toFixed(2)) => ({ k, label, def, min, max, step, fmt });
 // a slider's value is a multiple of the style's own amount (1 is as designed)
 export const Q_GROUPS = [
   { id: 'render3d', title: '3D render', fields: [
-    { k: 'samples', label: 'Samples per pixel', opts: [32, 64, 128, 256, 512, 1024, 2048, 4096], def: 128 },
+    { k: 'timeBudget', label: 'Time limit', opts: [[15, '15 s'], [30, '30 s'], [60, '1 min'], [120, '2 min'], [300, '5 min'], [0, 'None']], def: 30 },
+    { k: 'samples', label: 'Maximum samples per pixel', opts: [32, 64, 128, 256, 512, 1024, 2048, 4096], def: 512 },
     { k: 'scale', label: 'Resolution', opts: [0.5, 0.75, 1, 1.5, 2], def: 1, size: true },
     { k: 'bounces', label: 'Bounces of light', opts: [2, 3, 4, 5, 6, 8, 10], def: 3 },
+    { k: 'ptReach', label: 'Path-traced distance', opts: [[250, '250 m'], [500, '500 m'], [1000, '1 km'], [2000, '2 km']], def: 500 },
     { k: 'horizonReach', label: 'Draw distance', opts: [[1500, '1.5 km'], [3000, '3 km'], [5000, '5 km'], [8000, '8 km'], [12000, '12 km']], def: 5000 },
     { k: 'hazeVisibility', label: 'Visibility in the haze', opts: [[8000, '8 km'], [15000, '15 km'], [28000, '28 km'], [50000, '50 km'], [100000, '100 km']], def: 28000 },
     { k: 'denoise', label: 'Noise filter', opts: [[0, 'Off'], [2, 'Light'], [5, 'Normal'], [8, 'Strong']], def: 5 },
@@ -68,7 +71,8 @@ export function createGallery({ renderer, scene, camera, origin, onClose }) {
   /* ---------- settings, kept in the browser ---------- */
   const QS = Object.fromEntries(Q_GROUPS.map(g => [g.id, Object.fromEntries(g.fields.map(f => [f.k, f.def]))]));
   try { const v = JSON.parse(localStorage.getItem(Q_KEY) || 'null');
-    if (v && !(v.v >= 2) && v.render3d) { delete v.render3d.samples; delete v.render3d.bounces; }
+    if (v && !(v.v >= 2) && v.render3d) delete v.render3d.bounces;
+    if (v && !(v.v >= 3) && v.render3d) delete v.render3d.samples;
     if (v) for (const g of Q_GROUPS) for (const f of g.fields) if (v[g.id] && typeof v[g.id][f.k] === typeof f.def) QS[g.id][f.k] = v[g.id][f.k]; } catch (e) { /* storage unavailable */ }
   const storeQS = () => { try { localStorage.setItem(Q_KEY, JSON.stringify({ ...QS, v: Q_VERSION })); } catch (e) { /* storage unavailable */ } };
 
@@ -366,7 +370,7 @@ export function createGallery({ renderer, scene, camera, origin, onClose }) {
     const t0 = performance.now();
     job.done = (async () => {
       let out;
-      if (style === 'render3d') out = await trace(p, ctl.signal, live);
+      if (style === 'render3d') out = await trace(p, ctl.signal, live, t0);
       else {
         const { applyEffect } = await import('./effects.js');
         const dur = QS.all.duration * 1000;
@@ -394,7 +398,7 @@ export function createGallery({ renderer, scene, camera, origin, onClose }) {
   }
   // the path tracer, from the camera the photo was taken with: its matrices are in the scene's frame of the time,
   // which the floating origin has moved by (origin then - origin now) since
-  async function trace(p, signal, live) {
+  async function trace(p, signal, live, t0) {
     const m = p.meta, Q = QS.render3d;
     const cam = new THREE.PerspectiveCamera(m.fov, m.aspect, m.near, m.far);
     const mw = new THREE.Matrix4().fromArray(m.matrixWorld), o0 = m.origin || { x: 0, y: 0, z: 0 };
@@ -406,14 +410,20 @@ export function createGallery({ renderer, scene, camera, origin, onClose }) {
     let first = true;
     setState(phases.world, 0);
     const { pathTrace } = ptModule = await import('./pathtrace.js');
-    // artist mode covers the game, so the game draws nothing while the picture is traced and leaves the GPU to it
+    // artist mode covers the game, so the game draws nothing while the picture is traced and leaves the GPU to it; the
+    // world also stands still, so that what moves in it (the trains, the boats, the people) stands where it stood in
+    // every pass of the picture, and the game leaves the page's time to the picture
     const draw = renderer.render; renderer.render = () => {};
+    const V = window.__village, wasPaused = V ? V.paused : true;
+    if (V) V.paused = true;
     try {
       return await pathTrace({ renderer, scene, camera: cam, signal, width: W, height: H,
-        samples: Q.samples, bounces: Q.bounces, horizonReach: Q.horizonReach, hazeVisibility: Q.hazeVisibility, denoise: Q.denoise, materials: Q.materials, haze: Q.haze,
+        timeBudget: Q.timeBudget, startTime: t0,
+        samples: Q.samples, bounces: Q.bounces, horizonReach: Q.horizonReach, ptReach: Q.ptReach, hazeVisibility: Q.hazeVisibility, denoise: Q.denoise, materials: Q.materials, haze: Q.haze,
         onProgress: ({ phase, fraction }) => { if (live() && (phase !== 'trace' || first)) setState(phases[phase] || phase, fraction || 0); },
-        onFrame: (c, k) => { if (!live()) return; if (first) { sizeStage(W, H); first = false; } g2.drawImage(c, 0, 0, W, H); setState(`Tracing ${Math.round(k * 100)} %`, k); } });
-    } finally { renderer.render = draw; }
+        // the first picture, shown before the tracing begins, leaves the phase as it is
+        onFrame: (c, k) => { if (!live()) return; if (first) { sizeStage(W, H); first = false; } g2.drawImage(c, 0, 0, W, H); if (k > 0) setState(`Tracing ${Math.round(k * 100)} %`, k); } });
+    } finally { renderer.render = draw; if (V) V.paused = wasPaused; }
   }
   function save() {
     const r = A.result; if (!r || A.saved || A.job) return;

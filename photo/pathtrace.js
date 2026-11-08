@@ -9,20 +9,40 @@
    onProgress({phase, fraction, info}) reports the phases 'world', 'scene', 'albedo', 'bvh', 'trace', 'denoise', 'done'.
    signal is an AbortSignal; aborting rejects the promise with an AbortError.
 
-   onFrame(canvas, progress) shows the picture while it is made. While the samples accumulate it is called after the
-   first sample and then at most once every frameInterval milliseconds (120 by default, longer if drawing the frames
+   onFrame(canvas, progress) shows the picture while it is made. It is first called with progress 0 once the colour
+   passes are drawn, before the BVH is finished, with every surface lit as the far field is (see below). While the
+   samples accumulate it is then called after the first sample and then at most once every frameInterval milliseconds (120 by default, longer if drawing the frames
    would take more than a tenth of the time), after a whole sample has been added, with progress the share of the
-   samples taken so far (above 0 and below 1). The canvas is a 2D canvas of the final size holding the picture as it
+   samples taken, or of the time allowed, so far (above 0 and below 1). The canvas is a 2D canvas of the final size holding the picture as it
    stands: the light filtered lightly (previewFilter), times the game's surface colour, with haze, exposure and tone
    mapping as in the final picture, so that it is recognisable from the first sample and sharpens as the samples add
    up. The same canvas object is passed each time and is drawn over before the next call, so a caller that keeps a
    frame copies it. Last, after the filter, onFrame is called once with progress exactly 1 and the very canvas the
    promise resolves with.
 
+   Time. The picture is given timeBudget seconds (30 by default) from startTime, which the caller sets to the moment
+   it was asked for. The samples are taken until another would not be finished, filtered and shown within that time,
+   or until samples have been taken, but never fewer than minSamples, so that a slower computer makes a picture of
+   fewer samples in the same time rather than taking longer; the filter is the more important the fewer they are.
+   While the samples are taken, the GPU is given the path tracer's work one tile at a time (see the loop at the end
+   of pathTrace), so that the page and the system stay responsive.
+
+   The near field and the far field. Only the near field, out to ptReach (500 m by default), is path-traced. Beyond
+   it the world is drawn by raster passes alone, and lit by a model of the light: the sun's, as far as two shadow
+   maps drawn from the sun say it is seen, and the irradiance of the sky and the ground on a surface facing each way.
+   The two terms are fitted, by least squares, to the path-traced light of the surfaces at the edge of the near
+   field, so that the two fields agree in brightness and colour, and the far field is blended in over the last 30 %
+   of the near field's reach. The path tracer itself holds only the near field, with the distant terrain carried on
+   as a stand-in for the far field's blocks in its reflections and shadows, so that its BVH stays small and its rays
+   short; the pixels of the far field are not traced at all, those of open sky at one pass in eight, and the far
+   field's sea, glass and metal at one pass in three with two bounces. The near field ends sooner should the path
+   tracer's budget of triangles or vertices be spent before ptReach.
+
    The world. The picture is given a world of its own, built round the camera and only where it looks (gatherWorld):
    each block at the detail its distance asks for, taken from the game where the game holds it and otherwise generated
-   with the game's genChunk for the picture alone, a few at a time between frames, out to blockReach; beyond, out to
-   horizonReach, the land is a terrain mesh made from the game's coarse terrain. The game's draw distance is not
+   with the game's genChunk for the picture alone, a few at a time between frames, out to blockReach; the blocks
+   within the near field join the path tracer's scene, those beyond it only the raster passes'. Beyond the blocks, out
+   to horizonReach, the land is a terrain mesh made from the game's coarse terrain. The game's draw distance is not
    touched. The scene is kept for the next picture of the same view (releasePathTrace() lets it go).
 
    The scene. The live scene is copied into a static scene for three-gpu-pathtracer: every visible opaque mesh within
@@ -40,7 +60,8 @@
    quotient (the light falling on each surface) is filtered by an edge-aware a-trous filter guided by normals, depth
    and an estimate of its own noise, and the result is multiplied by the surface colour A_game drawn with the game's
    own materials under a flat white light. Both colour passes are drawn with the same sub-pixel offsets, so that edges
-   agree. The sky, the sea, glass and metal are taken from the path tracer directly. Aerial perspective is added from
+   agree. The sky, the sea, glass and metal are taken from the path tracer directly. In the far field the light is
+   the model's in place of the path tracer's. Aerial perspective is added from
    the depth (extinction by a haze that thins with height, and in-scattered light of the sky's horizon colour), and
    the picture is tone mapped with ACES Filmic at the game's exposure. */
 
@@ -49,10 +70,25 @@ import { PathTracingRenderer, MeshBVH, SAH, FullScreenQuad } from './vendor/path
 
 /* ---------- settings ---------- */
 const DEFAULTS = {
-  samples: 128,            // samples per pixel
+  samples: 512,            // the most samples per pixel
+  timeBudget: 30,          // seconds: the picture is finished when this time is up, counted from startTime (or from the
+                           // call), with as many samples as fitted in; 0 or null takes the samples alone
+  startTime: null,         // performance.now() at which the time budget began; null takes the time of the call
+  minSamples: 4,           // the fewest samples a picture is given, should the time be up sooner
+  ptReach: 500,            // metres: the near field, which is path-traced; beyond it the raster passes draw the world and
+                           // light it (the far field), blended into the near field over the last 30 % of this distance.
+                           // 0 or null path-traces everything
+  maxRasterTriangles: null,  // the most triangles of the far field's blocks; null takes 6 million, or less likewise
+  shadowSize: 2048,        // the size of each of the far field's two shadow maps
+  farField: 400,           // metres: where the whole picture is path-traced (ptReach 0), a surface beyond this is far;
+                           // otherwise a surface beyond 70 % of the near field is. A far surface is sampled at one pass
+                           // in farEvery, with at most farBounces bounces (the camera ray counts as the first)
+  farEvery: 3,
+  farBounces: 2,
+  skyEvery: 8,             // the open sky is sampled at one pass in this many
   bounces: 3,              // diffuse and glossy bounces after the camera ray
   extend: true,            // build the world for the picture beyond the game's draw distance, in the view
-  lodRings: [3, 12],       // blocks from the camera: full detail out to the first ring, simplified to the second, outlines beyond
+  lodRings: [2, 12],       // blocks from the camera: full detail out to the first ring, simplified to the second, outlines beyond
   blockReach: null,        // metres: blocks with their buildings are built out to here (or to horizonReach, if nearer);
                            // null takes 1600 m for a horizonReach up to 5 km and 42 % of it beyond, so that the longest
                            // draw distances keep the distant islands' cliffs and villages as blocks
@@ -89,8 +125,11 @@ const DEFAULTS = {
   exposure: null,          // null takes the game renderer's exposure
   fog: true,               // the game's own fog, used only when the haze is turned off
   tiles: null,             // path tracer tiles per side to begin with; null chooses from the size. The number is then
-                           // raised between samples while one tile alone takes much longer than the share of a frame given to it
-  gpuShare: 0.6,           // the share of each display frame the tracing may take, so that the page and the rest of
+                           // adjusted between samples so that each tile keeps the GPU busy for about tileMs
+  inFlight: 1,             // tiles sent to the GPU before the oldest is waited for
+  tileMs: 30,              // milliseconds of GPU time aimed at for one tile; a tile is drawn in one go, and many small
+                           // tiles cost far more than a few large ones
+  gpuShare: 0.85,          // the share of the GPU's time the tracing may take, so that the page and the rest of
                            // the system keep enough of the GPU to stay responsive
   onFrame: null,           // onFrame(canvas, progress): the picture while it clears (see the notes on pathTrace)
   frameInterval: 120,      // milliseconds: the least time between two frames handed to onFrame
@@ -114,11 +153,54 @@ function getContext(w, h) {
     // the sky in the environment map is brightened and tinted to light the scene as the game's hemisphere light
     // does; a ray that leaves a mirror-like reflection sees the sky as it is drawn, by undoing that gain
     m.uniforms.uSpecSky = { value: new THREE.Vector3(1, 1, 1) };
+    // the rate of sampling by distance: a pixel whose surface lies beyond uFarDist (the distance along the ray, from the
+    // guide's depth, the least of the pixel and four neighbours) is traced at one pass in uFarEvery, and with at most
+    // uFarBounces bounces; a pixel
+    // of open sky at one pass in uSkyEvery. Every pixel is traced at the first pass. The passes a pixel takes are
+    // spread by blocks of 8 by 8 pixels, so that each pass costs about the same and the GPU's threads stay together,
+    // and the pixel's own weight in the running mean is used in place of the pass's, so that the mean is exact
+    m.uniforms.uGuide = { value: null };
+    m.uniforms.uRateOn = { value: 0 };
+    m.uniforms.uFarDist = { value: 1e9 };
+    m.uniforms.uFarEvery = { value: 1 };
+    m.uniforms.uSkyEvery = { value: 1 };
+    m.uniforms.uFarBounces = { value: 8 };
+    // the far field, which the raster passes light: a pixel with a surface at its centre and in its colour pass (uCover,
+    // the colour pass's coverage summed over uCoverN offsets), whose surface lies beyond uSkipDist, is not traced at all
+    m.uniforms.uCover = { value: null };
+    m.uniforms.uCoverN = { value: 1 };
+    m.uniforms.uView = { value: new THREE.Vector2(1, 1) };
+    m.uniforms.uSkipDist = { value: 1e9 };
     m.fragmentShader = m.fragmentShader
-      .replace('void main() {', 'uniform float uSampleClamp;\nuniform vec3 uSpecSky;\nvoid main() {')
+      .replace('void main() {', 'uniform float uSampleClamp;\nuniform vec3 uSpecSky;\nuniform sampler2D uGuide, uCover;\nuniform float uRateOn, uFarDist, uFarEvery, uSkyEvery, uCoverN, uSkipDist;\nuniform vec2 uView;\nuniform int uFarBounces;\nvoid main() {')
+      .replace('Ray ray = getCameraRay();', `Ray ray = getCameraRay();
+          float pxOpacity = opacity; bool pxFar = false;
+          if ( uRateOn > 0.5 ) {
+            ivec2 gp = ivec2( gl_FragCoord.xy ), gs = textureSize( uGuide, 0 ) - 1;
+            // the distance along the ray for a unit of view depth
+            float rayK = length( vec3( ( gl_FragCoord.xy / vec2( gs + 1 ) * 2.0 - 1.0 ) * uView, 1.0 ) );
+            float dmin = 1e9;
+            for ( int q = 0; q < 5; q ++ ) {
+              ivec2 o = q == 1 ? ivec2( 2, 0 ) : q == 2 ? ivec2( - 2, 0 ) : q == 3 ? ivec2( 0, 2 ) : q == 4 ? ivec2( 0, - 2 ) : ivec2( 0 );
+              float z = texelFetch( uGuide, clamp( gp + o, ivec2( 0 ), gs ), 0 ).w;
+              if ( z > 0.0 && z < 1e5 ) dmin = min( dmin, z * rayK );
+            }
+            float zc = texelFetch( uGuide, gp, 0 ).w;
+            if ( dmin > uSkipDist && dmin < 1e8 && zc > 0.0 && zc < 1e5 && texelFetch( uCover, gp, 0 ).a > 0.02 * uCoverN ) discard;
+            pxFar = dmin > uFarDist;
+            float every = dmin > 1e8 ? uSkyEvery : pxFar ? uFarEvery : 1.0;
+            if ( every > 1.5 ) {
+              float k = floor( 1.0 / opacity - 0.5 );
+              vec2 bk = floor( gl_FragCoord.xy / 8.0 );
+              float off = floor( fract( sin( dot( bk, vec2( 12.9898, 78.233 ) ) ) * 43758.5453 ) * every );
+              if ( k > 0.5 && mod( k + off, every ) > 0.5 ) discard;
+              pxOpacity = 1.0 / ( 1.0 + floor( ( k + off ) / every ) );
+            }
+          }`)
+      .replace('for ( int i = 0; i < bounces; i ++ ) {', 'for ( int i = 0; i < bounces; i ++ ) {\n\t\t\t\t\t\tif ( pxFar && i >= uFarBounces ) break;')
       .replace('gl_FragColor.rgb += environmentIntensity * envColor * state.throughputColor * misWeight;',
         'gl_FragColor.rgb += environmentIntensity * envColor * state.throughputColor * misWeight * ( state.isShadowRay ? vec3( 1.0 ) : uSpecSky );')
-      .replace('gl_FragColor.a *= opacity;', '{ if ( any( isnan( gl_FragColor.rgb ) ) || any( isinf( gl_FragColor.rgb ) ) ) gl_FragColor.rgb = vec3( 0.0 ); float mx = max( max( gl_FragColor.r, gl_FragColor.g ), gl_FragColor.b ); if ( mx > uSampleClamp ) gl_FragColor.rgb *= uSampleClamp / mx; }\n\t\t\t\t\tgl_FragColor.a *= opacity;');
+      .replace('gl_FragColor.a *= opacity;', '{ if ( any( isnan( gl_FragColor.rgb ) ) || any( isinf( gl_FragColor.rgb ) ) ) gl_FragColor.rgb = vec3( 0.0 ); float mx = max( max( gl_FragColor.r, gl_FragColor.g ), gl_FragColor.b ); if ( mx > uSampleClamp ) gl_FragColor.rgb *= uSampleClamp / mx; }\n\t\t\t\t\tgl_FragColor.a *= pxOpacity;');
     m.needsUpdate = true;
     // the defines are set now as every picture uses them (plain PCG random numbers, no depth of field, the sky as the
     // background, no fog), which starts the compilation of the path tracer in the background while the world is built
@@ -141,10 +223,22 @@ function target(name, w, h, type = THREE.FloatType, depth = false) {
   return t;
 }
 
-const sleep0 = () => new Promise(r => setTimeout(r, 0));
-// gives the page a turn between slices of work: scheduler.yield where the browser has it, which is not slowed as a
-// chain of zero timeouts is
-const yieldPage = () => (globalThis.scheduler && typeof globalThis.scheduler.yield === 'function') ? globalThis.scheduler.yield() : sleep0();
+// a single-channel float target with a depth buffer, for a shadow map
+function shadowTarget(name, size) {
+  let t = ctx.targets.get(name);
+  if (!t) {
+    t = new THREE.WebGLRenderTarget(size, size, { type: THREE.FloatType, format: THREE.RedFormat, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, depthBuffer: true, generateMipmaps: false });
+    ctx.targets.set(name, t);
+  }
+  if (t.width !== size) t.setSize(size, size);
+  return t;
+}
+
+// gives the page a turn between slices of work, by a message to itself: a message is not slowed as a chain of zero
+// timeouts is, and, unlike scheduler.yield, it does not go ahead of the browser's drawing of the page
+const yieldChannel = new MessageChannel(), yieldQueue = [];
+yieldChannel.port1.onmessage = () => { const r = yieldQueue.shift(); if (r) r(); };
+const yieldPage = () => new Promise(r => { yieldQueue.push(r); yieldChannel.port2.postMessage(0); });
 function checkAbort(signal) { if (signal && signal.aborted) throw new DOMException('The path tracing was stopped.', 'AbortError'); }
 
 // waits until the GPU has finished what has been sent to it, without blocking the page
@@ -230,12 +324,15 @@ async function buildBVH(geo, options, signal, info) {
       for (let k = 0; k < ids.length; k++) { const t = ids[k]; if (bin(cen[t * 3 + axis]) <= cut) L[a++] = t; else Rr[b++] = t; }
       return { axis, left: split(L, depth + 1), right: split(Rr, depth + 1) };
     };
+    await yieldPage(); checkAbort(signal);
     const all = new Uint32Array(nt); for (let t = 0; t < nt; t++) all[t] = t;
     const top = split(all, 0);
+    await yieldPage(); checkAbort(signal);
     const groups = []; const collectLeaves = n => { if (n.ids) groups.push(n); else { collectLeaves(n.left); collectLeaves(n.right); } }; collectLeaves(top);
     info.bvhGroups = groups.length; info.tBvhSplit = Math.round(performance.now() - t0);
     // each group's hierarchy, built in a worker of its own over its own copy of its triangles
-    const results = await Promise.all(groups.map((g, i) => {
+    const results = await Promise.all(groups.map(async (g, i) => {
+      await yieldPage();
       const P = new Float32Array(g.ids.length * 9);
       for (let k = 0; k < g.ids.length; k++) { const t = g.ids[k]; for (let c = 0; c < 3; c++) { const v = idx[t * 3 + c] * 3; P[k * 9 + c * 3] = pos[v]; P[k * 9 + c * 3 + 1] = pos[v + 1]; P[k * 9 + c * 3 + 2] = pos[v + 2]; } }
       return runWorker(pool.workers[i], { position: P, options }, [P.buffer], signal);
@@ -266,7 +363,9 @@ async function buildBVH(geo, options, signal, info) {
       U32[w + 6] = L.end; U32[w + 7] = n.axis;
       return { end: Rr.end, b };
     };
+    await yieldPage(); checkAbort(signal);
     emit(top, 0);
+    await yieldPage(); checkAbort(signal);
     info.tBvhWorkers = Math.round(performance.now() - t0);
     return MeshBVH.deserialize({ roots: [buf], index: idx, indirectBuffer: indirect }, geo, { setIndex: false, indirect: true });
   } catch (e) {
@@ -317,13 +416,15 @@ function metalClass(r, g, b) {
 const isTrainMaterial = m => typeof m.customProgramCacheKey === 'function' && /^train/.test(m.customProgramCacheKey());
 
 // one physical material for each distinct look among the game's materials and each class of surface in it
-function convertMaterial(m, cache, list, noShadow = false, cls = CLS.BASE) {
+// (own: a material that is not to be shared with any other part, such as the distant terrain's, which the raster
+// passes leave out)
+function convertMaterial(m, cache, list, noShadow = false, cls = CLS.BASE, own = '') {
   const rough = m.type === 'MeshStandardMaterial' || m.type === 'MeshPhysicalMaterial' ? Math.max(0.05, m.roughness)
     : m.type === 'MeshPhongMaterial' ? Math.min(1, Math.max(0.25, Math.sqrt(2 / (m.shininess + 2)) * 1.6))
     : m.type === 'MeshToonMaterial' ? 0.85 : 0.92;
   const metal = m.metalness !== undefined ? m.metalness : 0;
   const em = m.emissive ? m.emissive.clone().multiplyScalar(m.emissiveIntensity ?? 1) : new THREE.Color(0, 0, 0);
-  const key = [m.color ? m.color.getHexString() : 'ffffff', m.map ? m.map.uuid : '-', rough.toFixed(2), metal.toFixed(2), em.getHexString(), m.alphaTest > 0 ? m.alphaTest : 0, noShadow ? 'ns' : 's', cls].join('|');
+  const key = [m.color ? m.color.getHexString() : 'ffffff', m.map ? m.map.uuid : '-', rough.toFixed(2), metal.toFixed(2), em.getHexString(), m.alphaTest > 0 ? m.alphaTest : 0, noShadow ? 'ns' : 's', cls, own].join('|');
   let i = cache.get(key);
   if (i !== undefined) return i;
   const base = { color: m.color ? m.color.clone() : new THREE.Color(1, 1, 1), vertexColors: true, side: THREE.DoubleSide };
@@ -488,7 +589,7 @@ function skyColour(U, x, y, z, glow, out) {
 }
 
 // the background as the game draws it, and the light of the sky with the sun as a disc
-function buildSky(U, sunDir, sunRad, opt) {
+async function buildSky(U, sunDir, sunRad, opt) {
   const W = opt.envWidth, H = W / 2;
   const bg = new Float32Array(W * H * 4), env = new Float32Array(W * H * 4);
   const c = [0, 0, 0];
@@ -497,7 +598,9 @@ function buildSky(U, sunDir, sunRad, opt) {
   let eUp = [0, 0, 0], discW = 0;
   const dTh = 2 * Math.PI / W, dPh = Math.PI / H;
   const discMask = new Float32Array(W * H);
+  let tY = performance.now();
   for (let j = 0; j < H; j++) {
+    if (performance.now() - tY > 12) { await yieldPage(); tY = performance.now(); }
     // row 0 is the bottom of the map: direction y = -cos(pi v)
     const v = (j + 0.5) / H, phi = (1 - v) * Math.PI, sp = Math.sin(phi), y = Math.cos(phi);
     const dOmega = sp * dTh * dPh;
@@ -523,10 +626,17 @@ function buildSky(U, sunDir, sunRad, opt) {
   const rl = lum(ratio);
   const gains = ratio.map(r => gain * Math.pow(Math.max(1e-3, r / rl), opt.skyTint));
   const sunL = discW > 0 ? [sunRad.r / discW, sunRad.g / discW, sunRad.b / discW] : [0, 0, 0];
+  // the sky light without the sun, averaged into a coarse map, for the irradiance of the far field
+  const DW = 64, DH = 32, down = new Float32Array(DW * DH * 3), fx = W / DW, fy = H / DH;
   for (let p = 0; p < W * H; p++) {
+    if ((p & 65535) === 0 && performance.now() - tY > 12) { await yieldPage(); tY = performance.now(); }
     const k = p * 4, w = discMask[p];
-    for (let q = 0; q < 3; q++) env[k + q] = env[k + q] * gains[q] + sunL[q] * w;
+    for (let q = 0; q < 3; q++) env[k + q] = env[k + q] * gains[q];
+    const d = (Math.floor(Math.floor(p / W) / fy) * DW + Math.floor((p % W) / fx)) * 3;
+    for (let q = 0; q < 3; q++) down[d + q] += env[k + q] / (fx * fy);
+    for (let q = 0; q < 3; q++) env[k + q] += sunL[q] * w;
   }
+  const irrTex = irradianceMap(down, DW, DH, sunDir, sunRad);
   const mk = (data) => {
     const t = new THREE.DataTexture(data, W, H, THREE.RGBAFormat, THREE.FloatType);
     t.mapping = THREE.EquirectangularReflectionMapping; t.minFilter = t.magFilter = THREE.LinearFilter;
@@ -538,7 +648,34 @@ function buildSky(U, sunDir, sunRad, opt) {
   for (let p = 0; p < bg.length; p++) bgHalf[p] = THREE.DataUtils.toHalfFloat(bg[p]);
   const bgTex = new THREE.DataTexture(bgHalf, W, H, THREE.RGBAFormat, THREE.HalfFloatType);
   bgTex.minFilter = bgTex.magFilter = THREE.LinearFilter; bgTex.wrapS = THREE.RepeatWrapping; bgTex.wrapT = THREE.ClampToEdgeWrapping; bgTex.generateMipmaps = false; bgTex.needsUpdate = true;
-  return { bgTex, envTex: mk(env), gain, gains, eUp, sunL };
+  return { bgTex, envTex: mk(env), irrTex, gain, gains, eUp, sunL };
+}
+
+// The irradiance on a surface facing each direction, from the sky (sky: the radiance without the sun, DW by DH, laid
+// out as the environment map) and from the ground, taken as a grey diffuse plane of albedo 0.25 lit by the sun and the
+// sky; an equirectangular map of 32 by 16 in the same layout
+function irradianceMap(sky, DW, DH, sunDir, sunRad) {
+  const dirs = [], dOm = [];
+  for (let j = 0; j < DH; j++) for (let i = 0; i < DW; i++) {
+    const v = (j + 0.5) / DH, phi = (1 - v) * Math.PI, sp = Math.sin(phi), th = ((i + 0.5) / DW - 0.5) * 2 * Math.PI;
+    dirs.push([sp * Math.cos(th), Math.cos(phi), sp * Math.sin(th)]); dOm.push(sp * (2 * Math.PI / DW) * (Math.PI / DH));
+  }
+  const up = [0, 0, 0];
+  for (let k = 0; k < dirs.length; k++) if (dirs[k][1] > 0) for (let q = 0; q < 3; q++) up[q] += sky[k * 3 + q] * dirs[k][1] * dOm[k];
+  const sr = [sunRad.r, sunRad.g, sunRad.b], ground = [0, 1, 2].map(q => 0.25 * (up[q] + sr[q] * Math.max(0, sunDir.y)) / Math.PI);
+  const OW = 32, OH = 16, out = new Float32Array(OW * OH * 4);
+  for (let j = 0; j < OH; j++) for (let i = 0; i < OW; i++) {
+    const v = (j + 0.5) / OH, phi = (1 - v) * Math.PI, sp = Math.sin(phi), th = ((i + 0.5) / OW - 0.5) * 2 * Math.PI;
+    const n = [sp * Math.cos(th), Math.cos(phi), sp * Math.sin(th)], o = (j * OW + i) * 4;
+    for (let k = 0; k < dirs.length; k++) {
+      const d = dirs[k], c = n[0] * d[0] + n[1] * d[1] + n[2] * d[2]; if (c <= 0) continue;
+      for (let q = 0; q < 3; q++) out[o + q] += (d[1] > 0 ? sky[k * 3 + q] : ground[q]) * c * dOm[k];
+    }
+    out[o + 3] = 1;
+  }
+  const t = new THREE.DataTexture(out, OW, OH, THREE.RGBAFormat, THREE.FloatType);
+  t.minFilter = t.magFilter = THREE.LinearFilter; t.wrapS = THREE.RepeatWrapping; t.wrapT = THREE.ClampToEdgeWrapping; t.generateMipmaps = false; t.needsUpdate = true;
+  return t;
 }
 
 /* ---------- collecting the scene ---------- */
@@ -554,7 +691,9 @@ function collect(scene, cam, opt, info) {
     if (d - r > opt.farReach) return false;
     sph.center.copy(c); sph.radius = r; return frustum.intersectsSphere(sph);
   };
-  const parts = [], included = new Set(), renderables = [];
+  // what lies wholly beyond ptReach is drawn by the raster passes alone (farParts)
+  const parts = [], farParts = [], included = new Set(), renderables = [];
+  const ptReach = opt.ptReach > 0 ? opt.ptReach : Infinity;
   let sea = null, sky = null, sun = null, hemi = null, far = null;
   scene.traverseVisible(o => {
     if (o.isDirectionalLight && (!sun || o.castShadow)) sun = o;
@@ -584,17 +723,17 @@ function collect(scene, cam, opt, info) {
         o.getMatrixAt(k, im); mw.multiplyMatrices(o.matrixWorld, im);
         c.copy(bs.center).applyMatrix4(mw); const r = bs.radius * mw.getMaxScaleOnAxis();
         if (!keep(c, r)) continue;
-        parts.push({ o, matrix: mw.clone(), instance: k }); any = true;
+        (c.distanceTo(camPos) - r > ptReach ? farParts : parts).push({ o, matrix: mw.clone(), instance: k }); any = true;
       }
       if (any) included.add(o);
     } else {
       const c = bs.center.clone().applyMatrix4(o.matrixWorld), r = bs.radius * o.matrixWorld.getMaxScaleOnAxis();
       if (!farTerrain && !keep(c, r)) return;
-      parts.push({ o, matrix: o.matrixWorld.clone(), instance: -1, far: farTerrain }); included.add(o);
+      (!farTerrain && c.distanceTo(camPos) - r > ptReach ? farParts : parts).push({ o, matrix: o.matrixWorld.clone(), instance: -1, far: farTerrain }); included.add(o);
     }
   });
-  info.parts = parts.length;
-  return { parts, included, renderables, sea, sky, sun, hemi, far };
+  info.parts = parts.length; info.farParts = farParts.length;
+  return { parts, farParts, included, renderables, sea, sky, sun, hemi, far };
 }
 
 /* ---------- the world for the picture ----------
@@ -615,9 +754,10 @@ function wideFrustum(cam, k) {
   return { wide, frustum: new THREE.Frustum().setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(wide.projectionMatrix, wide.matrixWorldInverse)) };
 }
 // The blocks, filled into W as they come so that whatever was generated can be let go even if the picture is
-// stopped half way: W.parts (for the scene), W.temps (meshes with the game's own materials, for the colour passes),
-// W.generated (the blocks made for the picture alone, which the caller hands back with V.disposeChunk), W.built
-// (the cells covered, in the true world)
+// stopped half way: W.parts (the blocks within ptReach, for the path-traced scene), W.far (the geometry of the blocks
+// beyond it, for the raster passes alone), W.temps (meshes with the game's own materials, for the colour passes),
+// W.generated and W.farChunks (the blocks made for the picture alone, near and far, which are handed back with
+// V.disposeChunk), W.built and W.farBuilt (the cells covered, near and far, in the true world)
 async function gatherWorld(V, cam, opt, info, budget, W, report, signal) {
   const C = BLOCK, wg = worldGroup(V); wg.updateMatrixWorld(true);
   const ox = -wg.position.x, oz = -wg.position.z;   // the floating origin: true world = scene + origin
@@ -645,41 +785,50 @@ async function gatherWorld(V, cam, opt, info, budget, W, report, signal) {
     cells.push({ cx, cz, d, want: ring <= r0 ? 0 : ring <= r1 ? 1 : 2 });
   }
   cells.sort((a, b) => a.d - b.d);
-  let tris = 0, verts = 0, made = 0, reused = 0, t = performance.now();
+  let tris = 0, verts = 0, farTris = 0, made = 0, reused = 0, t = performance.now();
   const tGen = [0, 0, 0], nGen = [0, 0, 0], trisByLod = [0, 0, 0];
   const t0 = performance.now();
   for (let k = 0; k < cells.length; k++) {
-    // beyond the budget the blocks end, and the distant terrain begins there instead
-    if (tris > budget.triangles || verts > budget.vertices) { info.blocksCut = cells.length - k; W.reach = cells[k].d; break; }
+    // blocks nearer than ptReach are path-traced; those beyond are drawn by the raster passes alone
     const c = cells[k], key = c.cx + ',' + c.cz;
+    // once the path tracer's budget is spent, the near field ends there (W.nearReach) and the blocks beyond it are
+    // drawn by the raster passes; beyond the raster passes' own budget the blocks end, and the distant terrain begins
+    if (c.d < W.nearReach && (tris > budget.triangles || verts > budget.vertices)) W.nearReach = c.d;
+    const near = c.d < W.nearReach;
+    if (!near && farTris > budget.rasterTriangles) { info.blocksCut = cells.length - k; W.reach = c.d; break; }
     let ch = have.get(key);
     // a block the game holds at the detail wanted or finer is taken as it is; so is a simplified one where full detail
     // is wanted, since the game's boats stand with it and would otherwise be there twice
     if (!(ch && (ch.lod <= c.want || (c.want === 0 && ch.lod === 1)))) {
       const tg = performance.now();
-      ch = V.genChunk(c.cx, c.cz, c.want); W.generated.push(ch); made++;
+      ch = V.genChunk(c.cx, c.cz, c.want); (near ? W.generated : W.farChunks).push(ch); made++;
       tGen[c.want] += performance.now() - tg; nGen[c.want]++;
     } else reused++;
-    W.built.add(key);
+    (near ? W.built : W.farBuilt).add(key);
     const M = new THREE.Matrix4().makeTranslation(c.cx * C - ox, 0, c.cz * C - oz);
     for (const [g, m] of [[ch.geo, bMat], [ch.groundGeo, gMat]]) {
       if (!g || !g.attributes.position || !g.attributes.position.count) continue;
       if (g === ch.groundGeo) { if (!g.boundingBox) g.computeBoundingBox(); if (g.boundingBox.max.y < -1.5) continue; }   // sea floor, unseen under the water
+      // a block beyond ptReach is drawn by the raster passes alone
+      if (!near) { W.far.push({ g, m, x: c.cx * C - ox, z: c.cz * C - oz }); farTris += (g.index ? g.index.count : g.attributes.position.count) / 3; continue; }
       W.parts.push({ o: { geometry: g, material: m, isInstancedMesh: false, position: new THREE.Vector3() }, matrix: M, instance: -1, block: true });
       const nt = (g.index ? g.index.count : g.attributes.position.count) / 3;
       tris += nt; verts += g.attributes.position.count; trisByLod[Math.min(2, ch.lod)] += nt;
       // near the camera the colour passes draw the game's own surfaces, patterns and all
       if (c.d < opt.colourReach) { const mesh = new THREE.Mesh(g, m); mesh.position.set(c.cx * C, 0, c.cz * C); mesh.frustumCulled = false; W.temps.push(mesh); }
     }
-    if (performance.now() - t > 25) { report('world', (k + 1) / cells.length); await yieldPage(); checkAbort(signal); t = performance.now(); }
+    if (performance.now() - t > 30) { report('world', (k + 1) / cells.length); await yieldPage(); checkAbort(signal); t = performance.now(); }
   }
+  info.farBlockTriangles = Math.round(farTris); info.nearReach = Math.round(Math.min(W.nearReach, 1e6));
   info.blockCells = cells.length; info.blocksReused = reused; info.blocksMade = made; info.blockTriangles = Math.round(tris); info.blockVertices = verts;
   info.genMs = tGen.map(Math.round); info.blockTrianglesByLod = trisByLod.map(Math.round); info.genCount = nGen; info.tBlocks = Math.round(performance.now() - t0);
   return true;
 }
 
 // the land beyond the blocks, out to horizonReach, from the game's coarse terrain
-function distantTerrain(V, cam, opt, info, built, reach = Infinity) {
+// (lowered under the blocks within built, for the path tracer; rasterPosition is the same lowered also under the
+// blocks of farBuilt, which only the raster passes draw, the terrain standing in for them in the path tracer)
+function distantTerrain(V, cam, opt, info, built, reach = Infinity, farBuilt = null) {
   const r0 = Math.min(opt.horizonReach, opt.blockReach, reach), R = opt.horizonReach;
   if (!V.farPoint || !V.FS || R <= r0 + 1) return null;
   const t0 = performance.now(), FS = V.FS, C = BLOCK, wg = worldGroup(V);
@@ -700,10 +849,11 @@ function distantTerrain(V, cam, opt, info, built, reach = Infinity) {
   for (let r = r0 * 0.96; r < R; r *= 1 + da) radii.push(r);
   radii.push(R);
   const nr = radii.length, nv = nr * na;
-  const P = new Float32Array(nv * 3), Cc = new Float32Array(nv * 3), Hs = new Float32Array(nv);
+  const P = new Float32Array(nv * 3), Cc = new Float32Array(nv * 3), Hs = new Float32Array(nv), PR = new Float32Array(nv * 3);
   const pts = new Map();
   const fp = (gi, gj) => { const k = gi * 1e6 + gj; let F = pts.get(k); if (!F) { F = V.farPoint(gi, gj); pts.set(k, F); } return F; };
-  const inBuilt = (x, z) => built.has(Math.floor(x / C) + ',' + Math.floor(z / C));
+  const inSet = (S, x, z) => S.has(Math.floor(x / C) + ',' + Math.floor(z / C));
+  const under = (S, x, z) => S && inSet(S, x - 2, z - 2) && inSet(S, x + 2, z - 2) && inSet(S, x - 2, z + 2) && inSet(S, x + 2, z + 2);
   for (let a = 0; a < nr; a++) for (let b = 0; b < na; b++) {
     const r = radii[a], th = a0 + lo + (hi - lo) * b / (na - 1), x = wx + Math.cos(th) * r, z = wz + Math.sin(th) * r, q = a * na + b;
     let h, cr, cg, cb;
@@ -716,10 +866,10 @@ function distantTerrain(V, cam, opt, info, built, reach = Infinity) {
       h = A.h * w00 + B.h * w10 + D.h * w01 + E.h * w11;
       cr = A.r * w00 + B.r * w10 + D.r * w01 + E.r * w11; cg = A.g * w00 + B.g * w10 + D.g * w01 + E.g * w11; cb = A.b * w00 + B.b * w10 + D.b * w01 + E.b * w11;
     }
-    let y = h - 0.35;
+    let y = h - 0.35, yr = y;
     // under the blocks the terrain is lowered out of their way, as the game's own coarse terrain is
-    if (inBuilt(x - 2, z - 2) && inBuilt(x + 2, z - 2) && inBuilt(x - 2, z + 2) && inBuilt(x + 2, z + 2)) y -= 60;
-    P[q * 3] = x - ox; P[q * 3 + 1] = y; P[q * 3 + 2] = z - oz; Hs[q] = h;
+    if (under(built, x, z)) y = yr = y - 60; else if (under(farBuilt, x, z)) yr -= 60;
+    P[q * 3] = PR[q * 3] = x - ox; P[q * 3 + 1] = y; PR[q * 3 + 1] = yr; P[q * 3 + 2] = PR[q * 3 + 2] = z - oz; Hs[q] = h;
     Cc[q * 3] = cr; Cc[q * 3 + 1] = cg; Cc[q * 3 + 2] = cb;
   }
   const I = [];
@@ -742,7 +892,7 @@ function distantTerrain(V, cam, opt, info, built, reach = Infinity) {
   geo.setIndex(new THREE.BufferAttribute(new Uint32Array(I), 1));
   geo.computeVertexNormals();
   info.terrainTriangles = I.length / 3; info.terrainVertices = nv; info.terrainPoints = pts.size; info.tTerrain = Math.round(performance.now() - t0);
-  return { o: { geometry: geo, material: V.farMesh.material, isInstancedMesh: false, position: new THREE.Vector3() }, matrix: new THREE.Matrix4(), instance: -1, generated: true };
+  return { o: { geometry: geo, material: V.farMesh.material, isInstancedMesh: false, position: new THREE.Vector3() }, matrix: new THREE.Matrix4(), instance: -1, generated: true, terrain: true, rasterPosition: PR };
 }
 
 // the cells of the world whose blocks are loaded, under which the distant terrain is lowered out of sight
@@ -779,7 +929,7 @@ function rippleTexture() {
   return rippleTex;
 }
 
-function buildGeometry(col, seaGeo, origin, info, opt) {
+async function buildGeometry(col, seaGeo, origin, info, opt, signal) {
   // everything is moved so that the camera stands at the origin, where floats are finest
   const shift = new THREE.Matrix4().makeTranslation(-origin.x, -origin.y, -origin.z);
   const matCache = new Map(), materials = [];
@@ -791,7 +941,9 @@ function buildGeometry(col, seaGeo, origin, info, opt) {
   };
   // each part becomes one or more pieces: a range of triangles with one material
   const pieces = [];
+  let tY = performance.now();
   for (const p of col.parts) {
+    if (performance.now() - tY > 12) { await yieldPage(); checkAbort(signal); tY = performance.now(); }
     const o = p.o, g = o.geometry, ms = Array.isArray(o.material) ? o.material : null;
     const idx = g.index, total = idx ? idx.count : g.attributes.position.count;
     const dr0 = Math.max(0, g.drawRange.start), dr1 = Math.min(total, g.drawRange.start + g.drawRange.count);
@@ -801,11 +953,11 @@ function buildGeometry(col, seaGeo, origin, info, opt) {
       if (!usable(r.m) || r.e <= r.s) continue;
       const e3 = r.e - ((r.e - r.s) % 3);
       const cl = opt.materials ? classify(g, r.m, r.s, e3, idx) : null;
-      if (!cl) { pieces.push({ p, s: r.s, e: e3, m: r.m, mi: convertMaterial(r.m, matCache, materials, !!p.far) }); continue; }
+      if (!cl) { pieces.push({ p, s: r.s, e: e3, m: r.m, mi: convertMaterial(r.m, matCache, materials, !!p.far, CLS.BASE, p.terrain ? 'terrain' : '') }); continue; }
       // a mesh holding several classes of surface is split into one piece for each, triangle by triangle
       const by = new Map();
       for (let k = 0; k < cl.length; k++) { let L = by.get(cl[k]); if (!L) by.set(cl[k], L = []); L.push(r.s + k * 3); }
-      for (const [c, L] of by) pieces.push({ p, s: 0, e: L.length * 3, tris: Uint32Array.from(L), m: r.m, mi: convertMaterial(r.m, matCache, materials, !!p.far, c) });
+      for (const [c, L] of by) pieces.push({ p, s: 0, e: L.length * 3, tris: Uint32Array.from(L), m: r.m, mi: convertMaterial(r.m, matCache, materials, !!p.far, c, p.terrain ? 'terrain' : '') });
     }
   }
   const seaMat = new THREE.MeshPhysicalMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.07, metalness: 0, ior: 1.333, side: THREE.DoubleSide,
@@ -830,6 +982,7 @@ function buildGeometry(col, seaGeo, origin, info, opt) {
   info.loadedCells = cells ? cells.size : 0;
   let w = 0, wi = 0, seaUV = null; const groups = []; let gStart = 0, gMat = -1;
   for (const pc of pieces) {
+    if (performance.now() - tY > 12) { await yieldPage(); checkAbort(signal); tY = performance.now(); }
     if (pc.mi !== gMat) { if (gMat >= 0) groups.push({ start: gStart, count: wi - gStart, materialIndex: gMat }); gMat = pc.mi; gStart = wi; }
     const o = pc.p.o, g = o.geometry, pos = g.attributes.position, idx = g.index, M = shift.clone().multiply(pc.p.matrix);
     nm.getNormalMatrix(M);
@@ -871,6 +1024,7 @@ function buildGeometry(col, seaGeo, origin, info, opt) {
     }
   }
   if (gMat >= 0) groups.push({ start: gStart, count: wi - gStart, materialIndex: gMat });
+  const terrainMats = new Set(pieces.filter(pc => pc.p.terrain).map(pc => pc.mi));
   // the sea goes last
   if (seaGeo) {
     const sp = seaGeo.attributes.position.array, sn = seaGeo.attributes.normal.array, sc = seaGeo.attributes.color.array, si = seaGeo.index.array;
@@ -895,7 +1049,41 @@ function buildGeometry(col, seaGeo, origin, info, opt) {
   geo.setIndex(new THREE.BufferAttribute(I, 1));
   for (const gr of groups) geo.addGroup(gr.start, gr.count, gr.materialIndex);
   info.materials = materials.length;
-  return { geo, materials, seaIndex };
+  return { geo, materials, seaIndex, terrainMats };
+}
+
+// a block made for the picture alone is handed back to the game, which lets go of it and of its boats and clock faces
+function disposeChunk(V, ch) {
+  try { if (V && V.disposeChunk) V.disposeChunk(ch); else { ch.geo.dispose(); ch.groundGeo.dispose(); } } catch (e) { /* already gone */ }
+}
+
+/* ---------- the far field, drawn by the raster passes alone ----------
+   Beyond ptReach the picture is not path-traced. The blocks there (W.far), the game's objects there (col.farParts)
+   and the distant terrain, lowered under every block, are drawn into the colour passes, the guide and the shadow
+   maps; the path tracer holds the terrain alone there, unlowered, which stands in for them in its reflections and
+   shadows. The light on the far surfaces is worked out from the guide (farBasisMat). */
+async function buildFarScene(W, col, terrain, materials, terrainMats, origin, info, opt, signal) {
+  const meshes = [], owned = [], white = new THREE.Color(1, 1, 1), byMat = new Map();
+  const albedoOf = m => { let a = byMat.get(m); if (!a) { a = albedoMaterial({ color: m.color || white, map: null }, false); byMat.set(m, a); owned.push(a); } return a; };
+  const add = (g, m, x = 0, y = 0, z = 0) => { const mesh = new THREE.Mesh(g, m); mesh.position.set(x, y, z); mesh.frustumCulled = false; mesh.matrixAutoUpdate = false; mesh.updateMatrix(); meshes.push(mesh); };
+  let tris = 0;
+  for (const f of W.far) { add(f.g, albedoOf(f.m), f.x - origin.x, -origin.y, f.z - origin.z); tris += (f.g.index ? f.g.index.count : f.g.attributes.position.count) / 3; }
+  if (col.farParts && col.farParts.length) {
+    const fi = {}, r = await buildGeometry({ parts: col.farParts, far: null }, null, origin, fi, opt, signal);
+    const mats = r.materials.map(m => albedoMaterial(m, false));
+    add(r.geo, mats); owned.push(r.geo, ...mats, ...r.materials); tris += fi.triangles;
+  }
+  let terrainOn = false;
+  if (terrain && terrainMats.size) {
+    const tg = terrain.o.geometry, PR = terrain.rasterPosition, P = new Float32Array(PR.length);
+    for (let k = 0; k < PR.length; k += 3) { P[k] = PR[k] - origin.x; P[k + 1] = PR[k + 1] - origin.y; P[k + 2] = PR[k + 2] - origin.z; }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(P, 3)); g.setAttribute('normal', tg.attributes.normal); g.setAttribute('color', tg.attributes.color); g.setIndex(tg.index);
+    const m = albedoMaterial(materials[terrainMats.values().next().value], false);
+    add(g, m); owned.push(g, m); terrainOn = true;
+  }
+  info.farTriangles = Math.round(tris);
+  return { meshes, terrain: terrainOn, dispose() { for (const x of owned) x.dispose(); } };
 }
 
 /* ---------- shaders for the raster passes ---------- */
@@ -934,21 +1122,50 @@ const accumulateMat = pass(`uniform sampler2D tA, tB; uniform float uWhich; vary
   { tA: { value: null }, tB: { value: null }, uWhich: { value: 0 } },
   { blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor, blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.OneFactor, transparent: true });
 
+// every other pixel of every other row, for reading back a quarter of a buffer
+const packMat = pass(`uniform sampler2D t; void main(){ gl_FragColor=texelFetch(t,ivec2(gl_FragCoord.xy)*2,0); }`, { t: { value: null } }, { blending: THREE.NoBlending });
 const copyMat = pass(`uniform sampler2D t; varying vec2 vUv; void main(){ gl_FragColor=texture2D(t,vUv); }`, { t: { value: null } }, { blending: THREE.NoBlending });
 
 // the light falling on each surface (radiance over flat colour) and the variance of its mean, from the two halves of
 // the samples
-const demodMat = pass(`uniform sampler2D tP, tH, tApt; uniform float uN; uniform vec2 uTexel; varying vec2 vUv;
+// the far field: a surface beyond uBand.x (at the centre of the pixel) takes the light of the far field, entirely
+// beyond uBand.y. Where the surface covers only part of the pixel, the rest is the sky as the path tracer shows it,
+// which is mixed in by the share the surface leaves uncovered (the colour passes count what they leave uncovered as
+// white)
+// With uPreview, before any sample is taken, every surface takes the light of the far field and the rest is sky.
+const demodMat = pass(`uniform sampler2D tP, tH, tApt, tG, tFar, tBg; uniform float uN, uHybrid, uPreview, uTanY, uAspect; uniform vec2 uTexel, uBand; uniform vec3 uKSun, uKSky;
+  uniform mat3 uCamRot; varying vec2 vUv;
   float lum(vec3 c){ return dot(c,vec3(0.2126,0.7152,0.0722)); }
-  vec3 light(vec2 uv){ return texture2D(tP,uv).rgb/max(texture2D(tApt,uv).rgb/uN,vec3(0.03)); }
+  vec3 viewDir(vec2 uv){ return vec3((uv*2.0-1.0)*vec2(uTanY*uAspect,uTanY),-1.0); }
+  float farShare(vec2 uv, float cover){
+    if (uHybrid<0.5 || cover<0.02) return 0.0;
+    float z=texture2D(tG,uv).w; if (z<=0.0 || z>1e5) return 0.0;
+    return smoothstep(uBand.x,uBand.y,z*length(viewDir(uv))); }
+  // the sky behind the pixel, as the path tracer draws it
+  vec3 skyIn(vec3 d){ return texture2D(tBg,vec2(atan(d.z,d.x)/6.2831853+0.5,1.0-acos(clamp(d.y,-1.0,1.0))/3.1415927)).rgb; }
+  vec3 skyAt(vec2 uv){ return skyIn(normalize(uCamRot*viewDir(uv))); }
+  // the light of the far field on the pixel's surface, as the light to multiply its colour (A, with cover) by
+  vec3 farLight(vec2 uv, vec4 A){ vec4 b=texture2D(tFar,uv); vec3 E=uKSun*b.a+uKSky*b.rgb;
+    if (A.a>0.99) return E;
+    vec3 sky=skyAt(uv), alb=max(A.rgb-(1.0-A.a),vec3(0.0));
+    return (alb*E+(1.0-A.a)*sky)/max(A.rgb,vec3(0.03)); }
+  vec3 light(vec2 uv){ vec4 A=texture2D(tApt,uv)/uN; vec3 E=texture2D(tP,uv).rgb/max(A.rgb,vec3(0.03));
+    float t=farShare(uv,A.a); return t>0.0 ? mix(E,farLight(uv,A),t) : E; }
   void main(){ vec3 P=texture2D(tP,vUv).rgb, H=texture2D(tH,vUv).rgb; vec4 A=texture2D(tApt,vUv)/uN;
+    // (the sea, glass and metal, which the colour passes leave uncovered, take a dim reflection of the sky)
+    if (uPreview>0.5){ vec4 g=texture2D(tG,vUv); bool hit=g.w>0.0 && g.w<1e5;
+      vec3 E = hit && A.a>0.02 ? farLight(vUv,A) : hit ? 0.35*skyIn(reflect(normalize(uCamRot*viewDir(vUv)),normalize(g.xyz))) : skyAt(vUv);
+      gl_FragColor=vec4(E/(hit && A.a>0.02 ? vec3(1.0) : max(A.rgb,vec3(0.03))),0.0); return; }
     vec3 a=max(A.rgb,vec3(0.03)); vec3 E=P/a; float d=lum(P-H)/max(lum(a),0.03);
+    float t=farShare(vUv,A.a); if (t>0.0){ E=mix(E,farLight(vUv,A),t); d*=1.0-t; }
     // a pixel far brighter than every one of its eight neighbours is a firefly: it takes their mean instead
     vec3 s=vec3(0.0); float mx=0.0;
     for (int y=-1;y<=1;y++) for (int x=-1;x<=1;x++){ if (x==0&&y==0) continue; vec3 q=light(vUv+vec2(float(x),float(y))*uTexel); s+=q; mx=max(mx,lum(q)); }
     if (lum(E)>3.0*mx+0.05){ E=s/8.0; d=0.0; }
     gl_FragColor=vec4(E,d*d); }`,
-  { tP: { value: null }, tH: { value: null }, tApt: { value: null }, uN: { value: 1 }, uTexel: { value: new THREE.Vector2() } }, { blending: THREE.NoBlending });
+  { tP: { value: null }, tH: { value: null }, tApt: { value: null }, tG: { value: null }, tFar: { value: null }, uN: { value: 1 }, uTexel: { value: new THREE.Vector2() },
+    uHybrid: { value: 0 }, uPreview: { value: 0 }, uTanY: { value: 1 }, uAspect: { value: 1 }, uBand: { value: new THREE.Vector2(1e9, 1e9) }, uKSun: { value: new THREE.Vector3() }, uKSky: { value: new THREE.Vector3() },
+    tBg: { value: null }, uCamRot: { value: new THREE.Matrix3() } }, { blending: THREE.NoBlending });
 
 // one step of the edge-aware a-trous filter (a 5x5 B3 spline at a spacing of uStep pixels), weighted by the plane of
 // the surface, its normal and the difference in light measured against the estimated noise
@@ -1019,6 +1236,56 @@ const composeMat = pass(`uniform sampler2D tE, tP, tApt, tAg, tG; uniform float 
     uTanY: { value: 1 }, uAspect: { value: 1 }, uHor: { value: new THREE.Color() }, uMid: { value: new THREE.Color() }, uCamRot: { value: new THREE.Matrix3() } },
   { blending: THREE.NoBlending, toneMapped: true });
 
+/* ---------- the light on the far field ----------
+   Beyond ptReach the light on a surface is the sun's, as far as the sun is seen from it, and the sky's: the sun's
+   visibility comes from two shadow maps over the far part of the view, drawn from the sun with everything the raster
+   passes draw, and the sky's irradiance from a coarse map of the irradiance of the sky and the ground on a surface
+   facing each way (irradianceMap). farBasisMat writes, for each pixel, the sky's irradiance (rgb) and the share of
+   the sun's (a: the cosine of its angle times its visibility). The light is then kSun * a + kSky * rgb, where kSun and
+   kSky are fitted, colour by colour, to the path-traced light of the surfaces between, at the edge of the near field
+   (see calibrate in pathTrace), so that the two fields meet without a seam. */
+const shadowDepthMat = new THREE.RawShaderMaterial({
+  glslVersion: THREE.GLSL3, side: THREE.DoubleSide,
+  vertexShader: `in vec3 position; uniform mat4 modelViewMatrix, projectionMatrix; void main(){ gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+  fragmentShader: `precision highp float; out vec4 o; void main(){ o=vec4(gl_FragCoord.z); }`,
+});
+// an orthographic camera looking along the sun's light over the part of the view between view depths n0 and n1
+function sunCamera(camPT, sunDir, n0, n1, tanY, aspect) {
+  const rot = new THREE.Matrix3().setFromMatrix4(camPT.matrixWorld), corners = [], centre = new THREE.Vector3();
+  for (const d of [n0, n1]) for (const sx of [-1, 1]) for (const sy of [-1, 1]) {
+    const c = new THREE.Vector3(sx * tanY * aspect * d, sy * tanY * d, -d).applyMatrix3(rot); corners.push(c); centre.add(c); }
+  centre.multiplyScalar(1 / 8);
+  const lc = new THREE.OrthographicCamera(), D = 4000;
+  lc.position.copy(centre).addScaledVector(sunDir, D);
+  if (Math.abs(sunDir.y) > 0.99) lc.up.set(1, 0, 0);
+  lc.lookAt(centre); lc.updateMatrixWorld(true);
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, z0 = Infinity;
+  for (const c of corners) { const v = c.applyMatrix4(lc.matrixWorldInverse); x0 = Math.min(x0, v.x); x1 = Math.max(x1, v.x); y0 = Math.min(y0, v.y); y1 = Math.max(y1, v.y); z0 = Math.min(z0, v.z); }
+  lc.left = x0; lc.right = x1; lc.bottom = y0; lc.top = y1; lc.near = 1; lc.far = -z0 + 800; lc.updateProjectionMatrix();
+  return lc;
+}
+const farBasisMat = pass(`uniform sampler2D tG, tIrr, tS0, tS1; uniform mat4 uL0, uL1; uniform vec4 uT0, uT1; uniform mat3 uCamRot;
+  uniform float uTanY, uAspect, uSize; uniform vec3 uSun; varying vec2 vUv;
+  // the share of the sun seen from p, from one shadow map (t: texel size in metres, depth range, -, the view depth up
+  // to which it serves), with a 3 by 3 filter
+  float sunSeen(sampler2D S, mat4 L, vec4 t, vec3 p, vec3 n){
+    vec4 q=L*vec4(p+n*t.x*1.5,1.0); vec3 c=q.xyz/q.w*0.5+0.5;
+    if (any(lessThan(c.xy,vec2(0.0))) || any(greaterThan(c.xy,vec2(1.0))) || c.z>1.0) return 1.0;
+    float bias=t.x*1.5/t.y, v=0.0;
+    for (int y=-1;y<=1;y++) for (int x=-1;x<=1;x++) v+=step(c.z-bias,texture2D(S,c.xy+vec2(float(x),float(y))/uSize).r);
+    return v/9.0; }
+  void main(){
+    vec4 g=texture2D(tG,vUv);
+    if (g.w<=0.0 || g.w>1e5){ gl_FragColor=vec4(0.0); return; }
+    vec3 p=uCamRot*(vec3((vUv*2.0-1.0)*vec2(uTanY*uAspect,uTanY),-1.0)*g.w), n=normalize(g.xyz);
+    float d=g.w, nl=max(dot(n,uSun),0.0), vis=1.0;
+    if (nl>0.0) vis = d<uT0.w ? sunSeen(tS0,uL0,uT0,p,n) : d<uT1.w ? sunSeen(tS1,uL1,uT1,p,n) : 1.0;
+    vec2 uv=vec2(atan(n.z,n.x)/6.2831853+0.5, 1.0-acos(clamp(n.y,-1.0,1.0))/3.1415927);
+    gl_FragColor=vec4(texture2D(tIrr,uv).rgb, nl*vis); }`,
+  { tG: { value: null }, tIrr: { value: null }, tS0: { value: null }, tS1: { value: null }, uL0: { value: new THREE.Matrix4() }, uL1: { value: new THREE.Matrix4() },
+    uT0: { value: new THREE.Vector4() }, uT1: { value: new THREE.Vector4() }, uCamRot: { value: new THREE.Matrix3() }, uTanY: { value: 1 }, uAspect: { value: 1 }, uSize: { value: 2048 },
+    uSun: { value: new THREE.Vector3(0, 1, 0) } }, { blending: THREE.NoBlending });
+
 // a float buffer drawn for inspection: tone mapped, or as it is
 const viewMat = pass(`uniform sampler2D t; uniform float uScale, uDiv; uniform vec4 uMode; varying vec2 vUv;
   void main(){ vec4 c=texture2D(t,vUv)/uDiv; vec3 o=uMode.x>0.5? c.rgb*uScale : uMode.y>0.5 ? c.xyz*0.5+0.5 : uMode.z>0.5 ? vec3(c.w/uScale) : vec3(c.a);
@@ -1026,6 +1293,22 @@ const viewMat = pass(`uniform sampler2D t; uniform float uScale, uDiv; uniform v
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
   }`, { t: { value: null }, uScale: { value: 1 }, uDiv: { value: 1 }, uMode: { value: new THREE.Vector4(1, 0, 0, 0) } }, { blending: THREE.NoBlending, toneMapped: true });
+
+// the passes' programs are compiled once, in the background (the browser compiles them on threads of its own where it
+// can), while the world for the first picture is built, so that their first use does not hold up the page
+function precompilePasses() {
+  if (ctx.precompiled) return; ctx.precompiled = true;
+  const { R } = ctx, sc = new THREE.Scene(), cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1), geo = new THREE.PlaneGeometry(2, 2);
+  const add = mat => { const mesh = new THREE.Mesh(geo, mat); mesh.frustumCulled = false; sc.add(mesh); };
+  [accumulateMat, copyMat, packMat, demodMat, atrousMat, farBasisMat, shadowDepthMat, guideMaterial(), albedoMaterial({ color: new THREE.Color(1, 1, 1), map: null }, false)].forEach(add);
+  const tm = R.toneMapping;
+  const compile = mapping => { R.toneMapping = mapping; const sc2 = new THREE.Scene(); const mesh = new THREE.Mesh(geo, composeMat); mesh.frustumCulled = false; sc2.add(mesh); return R.compileAsync(sc2, cam); };
+  try {
+    const all = [R.compileAsync(sc, cam), compile(THREE.ACESFilmicToneMapping), compile(THREE.NoToneMapping)];
+    R.toneMapping = tm;
+    Promise.all(all).catch(() => {});
+  } catch (e) { R.toneMapping = tm; }
+}
 
 function runPass(mat, out) {
   const { R, quad } = ctx;
@@ -1077,7 +1360,8 @@ function withTemps(V, temps, col, fn) {
 let kept = null;
 function dropKept() {
   if (!kept) return;
-  kept.bvh.geometry = null; kept.geo.dispose(); kept.rasterMats.forEach(x => x.dispose()); kept.materials.forEach(x => x.dispose());
+  if (kept.bvh) kept.bvh.geometry = null; kept.geo.dispose(); kept.rasterMats.forEach(x => x.dispose()); kept.materials.forEach(x => x.dispose());
+  kept.farScene.dispose(); for (const ch of kept.farChunks) disposeChunk(kept.V, ch);
   kept = null; if (ctx) ctx.uploaded = null;
 }
 export function releasePathTrace() { dropKept(); }
@@ -1087,7 +1371,7 @@ function sceneKey(cam, wg, w, h, opt) {
   const o = wg ? wg.position : { x: 0, y: 0, z: 0 }, e = cam.matrixWorld.elements;
   const m = e.map((x, i) => i === 12 ? (x - o.x).toFixed(2) : i === 13 ? (x - o.y).toFixed(2) : i === 14 ? (x - o.z).toFixed(2) : x.toFixed(4));
   return [m.join(','), cam.projectionMatrix.elements.map(x => x.toFixed(5)).join(','), w, h, opt.extend, opt.horizonReach, opt.blockReach, opt.lodRings.join('/'), opt.materials,
-    opt.ripple, opt.rippleSize, opt.jitter, opt.textureSize, opt.nearReach, opt.farReach, opt.frustumWiden, opt.frustumWidenFar, opt.widenReach, opt.terrainStep, opt.colourReach, opt.maxTriangles, opt.maxVertices].join('|');
+    opt.ripple, opt.rippleSize, opt.jitter, opt.textureSize, opt.nearReach, opt.farReach, opt.frustumWiden, opt.frustumWidenFar, opt.widenReach, opt.terrainStep, opt.colourReach, opt.maxTriangles, opt.maxVertices, opt.ptReach, opt.maxRasterTriangles].join('|');
 }
 // the sky, the sun and the hemisphere light of the live scene
 function lightsOf(scene) {
@@ -1106,6 +1390,8 @@ export async function pathTrace(opts = {}) {
   const mem = Math.min(8, navigator.deviceMemory || 8) / 8;
   if (opt.maxTriangles == null) opt.maxTriangles = 4.5e6 * mem;
   if (opt.maxVertices == null) opt.maxVertices = 6e6 * mem;
+  if (opt.maxRasterTriangles == null) opt.maxRasterTriangles = 6e6 * mem;
+  opt.ptReach = opt.ptReach > 0 ? opt.ptReach : Infinity;
   const { renderer, scene, camera, signal, onProgress } = opt;
   const samples = Math.max(1, Math.round(opt.samples));
   if (!scene || !camera) throw new Error('pathTrace needs the scene and the camera.');
@@ -1114,10 +1400,12 @@ export async function pathTrace(opts = {}) {
   const h = Math.round(opt.height || (gameCanvas ? gameCanvas.height : Math.round(w / (camera.aspect || 1.6))));
   const info = { width: w, height: h, samples, bounces: opt.bounces };
   const t0 = performance.now(), mark = k => { info[k] = Math.round(performance.now() - t0); };
+  const deadline = opt.timeBudget > 0 ? (opt.startTime ?? t0) + opt.timeBudget * 1000 : Infinity;
   const report = (phase, fraction) => { if (onProgress) try { onProgress({ phase, fraction, info }); } catch (e) { /* the caller's own error */ } };
   checkAbort(signal);
   getContext(w, h);
   const { R, pt } = ctx;
+  precompilePasses();
 
   // the camera as it is now, standing alone
   camera.updateMatrixWorld();
@@ -1139,58 +1427,73 @@ export async function pathTrace(opts = {}) {
   camPT.far = Math.max(camPT.far, opt.horizonReach * 5); camPT.updateProjectionMatrix();
   const NJ = Math.max(1, opt.jitter);
   const key = sceneKey(cam, extend ? worldGroup(V) : null, w, h, opt);
-  let S = kept && kept.key === key ? kept : null;
+  // (a scene whose BVH was not finished, because the picture was stopped, is not kept)
+  let S = kept && kept.key === key && kept.bvh ? kept : null;
   info.sceneKept = !!S;
   // the colour passes' sums and the filter's guide, drawn once for each scene
   const accPt = target('accPt', w, h, THREE.FloatType), accGame = target('accGame', w, h, THREE.FloatType);
   const tG = target('guide', w, h, THREE.FloatType, true), tLit = target('lit', w, h, THREE.FloatType, true);
   const wantLit = opt.autoExposure && opt.exposure == null;
 
+  let bvhJob = null;
   if (!S) {
     // the scene kept for another view is let go before this one is built
     dropKept();
-    const W = { parts: [], temps: [], generated: [], built: new Set(), reach: Infinity };
-    let geo, materials, seaIndex, rasterMats, col;
+    const W = { parts: [], far: [], temps: [], generated: [], farChunks: [], built: new Set(), farBuilt: new Set(), reach: Infinity, nearReach: opt.ptReach };
+    let geo, materials, seaIndex, rasterMats, col, farScene = null, rasterScene = null;
     try {
-      if (extend) { report('world', 0); await yieldPage(); await gatherWorld(V, cam, opt, info, { triangles: opt.maxTriangles * 0.85, vertices: opt.maxVertices * 0.7 }, W, report, signal); mark('tWorld'); }
+      if (extend) { report('world', 0); await yieldPage(); await gatherWorld(V, cam, opt, info, { triangles: opt.maxTriangles * 0.85, vertices: opt.maxVertices * 0.7, rasterTriangles: opt.maxRasterTriangles }, W, report, signal); mark('tWorld'); }
       checkAbort(signal);
 
       // everything taken from the live scene is taken now, in one go, before the game moves on
       report('scene', 0); await yieldPage();
       scene.updateMatrixWorld(true);
-      col = collect(scene, cam, opt, info);
+      col = collect(scene, cam, { ...opt, ptReach: W.nearReach }, info);
       let terrain = null;
-      if (extend) { col.parts.push(...W.parts); terrain = distantTerrain(V, cam, opt, info, W.built, W.reach); if (terrain) col.parts.push(terrain); }
+      if (extend) { col.parts.push(...W.parts); terrain = distantTerrain(V, cam, opt, info, W.built, W.reach, W.farBuilt); if (terrain) col.parts.push(terrain); }
       const seaGeo = col.sea ? buildSea(col.sea, opt.horizonReach * 4) : null;
       mark('tCollect');
-      ({ geo, materials, seaIndex } = buildGeometry(col, seaGeo, origin, info, opt));
+      // the page is given a turn between the longer steps
+      await yieldPage(); checkAbort(signal);
+      let terrainMats;
+      ({ geo, materials, seaIndex, terrainMats } = await buildGeometry(col, seaGeo, origin, info, opt, signal));
+      // what only the raster passes draw: the blocks and the game's objects beyond ptReach, and the distant terrain
+      // lowered under all the blocks (the path tracer's own terrain stands in for the far blocks)
+      await yieldPage(); checkAbort(signal);
+      farScene = await buildFarScene(W, col, terrain, materials, terrainMats, origin, info, opt, signal);
       if (terrain) terrain.o.geometry.dispose();
       mark('tGeometry');
 
       // the two colour passes, with the same sub-pixel offsets
       report('albedo', 0); await yieldPage();
-      const rasterScene = new THREE.Scene();
+      rasterScene = new THREE.Scene();
       // the sea, glass and metal keep the path tracer's colour: they are written as uncovered in the colour passes
       rasterMats = materials.map((m, i) => albedoMaterial(m, i === seaIndex || isDirectClass(m.userData.cls)));
+      for (const i of terrainMats) if (farScene.terrain) rasterMats[i].visible = false;
       const rasterMesh = new THREE.Mesh(geo, rasterMats); rasterMesh.frustumCulled = false; rasterScene.add(rasterMesh);
+      for (const mesh of farScene.meshes) rasterScene.add(mesh);
       const tA = target('a', w, h, THREE.HalfFloatType, true), tB = target('b', w, h, THREE.HalfFloatType, true);
       R.setClearColor(0x000000, 0);
       for (const t of [accPt, accGame]) { R.setRenderTarget(t); R.clear(); }
       R.setRenderTarget(null);
       const halton = (i, b) => { let f = 1, r = 0; while (i > 0) { f /= b; r += f * (i % b); i = Math.floor(i / b); } return r; };
-      withTemps(V, W.temps, col, () => {
-        withGameScene(scene, col, true, () => {
-          for (let j = 0; j < NJ; j++) {
-            const jx = NJ > 1 ? halton(j + 1, 2) - 0.5 : 0, jy = NJ > 1 ? halton(j + 1, 3) - 0.5 : 0;
-            cam.setViewOffset(w, h, jx, jy, w, h); camPT.setViewOffset(w, h, jx, jy, w, h);
-            R.setClearColor(0xffffff, 0); R.setRenderTarget(tA); R.clear(); R.render(rasterScene, camPT);
-            drawGame(scene, cam, tB);
-            accumulateMat.uniforms.tA.value = tA.texture; accumulateMat.uniforms.tB.value = tB.texture;
-            accumulateMat.uniforms.uWhich.value = 0; R.autoClear = false; runPass(accumulateMat, accPt);
-            accumulateMat.uniforms.uWhich.value = 1; runPass(accumulateMat, accGame); R.autoClear = true;
-          }
-        });
+      // the programs of the game's materials, which this renderer has not drawn before, are compiled in the background
+      try { await R.compileAsync(rasterScene, camPT); await R.compileAsync(scene, cam); } catch (e) { /* compiled as they are drawn */ }
+      checkAbort(signal);
+      // one offset at a time, with the game's scene set up for it and put back each time, so that the page has a
+      // turn between them
+      for (let j = 0; j < NJ; j++) {
+        const jx = NJ > 1 ? halton(j + 1, 2) - 0.5 : 0, jy = NJ > 1 ? halton(j + 1, 3) - 0.5 : 0;
+        cam.setViewOffset(w, h, jx, jy, w, h); camPT.setViewOffset(w, h, jx, jy, w, h);
+        R.setClearColor(0xffffff, 0); R.setRenderTarget(tA); R.clear(); R.render(rasterScene, camPT);
+        withTemps(V, W.temps, col, () => withGameScene(scene, col, true, () => drawGame(scene, cam, tB)));
+        accumulateMat.uniforms.tA.value = tA.texture; accumulateMat.uniforms.tB.value = tB.texture;
+        accumulateMat.uniforms.uWhich.value = 0; R.autoClear = false; runPass(accumulateMat, accPt);
+        accumulateMat.uniforms.uWhich.value = 1; runPass(accumulateMat, accGame); R.autoClear = true;
         cam.clearViewOffset(); camPT.clearViewOffset();
+        await yieldPage(); checkAbort(signal);
+      }
+      withTemps(V, W.temps, col, () => {
         // the guide for the filter: normals and depth at the centre of each pixel
         rasterScene.overrideMaterial = guideMaterial();
         R.setClearColor(0x000000, 0); R.setRenderTarget(tG); R.clear(); R.render(rasterScene, camPT); R.setRenderTarget(null);
@@ -1202,23 +1505,22 @@ export async function pathTrace(opts = {}) {
       mark('tAlbedo');
     } catch (e) {
       if (geo) geo.dispose(); if (materials) materials.forEach(x => x.dispose()); if (rasterMats) rasterMats.forEach(x => x.dispose());
+      if (farScene) farScene.dispose();
+      for (const ch of W.farChunks) disposeChunk(V, ch);
       throw e;
     } finally {
       // the blocks made for the picture alone are let go (the game's boats and clock faces with them)
-      for (const ch of W.generated) try { if (V.disposeChunk) V.disposeChunk(ch); else { ch.geo.dispose(); ch.groundGeo.dispose(); } } catch (e) { /* already gone */ }
+      for (const ch of W.generated) disposeChunk(V, ch);
     }
     checkAbort(signal);
 
-    // the bounding volume hierarchy over every triangle
+    // the bounding volume hierarchy over every triangle, built in the workers while the light of the far field is
+    // worked out and a first picture is shown
     report('bvh', 0);
-    await yieldPage();
-    try {
-      const bvh = await buildBVH(geo, { strategy: opt.bvhStrategy ?? SAH, maxLeafTris: opt.bvhLeaf ?? 1, indirect: true }, signal, info);
-      S = { key, geo, materials, seaIndex, rasterMats, bvh, temps: W.temps, included: col.included };
-    } catch (e) { geo.dispose(); materials.forEach(x => x.dispose()); rasterMats.forEach(x => x.dispose()); throw e; }
+    S = { key, geo, materials, seaIndex, rasterMats, bvh: null, temps: W.temps, included: col.included, rasterScene, farScene, farChunks: W.farChunks, V, nearReach: W.nearReach };
     kept = S;
-    mark('tBVH');
-    checkAbort(signal);
+    bvhJob = buildBVH(geo, { strategy: opt.bvhStrategy ?? SAH, maxLeafTris: opt.bvhLeaf ?? 1, indirect: true }, signal, info).then(b => { mark('tBVH'); return b; });
+    bvhJob.catch(() => {});
   } else if (wantLit) {
     // the same view again: only the game's own lighting is drawn anew, since the time of day may have moved on
     report('albedo', 0);
@@ -1229,7 +1531,7 @@ export async function pathTrace(opts = {}) {
     withTemps(V, extend ? S.temps : [], col, () => withGameScene(scene, col, false, () => drawGame(scene, cam, tLit)));
     mark('tAlbedo');
   }
-  const { geo, materials, seaIndex, bvh } = S;
+  const { geo, materials } = S;
 
   // the light: the sun and the sky, as the game has them now
   const L = lightsOf(scene);
@@ -1246,32 +1548,50 @@ export async function pathTrace(opts = {}) {
   const exposure = opt.exposure ?? (renderer ? renderer.toneMappingExposure : 1);
   const fogNear = scene.fog ? scene.fog.near : 90, fogFar = scene.fog ? scene.fog.far : 1500;
   const horCol = SU.uHor.value.clone(), midCol = SU.uMid.value.clone();
-  const sky = buildSky(SU, sunDir, sunRad, { ...opt, hemi: hemiInfo });
+  await yieldPage(); checkAbort(signal);
+  const sky = await buildSky(SU, sunDir, sunRad, { ...opt, hemi: hemiInfo });
   info.skyGain = sky.gains.map(x => +x.toFixed(3));
   mark('tSky');
+  await yieldPage();
+  if (signal && signal.aborted) { sky.envTex.dispose(); sky.bgTex.dispose(); sky.irrTex.dispose(); checkAbort(signal); }
 
-  // hand everything to the path tracer; the scene's own buffers only when they are not there already
   const m = pt.material;
-  m.bounces = opt.bounces; m.transmissiveBounces = 2; m.filterGlossyFactor = 0.5;
-  // the stratified sample lists repeat the same numbers in every sample here, so plain PCG random numbers are used
-  m.setDefine('RANDOM_TYPE', opt.randomType ?? 0);
-  m.uniforms.uSampleClamp.value = opt.sampleClamp;
-  m.uniforms.uSpecSky.value.set(1 / sky.gains[0], 1 / sky.gains[1], 1 / sky.gains[2]);
-  if (ctx.uploaded !== S) {
-    m.bvh.updateFrom(bvh);
-    m.attributesArray.updateFrom(geo.attributes.normal, geo.attributes.tangent, geo.attributes.uv, geo.attributes.color);
-    m.materialIndexAttribute.updateFrom(geo.attributes.materialIndex);
-    const textures = [...new Set(materials.flatMap(x => [x.map, x.normalMap]).filter(Boolean))];
-    m.textures.setTextures(R, textures, opt.textureSize, opt.textureSize);
-    m.materials.updateFrom(materials, textures);
-    ctx.uploaded = S;
-  }
-  m.lights.updateFrom([], []);
-  m.envMapInfo.updateFrom(sky.envTex);
-  m.environmentIntensity = 1; m.environmentRotation.identity();
-  m.backgroundMap = sky.bgTex; m.backgroundAlpha = 1; m.backgroundIntensity = 1; m.backgroundBlur = 0; m.backgroundRotation.identity();
   pt.alpha = !R.extensions.get('EXT_float_blend');
-  let tiles = opt.tiles || Math.max(2, Math.ceil(Math.sqrt(w * h / 40000)));
+  // the rate of sampling by distance needs the running mean blended on the GPU, which the alpha mode does not do
+  const rate = !pt.alpha && (opt.farEvery > 1 || opt.skyEvery > 1 || opt.farBounces < opt.bounces);
+  const tanY = Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2) / cam.zoom;
+  // the far field is lit by the raster passes when there is one
+  const hybrid = !!(S.farScene && S.nearReach < Infinity);
+  const nearR = hybrid ? S.nearReach : Infinity;
+  m.uniforms.uRateOn.value = rate || hybrid ? 1 : 0; m.uniforms.uGuide.value = tG.texture;
+  m.uniforms.uFarDist.value = hybrid ? nearR * 0.7 : opt.farField > 0 ? opt.farField : 1e9;
+  m.uniforms.uFarEvery.value = rate ? Math.max(1, Math.round(opt.farEvery)) : 1; m.uniforms.uSkyEvery.value = rate ? Math.max(1, Math.round(opt.skyEvery)) : 1;
+  m.uniforms.uFarBounces.value = Math.max(1, Math.round(opt.farBounces));
+  m.uniforms.uCover.value = accPt.texture; m.uniforms.uCoverN.value = NJ; m.uniforms.uView.value.set(tanY * w / h, tanY);
+  m.uniforms.uSkipDist.value = hybrid ? nearR : 1e9;
+  const tFarB = target('farBasis', w, h);
+  if (hybrid) {
+    // the shadow maps of the far field, from the sun as it is now, and the sky's irradiance and the sun's share on
+    // each far surface
+    const size = opt.shadowSize, split = Math.min(opt.horizonReach, nearR * 5), cams = [sunCamera(camPT, sunDir, nearR * 0.3, split, tanY, w / h)];
+    if (split < opt.horizonReach) cams.push(sunCamera(camPT, sunDir, split * 0.9, opt.horizonReach * 1.05, tanY, w / h));
+    const fb = farBasisMat.uniforms, rs = S.rasterScene;
+    rs.overrideMaterial = shadowDepthMat;
+    cams.forEach((lc, i) => {
+      const t = shadowTarget('shadow' + i, size);
+      R.setClearColor(0xffffff, 1); R.setRenderTarget(t); R.clear(); R.render(rs, lc);
+      const L = new THREE.Matrix4().multiplyMatrices(lc.projectionMatrix, lc.matrixWorldInverse);
+      (i ? fb.uL1 : fb.uL0).value.copy(L); (i ? fb.tS1 : fb.tS0).value = t.texture;
+      (i ? fb.uT1 : fb.uT0).value.set((lc.right - lc.left) / size, lc.far - lc.near, 0, i ? opt.horizonReach * 2 : split);
+    });
+    if (cams.length < 2) { fb.tS1.value = fb.tS0.value; fb.uT1.value.set(1, 1, 0, 0); }
+    rs.overrideMaterial = null; R.setRenderTarget(null);
+    fb.tG.value = tG.texture; fb.tIrr.value = sky.irrTex; fb.uCamRot.value.setFromMatrix4(cam.matrixWorld); fb.uTanY.value = tanY; fb.uAspect.value = w / h;
+    fb.uSize.value = size; fb.uSun.value.copy(sunDir);
+    runPass(farBasisMat, tFarB);
+    mark('tFarField');
+  }
+  let tiles = opt.tiles || Math.max(2, Math.ceil(Math.sqrt(w * h / 100000)));
   pt.tiles.set(tiles, tiles);
   pt.setSize(w, h);
   pt.setCamera(camPT);
@@ -1281,12 +1601,81 @@ export async function pathTrace(opts = {}) {
   // the passes that make the picture from the samples, set up before the samples are taken so that the picture can
   // be shown while it clears
   const tP = pt.target;
-  const tanY = Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2) / cam.zoom;
   const tH = target('half', w, h, THREE.FloatType);
   // until half the samples are in, the half-way buffer is black, which the filter reads as a great deal of noise and
   // smooths the early frames strongly
   R.setClearColor(0x000000, 0); R.setRenderTarget(tH); R.clear(); R.setRenderTarget(null);
-  demodMat.uniforms.uTexel.value.set(1 / w, 1 / h); demodMat.uniforms.tP.value = tP.texture; demodMat.uniforms.tH.value = tH.texture; demodMat.uniforms.tApt.value = accPt.texture; demodMat.uniforms.uN.value = NJ;
+  const du = demodMat.uniforms;
+  du.uTexel.value.set(1 / w, 1 / h); du.tP.value = tP.texture; du.tH.value = tH.texture; du.tApt.value = accPt.texture; du.uN.value = NJ;
+  du.tG.value = tG.texture; du.tFar.value = tFarB.texture; du.uHybrid.value = hybrid ? 1 : 0; du.uTanY.value = tanY; du.uAspect.value = w / h;
+  du.uBand.value.set(nearR * 0.7, nearR * 0.95); du.tBg.value = sky.bgTex; du.uCamRot.value.setFromMatrix4(cam.matrixWorld);
+  // the far field's light, fitted to the path-traced light of the surfaces at the edge of the near field: for each
+  // colour, the light E = P / A_pt there is fitted as kSun * (the sun's share) + kSky * (the sky's irradiance), by least
+  // squares, leaving out the points that miss the first fit by more than three standard deviations. Should the points
+  // be too few, or too alike in their share of the sun to tell the two terms apart, one gain is fitted to both, and
+  // with fewer still the terms are taken as they are
+  const sunC = [sunRad.r, sunRad.g, sunRad.b];
+  const setK = (a, b) => { du.uKSun.value.set(a[0] * sunC[0] / Math.PI, a[1] * sunC[1] / Math.PI, a[2] * sunC[2] / Math.PI); du.uKSky.value.set(b[0] / Math.PI, b[1] / Math.PI, b[2] / Math.PI); };
+  setK([1, 1, 1], [0.9, 0.9, 0.9]);
+  // a buffer read back at every other pixel of every other row (w2 by h2)
+  const w2 = Math.floor(w / 2), h2 = Math.floor(h / 2);
+  const readPacked = tex => {
+    const t = target('pack', w2, h2); packMat.uniforms.t.value = tex; runPass(packMat, t);
+    const a = new Float32Array(w2 * h2 * 4); R.readRenderTargetPixels(t, 0, 0, w2, h2, a); return a;
+  };
+  let calPts = null;
+  const calibrate = () => {
+    if (!hybrid) return;
+    if (!calPts) {
+      const gd = readPacked(tG.texture), ap = readPacked(accPt.texture), fb = readPacked(tFarB.texture);
+      const idx = [], S = [], A = [], Al = [];
+      for (let y2 = 0; y2 < h2; y2++) for (let x2 = 0; x2 < w2; x2++) {
+        const x = x2 * 2, y = y2 * 2, k = (y2 * w2 + x2) * 4, z = gd[k + 3]; if (!(z > 0 && z < 1e5) || ap[k + 3] < 0.99 * NJ) continue;
+        const u = (x + 0.5) / w * 2 - 1, v = (y + 0.5) / h * 2 - 1, d = z * Math.hypot(u * tanY * w / h, v * tanY, 1);
+        if (d < Math.max(40, nearR * 0.3) || d > nearR * 0.95) continue;
+        idx.push(k); S.push(fb[k + 3]); A.push(fb[k], fb[k + 1], fb[k + 2]); Al.push(ap[k] / NJ, ap[k + 1] / NJ, ap[k + 2] / NJ);
+      }
+      calPts = { idx, S, A, Al };
+    }
+    const n = calPts.idx.length; info.calibPoints = n;
+    if (n < 200) return;
+    const P = readPacked(tP.texture);
+    // the terms of each point, colour by colour (c = 3 for the luminance)
+    const terms = c => {
+      const xs = new Float32Array(n), as = new Float32Array(n), es = new Float32Array(n), L = [0.2126, 0.7152, 0.0722];
+      for (let i = 0; i < n; i++) {
+        const k = calPts.idx[i], e = q => P[k + q] / Math.max(0.03, calPts.Al[i * 3 + q]);
+        if (c < 3) { xs[i] = sunC[c] * calPts.S[i] / Math.PI; as[i] = calPts.A[i * 3 + c] / Math.PI; es[i] = e(c); }
+        else for (let q = 0; q < 3; q++) { xs[i] += L[q] * sunC[q] * calPts.S[i] / Math.PI; as[i] += L[q] * calPts.A[i * 3 + q] / Math.PI; es[i] += L[q] * e(q); }
+      }
+      return { xs, as, es };
+    };
+    // least squares of e = a x + b s, twice, the second time without the points the first fit misses by more than three
+    // standard deviations; fixedA keeps a as given
+    const fit = ({ xs, as, es }, fixedA) => {
+      let keep = null, a = fixedA ?? 1, b = 0.9;
+      for (let pass = 0; pass < 2; pass++) {
+        let sxx = 0, sxa = 0, saa = 0, sxe = 0, sae = 0, m = 0;
+        for (let i = 0; i < n; i++) { if (keep && !keep[i]) continue; sxx += xs[i] * xs[i]; sxa += xs[i] * as[i]; saa += as[i] * as[i]; sxe += xs[i] * es[i]; sae += as[i] * es[i]; m++; }
+        const det = sxx * saa - sxa * sxa;
+        if (fixedA != null) b = (sae - a * sxa) / Math.max(1e-9, saa);
+        else if (m > 200 && det > 1e-3 * sxx * saa) { a = (sxe * saa - sae * sxa) / det; b = (sae * sxx - sxe * sxa) / det; }
+        else { const g = (sxe + sae) / Math.max(1e-9, sxx + 2 * sxa + saa); a = g; b = g * 0.9; }
+        if (fixedA == null) a = Math.min(1.15, Math.max(0.75, a));
+        b = Math.min(2, Math.max(0.3, b));
+        let r2 = 0; for (let i = 0; i < n; i++) { const r = es[i] - a * xs[i] - b * as[i]; r2 += r * r; }
+        const lim = 9 * r2 / n; keep = new Uint8Array(n);
+        for (let i = 0; i < n; i++) { const r = es[i] - a * xs[i] - b * as[i]; keep[i] = r * r <= lim ? 1 : 0; }
+      }
+      return [a, b];
+    };
+    // the sun's light is the path tracer's own, but for the share of it that the surfaces between pass on, so one gain
+    // is fitted to it for all colours, from the luminance; the light of the sky, and of the surfaces round about, is
+    // fitted colour by colour
+    const a = fit(terms(3))[0], ka = [a, a, a], kb = [0, 1, 2].map(c => fit(terms(c), a)[1]);
+    setK(ka, kb);
+    info.calib = { sun: ka.map(x => +x.toFixed(3)), sky: kb.map(x => +x.toFixed(3)), at: pt.samples };
+  };
   const tE0 = target('e0', w, h), tE1 = target('e1', w, h);
   atrousMat.uniforms.tG.value = tG.texture; atrousMat.uniforms.uTexel.value.set(1 / w, 1 / h);
   atrousMat.uniforms.uTanY.value = tanY; atrousMat.uniforms.uAspect.value = w / h;
@@ -1318,13 +1707,11 @@ export async function pathTrace(opts = {}) {
     cu.tE.value = src.texture;
     const tL = target('lin', w, h);
     cu.uSceneGain.value = 1; cu.uFog.value = 0; cu.uHaze.value = 0; runPass(composeMat, tL); cu.uFog.value = opt.fog && !opt.haze && scene.fog ? 1 : 0; cu.uHaze.value = opt.haze ? 1 : 0;
-    const a = new Float32Array(w * h * 4);
-    R.readRenderTargetPixels(tL, 0, 0, w, h, a);
+    const a = readPacked(tL.texture);
     if (!fixed) {
-      const b = new Float32Array(w * h * 4), gd = new Float32Array(w * h * 4), cv = new Float32Array(w * h * 4);
-      R.readRenderTargetPixels(tLit, 0, 0, w, h, b); R.readRenderTargetPixels(tG, 0, 0, w, h, gd); R.readRenderTargetPixels(accPt, 0, 0, w, h, cv);
+      const b = readPacked(tLit.texture), gd = readPacked(tG.texture), cv = readPacked(accPt.texture);
       const idx = [], lb = [];
-      for (let i = 0; i < w * h; i += 3) {
+      for (let i = 0; i < w2 * h2; i++) {
         const k = i * 4, z = gd[k + 3];
         if (!(z > 0 && z < 400) || cv[k + 3] < NJ - 0.01) continue;
         idx.push(k); lb.push(Math.log(0.2126 * b[k] + 0.7152 * b[k + 1] + 0.0722 * b[k + 2] + 1e-3));
@@ -1356,47 +1743,126 @@ export async function pathTrace(opts = {}) {
     lastFrame = performance.now(); frameCost = lastFrame - tf;
   };
 
-  // the samples, a few tiles at a time. Each display frame is given a batch of tiles, sized so that the GPU spends about
-  // gpuShare of the frame on it; the batch is waited for before the next frame's is sent, so that the page, the
-  // browser and the rest of the system are never starved of the GPU. If even one tile takes much longer than the
-  // share, the next sample is cut into more, smaller tiles
+  // a first picture, from the colour passes and the light of the far field on every surface, while the BVH is built
+  if (bvhJob && hybrid && opt.onFrame) {
+    du.uPreview.value = 1; measureGain(filtered(0)); showFrame(0); du.uPreview.value = 0;
+    if (opt.debug) opt.debug.preview = snapshot(w, h);
+    await yieldPage();
+  }
+  if (bvhJob) S.bvh = await bvhJob;
+  checkAbort(signal);
+  const { bvh } = S;
+
+  // hand everything to the path tracer; the scene's own buffers only when they are not there already
+  m.bounces = opt.bounces; m.transmissiveBounces = 2; m.filterGlossyFactor = 0.5;
+  // the stratified sample lists repeat the same numbers in every sample here, so plain PCG random numbers are used
+  m.setDefine('RANDOM_TYPE', opt.randomType ?? 0);
+  m.uniforms.uSampleClamp.value = opt.sampleClamp;
+  m.uniforms.uSpecSky.value.set(1 / sky.gains[0], 1 / sky.gains[1], 1 / sky.gains[2]);
+  if (ctx.uploaded !== S) {
+    m.bvh.updateFrom(bvh); await yieldPage();
+    m.attributesArray.updateFrom(geo.attributes.normal, geo.attributes.tangent, geo.attributes.uv, geo.attributes.color); await yieldPage();
+    m.materialIndexAttribute.updateFrom(geo.attributes.materialIndex);
+    const textures = [...new Set(materials.flatMap(x => [x.map, x.normalMap]).filter(Boolean))];
+    m.textures.setTextures(R, textures, opt.textureSize, opt.textureSize);
+    m.materials.updateFrom(materials, textures);
+    ctx.uploaded = S;
+  }
+  m.lights.updateFrom([], []);
+  m.envMapInfo.updateFrom(sky.envTex);
+  m.environmentIntensity = 1; m.environmentRotation.identity();
+  m.backgroundMap = sky.bgTex; m.backgroundAlpha = 1; m.backgroundIntensity = 1; m.backgroundBlur = 0; m.backgroundRotation.identity();
+
+  // the samples, a tile at a time. At most inFlight tiles are on the GPU at once, so that the browser's own drawing
+  // never waits behind more than that; the next tile is sent as soon as the last is seen to be done, the fence being
+  // polled quickly once the tile's expected time is nearly up. The number of tiles is adjusted between samples so that
+  // one tile takes about tileMs (each tile costs a good deal on top of its share of the work, so a few large tiles are
+  // far quicker than many small ones), and should the tracing have kept the GPU busy for more than gpuShare of the
+  // last tenth of a second, it pauses, so that the rest of the system keeps a share of the GPU
   report('trace', 0);
   const gl = R.getContext();
-  const waitFence = async f => { for (;;) { const st = gl.clientWaitSync(f, 0, 0); if (st === gl.ALREADY_SIGNALED || st === gl.CONDITION_SATISFIED || st === gl.WAIT_FAILED) break; await new Promise(r => setTimeout(r, 1)); } gl.deleteSync(f); };
-  const nextFrame = () => new Promise(r => { let done = false; const go = () => { if (!done) { done = true; r(); } };
-    if (!document.hidden) requestAnimationFrame(go); setTimeout(go, 40); });
-  const slice = 1000 / 60 * opt.gpuShare;
-  const half = Math.max(1, Math.floor(samples / 2)), gainAt = Math.min(8, samples);
-  let tTrace = 0, halfDone = false, gainDone = false, early = false, batch = 1, split = false;
-  info.tilesUsed = [tiles];
-  while (pt.samples < samples) {
-    checkAbort(signal);
-    if (pt.isCompiling) { pt.update(); await new Promise(r => setTimeout(r, 30)); continue; }
-    if (tTrace === 0) { pt.update(); await gpuIdle(R); mark('tCompile'); tTrace = performance.now(); continue; }
-    const tq = performance.now();
-    for (let k = 0; k < batch && pt.samples < samples; k++) {
+  // a fence is polled at the pace of timeouts until the time it is expected to take is nearly up, and then at the
+  // pace of messages, which the browser does not slow down as it does a chain of timeouts
+  const chan = new MessageChannel(), tick = () => new Promise(r => { chan.port1.onmessage = () => r(); chan.port2.postMessage(0); });
+  const waitFence = async (f, expect = 0) => {
+    const t0f = performance.now();
+    for (;;) { const st = gl.clientWaitSync(f, 0, 0); if (st === gl.ALREADY_SIGNALED || st === gl.CONDITION_SATISFIED || st === gl.WAIT_FAILED) break;
+      if (performance.now() - t0f < expect - 2) await new Promise(r => setTimeout(r, 1)); else await tick(); }
+    gl.deleteSync(f);
+  };
+  const minSamples = Math.min(samples, Math.max(1, opt.minSamples));
+  let tTrace = 0, halfDone = false, gainDone = false, early = false, passStart = 0, passMs = 0;
+  // the share of the picture done: of the samples, or of the time left when the tracing began, whichever is further on
+  const progress = () => Math.min(1, Math.max(pt.samples / samples, tTrace && deadline < Infinity ? (performance.now() - tTrace) / Math.max(1, deadline - tTrace) : 0));
+  // the time the filter and the last picture take, kept back from the budget
+  const finishMs = () => 150 + frameCost * 1.5;
+  let stopped = false, tileTime = 0, passTiles = 0, passGpu = 0;
+  const flight = [];   // the tiles on the GPU: their fences and the times they were sent
+  let lastDone = 0, winStart = 0, winBusy = 0;
+  info.tilesUsed = []; info.tilesSent = 0; info.gpuBusy = 0; info.pauses = 0;
+  // the work done between samples (the frames shown, the fits), with a turn for the page after each step that reads
+  // from the GPU
+  const atSample = async () => {
+    const now = performance.now(); passMs = now - passStart; passStart = now;
+    // the time is up when another sample would not be finished, filtered and shown before the deadline
+    if (pt.samples >= minSamples && now + passMs + finishMs() > deadline) stopped = true;
+    const k = stopped ? 1 : progress();
+    if (hybrid && (pt.samples === 1 || pt.samples === 8 || (!halfDone && k >= 0.5))) { calibrate(); await yieldPage(); }
+    if (!halfDone && k >= 0.5 && !stopped) { copyMat.uniforms.t.value = pt.target.texture; runPass(copyMat, tH); halfDone = true; info.halfAt = pt.samples; }
+    if (!gainDone && (pt.samples >= 8 || stopped || pt.samples >= samples)) { measureGain(filtered(0)); gainDone = true; await yieldPage(); }
+    else if (!gainDone && !early && opt.onFrame) { measureGain(filtered(opt.previewFilter)); early = true; info.earlyGain = info.sceneGain; await yieldPage(); }
+    if (opt.onFrame && !stopped && pt.samples < samples && (lastFrame === 0 || performance.now() - lastFrame >= Math.max(opt.frameInterval, frameCost * 10))) showFrame(Math.min(0.99, k));
+    report('trace', k);
+    // the size of the tiles of the next sample, so that one tile takes about tileMs
+    if (passTiles) tileTime = passGpu / passTiles;
+    passTiles = 0; passGpu = 0;
+    if (tileTime > 0) {
+      const want = Math.min(24, Math.max(1, Math.round(tiles * Math.sqrt(tileTime / opt.tileMs))));
+      if ((tileTime > opt.tileMs * 1.4 || tileTime < opt.tileMs * 0.6) && want !== tiles) { tiles = want; pt.tiles.set(tiles, tiles); info.tilesUsed.push(tiles); }
+    }
+  };
+  // waits for the oldest tile on the GPU; its time is from the later of its sending and the end of the tile before it
+  const retire = async () => {
+    const e = flight.shift(); await waitFence(e.f, tileTime - (performance.now() - Math.max(e.t, lastDone)));
+    const now = performance.now(), dt = now - Math.max(e.t, lastDone); lastDone = now;
+    passTiles++; passGpu += dt; winBusy += dt; info.gpuBusy += dt;
+  };
+  try {
+    while (pt.samples < samples && !stopped) {
+      checkAbort(signal);
+      if (pt.isCompiling || tTrace === 0) {
+        pt.update();
+        if (pt.isCompiling) { await new Promise(r => setTimeout(r, 30)); continue; }
+        // the first tile, sent with the compilation, is waited for and not timed
+        await gpuIdle(R); mark('tCompile'); tTrace = passStart = winStart = lastDone = performance.now(); continue;
+      }
       const s0 = pt.samples;
-      pt.update();
-      if (Math.floor(pt.samples) !== Math.floor(s0)) {
-        if (!halfDone && pt.samples >= half) { copyMat.uniforms.t.value = pt.target.texture; runPass(copyMat, tH); halfDone = true; }
-        if (!gainDone && pt.samples >= gainAt) { measureGain(filtered(0)); gainDone = true; }
-        else if (!gainDone && !early && opt.onFrame) { measureGain(filtered(opt.previewFilter)); early = true; info.earlyGain = info.sceneGain; }
-        if (opt.onFrame && pt.samples < samples && (lastFrame === 0 || performance.now() - lastFrame >= Math.max(opt.frameInterval, frameCost * 10))) showFrame(pt.samples / samples);
-        report('trace', pt.samples / samples);
-        // a new sample begins with the next update, which reads the number of tiles afresh
-        if (split) { tiles = Math.min(32, tiles + Math.max(1, tiles >> 1)); pt.tiles.set(tiles, tiles); info.tilesUsed.push(tiles); split = false; }
+      // the path tracer's own target is bound first, so that it does not switch targets between tiles
+      R.setRenderTarget(pt._primaryTarget);
+      pt.update(); info.tilesSent++;
+      flight.push({ f: gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0), t: performance.now() }); gl.flush();
+      if (Math.floor(pt.samples) !== Math.floor(s0)) await atSample();
+      if (flight.length >= Math.max(1, opt.inFlight)) await retire();
+      // the GPU's share over the last tenth of a second
+      const now = performance.now();
+      if (now - winStart >= 100) {
+        if (winBusy > opt.gpuShare * (now - winStart)) {
+          while (flight.length) await retire();
+          const rest = winBusy / opt.gpuShare - (performance.now() - winStart);
+          if (rest > 0) { info.pauses++; await new Promise(r => setTimeout(r, Math.min(50, rest))); }
+          lastDone = performance.now();
+        }
+        winStart = performance.now(); winBusy = 0;
       }
     }
-    const fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0); gl.flush(); await waitFence(fence);
-    const dt = performance.now() - tq;
-    if (dt > slice * 1.3) { if (batch > 1) batch = Math.max(1, Math.floor(batch * slice / dt)); else if (dt > slice * 2.5) split = true; }
-    else if (dt < slice * 0.7) batch = Math.min(4096, batch + Math.max(1, batch >> 2));
-    await nextFrame();
-  }
+    while (flight.length) await retire();
+  } finally { for (const e of flight) gl.deleteSync(e.f); }
+  calibrate();
   if (!gainDone) measureGain(filtered(0));
   await gpuIdle(R);
   info.traceMs = Math.round(performance.now() - tTrace);
-  info.samplesPerSecond = +(samples / (info.traceMs / 1000)).toFixed(2);
+  info.samplesTaken = pt.samples;
+  info.samplesPerSecond = +(pt.samples / (info.traceMs / 1000)).toFixed(2);
   mark('tTrace');
 
   // the light on each surface, filtered, then the picture
@@ -1418,13 +1884,14 @@ export async function pathTrace(opts = {}) {
     opt.debug.albedoGame = show(accGame.texture, [1, 0, 0, 0], 1, NJ);
     opt.debug.normal = show(tG.texture, [0, 1, 0, 0]);
     opt.debug.depth = show(tG.texture, [0, 0, 1, 0], 300);
+    if (hybrid) { opt.debug.farSun = show(tFarB.texture, [0, 0, 0, 0]); opt.debug.farSky = show(tFarB.texture, [1, 0, 0, 0], 0.3); }
   }
   R.toneMapping = THREE.NoToneMapping;
   mark('tTotal');
   info.exposure = exposure;
 
   // the sky is made for each picture; the scene is kept for the next picture of the same view
-  sky.envTex.dispose(); sky.bgTex.dispose();
+  sky.envTex.dispose(); sky.bgTex.dispose(); sky.irrTex.dispose();
   out.info = info;
   report('done', 1);
   if (opt.onFrame) try { opt.onFrame(out, 1); } catch (e) { /* the caller's own error */ }
