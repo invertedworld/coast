@@ -26,9 +26,20 @@ html,body{height:100%;margin:0;overflow:hidden;background:var(--sea);color:var(-
 .toast b{font-weight:500;color:var(--verdigris);margin-right:8px;letter-spacing:.12em;text-transform:uppercase;font-size:.72rem}
 .help .controls{columns:280px;column-gap:28px}
 .help .controls[hidden]{display:none}
-.help .tabs{display:flex;gap:4px;margin:0 0 16px;border-bottom:1px solid var(--line)}
-.help .tabs button{font:inherit;font-size:.82rem;letter-spacing:.06em;color:var(--plaster-dim);background:none;border:0;border-bottom:2px solid transparent;padding:6px 12px 8px;margin-bottom:-1px;cursor:pointer}
-.help .tabs button[aria-selected="true"]{color:var(--plaster);border-bottom-color:var(--verdigris)}
+.help input[type=range]{vertical-align:middle;accent-color:var(--verdigris);width:140px}
+.help input[type=checkbox]{accent-color:var(--verdigris);width:16px;height:16px;vertical-align:middle;margin:0}
+.help h2.part{margin:0 0 12px;font-size:.78rem;font-weight:500;letter-spacing:.16em;text-transform:uppercase;color:var(--plaster-dim)}
+.help h2.part.sep{margin-top:6px;padding-top:16px;border-top:1px solid var(--line)}
+.help .foot,.about .foot{display:flex;justify-content:flex-end;margin-top:6px;padding-top:12px;border-top:1px solid var(--line)}
+.help .foot button,.about .foot button{font:inherit;font-size:.85rem;color:var(--plaster);background:rgba(245,233,215,.1);border:1px solid var(--line);border-radius:4px;padding:6px 14px;cursor:pointer}
+.help .foot button:hover,.about .foot button:hover{background:rgba(245,233,215,.18)}
+.about{position:fixed;z-index:6;top:50%;left:50%;transform:translate(-50%,-50%);width:min(440px,calc(100vw - 32px));box-sizing:border-box;background:var(--panel);border:1px solid var(--line);
+  border-radius:4px;padding:18px 22px 16px;backdrop-filter:blur(8px);line-height:1.45}
+.about[hidden]{display:none}
+.about h2{margin:0 0 10px;font:400 1.4rem/1.2 var(--font-display,serif);letter-spacing:.04em}
+.about p{margin:0 0 8px}
+.about a{color:var(--plaster)}
+.about .credits{font-size:.85rem;color:var(--plaster-dim)}
 .stats{position:fixed;z-index:3;top:16px;left:16px;max-width:calc(100vw - 32px);box-sizing:border-box;display:grid;grid-template-columns:auto auto;gap:2px 14px;
   background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:10px 14px;backdrop-filter:blur(8px);pointer-events:none;
   font-size:.82rem;line-height:1.35;font-variant-numeric:tabular-nums}
@@ -38,8 +49,6 @@ html,body{height:100%;margin:0;overflow:hidden;background:var(--sea);color:var(-
 .help h3{grid-column:1/-1;margin:0 0 -2px;font-size:.72rem;font-weight:500;letter-spacing:.16em;text-transform:uppercase;color:var(--verdigris)}
 .help .row{display:contents}
 .help .row>span:first-child{white-space:nowrap}
-.help .credits{margin:6px 0 0;padding-top:12px;border-top:1px solid var(--line);font-size:.82rem;color:var(--plaster-dim);font-variant-numeric:lining-nums}
-.help .credits a{color:var(--plaster)}
 .island{position:fixed;z-index:5;top:50%;left:50%;transform:translate(-50%,-50%);width:min(440px,calc(100vw - 32px));box-sizing:border-box;
   background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:18px 22px 20px;backdrop-filter:blur(8px);display:flex;flex-direction:column;gap:14px}
 .island h3{margin:0;font-size:.72rem;font-weight:500;letter-spacing:.16em;text-transform:uppercase;color:var(--verdigris)}
@@ -75,8 +84,8 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
 <div class="joy" id="joy" hidden><i></i></div>
 
 <aside class="help" id="help" hidden aria-label="Help">
-  <div class="tabs" role="tablist"><button type="button" role="tab" data-tab="keys" aria-selected="true">Keyboard and mouse</button><button type="button" role="tab" data-tab="pad" aria-selected="false">Controller</button></div>
-  <div class="controls" data-panel="keys">
+  <h2 class="part">Keyboard and mouse</h2>
+  <div class="controls">
     <div class="group"><h3>Movement</h3>
       <div class="row"><span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><span>Walk</span></div>
       <div class="row"><span><kbd>Q</kbd><kbd>E</kbd></span><span>Turn</span></div>
@@ -140,37 +149,41 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
       <div class="row"><span><kbd>H</kbd></span><span>Show this help page</span></div>
     </div>
   </div>
-  <div class="controls" data-panel="pad" hidden>
+  <h2 class="part sep">Controller</h2>
+  <div class="controls">
     <div class="group"><h3>Movement</h3>
-      <div class="row"><span>Left stick</span><span>Move</span></div>
+      <div class="row"><span>Left stick</span><span>Walk, swim or steer</span></div>
       <div class="row"><span>Right stick</span><span>Look</span></div>
-      <div class="row"><span>Press left stick</span><span>Run or walk</span></div>
       <div class="row"><span>A</span><span>Jump</span></div>
-      <div class="row"><span>D-pad</span><span>Turn and tilt</span></div>
-      <div class="row"><span>D-pad down</span><span>Sit or stand</span></div>
+      <div class="row"><span>B</span><span>Crouch</span></div>
     </div>
-    <div class="group"><h3>Scenes</h3>
-      <div class="row"><span>Y</span><span>Passenger train, or dinghy when near one</span></div>
-      <div class="row"><span>X</span><span>Ferry</span></div>
-      <div class="row"><span>Press right stick</span><span>Sailing dinghy</span></div>
-      <div class="row"><span>B</span><span>Aerial</span></div>
+    <div class="group"><h3>Views</h3>
+      <div class="row"><span>X</span><span>Cycle view</span></div>
+      <div class="row"><span>Y</span><span>Aerial</span></div>
+      <div class="row"><span>Bumpers</span><span>Distance</span></div>
     </div>
-    <div class="group"><h3>Camera</h3>
-      <div class="row"><span>LB</span><span>Switch view</span></div>
-      <div class="row"><span>RB</span><span>Tilt-shift effect</span></div>
-      <div class="row"><span>Triggers</span><span>Zoom in and out</span></div>
-    </div>
-    <div class="group"><h3>Sailing and underwater</h3>
-      <div class="row"><span>Left stick</span><span>Steer and paddle, or swim</span></div>
-      <div class="row"><span>Triggers</span><span>Trim the sail</span></div>
-      <div class="row"><span>Right and left triggers</span><span>Ascend and descend</span></div>
+    <div class="group"><h3>Camera mode</h3>
+      <div class="row"><span>Left trigger</span><span>Take picture</span></div>
+      <div class="row"><span>Bumpers</span><span>Zoom in and out</span></div>
+      <div class="row"><span>D-pad up and down</span><span>Focus</span></div>
+      <div class="row"><span>D-pad left and right</span><span>Exposure</span></div>
     </div>
     <div class="group"><h3>Other</h3>
-      <div class="row"><span>Back</span><span>Mute sound</span></div>
-      <div class="row"><span>Start</span><span>Show this help page</span></div>
+      <div class="row"><span>Menu</span><span>Show this help page</span></div>
+    </div>
+    <div class="group"><h3>Look</h3>
+      <div class="row"><label for="padInv">Invert vertical look</label><span><input type="checkbox" id="padInv"></span></div>
+      <div class="row"><label for="padSens">Sensitivity</label><span><input type="range" id="padSens" min="0.25" max="3" step="0.05"> <output id="padSensV"></output></span></div>
     </div>
   </div>
+  <div class="foot"><button type="button" class="about-btn" data-a="about">About</button></div>
+</aside>
+<aside class="about" id="about" hidden role="dialog" aria-label="About">
+  <h2>Coast</h2>
+  <p>Copyright © 2026 Mark Hammond</p>
+  <p><a href="https://github.com/invertedworld/coast" target="_blank" rel="noopener">github.com/invertedworld/coast</a></p>
   <p class="credits">The cats are from <a href="https://github.com/c1t1zen1/Michi-Neko-The-Cat-Philosophers-Path" target="_blank" rel="noopener">Michi-Neko: The Cat Philosopher’s Path</a> by c1t1zen1, used under the MIT licence.</p>
+  <div class="foot"><button type="button" data-a="about-close">Close</button></div>
 </aside>
 <aside class="island" id="island" hidden aria-label="New island">
   <h3>New island</h3>
@@ -9412,11 +9425,10 @@ function currentCell(){
 const keys={};
 let mode='street', started=true;
 const helpEl=document.getElementById('help');
-// the help panel's two tabs: the keyboard and mouse, and the controller; the one last shown is remembered
-function helpTab(t){ for (const b of helpEl.querySelectorAll('.tabs button')) b.setAttribute('aria-selected',String(b.dataset.tab===t));
-  for (const d of helpEl.querySelectorAll('[data-panel]')) d.hidden=d.dataset.panel!==t; try{ localStorage.setItem('coast.helpTab',t); }catch(_){} }
-helpEl.querySelector('.tabs').addEventListener('click',e=>{ const b=e.target.closest('[data-tab]'); if (b) helpTab(b.dataset.tab); });
-try{ const t=localStorage.getItem('coast.helpTab'); if (t==='pad') helpTab('pad'); }catch(_){}
+// the About box, opened from the help panel
+const aboutEl=document.getElementById('about');
+helpEl.querySelector('[data-a="about"]').addEventListener('click',()=>{ aboutEl.hidden=false; aboutEl.querySelector('[data-a="about-close"]').focus(); });
+aboutEl.querySelector('[data-a="about-close"]').addEventListener('click',()=>{ aboutEl.hidden=true; });
 /* ---------- sound ----------
    Sound files are listed in sounds.json as {"id": "path"} or {"id": ["path", ...]}; several files for one id are
    played in random turn. A sound with no file stays silent. The engine starts on the first click or key press,
@@ -9821,8 +9833,9 @@ addEventListener('keydown',e=>{ keys[e.code]=true;
   if (code==='KeyB') setTilt(!tiltShift);
   if (code==='KeyP' && !e.repeat){ paused=!paused; lastClock=null; }
   // the help panel frees the mouse, so that its tabs can be clicked
-  if (code==='KeyH' && !e.repeat){ helpEl.hidden=!helpEl.hidden; lastCell=null; if (!helpEl.hidden && document.pointerLockElement) document.exitPointerLock(); }
-  if (code==='Escape' && !helpEl.hidden){ helpEl.hidden=true; lastCell=null; }
+  if (code==='KeyH' && !e.repeat){ helpEl.hidden=!helpEl.hidden; aboutEl.hidden=true; lastCell=null; if (!helpEl.hidden && document.pointerLockElement) document.exitPointerLock(); }
+  if (code==='Escape' && !aboutEl.hidden) aboutEl.hidden=true;
+  else if (code==='Escape' && !helpEl.hidden){ helpEl.hidden=true; lastCell=null; }
   if (code==='KeyI' && !e.repeat) openIsland();
   if (code==='KeyZ' && !e.repeat) crouch=!crouch;
   if (code==='KeyX' && !e.repeat) sitKey();
@@ -9837,35 +9850,56 @@ addEventListener('keydown',e=>{ keys[e.code]=true;
   if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(code)) e.preventDefault(); });
 addEventListener('keyup',e=>{ keys[e.code]=false; });
 /* ---------- game controller (standard mapping): sticks move and look, buttons stand in for keys ---------- */
-const pad={x:0,y:0,lt:0,rt:0,held:new Set(),armed:true,mode:null,yCode:null};
-// Y (3) rides with the train, except while sailing or within reach of a dinghy, when it stands for the Y key; a press
-// of the right stick (11) always does. While sailing the triggers trim the sail instead of zooming
-const PAD_KEYS={0:'Space',1:'Digit5',2:'Digit3',4:'Digit0',5:'KeyB',6:'Minus',7:'Equal',8:'KeyM',9:'KeyH',11:'Digit4',12:'ArrowUp',13:'ArrowDown',14:'ArrowLeft',15:'ArrowRight'};
+const pad={x:0,y:0,lt:0,rt:0,held:new Set(),armed:true,mode:null,yCode:null,ltOn:false,dOn:{}};
+// the controller (standard mapping): the left stick walks, swims and steers, the right stick looks; A jumps (and rises
+// in the water), B crouches (and dives in the water), X steps through the views (the 0 key), Y is the bird's-eye view
+// (5), the bumpers bring the view nearer or further (- and +), and Start shows the help panel. With the camera raised
+// the left trigger takes a picture, the bumpers zoom, the D-pad's up and down focus further and nearer and its left and
+// right change the exposure; with the camera lowered the left trigger takes a quick picture. At the helm the triggers
+// trim the sail. Pressing the left stick changes between running and walking
+const PAD_KEYS={0:'Space',2:'Digit0',3:'Digit5',4:'Minus',5:'Equal',9:'KeyH'};
+// the look: its sensitivity and whether up and down are inverted, kept in the browser
+const padLook=(()=>{ let o={sens:1,invert:false}; try{ Object.assign(o,JSON.parse(localStorage.getItem('coast.padLook')||'{}')); }catch(_){} return o; })();
+function padLookSave(){ try{ localStorage.setItem('coast.padLook',JSON.stringify(padLook)); }catch(_){} }
+// the look's settings on the controller's tab of the help panel
+{ const inv=document.getElementById('padInv'), sen=document.getElementById('padSens'), out=document.getElementById('padSensV');
+  inv.checked=padLook.invert; sen.value=padLook.sens; out.textContent=Math.round(padLook.sens*100)+' %';
+  inv.addEventListener('change',()=>{ padLook.invert=inv.checked; padLookSave(); });
+  sen.addEventListener('input',()=>{ padLook.sens=+sen.value; out.textContent=Math.round(padLook.sens*100)+' %'; padLookSave(); });
+  for (const el of [inv,sen]) el.addEventListener('keydown',e=>e.stopPropagation()); }
 let padRun=false, padL3=false;   // pressing the left stick switches between running and walking
 const padKey=(code,down)=>dispatchEvent(new KeyboardEvent(down?'keydown':'keyup',{code}));
 function pollPad(dt){
   const gp=[...(navigator.getGamepads?navigator.getGamepads():[])].find(g=>g&&g.connected);
   if (!gp){ pad.x=pad.y=pad.lt=pad.rt=0; if (pad.yCode){ padKey(pad.yCode,false); pad.yCode=null; } for (const c of pad.held) padKey(c,false); pad.held.clear(); if (padRun){ padRun=false; padKey('ShiftLeft',false); } return; }
-  { const b=gp.buttons[10], on=!!b&&b.pressed; if (on && !padL3){ padRun=!padRun; padKey('ShiftLeft',padRun); } padL3=on; }
+  const btn=i=>{ const b=gp.buttons[i]; return !!b&&(b.pressed||b.value>0.5); };
+  { const on=btn(10); if (on && !padL3){ padRun=!padRun; padKey('ShiftLeft',padRun); } padL3=on; }
   // a wide dead zone, so a stick resting slightly off centre does not creep the player along
   const DZ=0.26, dz=(x,y)=>{ const m=Math.hypot(x,y); if (m<DZ) return [0,0]; const k=Math.min(1,(m-DZ)/(1-DZ))/m; return [x*k,y*k]; };
   // after any change of view the left stick does nothing until it has been let go back to the centre
   if (pad.mode!==mode){ pad.mode=mode; pad.armed=false; }
   const lx=gp.axes[0]||0, ly=gp.axes[1]||0; if (!pad.armed && Math.hypot(lx,ly)<DZ) pad.armed=true;
   [pad.x,pad.y]=pad.armed?dz(lx,ly):[0,0];
-  const [rx,ry]=dz(gp.axes[2]||0,gp.axes[3]||0);
-  if (rx||ry) look(rx*Math.abs(rx)*dt*1100, ry*Math.abs(ry)*dt*800);
-  // at the helm the triggers trim the sail, and in the water the right trigger rises and the left dives
-  const sailing=!!sailD, helm=mode==='dinghy'||mode==='swim';
+  const [rx,ry]=dz(gp.axes[2]||0,gp.axes[3]||0), ks=padLook.sens;
+  if (rx||ry) look(rx*Math.abs(rx)*dt*1100*ks, ry*Math.abs(ry)*dt*800*ks*(padLook.invert?-1:1));
+  // at the helm the triggers trim the sail
+  const helm=mode==='dinghy';
   pad.lt=helm&&gp.buttons[6]?gp.buttons[6].value:0; pad.rt=helm&&gp.buttons[7]?gp.buttons[7].value:0;
-  { const b=gp.buttons[3], on=!!b&&(b.pressed||b.value>0.5);
-    if (on && !pad.yCode){ const N=dgyNearest(player.x,player.z); pad.yCode=sailing||(N&&N.d<=6)?'Digit4':'Digit1'; padKey(pad.yCode,true); }
+  // B: crouch at street level, and dive while it is held in the water
+  { const on=btn(1);
+    if (on && !pad.yCode){ pad.yCode=mode==='swim'?'KeyC':'KeyZ'; padKey(pad.yCode,true); }
     else if (!on && pad.yCode){ padKey(pad.yCode,false); pad.yCode=null; } }
-  // the D-pad's down sits or stands at street level, in a coach and on the ferry, and tilts the bird's-eye view
-  { const b=gp.buttons[13], on=!!b&&(b.pressed||b.value>0.5);
-    if (on && !pad.dCode){ pad.dCode=mode==='street'||mode==='coach'||mode==='ferry'?'KeyX':'ArrowDown'; padKey(pad.dCode,true); }
-    else if (!on && pad.dCode){ padKey(pad.dCode,false); pad.dCode=null; } }
-  for (const [i,code] of Object.entries(PAD_KEYS)){ const b=gp.buttons[i]; if (!b || i==='13') continue; if (helm && (i==='6'||i==='7')) continue; const on=b.pressed||b.value>0.5;
+  const cam=PHOTO.api, camOn=cam.state.on;
+  // the left trigger takes a picture: through the lens with the camera raised, or a quick one of the view as it is
+  { const on=!helm && btn(6); if (on && !pad.ltOn){ if (camOn) cam.shoot(); else cam.quick(); } pad.ltOn=on; }
+  if (camOn){
+    const st=cam.state;
+    if (btn(4)) cam.setFocal(st.focal*Math.exp(-dt*1.2)); if (btn(5)) cam.setFocal(st.focal*Math.exp(dt*1.2));
+    if (btn(12)) cam.setFocus(st.focus*Math.exp(dt*1.5)); if (btn(13)) cam.setFocus(st.focus*Math.exp(-dt*1.5));
+    for (const [i,d] of [[14,-1],[15,1]]){ const on=btn(i); if (on && !pad.dOn[i]) cam.setEV(st.ev+d/3); pad.dOn[i]=on; }
+  }
+  for (const [i,code] of Object.entries(PAD_KEYS)){ const b=gp.buttons[i]; if (!b) continue;
+    const on=(b.pressed||b.value>0.5) && !(camOn && (i==='4'||i==='5'));
     if (on && !pad.held.has(code)){ pad.held.add(code); padKey(code,true); }
     else if (!on && pad.held.has(code)){ pad.held.delete(code); padKey(code,false); } }
 }
@@ -10532,7 +10566,7 @@ function swimLeaveHere(){ const S=swimmer.state; swimToStreet({x:S.x,y:Math.max(
 function swimStep(dt){
   const I=swimIn;
   I.fwd=clamp((keys.KeyW||keys.ArrowUp?1:0)-(keys.KeyS||keys.ArrowDown?1:0)-joy.y-pad.y,-1,1); I.strafe=clamp((keys.KeyD?1:0)-(keys.KeyA?1:0)+joy.x+pad.x,-1,1);
-  I.rise=clamp((keys.Space?1:0)-(keys.KeyC?1:0)+pad.rt-pad.lt,-1,1); I.sprint=!!(keys.ShiftLeft||keys.ShiftRight); I.yaw=yaw; I.pitch=fpPitch;
+  I.rise=clamp((keys.Space?1:0)-(keys.KeyC?1:0),-1,1); I.sprint=!!(keys.ShiftLeft||keys.ShiftRight); I.yaw=yaw; I.pitch=fpPitch;
   // the ladders of the harbours near by, the ways out where a wall stands out of the water
   swimExitT-=dt; if (swimExitT<=0){ swimExitT=0.5; const L=swimmer.options.exits; L.length=0; const cx=Math.floor(player.x/C), cz=Math.floor(player.z/C);
     for (let j=-1;j<=1;j++) for (let i=-1;i<=1;i++){ const ch=chunks.get(key(cx+i,cz+j)); if (ch && ch.ladders) for (const e of ch.ladders) L.push(e); } }

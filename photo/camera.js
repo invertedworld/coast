@@ -561,6 +561,7 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
     addEffectHook(fn) { hooks.push(fn); return () => { const i = hooks.indexOf(fn); if (i >= 0) hooks.splice(i, 1); }; },
     removeEffectHook(fn) { const i = hooks.indexOf(fn); if (i >= 0) hooks.splice(i, 1); },
     get state() { return { on: S.on, focal: S.focal, fNumber: S.fNumber, focus: S.focus, autofocus: S.autofocus, ev: S.ev, vignette: S.vignette, ratio: RATIOS[S.ratio][0], focused: S.af }; },
+    quick: () => quickShot(),
     enter, exit, toggle, setFocal, setAperture, setEV, setFocus, setVignette, setRatio: k => setRatio(typeof k === 'string' ? RATIOS.findIndex(q => q[0] === k) : k),
   };
   return { get on() { return S.on; }, frame, renderLens, lookScale, api };
