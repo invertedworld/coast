@@ -10245,7 +10245,9 @@ canvas.addEventListener('dblclick',e=>{ if (mode!=='above') return;
   if (started) lockPointer(); });
 addEventListener('mousemove',e=>{
   const locked=document.pointerLockElement===canvas; if (!locked&&!dragging) return;
-  const dx=locked?e.movementX:e.clientX-lx, dy=locked?e.movementY:e.clientY-ly; lx=e.clientX; ly=e.clientY; const k=PHOTO.lookScale(); look(dx*k,dy*k);
+  const dx=locked?e.movementX:e.clientX-lx, dy=locked?e.movementY:e.clientY-ly; lx=e.clientX; ly=e.clientY; const k=PHOTO.lookScale();
+  // in the bird's-eye view a drag takes hold of the landscape: it turns and tilts the opposite way to a look
+  if (mode==='above' && !locked) look(-dx*k,-dy*k); else look(dx*k,dy*k);
 });
 const cam={y:null,head:0}, chase={d:34,yaw:0,pitch:0.32,fresh:true,lift:0}, _cv=new THREE.Vector3();
 const riding=()=>mode==='train'||mode==='chase';
