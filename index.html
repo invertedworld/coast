@@ -9885,14 +9885,22 @@ function pollPad(dt){
   if (!gp){ pad.x=pad.y=pad.lt=pad.rt=0; if (pad.yCode){ padKey(pad.yCode,false); pad.yCode=null; } for (const c of pad.held) padKey(c,false); pad.held.clear(); if (padRun){ padRun=false; padKey('ShiftLeft',false); } return; }
   const btn=i=>{ const b=gp.buttons[i]; return !!b&&(b.pressed||b.value>0.5); };
   { const on=btn(10); if (on && !padL3){ padRun=!padRun; padKey('ShiftLeft',padRun); } padL3=on; }
-  // a wide dead zone, so a stick resting slightly off centre does not creep the player along
-  const DZ=0.26, dz=(x,y)=>{ const m=Math.hypot(x,y); if (m<DZ) return [0,0]; const k=Math.min(1,(m-DZ)/(1-DZ))/m; return [x*k,y*k]; };
-  // after any change of view the left stick does nothing until it has been let go back to the centre
-  if (pad.mode!==mode){ pad.mode=mode; pad.armed=false; }
-  const lx=gp.axes[0]||0, ly=gp.axes[1]||0; if (!pad.armed && Math.hypot(lx,ly)<DZ) pad.armed=true;
+  // radial dead zones, rescaled so that the response starts at nothing just outside them: wider for the left stick, so
+  // that a stick resting slightly off centre does not creep the player along, and narrow for the right, so that the
+  // view answers the smallest movement
+  const dzr=(x,y,D)=>{ const m=Math.hypot(x,y); if (m<D) return [0,0]; const k=Math.min(1,(m-D)/(1-D))/m; return [x*k,y*k]; };
+  const DZ=0.18, dz=(x,y)=>dzr(x,y,DZ);
+  // after a change of view the left stick rests for a moment (until it is let go, or for a third of a second at most),
+  // so that a push meant for the last view does not carry on into the new one
+  if (pad.mode!==mode){ pad.mode=mode; pad.armed=false; pad.armT=0.33; }
+  const lx=gp.axes[0]||0, ly=gp.axes[1]||0; if (!pad.armed && (Math.hypot(lx,ly)<DZ || (pad.armT-=dt)<=0)) pad.armed=true;
   [pad.x,pad.y]=pad.armed?dz(lx,ly):[0,0];
-  const [rx,ry]=dz(gp.axes[2]||0,gp.axes[3]||0), ks=padLook.sens;
-  if (rx||ry) look(rx*Math.abs(rx)*dt*1100*ks, ry*Math.abs(ry)*dt*800*ks*(padLook.invert?-1:1));
+  // the look: a gentle curve (the deflection to the power 1.5) for fine aim near the centre, and at full deflection the
+  // turn quickens over half a second, to half as fast again, for sweeping round
+  const [rx,ry]=dzr(gp.axes[2]||0,gp.axes[3]||0,0.1), ks=padLook.sens, rm=Math.hypot(rx,ry);
+  pad.full=rm>0.92?Math.min(0.5,(pad.full||0)+dt):0; const boost=1+pad.full;
+  const cv=v=>Math.sign(v)*Math.pow(Math.abs(v),1.5);
+  if (rx||ry) look(cv(rx)*dt*1250*ks*boost, cv(ry)*dt*900*ks*boost*(padLook.invert?-1:1));
   // at the helm the triggers trim the sail
   const helm=mode==='dinghy';
   pad.lt=helm&&gp.buttons[6]?gp.buttons[6].value:0; pad.rt=helm&&gp.buttons[7]?gp.buttons[7].value:0;
