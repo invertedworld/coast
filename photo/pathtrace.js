@@ -89,8 +89,7 @@ const DEFAULTS = {
   exposure: null,          // null takes the game renderer's exposure
   fog: true,               // the game's own fog, used only when the haze is turned off
   tiles: null,             // path tracer tiles per side to begin with; null chooses from the size. The number is then
-                           // adjusted between samples so that each tile keeps the GPU busy for about tileMs
-  tileMs: 8,               // milliseconds of GPU time aimed at for one tile
+                           // raised between samples while one tile alone takes much longer than the share of a frame given to it
   gpuShare: 0.6,           // the share of each display frame the tracing may take, so that the page and the rest of
                            // the system keep enough of the GPU to stay responsive
   onFrame: null,           // onFrame(canvas, progress): the picture while it clears (see the notes on pathTrace)
@@ -1272,7 +1271,7 @@ export async function pathTrace(opts = {}) {
   m.environmentIntensity = 1; m.environmentRotation.identity();
   m.backgroundMap = sky.bgTex; m.backgroundAlpha = 1; m.backgroundIntensity = 1; m.backgroundBlur = 0; m.backgroundRotation.identity();
   pt.alpha = !R.extensions.get('EXT_float_blend');
-  let tiles = opt.tiles || Math.max(2, Math.ceil(Math.sqrt(w * h / 25000)));
+  let tiles = opt.tiles || Math.max(2, Math.ceil(Math.sqrt(w * h / 40000)));
   pt.tiles.set(tiles, tiles);
   pt.setSize(w, h);
   pt.setCamera(camPT);
@@ -1357,40 +1356,42 @@ export async function pathTrace(opts = {}) {
     lastFrame = performance.now(); frameCost = lastFrame - tf;
   };
 
-  // the samples, a tile at a time, with one tile on the GPU at once. Each tile is waited for before the next is sent,
-  // and once the tiles of one display frame have kept the GPU busy for gpuShare of it, the tracing waits for the next
-  // frame, so that the page, the browser and the rest of the system are never starved of the GPU. Between samples the
-  // number of tiles is adjusted so that one tile takes about tileMs
+  // the samples, a few tiles at a time. Each display frame is given a batch of tiles, sized so that the GPU spends about
+  // gpuShare of the frame on it; the batch is waited for before the next frame's is sent, so that the page, the
+  // browser and the rest of the system are never starved of the GPU. If even one tile takes much longer than the
+  // share, the next sample is cut into more, smaller tiles
   report('trace', 0);
   const gl = R.getContext();
   const waitFence = async f => { for (;;) { const st = gl.clientWaitSync(f, 0, 0); if (st === gl.ALREADY_SIGNALED || st === gl.CONDITION_SATISFIED || st === gl.WAIT_FAILED) break; await new Promise(r => setTimeout(r, 1)); } gl.deleteSync(f); };
   const nextFrame = () => new Promise(r => { let done = false; const go = () => { if (!done) { done = true; r(); } };
-    if (!document.hidden) requestAnimationFrame(go); setTimeout(go, 50); });
-  const frameMs = 1000 / 60, slice = frameMs * opt.gpuShare;
+    if (!document.hidden) requestAnimationFrame(go); setTimeout(go, 40); });
+  const slice = 1000 / 60 * opt.gpuShare;
   const half = Math.max(1, Math.floor(samples / 2)), gainAt = Math.min(8, samples);
-  let tTrace = 0, halfDone = false, gainDone = false, early = false, busy = 0, worst = 0;
-  info.tilesUsed = [];
+  let tTrace = 0, halfDone = false, gainDone = false, early = false, batch = 1, split = false;
+  info.tilesUsed = [tiles];
   while (pt.samples < samples) {
     checkAbort(signal);
-    const s0 = pt.samples;
-    pt.update();
-    if (pt.isCompiling) { await new Promise(r => setTimeout(r, 30)); continue; }
-    if (tTrace === 0) { await gpuIdle(R); mark('tCompile'); tTrace = performance.now(); continue; }
+    if (pt.isCompiling) { pt.update(); await new Promise(r => setTimeout(r, 30)); continue; }
+    if (tTrace === 0) { pt.update(); await gpuIdle(R); mark('tCompile'); tTrace = performance.now(); continue; }
     const tq = performance.now();
-    const fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0); gl.flush(); await waitFence(fence);
-    const dt = performance.now() - tq; busy += dt; worst = Math.max(worst, dt);
-    if (Math.floor(pt.samples) !== Math.floor(s0)) {
-      if (!halfDone && pt.samples >= half) { copyMat.uniforms.t.value = pt.target.texture; runPass(copyMat, tH); halfDone = true; }
-      if (!gainDone && pt.samples >= gainAt) { measureGain(filtered(0)); gainDone = true; }
-      else if (!gainDone && !early && opt.onFrame) { measureGain(filtered(opt.previewFilter)); early = true; info.earlyGain = info.sceneGain; }
-      if (opt.onFrame && pt.samples < samples && (lastFrame === 0 || performance.now() - lastFrame >= Math.max(opt.frameInterval, frameCost * 10))) { showFrame(pt.samples / samples); busy += frameCost; }
-      report('trace', pt.samples / samples);
-      // the tiles of the next sample, from the slowest tile of this one
-      const want = Math.min(24, Math.max(1, Math.round(tiles * Math.sqrt(worst / opt.tileMs))));
-      if (worst > opt.tileMs * 1.5 || worst < opt.tileMs * 0.4) if (want !== tiles) { tiles = want; pt.tiles.set(tiles, tiles); info.tilesUsed.push(tiles); }
-      worst = 0;
+    for (let k = 0; k < batch && pt.samples < samples; k++) {
+      const s0 = pt.samples;
+      pt.update();
+      if (Math.floor(pt.samples) !== Math.floor(s0)) {
+        if (!halfDone && pt.samples >= half) { copyMat.uniforms.t.value = pt.target.texture; runPass(copyMat, tH); halfDone = true; }
+        if (!gainDone && pt.samples >= gainAt) { measureGain(filtered(0)); gainDone = true; }
+        else if (!gainDone && !early && opt.onFrame) { measureGain(filtered(opt.previewFilter)); early = true; info.earlyGain = info.sceneGain; }
+        if (opt.onFrame && pt.samples < samples && (lastFrame === 0 || performance.now() - lastFrame >= Math.max(opt.frameInterval, frameCost * 10))) showFrame(pt.samples / samples);
+        report('trace', pt.samples / samples);
+        // a new sample begins with the next update, which reads the number of tiles afresh
+        if (split) { tiles = Math.min(32, tiles + Math.max(1, tiles >> 1)); pt.tiles.set(tiles, tiles); info.tilesUsed.push(tiles); split = false; }
+      }
     }
-    if (busy >= slice) { busy = 0; await nextFrame(); }
+    const fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0); gl.flush(); await waitFence(fence);
+    const dt = performance.now() - tq;
+    if (dt > slice * 1.3) { if (batch > 1) batch = Math.max(1, Math.floor(batch * slice / dt)); else if (dt > slice * 2.5) split = true; }
+    else if (dt < slice * 0.7) batch = Math.min(4096, batch + Math.max(1, batch >> 2));
+    await nextFrame();
   }
   if (!gainDone) measureGain(filtered(0));
   await gpuIdle(R);
