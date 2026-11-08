@@ -4,7 +4,7 @@
    selects it and shows it large; Download PNG and Delete act on the item selected. Artist mode opens for a selected
    photo.
 
-   Artist mode makes artworks from one photo. A style is chosen (Watercolour, Oil, Impressionist, Charcoal or
+   Artist mode makes artworks from one photo. A style is chosen (Watercolour, Oil, Impressionist, Woodcut or
    3D render), then its settings, which are kept in the browser's local storage (key coast.pictureSettings) as soon as
    they change. Render paints the photo in the style chosen, or path-traces the scene again from the photo's own
    camera, and shows it being made; a render in progress is stopped by another render, by a change of style or by
@@ -19,10 +19,10 @@ import * as THREE from 'three';
 
 const KEEP = 24;
 const Q_KEY = 'coast.pictureSettings';
-// the version of the stored settings: version 2 lowered the 3D render's default samples and bounces, and version 3
-// gave the 3D render a time limit, with the samples per pixel its upper bound; the values kept from an earlier
-// version give way to the new defaults
-const Q_VERSION = 3;
+// the version of the stored settings: version 2 lowered the 3D render's default samples and bounces, version 3
+// gave the 3D render a time limit, with the samples per pixel its upper bound, and version 4 replaced the charcoal
+// style with the woodcut; the values kept from an earlier version give way to the new defaults
+const Q_VERSION = 4;
 const sl = (k, label, def, min, max, step, fmt = v => '× ' + v.toFixed(2)) => ({ k, label, def, min, max, step, fmt });
 // a slider's value is a multiple of the style's own amount (1 is as designed)
 export const Q_GROUPS = [
@@ -44,10 +44,11 @@ export const Q_GROUPS = [
     sl('edge', 'Dark edges', 1, 0, 2, 0.05), sl('granulation', 'Granulation', 1, 0, 2, 0.05), sl('pencil', 'Pencil', 1, 0, 2, 0.05), sl('margin', 'Paper margin', 1, 0, 2, 0.05) ] },
   { id: 'oil', title: 'Oil', fields: [ { k: 'mixing', label: 'Colour mixing', opts: [[0, 'On the palette'], [1, 'Optical']], def: 0 }, sl('radius', 'Brush size', 6, 2, 14, 1, v => v + ' px'), sl('stroke', 'Stroke length', 1, 0.25, 2, 0.05), sl('impasto', 'Impasto', 1, 0, 2, 0.05) ] },
   { id: 'impressionist', title: 'Impressionist', fields: [ sl('size', 'Dab size', 1, 0.4, 2.5, 0.05), sl('strokes', 'Number of dabs', 1, 0.3, 2, 0.05), sl('jitter', 'Broken colour', 1, 0, 2, 0.05) ] },
-  { id: 'charcoal', title: 'Charcoal', fields: [ sl('abstraction', 'Simplification', 5, 2, 12, 1, v => v + ' px'), sl('hatching', 'Hatching', 1, 0, 2, 0.05),
-    sl('smudge', 'Smudging', 1, 0, 2, 0.05), sl('contour', 'Contour lines', 1, 0, 2, 0.05) ] },
+  { id: 'woodcut', title: 'Woodcut', fields: [ sl('spacing', 'Line spacing', 9, 5, 16, 1, v => v + ' px'), sl('weight', 'Boldness', 1, 0.4, 2, 0.05),
+    sl('contrast', 'Contrast', 1, 0, 2, 0.05), sl('outline', 'Outlines', 1, 0, 2, 0.05), sl('grain', 'Wood grain', 1, 0, 2, 0.05),
+    sl('colours', 'Colour blocks', 0, 0, 4, 1, v => v ? String(v) : 'None') ] },
 ];
-export const STYLES = [['watercolour', 'Watercolour'], ['oil', 'Oil'], ['impressionist', 'Impressionist'], ['charcoal', 'Charcoal'], ['render3d', '3D render']];
+export const STYLES = [['watercolour', 'Watercolour'], ['oil', 'Oil'], ['impressionist', 'Impressionist'], ['woodcut', 'Woodcut'], ['render3d', '3D render']];
 const styleName = id => (STYLES.find(s => s[0] === id) || [id, id])[1];
 
 const svg = (d, extra = '') => `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" ${extra}>${d}</svg>`;
@@ -60,7 +61,7 @@ export const ICON = {
   watercolour: svg('<path d="M12 3.5c3 4 5.5 7 5.5 10a5.5 5.5 0 0 1-11 0c0-3 2.5-6 5.5-10z"/><path d="M9.2 14.5a2.8 2.8 0 0 0 2.8 2.6" opacity=".7"/>'),
   oil: svg('<path d="M20.5 3.5l-7.2 7.8"/><path d="M11.4 10.2l2.4 2.4"/><path d="M10.6 11.2c-2.2-.1-3.8 1.2-4.2 3.2-.3 1.7-.9 3.4-2.4 4.9 2.6.5 5.5 0 7.1-1.7 1.4-1.4 1.8-3.2 1.4-4.5z"/>'),
   impressionist: svg('<circle cx="7" cy="8" r="1.6"/><circle cx="13" cy="6.5" r="1.6"/><circle cx="18" cy="10" r="1.6"/><circle cx="9" cy="14" r="1.6"/><circle cx="15.5" cy="15.5" r="1.6"/><circle cx="6" cy="19" r="1.3"/><circle cx="12" cy="19.5" r="1.3"/>'),
-  charcoal: svg('<path d="M16.5 3.5l4 4L9 19l-5 1.5L5.5 15.5z"/><path d="M14 6l4 4"/>'),
+  woodcut: svg('<path d="M3.5 20.5l7-7"/><path d="M9 12l3 3 2.5-2.5L20.5 6.5 17.5 3.5 11.5 9.5z"/><path d="M14 20.5h6.5M16 17.5h4.5"/>'),
   render3d: svg('<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/>'),
   stop: svg('<rect x="7" y="7" width="10" height="10" rx="1.2"/>'),
 };
@@ -74,7 +75,9 @@ export function createGallery({ renderer, scene, camera, origin, onClose }) {
   try { const v = JSON.parse(localStorage.getItem(Q_KEY) || 'null');
     if (v && !(v.v >= 2) && v.render3d) delete v.render3d.bounces;
     if (v && !(v.v >= 3) && v.render3d) delete v.render3d.samples;
-    if (v) for (const g of Q_GROUPS) for (const f of g.fields) if (v[g.id] && typeof v[g.id][f.k] === typeof f.def) QS[g.id][f.k] = v[g.id][f.k]; } catch (e) { /* storage unavailable */ }
+    if (v) for (const g of Q_GROUPS) for (const f of g.fields) if (v[g.id] && typeof v[g.id][f.k] === typeof f.def) QS[g.id][f.k] = v[g.id][f.k];
+    // settings of a style that no longer exists, such as the charcoal, are dropped from the stored copy
+    if (v && !(v.v >= Q_VERSION)) localStorage.setItem(Q_KEY, JSON.stringify({ ...QS, v: Q_VERSION })); } catch (e) { /* storage unavailable */ }
   const storeQS = () => { try { localStorage.setItem(Q_KEY, JSON.stringify({ ...QS, v: Q_VERSION })); } catch (e) { /* storage unavailable */ } };
 
   /* ---------- styles ---------- */

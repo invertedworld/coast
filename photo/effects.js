@@ -1,7 +1,7 @@
 /* Picture effects for photographs taken in the village.
 
    applyEffect(name, source, opts) -> Promise<HTMLCanvasElement>
-     name    'watercolour', 'oil', 'impressionist' or 'charcoal'
+     name    'watercolour', 'oil', 'impressionist' or 'woodcut'
      source  an HTMLCanvasElement, HTMLImageElement or ImageBitmap holding the picture
      opts    seed (a number, for the random parts), and per-effect settings listed with each effect below
              (opts.debug names an intermediate stage to return instead, for the testbench)
@@ -22,7 +22,7 @@
    picture. */
 import * as THREE from 'three';
 
-export const EFFECTS = ['watercolour', 'oil', 'impressionist', 'charcoal'];
+export const EFFECTS = ['watercolour', 'oil', 'impressionist', 'woodcut'];
 
 /* ---------- the private GL context and full-screen passes ---------- */
 let G = null;
@@ -842,111 +842,278 @@ function impressionist(srcTex, w, h, o) {
   return { frame, dispose };
 }
 
-/* ---------- charcoal ----------
-   A monochrome drawing on laid charcoal paper. The picture's values are gathered into tonal masses from its
-   Kuwahara-simplified copy and drawn with hatching: strokes laid along the flow of the structure tensor, each a
-   line whose breadth and pressure follow the darkness beneath it, with a second set crossing the first in the
-   shadows. The charcoal catches only on the tooth of the paper where the pressure is light and fills it where it
-   is heavy. Middle tones are smudged into a soft grey, contours are drawn as crisp lines of varying pressure,
-   the lightest places are lifted back to bare paper, and stray dust and finger smudges lie on the sheet.
-   opts: abstraction (Kuwahara radius, default 5), hatching (default 1), contour (default 1), smudge (default 1) */
-const CH_TONE = `uniform sampler2D tSrc; uniform float uLo, uHi;
-void main(){ vec3 c=texture(tSrc,vUv).rgb; float L=mix(lum(c),max(c.r,max(c.g,c.b)),0.5);
-  // values pushed apart, as a draughtsman simplifies light and shadow
-  float D=clamp((uHi-L)/max(uHi-uLo,0.1),0.0,1.0); D=pow(D,1.1);
-  fragColor=vec4(D,D,D,1.0); }`;
+/* ---------- woodcut ----------
+   A relief print from a carved block of plank wood, in black ink on off-white paper. The picture is simplified with
+   the Kuwahara filter, and its values set the width of parallel cuts: the uncut wood between them prints as black
+   lines, which swell into solid black in the shadows, where the cuts narrow to thin white gouges, and taper to
+   nothing in the lights, where the wood is cleared away. The cuts follow the forms: on the land they run along the
+   flow of the structure tensor, as a phasor noise of Gabor kernels each turned to the flow at its centre, and run
+   level where the flow has no clear direction; the sky, found by filling from the top of the picture, is cut in
+   level lines that grow heavier towards the top, and the sea, filled from beneath the horizon, in wavy ones. Outlines are cut round the edges of the picture's shapes with a slightly wandering knife, and where
+   two dark shapes meet they are gouged white instead. The ink shows the grain of the plank and the unevenness of
+   the press, and the paper its fibres. With colour blocks, the picture's main colours (found by k-means) are first
+   printed flat from blocks of their own, slightly out of register, the sky graded as in bokashi, and the key block
+   carries only the outlines and the darker tones. While it is shown being made, a single block is carved, lightest
+   places first; with colour blocks, the impressions are printed one after another.
+   opts: spacing (line spacing in pixels, default 9), weight (boldness of the black, default 1), contrast
+         (default 1), outline (default 1), colours (number of colour blocks, 0 to 4, default 0), grain (default 1) */
+const WOOD_TONE = `uniform sampler2D tSrc; uniform float uLo, uHi, uContrast, uWeight;
+void main(){ vec3 c=texture(tSrc,vUv).rgb; float L=mix(lum(c),max(c.r,max(c.g,c.b)),0.3);
+  float d=clamp((uHi-L)/max(uHi-uLo,0.1),0.0,1.0);
+  // values pushed apart about the middle, then darkened or lightened as a whole
+  float g=0.5+0.8*uContrast; float a=pow(d,g), b=pow(1.0-d,g); d=a/max(a+b,1e-6);
+  d=pow(d,1.25/max(uWeight,0.05));
+  fragColor=vec4(d,L,0.0,1.0); }`;
 
-// hatching: a line integral convolution of sparse noise along the flow (turned by uTurn) draws long strokes that
-// follow the form; the strokes appear where the drawing is darker than each stroke's threshold
-const CH_HATCH = `uniform sampler2D tTfm, tTone, tQuiet; uniform float uLen, uLayer, uTurn, uFrom;
-float seedAt(vec2 x){ vec2 c=floor(x/(1.7*uS)); float h=hash12(c+uSeed*3.0+uLayer*17.0); return step(0.82,h)*(0.6+0.4*hash12(c+9.0)); }
+// the cuts: the distance from the middle of the nearest line of uncut wood, 0 on it and 1 halfway to the next
+const WOOD_LINES = `uniform sampler2D tTfm, tMask; uniform float uSpacing, uHorizon;
+float tri(float ph){ return abs(fract(ph+0.5)-0.5)*2.0; }
 void main(){
-  vec2 px=vUv*uRes; float cs=cos(uTurn), sn=sin(uTurn);
-  float acc=seedAt(px), wsum=1.0; int n=int(uLen*uS);
-  for (int dir=0; dir<2; dir++){
-    vec2 x=px; vec2 t0=texture(tTfm,vUv).xy; vec2 tp=vec2(cs*t0.x-sn*t0.y,sn*t0.x+cs*t0.y)*(dir==0?1.0:-1.0);
-    for (int i=1;i<=60;i++){ if (i>n) break;
-      vec2 t=texture(tTfm,x/uRes).xy; t=vec2(cs*t.x-sn*t.y,sn*t.x+cs*t.y); if (dot(t,tp)<0.0) t=-t; tp=t; x+=t;
-      float w=1.0-float(i)/float(n+1); acc+=w*seedAt(x); wsum+=w; }
+  vec2 p=vUv*uRes/uS; float lam=uSpacing;
+  vec2 m=texture(tMask,vUv).rg; float prof;
+  if (m.r>0.5){
+    // the sky: level cuts, wavering a little as a hand-held gouge does
+    prof=tri((p.y+lam*0.9*(fbm3(vec2(p.x*0.004,p.y*0.015)+uSeed)-0.5))/lam);
+  } else if (m.g>0.5){
+    // the sea: wavy cuts, the waves growing with the distance from the horizon
+    float dist=max(uHorizon-p.y,0.0);
+    float A=lam*mix(0.15,0.55,smoothstep(0.0,320.0,dist));
+    float xc=(p.x-0.5*uRes.x/uS)*mix(1.7,1.0,smoothstep(0.0,300.0,dist));
+    float wv=sin(2.0*PI*(xc/34.0+1.3*fbm3(vec2(p.x*0.005,p.y/(3.0*lam))+uSeed+21.0)));
+    wv=0.8*wv+0.6*(fbm3(vec2(p.x*0.02,p.y/(3.0*lam))+uSeed+27.0)-0.5);
+    prof=tri((p.y+A*wv)/lam);
+  } else {
+    // the land: phasor noise, a sum of Gabor kernels whose waves cross the flow of the picture
+    float f=1.0/lam, sk=1.8*lam, C=2.6*sk; vec2 ci=floor(p/C); vec2 acc=vec2(0.0);
+    for (int j=-1;j<=1;j++) for (int i=-1;i<=1;i++){ vec2 c=ci+vec2(i,j);
+      for (int k=0;k<8;k++){ vec2 xi=(c+hash22(c*1.37+float(k)*7.31+uSeed))*C;
+        // where the flow has no clear direction, as on a paved floor, the cuts run level
+        vec4 tf=texture(tTfm,xi*uS/uRes); vec2 t=tf.x<0.0 ? -tf.xy : tf.xy; t=normalize(mix(vec2(1.0,0.0),t,smoothstep(0.08,0.35,tf.w))+1e-6);
+        vec2 w=vec2(-t.y,t.x); if (w.y<0.0||(w.y==0.0&&w.x<0.0)) w=-w;
+        vec2 d=p-xi; float g=exp(-dot(d,d)/(2.0*sk*sk));
+        float th=2.0*PI*f*dot(d,w)+6.2831853*hash12(c*2.17+float(k)*3.9+uSeed+5.0);
+        acc+=g*vec2(cos(th),sin(th)); } }
+    prof=abs(atan(acc.y,acc.x))/PI;
   }
-  float v=acc/wsum*5.0;                                     // about 1 on a stroke, 0 between strokes
-  float D=texture(tTone,vUv).r;
-  float w=clamp((D-uFrom)/(1.0-uFrom),0.0,1.0);
-  float line=smoothstep(1.0-w,1.0-w+0.35,v)*smoothstep(0.0,0.15,w);
-  // broad quiet passages such as the sky are mostly smudged, with only a few strokes
-  line*=mix(0.5,1.0,smoothstep(0.01,0.12,texture(tQuiet,vUv).r));
-  fragColor=vec4(line*(0.55+0.45*w),w,0.0,1.0); }`;
+  fragColor=vec4(prof,0.0,0.0,1.0); }`;
 
-const CH_FINAL = `uniform sampler2D tTone, tSoft, tH1, tH2, tP1, tP2; uniform float uHatch, uContour, uSmudge;
-float tooth(vec2 p){ // laid paper: fine chain and laid lines, and a granular tooth
-  float laid=0.5+0.5*sin(p.y*2.1+0.6*sin(p.x*0.05));
-  float g=fbm(p*0.9)*0.6+vnoise(p*2.3)*0.4;
-  return clamp(0.25*laid+0.75*g,0.0,1.0); }
+// the strength of the edges of the picture's shapes, in colour, per pixel of a picture 800 pixels high
+const WOOD_EDGE = `uniform sampler2D tSrc;
+void main(){ vec2 d=1.0/uRes;
+  vec3 a=texture(tSrc,vUv+d*vec2(-1,-1)).rgb, b=texture(tSrc,vUv+d*vec2(0,-1)).rgb, c=texture(tSrc,vUv+d*vec2(1,-1)).rgb;
+  vec3 e=texture(tSrc,vUv+d*vec2(-1,0)).rgb, f=texture(tSrc,vUv+d*vec2(1,0)).rgb;
+  vec3 g=texture(tSrc,vUv+d*vec2(-1,1)).rgb, h=texture(tSrc,vUv+d*vec2(0,1)).rgb, i=texture(tSrc,vUv+d*vec2(1,1)).rgb;
+  vec3 gx=(c+2.0*f+i-a-2.0*e-g)*0.125, gy=(g+2.0*h+i-a-2.0*b-c)*0.125;
+  fragColor=vec4(sqrt(dot(gx,gx)+dot(gy,gy))*uS,0.0,0.0,1.0); }`;
+
+const WOOD_FINAL = `uniform sampler2D tTone, tLines, tEdge, tA, tMask; uniform float uOutline, uGrain, uN, uSky, uSea, uHorizon;
+uniform vec3 uPal[4], uCen[4]; uniform vec2 uReg[4];
+const vec3 PAPER=vec3(0.946,0.927,0.878), INK=vec3(0.06,0.055,0.06);
+// the grain of the plank, which runs across the block: rings wandering round the knots, and fine fibres
+float grain(vec2 p){
+  vec2 q=p+vec2(0.0,40.0*fbm3(p*vec2(0.0012,0.004)+uSeed+70.0));
+  float ring=0.5+0.5*sin(q.y*0.38+9.0*fbm3(vec2(q.x*0.0025,q.y*0.02)+uSeed+72.0));
+  float g=smoothstep(0.55,0.95,ring)*(0.4+0.6*fbm3(vec2(p.x*0.01,p.y*0.12)+uSeed+74.0));
+  return clamp(g+0.5*smoothstep(0.62,0.9,vnoise(vec2(p.x*0.04,p.y*0.9)+uSeed)),0.0,1.0); }
+// a crisp step of x past the edge e, smoothed over a pixel
+// colours are compared by lightness and by two opponent differences weighted twice, so that hues are kept apart
+vec3 opp(vec3 c){ return vec3(lum(c),2.0*(c.r-c.g),2.0*(0.5*(c.r+c.g)-c.b)); }
+float cut(float e, float x){ float fw=max(fwidth(x),1e-4); return clamp((x-e)/fw+0.5,0.0,1.0); }
 void main(){
   vec2 px=vUv*uRes, p=px/uS;
-  float D=texture(tTone,vUv).r, Ds=texture(tSoft,vUv).r;
-  D=clamp(D+1.2*(D-Ds),0.0,1.0);                 // local contrast, as the draughtsman separates planes
-  float ph=tooth(p);
-  // the charcoal catches on the peaks of the tooth under light pressure and fills the hollows under heavy
-  float k=0.0;
-  // smudged middle tones: charcoal rubbed into the paper with a finger or stump
-  float sm=uSmudge*smoothstep(0.03,0.9,mix(Ds,D,0.5))*(0.8+0.35*(fbm(p*0.01+uSeed+3.0)-0.5));
-  sm*=0.55+0.45*smoothstep(0.1,0.7,ph);
-  vec2 sw=p*0.004+uSeed+93.0; float ord=fbm(sw), ord2=fbm(sw+7.0);
-  k=1.0-(1.0-k)*(1.0-0.62*sm*reveal(0.5,0.74,ord2));
-  // hatching: two sets of strokes, the second crossing the first in the shadows
-  vec4 h1=texture(tH1,vUv), h2=texture(tH2,vUv);
-  float g1=smoothstep(1.0-h1.x*1.5-0.1,1.0-h1.x*1.5+0.25,ph);
-  float g2=smoothstep(1.0-h2.x*1.5-0.1,1.0-h2.x*1.5+0.25,ph);
-  k=1.0-(1.0-k)*(1.0-uHatch*0.7*h1.x*g1*reveal(0.0,0.36,ord))*(1.0-uHatch*0.7*h2.x*g2*reveal(0.28,0.56,ord2));
-  // the deepest shadows pressed into a dense black
-  float deep=smoothstep(0.62,0.95,D);
-  k=1.0-(1.0-k)*(1.0-0.8*deep*smoothstep(0.2,0.6,ph+deep*0.4)*reveal(0.4,0.66,ord));
-  // contours: crisp lines from the picture's edges, heavier and lighter as the hand presses and lifts
-  float e=lum(texture(tP1,vUv).rgb)-lum(texture(tP2,vUv).rgb);
-  float cl=smoothstep(0.015,0.05,abs(e))*(0.55+0.45*vnoise(p*0.03+uSeed+8.0));
-  cl*=smoothstep(0.25,0.55,ph+0.35*cl);
-  k=1.0-(1.0-k)*(1.0-uContour*0.85*cl*reveal(0.68,0.9,fbm(p*0.012+uSeed+94.0)));
-  // highlights lifted with a putty rubber: streaks of bare paper in the lightest places
-  float lift=smoothstep(0.1,0.02,Ds)*(0.6+0.4*fbm(vec2(p.x*0.02,p.y*0.08)+uSeed+40.0));
-  k*=1.0-lift*reveal(0.88,0.99,ord);
-  // dust and smudges on the sheet
-  float dust=smoothstep(0.62,0.8,fbm(p*0.004+uSeed+60.0))*0.12+step(0.9985,hash12(floor(p*0.7)+uSeed))*0.5;
-  k=1.0-(1.0-k)*(1.0-dust*smoothstep(0.3,0.7,ph)*reveal(0.9,1.0,ord2));
-  vec3 paper=vec3(0.93,0.915,0.875), char=vec3(0.11,0.105,0.11);
-  vec3 col=mix(paper,char,clamp(k,0.0,1.0));
-  // the tooth of the paper, lit from the upper left, everywhere the charcoal has not filled it
-  float hx=tooth(p+vec2(1.0,0.0))-ph, hy=tooth(p+vec2(0.0,1.0))-ph;
-  col*=1.0+(1.0-k)*(0.06*(-hx*0.7+hy*0.7)-0.03*(1.0-ph));
+  // the knife wanders a little from the drawn line
+  vec2 wob=(vec2(fbm3(p*0.025+uSeed+5.0),fbm3(p*0.025+uSeed+9.0))-0.5)*2.0*uS/uRes;
+  float d=texture(tTone,vUv+wob).r, prof=texture(tLines,vUv).r;
+  bool colour=uN>0.5; vec2 mk=texture(tMask,vUv).rg;
+  // a single block cuts the whole sky in lines, heavier towards the top and tapering towards the horizon
+  float up=clamp((p.y-uHorizon)/max(uRes.y/uS-uHorizon,1.0),0.0,1.0);
+  if (mk.r>0.5 && !colour) d=max(d,0.1+0.3*up*up);
+  // the key block: with colour blocks under it, it carries only the darker tones
+  float dk=colour ? clamp((d-0.42)/0.58,0.0,1.0) : d;
+  // the width of the uncut wood, a little uneven (in the sky each line on its own, so that the lines end one by
+  // one), with the finest lines cleared away and the darkest left whole
+  float nz=mk.r>0.5 ? 0.1*(vnoise(vec2(p.x*0.015,p.y*0.5)+uSeed+3.0)-0.5) : 0.06*(vnoise(p*0.06+uSeed+3.0)-0.5);
+  float wl=dk+nz*smoothstep(0.0,0.2,dk);
+  float fw=clamp(fwidth(prof),0.02,0.4);
+  wl = wl<1.1*fw ? 0.0 : (wl>1.0-0.9*fw ? 1.0 : wl);
+  float k=wl<=0.0 ? 0.0 : (wl>=1.0 ? 1.0 : 1.0-cut(wl,prof));
+  // outlines round the shapes, cut black, or gouged white where both sides are dark
+  float e=texture(tEdge,vUv+wob).r*(0.8+0.4*vnoise(p*0.04+uSeed+11.0));
+  float ol=cut(0.05/max(uOutline,0.05),e)*step(0.01,uOutline);
+  vec2 o=2.5*uS/uRes; float dmin=min(min(texture(tTone,vUv+vec2(o.x,0)).r,texture(tTone,vUv-vec2(o.x,0)).r),
+    min(texture(tTone,vUv+vec2(0,o.y)).r,texture(tTone,vUv-vec2(0,o.y)).r));
+  float gouge=smoothstep(0.78,0.86,dmin);
+  k=mix(max(k,ol),k*(1.0-ol),gouge);
+  // the print as it is being made
+  float sweep=clamp(vUv.x*0.85+0.3*(fbm3(p*0.004+uSeed+44.0)-0.5)+0.08,0.0,1.0);
+  if (uT<1.0 && !colour){
+    // a single block carved, the lightest places cleared first and the fine cuts in the shadows last
+    float ord=clamp(0.7*d+0.35*(fbm3(p*0.006+uSeed+33.0)-0.5)+0.12,0.0,1.0);
+    if (uT<0.02+0.95*ord) k=1.0;
+  }
+  float keyOn = (uT>=1.0||!colour) ? 1.0 : step((uN+sweep)/(uN+1.0),uT);
+  // the paper and its fibres
+  vec3 col=PAPER*(1.0+0.035*(fbm(p*0.35+uSeed+50.0)-0.5)+0.02*(vnoise(vec2(p.x*0.6,p.y*0.15)+uSeed)-0.5));
+  // the colour blocks: the nearest of the palette's colours, or the paper where it is nearest
+  if (colour){
+    float best=1e9, second=1e9; int bi=-1;
+    for (int i=0;i<4;i++){ if (float(i)>=uN) break;
+      vec3 dc=opp(texture(tA,vUv+uReg[i]*uS/uRes).rgb)-opp(uCen[i]); float dd=dot(dc,dc);
+      if (dd<best){ second=best; best=dd; bi=i; } else if (dd<second) second=dd; }
+    vec3 dp=opp(texture(tA,vUv).rgb)-opp(vec3(0.97,0.96,0.94)); float dpaper=dot(dp,dp)*0.8;
+    float op=1.0;
+    if (mk.r>0.5 && uSky>=0.0){ bi=int(uSky); op=mix(0.18,1.0,smoothstep(0.05,0.85,d)); dpaper=1e9; }
+    else if (mk.g>0.5 && uSea>=0.0){ bi=int(uSea); op=mix(0.55,1.0,d); dpaper=1e9; }
+    if (dpaper<best) bi=-1;
+    if (bi>=0){
+      vec3 pig=vec3(0.0); vec2 reg=vec2(0.0);
+      for (int i=0;i<4;i++) if (i==bi){ pig=uPal[i]; reg=uReg[i]; }
+      // the pigment, brushed on the block with water, prints a little mottled
+      vec2 q=p+reg;
+      op*=0.8+0.2*fbm(q*0.06+uSeed+float(bi)*7.0)-0.12*step(0.93,vnoise(q*0.7+uSeed+float(bi)));
+      op*=max(step((float(bi)+sweep)/(uN+1.0),uT),step(1.0,uT));
+      col*=mix(vec3(1.0),pig/PAPER,clamp(op,0.0,1.0));
+    }
+  }
+  // the ink: uneven over the sheet, lighter along the grain, with tiny gaps where the paper missed it
+  float dens=0.93+0.1*(fbm3(p*0.005+uSeed+60.0)-0.5);
+  dens*=1.0-uGrain*0.16*grain(p);
+  dens*=1.0-uGrain*0.7*step(0.996,hash12(floor(vec2(p.x*0.35,p.y*1.4))+uSeed));
+  col=mix(col,INK,clamp(k*keyOn,0.0,1.0)*clamp(dens,0.0,1.0));
   fragColor=vec4(clamp(col,0.0,1.0),1.0); }`;
 
-function charcoal(srcTex, w, h, o) {
-  const s = h / 800, seed = o.seed ?? 1;
-  const tfm = orientation(srcTex, w, h, 3.0 * s, 0.01, seed);
-  const A = target(w, h), tone = target(w, h), soft = target(w, h), h1 = target(w, h), h2 = target(w, h), tmp = target(w, h),
-    p1 = target(w, h), p2 = target(w, h);
-  kuwahara(srcTex, tfm, (o.abstraction ?? 5) * s, A, 8);
-  // the drawing uses the whole range from paper to black, whatever the picture's own range
-  const sw = 64, sh = Math.max(8, Math.round(64 * h / w)), small = target(sw, sh, THREE.FloatType);
-  pass(COPY, { tSrc: A, uGain: 1 }, small);
-  const px = readTarget(small), Ls = [];
-  for (let i = 0; i < px.length; i += 4) Ls.push(0.5 * (0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2]) + 0.5 * Math.max(px[i], px[i + 1], px[i + 2]));
-  Ls.sort((a, b) => a - b); small.dispose();
-  const lo = Math.min(0.45, Ls[Math.floor(Ls.length * 0.03)]), hi = Math.max(lo + 0.25, Math.min(0.97, Ls[Math.floor(Ls.length * 0.9)]));
-  pass(CH_TONE, { tSrc: A, uLo: lo, uHi: hi }, tone);
-  blur(tone, 5 * s, tmp, soft);
-  const det = target(w, h); pass(OIL_DETAIL, { tSrc: A }, det); blur(det, 6 * s, tmp, det);
-  const tfm2 = orientation(A, w, h, 14.0 * s, 0.02, seed, 0.15);
-  pass(CH_HATCH, { tTfm: tfm2, tQuiet: det, tTone: tone, uLen: 22, uLayer: 0, uTurn: 0.75, uFrom: 0.15, uSeed: seed }, h1);
-  pass(CH_HATCH, { tTfm: tfm2, tQuiet: det, tTone: tone, uLen: 18, uLayer: 1, uTurn: -0.45, uFrom: 0.5, uSeed: seed }, h2);
-  blur(A, 1.0 * s, tmp, p1); blur(A, 1.8 * s, tmp, p2);
-  const all = [tfm, tfm2, A, tone, soft, h1, h2, tmp, p1, p2, det], dispose = () => all.forEach(t => t.dispose());
-  const dbg = { A, tone, soft, h1, h2 }[o.debug]; if (dbg) return { frame: () => show(dbg, w, h), dispose };
-  return { dispose, frame: t => pass(CH_FINAL, { tTone: tone, tSoft: soft, tH1: h1, tH2: h2, tP1: p1, tP2: p2, uHatch: o.hatching ?? 1,
-    uContour: o.contour ?? 1, uSmudge: o.smudge ?? 1, uSeed: seed, uT: t }, null, { w, h }) };
+// the sky and the sea, found on a small copy of the simplified picture (rows from the top, values 0 to 1): the sky is
+// filled from the top of the picture through small steps of colour, and cut off where it starts to darken again below
+// the horizon; the sea is filled from beneath the cut. Returns the two masks and the horizon's height (0 at the foot)
+function skyAndSea(px, mw, mh) {
+  const N = mw * mh, at = (x, y) => ((mh - 1 - y) * mw + x) * 4;   // the pixels are read from the foot up
+  const L = new Float32Array(N), C = new Float32Array(N * 3);
+  for (let y = 0; y < mh; y++) for (let x = 0; x < mw; x++) { const i = y * mw + x, j = at(x, y);
+    C[i * 3] = px[j]; C[i * 3 + 1] = px[j + 1]; C[i * 3 + 2] = px[j + 2]; L[i] = 0.299 * px[j] + 0.587 * px[j + 1] + 0.114 * px[j + 2]; }
+  const step = (a, b) => Math.max(Math.abs(C[a * 3] - C[b * 3]), Math.abs(C[a * 3 + 1] - C[b * 3 + 1]), Math.abs(C[a * 3 + 2] - C[b * 3 + 2]));
+  const fill = (mask, seeds, tol, ok) => {
+    const q = seeds.slice(); for (const s of seeds) mask[s] = 1;
+    while (q.length) { const i = q.pop(), x = i % mw, y = (i - x) / mw;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= mw || ny >= mh) continue;
+        const n = ny * mw + nx; if (mask[n] || step(i, n) > tol || !ok(n, ny)) continue; mask[n] = 1; q.push(n); } }
+  };
+  // the sky: seeded from the top row where it is near the row's middle colour
+  const sky = new Uint8Array(N), top = [];
+  const med = k => { const v = []; for (let x = 0; x < mw; x++) v.push(C[x * 3 + k]); v.sort((a, b) => a - b); return v[mw >> 1]; };
+  const m0 = [med(0), med(1), med(2)];
+  for (let x = 0; x < mw; x++) if (Math.max(Math.abs(C[x * 3] - m0[0]), Math.abs(C[x * 3 + 1] - m0[1]), Math.abs(C[x * 3 + 2] - m0[2])) < 0.08) top.push(x);
+  if (top.length > mw * 0.2) fill(sky, top, 0.022 * 480 / mh, () => true);
+  // in each column the sky ends where it starts to darken after its lightest point, as the sea does below the horizon
+  const cutRows = [], bottoms = [];
+  for (let x = 0; x < mw; x++) {
+    let y = 0, best = -1, by = -1; while (y < mh && sky[y * mw + x]) { if (L[y * mw + x] > best) { best = L[y * mw + x]; by = y; } y++; }
+    if (y === 0) continue; let c = -1;
+    for (let k = by + 1; k < y; k++) if (L[k * mw + x] < best - 0.03) { c = k; break; }
+    if (c >= 0) { cutRows.push(c); for (let k = c; k < mh; k++) sky[k * mw + x] = 0; } else bottoms.push(y);
+  }
+  const median = a => { const v = a.slice().sort((p, q) => p - q); return v[v.length >> 1]; };
+  const horizon = cutRows.length > mw * 0.08 ? median(cutRows) : bottoms.length ? median(bottoms) : Math.round(mh * 0.4);
+  // the sea: seeded just beneath the sky wherever the sky reaches down to the horizon and the colour there is of the
+  // same hue as the sky above the horizon, or close to it, as the sea reflects the sky; it is filled through small
+  // steps of colour, as long as it stays near the colour of the seeds or is bluer than it is red
+  const sk = [0, 0, 0]; let ns = 0;
+  for (let y = Math.max(0, Math.round(horizon - mh * 0.04)); y < horizon; y++) for (let x = 0; x < mw; x++) { const i = y * mw + x;
+    if (sky[i]) { sk[0] += C[i * 3]; sk[1] += C[i * 3 + 1]; sk[2] += C[i * 3 + 2]; ns++; } }
+  const sea = new Uint8Array(N), seeds = [];
+  if (ns) {
+    sk.forEach((v, k) => { sk[k] = v / ns; });
+    const chroma = c => { const l = (c[0] + c[1] + c[2]) / 3; return [c[0] - l, c[1] - l, c[2] - l]; }, ck = chroma(sk), nk = Math.hypot(...ck);
+    for (let x = 0; x < mw; x++) { let y = 0; while (y < mh && sky[y * mw + x]) y++;
+      const i = Math.min(mh - 1, y + Math.max(2, Math.round(mh * 0.006))) * mw + x;
+      if (Math.abs(y - horizon) > mh * 0.015 || sky[i]) continue;
+      const c = [C[i * 3], C[i * 3 + 1], C[i * 3 + 2]], cc = chroma(c), nc = Math.hypot(...cc);
+      const sameHue = nc > 0.02 && nk > 0.02 && (cc[0] * ck[0] + cc[1] * ck[1] + cc[2] * ck[2]) / (nc * nk) > 0.75;
+      if (sameHue || Math.max(...c.map((v, k) => Math.abs(v - sk[k]))) < 0.1) seeds.push(i); }
+  }
+  if (seeds.length > mw * 0.04) {
+    // where the sea is seen the sky does not reach below the horizon: what the sky's fill found there is hazy land or sea
+    for (let i = Math.ceil(horizon + mh * 0.006) * mw; i < N; i++) sky[i] = 0;
+    const sm = [0, 1, 2].map(k => median(seeds.map(s => C[s * 3 + k])));
+    const near = (n, t) => Math.max(Math.abs(C[n * 3] - sm[0]), Math.abs(C[n * 3 + 1] - sm[1]), Math.abs(C[n * 3 + 2] - sm[2])) < t;
+    for (let i = (horizon + 2) * mw; i < N; i++) if (!sky[i] && near(i, 0.04)) seeds.push(i);
+    const ok = (n, ny) => ny > horizon && !sky[n] && (near(n, 0.25) || C[n * 3 + 2] > C[n * 3] + 0.12);
+    fill(sea, seeds, 0.035 * 480 / mh, ok);
+    // parts of the sea cut off from the rest, behind a boat or a pier, have the colour of the sea found so far
+    const found = []; for (let i = 0; i < N; i++) if (sea[i]) found.push(i);
+    const fm = [0, 1, 2].map(k => median(found.map(s => C[s * 3 + k])));
+    const more = []; for (let i = (horizon + 2) * mw; i < N; i++) if (!sea[i] && !sky[i] &&
+      Math.max(Math.abs(C[i * 3] - fm[0]), Math.abs(C[i * 3 + 1] - fm[1]), Math.abs(C[i * 3 + 2] - fm[2])) < 0.04) more.push(i);
+    if (more.length) fill(sea, more, 0.035 * 480 / mh, ok);
+    // small patches enclosed by the sea, such as the shadows of waves, are sea too
+    const seen = new Int32Array(N); let id = 0;
+    for (let i = (horizon + 1) * mw; i < N; i++) { if (sea[i] || sky[i] || seen[i]) continue;
+      const comp = [i], q = [i]; seen[i] = ++id; let open = false;
+      while (q.length && comp.length < N * 0.003) { const j = q.pop(), x = j % mw, y = (j - x) / mw;
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = x + dx, ny = y + dy;
+          if (nx < 0 || ny < 0 || nx >= mw || ny >= mh) { open = true; continue; }
+          const n = ny * mw + nx; if (sky[n] || (seen[n] && seen[n] !== id)) open = true;
+          if (sea[n] || sky[n] || seen[n]) continue; seen[n] = id; comp.push(n); q.push(n); } }
+      if (!open && !q.length) for (const j of comp) sea[j] = 1; }
+  }
+  return { sky, sea, horizon: (mh - horizon) / mh, C };
 }
 
-const RUN = { watercolour, oil, impressionist, charcoal };
+// the picture's main colours by k-means, for the colour blocks: the paper is a fixed colour of its own
+function woodPalette(C, n, k, rnd) {
+  const pts = []; for (let i = 0; i < n; i += 3) pts.push([C[i * 3], C[i * 3 + 1], C[i * 3 + 2]]);
+  const opp = c => [0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2], 2 * (c[0] - c[1]), 2 * (0.5 * (c[0] + c[1]) - c[2])];
+  const paper = [0.97, 0.96, 0.94], d2 = (a, b) => { const p = opp(a), q = opp(b); return (p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2 + (p[2] - q[2]) ** 2; };
+  const cs = [];
+  for (let c = 0; c < k; c++) { // k-means++ seeding, away from the paper and the colours chosen so far
+    const D = pts.map(p => Math.min(d2(p, paper), ...cs.map(q => d2(p, q)))), tot = D.reduce((a, b) => a + b, 0);
+    let r = rnd() * tot, i = 0; while (i < pts.length - 1 && (r -= D[i]) > 0) i++; cs.push(pts[i].slice()); }
+  for (let it = 0; it < 10; it++) {
+    const sum = cs.map(() => [0, 0, 0, 0]);
+    for (const p of pts) { let bi = -1, bd = d2(p, paper); cs.forEach((q, j) => { const d = d2(p, q); if (d < bd) { bd = d; bi = j; } });
+      if (bi >= 0) { const s = sum[bi]; s[0] += p[0]; s[1] += p[1]; s[2] += p[2]; s[3]++; } }
+    sum.forEach((s, j) => { if (s[3]) cs[j] = [s[0] / s[3], s[1] / s[3], s[2] / s[3]]; });
+  }
+  return cs;
+}
+
+function woodcut(srcTex, w, h, o) {
+  const s = h / 800, seed = o.seed ?? 1, sd = (seed % 997) * 0.173, nc = Math.max(0, Math.min(4, Math.round(o.colours ?? 0)));
+  const tfm0 = orientation(srcTex, w, h, 2.0 * s, 0.01, sd);
+  const A = target(w, h), tmp = target(w, h), B = target(w, h), tone = target(w, h), edge = target(w, h),
+    lines = target(w, h, THREE.FloatType);
+  kuwahara(srcTex, tfm0, 4 * s, A, 8);
+  // a small copy on the CPU, for the sky and the sea, the range of values and the colours
+  const mh = Math.min(h, 400), mw = Math.max(8, Math.round(mh * w / h)), small = target(mw, mh, THREE.FloatType);
+  pass(COPY, { tSrc: A, uGain: 1 }, small);
+  const ss = skyAndSea(readTarget(small), mw, mh); small.dispose();
+  const Ls = []; for (let i = 0; i < mw * mh; i += 7) Ls.push(0.7 * (0.299 * ss.C[i * 3] + 0.587 * ss.C[i * 3 + 1] + 0.114 * ss.C[i * 3 + 2]) + 0.3 * Math.max(ss.C[i * 3], ss.C[i * 3 + 1], ss.C[i * 3 + 2]));
+  Ls.sort((a, b) => a - b);
+  const lo = Math.min(0.4, Ls[Math.floor(Ls.length * 0.02)]), hi = Math.max(lo + 0.3, Math.min(0.98, Ls[Math.floor(Ls.length * 0.97)]));
+  const mc = document.createElement('canvas'); mc.width = mw; mc.height = mh;
+  const mx = mc.getContext('2d'), im = mx.createImageData(mw, mh);
+  for (let i = 0; i < mw * mh; i++) { im.data[i * 4] = ss.sky[i] * 255; im.data[i * 4 + 1] = ss.sea[i] * 255; im.data[i * 4 + 3] = 255; }
+  mx.putImageData(im, 0, 0); const mask = sourceTexture(mc);
+  pass(WOOD_TONE, { tSrc: A, uLo: lo, uHi: hi, uContrast: o.contrast ?? 1, uWeight: o.weight ?? 1 }, tone);
+  blur(A, 1.8 * s, tmp, B); pass(WOOD_EDGE, { tSrc: B }, edge);
+  const tfm = orientation(A, w, h, 24 * s, 0.02, sd, 0.15);
+  pass(WOOD_LINES, { tTfm: tfm, tMask: mask, uSpacing: o.spacing ?? 9, uHorizon: ss.horizon * 800, uSeed: sd }, lines);
+  // the colour blocks, each a little out of register with the key block
+  const rnd = mulberry(seed * 7 + 3), pal = nc ? woodPalette(ss.C, mw * mh, nc, rnd) : [];
+  const nearest = (m) => { let bi = -1, bd = 1e9; pal.forEach((q, j) => { const d = (q[0] - m[0]) ** 2 + (q[1] - m[1]) ** 2 + (q[2] - m[2]) ** 2; if (d < bd) { bd = d; bi = j; } }); return bi; };
+  const meanOf = msk => { const m = [0, 0, 0]; let n = 0; for (let i = 0; i < msk.length; i++) if (msk[i]) { m[0] += ss.C[i * 3]; m[1] += ss.C[i * 3 + 1]; m[2] += ss.C[i * 3 + 2]; n++; } return n > msk.length * 0.01 ? m.map(v => v / n) : null; };
+  const skyC = meanOf(ss.sky), seaC = meanOf(ss.sea);
+  const pigment = c => { const l = 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]; return new THREE.Vector3(...c.map(v => Math.min(0.96, Math.max(0.02, v + (v - l) * 0.15) * 0.96 + 0.03))); };
+  const U = { tTone: tone, tLines: lines, tEdge: edge, tA: A, tMask: mask, uHorizon: ss.horizon * 800, uOutline: o.outline ?? 1, uGrain: o.grain ?? 1, uN: pal.length,
+    uSky: skyC && pal.length ? nearest(skyC) : -1, uSea: seaC && pal.length ? nearest(seaC) : -1, uSeed: sd,
+    uPal: [0, 1, 2, 3].map(i => pal[i] ? pigment(pal[i]) : new THREE.Vector3()), uCen: [0, 1, 2, 3].map(i => new THREE.Vector3(...(pal[i] || [0, 0, 0]))),
+    uReg: [0, 1, 2, 3].map(() => new THREE.Vector2((rnd() - 0.5) * 3, (rnd() - 0.5) * 3)) };
+  const all = [tfm0, tfm, A, tmp, B, tone, edge, lines, mask], dispose = () => all.forEach(t => t.dispose());
+  if (o.debug === 'mask') return { frame: () => pass(COPY, { tSrc: mask, uGain: 1 }, null, { w, h }), dispose };
+  const dbg = { A, tone, lines, edge }[o.debug]; if (dbg) return { frame: () => show(dbg, w, h, o.debug === 'edge' ? 8 : 1), dispose };
+  return { dispose, frame: t => pass(WOOD_FINAL, { ...U, uT: t }, null, { w, h }) };
+}
+
+const RUN = { watercolour, oil, impressionist, woodcut };
 
 function stopped(signal) { if (signal && signal.aborted) throw new DOMException('The painting was stopped.', 'AbortError'); }
 
