@@ -104,6 +104,7 @@ The panel opened with **H** lists the controls. They are reproduced here for ref
 | 9 0 (camera raised) | Focus nearer or further, which sets manual focus. Shift and the mouse wheel do the same. |
 | U (camera raised) | Autofocus or manual focus. |
 | ; ' (camera raised) | Exposure compensation, in thirds of a stop from −3 to +3 EV. |
+| , . (camera raised) | Vignette, from off to 100 per cent in tenths. |
 | L | Shows or hides the gallery. |
 | H | Shows or hides the help panel. |
 

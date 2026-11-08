@@ -12,6 +12,9 @@
    - Autofocus on what lies under the AF point at the centre of the frame (the nearest surface in it, read back from
      the depth buffer a few times a second and eased in dioptres); or manual focus.
    - Exposure compensation in thirds of a stop, applied before the tone curve.
+   - A vignette, from off to 100 per cent in tenths, darkening the corners of the frame.
+   - The frame is the part of the window inside the crop marks, centred on the lens's axis; the window around it is
+     darkened, and a picture holds the frame alone. The focal length sets the field of view of the frame.
 
    While the camera is raised its controls are on the screen: the zoom, the focus (autofocus or manual, and the
    distance), the aperture and the exposure, each stepped with − and + buttons that repeat while held, the shutter, the
@@ -25,7 +28,8 @@
 
    ---------- API for picture effects (window.__village.photo) ----------
    photo.capture(opts?) -> Promise<HTMLCanvasElement>
-       Takes a picture on the next frame at the full resolution of the drawing buffer, with the depth of field and
+       Takes a picture on the next frame at the full resolution of the drawing buffer (when the camera is raised, of
+       the frame inside the crop marks), with the depth of field and
        exposure applied when the camera is raised (otherwise the game's own frame), without the viewfinder. The
        canvas carries canvas.photo, the metadata below. Options:
          depth: true    also reads back the linear depth in metres, top row first (meta.depth, Float32Array w*h)
@@ -45,10 +49,11 @@
        The game's renderer, scene and camera. The camera hangs in a group shifted by the floating origin, so its
        world position is camera.position plus meta.origin.
    photo.state
-       { on, focal, fNumber, focus, autofocus, ev }; photo.enter(), photo.exit(), photo.toggle(),
-       photo.setFocal(mm), photo.setAperture(N), photo.setEV(ev), photo.setFocus(metres | null for autofocus).
+       { on, focal, fNumber, focus, autofocus, ev, vignette }; photo.enter(), photo.exit(), photo.toggle(),
+       photo.setFocal(mm), photo.setAperture(N), photo.setEV(ev), photo.setVignette(0 to 1),
+       photo.setFocus(metres | null for autofocus).
 
-   meta = { width, height, time, on, focalLength, fNumber, focusDistance, ev, fov, aspect, near, far,
+   meta = { width, height, time, on, focalLength, fNumber, focusDistance, ev, vignette, fov, aspect, near, far,
             projectionMatrix: number[16], matrixWorld: number[16], origin: {x,y,z}, depth?: Float32Array }
 */
 import * as THREE from 'three';
@@ -66,7 +71,9 @@ const DEPTH_FN = `
   float linZ(float d){ return uNear*uFar/(uFar-d*(uFar-uNear)); }`;
 
 export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, allowed = () => true }) {
-  const S = { on: false, focal: 35, fNumber: 2.8, focus: 5, autofocus: true, ev: 0, afTarget: 5, afT: 0, af: false };
+  const S = { on: false, focal: 35, fNumber: 2.8, focus: 5, autofocus: true, ev: 0, vignette: 0, afTarget: 5, afT: 0, af: false };
+  // the frame within the window, as fractions of its width and height, centred; set from the viewfinder's layout
+  const FR = { x: 1, y: 1 };
   const hooks = [], pending = [];
 
   /* ---------- targets ---------- */
@@ -171,9 +178,9 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
     }`, gatherU);
 
   // exposure and the game's tone curve, to the screen
-  const outU = { tColor: { value: null }, uGain: { value: 1 }, uRes: { value: new THREE.Vector2() } };
+  const outU = { tColor: { value: null }, uGain: { value: 1 }, uRes: { value: new THREE.Vector2() }, uVig: { value: 0 }, uFrame: { value: new THREE.Vector2(1, 1) } };
   const outMat = new THREE.ShaderMaterial({ uniforms: outU, vertexShader: VERT, depthTest: false, depthWrite: false,
-    fragmentShader: `uniform sampler2D tColor; uniform float uGain; uniform vec2 uRes; varying vec2 vUv;
+    fragmentShader: `uniform sampler2D tColor; uniform float uGain; uniform vec2 uRes; uniform float uVig; uniform vec2 uFrame; varying vec2 vUv;
     void main(){
       vec4 c=texture2D(tColor,vUv); vec3 col=c.rgb;
       if (c.a>0.0){
@@ -184,9 +191,14 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
           vec4 n=texture2D(tColor,vUv+vec2(float(i),float(j))/uRes); float w=(i==0||j==0?2.0:1.0)*n.a; acc+=n.rgb*w; ws+=w; }
         col=mix(c.rgb,acc/ws,c.a);
       }
+      // the vignette: the light falls away towards the corners of the frame, as through a lens
+      vec2 fp=(vUv-0.5)*2.0/uFrame; float fa=uRes.x*uFrame.x/(uRes.y*uFrame.y);
+      float d=length(fp*vec2(fa,1.0))/length(vec2(fa,1.0));
+      float vig=1.0-uVig*0.85*smoothstep(0.15,1.0,d)*(0.5+0.5*d);
       gl_FragColor=vec4(col*uGain,1.0);
       #include <tonemapping_fragment>
       #include <colorspace_fragment>
+      gl_FragColor.rgb*=vig;
     }` });
 
   // autofocus: the nearest surface among points spread over the AF point
@@ -209,10 +221,14 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
   /* ---------- the lens ---------- */
   const sensor = aspect => { const h = DIAG / Math.sqrt(1 + aspect * aspect); return { w: h * aspect, h }; };
   const fovFor = (f, aspect) => 2 * Math.atan(sensor(aspect).h / (2 * f)) * 180 / Math.PI;
+  // the focal length gives the field of view of the frame inside the crop marks; the window shows more around it
+  const frameAspect = () => camera.aspect * FR.x / FR.y;
+  const frameFov = () => fovFor(S.focal, frameAspect());
+  const lensFov = () => 2 * Math.atan(Math.tan(frameFov() * Math.PI / 360) / FR.y) * 180 / Math.PI;
   let saved = null;
   function lensOn() {
     saved = camera.fov;
-    camera.fov = fovFor(S.focal, camera.aspect); camera.updateProjectionMatrix(); onFov && onFov();
+    camera.fov = lensFov(); camera.updateProjectionMatrix(); onFov && onFov();
   }
   function lensOff() {
     if (saved === null) return;
@@ -233,8 +249,8 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
     for (const U of [cocU, afU, depthU]) { U.uNear.value = near; U.uFar.value = far; }
 
     // circle of confusion: c = f^2 (z - s) / (N z (s - f)) on the sensor, as a radius in pixels of the frame's width
-    const f = S.focal / 1000, s = Math.max(S.focus, f * 1.5), sw = sensor(camera.aspect).w / 1000;
-    cocU.uK.value = f * f / (S.fNumber * (s - f)) / sw * W * 0.5;
+    const f = S.focal / 1000, s = Math.max(S.focus, f * 1.5), sw = sensor(frameAspect()).w / 1000;
+    cocU.uK.value = f * f / (S.fNumber * (s - f)) / sw * W * FR.x * 0.5;
     cocU.uFocus.value = s;
     cocU.uMaxR.value = clamp(Math.round(H * 0.022), 4, 3 * TILE);
     cocU.tColor.value = rtScene.texture; cocU.tDepth.value = rtScene.depthTexture;
@@ -268,7 +284,7 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
       depthOut = out;
     }
 
-    outU.tColor.value = rtGather.texture; outU.uGain.value = Math.pow(2, S.ev); outU.uRes.value.set(W, H);
+    outU.tColor.value = rtGather.texture; outU.uGain.value = Math.pow(2, S.ev); outU.uRes.value.set(W, H); outU.uVig.value = S.vignette; outU.uFrame.value.set(FR.x, FR.y);
     draw(outMat, null);
     return true;
   }
@@ -295,12 +311,18 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
 
   function grab(job) {
     const src = renderer.domElement, c = document.createElement('canvas');
-    c.width = src.width; c.height = src.height;
-    c.getContext('2d').drawImage(src, 0, 0);
-    const pm = camera.projectionMatrix.elements.slice(), mw = camera.matrixWorld.elements.slice();
+    // a picture taken through the lens is the frame inside the crop marks; otherwise the whole of the game's frame
+    const crop = S.on && saved !== null, W = src.width, H = src.height;
+    const cw = crop ? Math.round(W * FR.x) : W, ch = crop ? Math.round(H * FR.y) : H, x0 = (W - cw) >> 1, y0 = (H - ch) >> 1;
+    c.width = cw; c.height = ch;
+    c.getContext('2d').drawImage(src, x0, y0, cw, ch, 0, 0, cw, ch);
+    let fov = camera.fov, aspect = camera.aspect, pm = camera.projectionMatrix.elements.slice();
+    if (crop) { fov = frameFov(); aspect = cw / ch; const fc = new THREE.PerspectiveCamera(fov, aspect, camera.near, camera.far); pm = fc.projectionMatrix.elements.slice(); }
+    const mw = camera.matrixWorld.elements.slice();
     c.photo = { width: c.width, height: c.height, time: Date.now(), on: S.on, focalLength: S.on ? S.focal : null, fNumber: S.on ? S.fNumber : null,
-      focusDistance: S.on ? S.focus : null, ev: S.on ? S.ev : 0, fov: camera.fov, aspect: camera.aspect, near: camera.near, far: camera.far,
+      focusDistance: S.on ? S.focus : null, ev: S.on ? S.ev : 0, vignette: S.on ? S.vignette : 0, fov, aspect, near: camera.near, far: camera.far,
       projectionMatrix: pm, matrixWorld: mw, origin: origin ? { x: origin.x, y: origin.y, z: origin.z } : { x: 0, y: 0, z: 0 } };
+    if (depthOut && crop) { const d = new Float32Array(cw * ch); for (let y = 0; y < ch; y++) d.set(depthOut.subarray((y + y0) * W + x0, (y + y0) * W + x0 + cw), y * cw); depthOut = d; }
     if (depthOut) c.photo.depth = depthOut;
     job.resolve(c);
   }
@@ -324,7 +346,7 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
 .cam{position:fixed;inset:0;z-index:3;pointer-events:none;color:var(--plaster,#f5e9d7);font:500 15px/1 var(--font-body,system-ui);font-variant-numeric:lining-nums tabular-nums;--deck:96px}
 .cam button{pointer-events:auto;font:inherit;color:inherit;border:0;margin:0;cursor:pointer;-webkit-tap-highlight-color:transparent;touch-action:manipulation;user-select:none}
 .cam svg{display:block;width:100%;height:100%}
-.cam .fr{position:absolute;inset:76px 3.5% calc(var(--deck) + 28px)}
+.cam .fr{position:absolute;inset:76px 3.5% calc(var(--deck) + 28px);box-shadow:0 0 0 200vmax rgba(6,8,11,.6)}
 .cam .fr i{position:absolute;width:26px;height:26px;border:0 solid rgba(244,239,230,.8)}
 .cam .fr i:nth-child(1){left:0;top:0;border-width:1.5px 0 0 1.5px}
 .cam .fr i:nth-child(2){right:0;top:0;border-width:1.5px 1.5px 0 0}
@@ -387,7 +409,8 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
     <div class="deck">${dial('focal', 'Zoom', 'zoom-', 'zoom+', 'Wider (−)', 'Longer (+)')}
       ${dial('focus', 'Focus', 'near', 'far', 'Nearer (9)', 'Further (0)', '<button class="mode" data-c="af" title="Autofocus or manual focus (U)">AF</button>')}
       ${dial('fno', 'Aperture', 'open', 'close', 'Wider aperture ([)', 'Narrower aperture (])')}
-      ${dial('ev', 'Exposure', 'ev-', 'ev+', 'Darker (;)', "Brighter (')")}</div>`;
+      ${dial('ev', 'Exposure', 'ev-', 'ev+', 'Darker (;)', "Brighter (')")}
+      ${dial('vig', 'Vignette', 'vig-', 'vig+', 'Less vignette (,)', 'More vignette (.)')}</div>`;
   const shutterEl = document.createElement('div'); shutterEl.className = 'shutter';
   document.body.append(hud, shutterEl);
   const vfK = k => hud.querySelector(`[data-k="${k}"]`), vfM = k => hud.querySelector(`[data-m="${k}"]`);
@@ -409,23 +432,34 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
   const logPos = (v, a, b) => clamp(Math.log(v / a) / Math.log(b / a), 0, 1);
   let lastVF = '';
   function updateViewfinder() {
-    const txt = [Math.round(S.focal), S.fNumber, S.autofocus, fmtDist(S.focus), S.ev, S.af, G.photos.length].join('|');
+    const txt = [Math.round(S.focal), S.fNumber, S.autofocus, fmtDist(S.focus), S.ev, S.vignette, S.af, G.photos.length].join('|');
     if (txt === lastVF) return; lastVF = txt;
     vfK('focal').textContent = Math.round(S.focal) + ' mm'; vfM('focal').style.left = logPos(S.focal, F_MIN, F_MAX) * 100 + '%';
     vfK('fno').textContent = fmtF(S.fNumber); vfM('fno').style.left = STOPS.indexOf(S.fNumber) / (STOPS.length - 1) * 100 + '%';
     vfK('focus').textContent = fmtDist(S.focus); vfM('focus').style.left = logPos(S.focus, FOCUS_MIN, 1000) * 100 + '%';
     vfK('ev').textContent = fmtEV(S.ev); vfM('ev').style.left = (S.ev + 3) / 6 * 100 + '%';
+    vfK('vig').textContent = S.vignette ? Math.round(S.vignette * 100) + ' %' : 'Off'; vfM('vig').style.left = S.vignette * 100 + '%';
     modeEl.textContent = S.autofocus ? 'AF' : 'MF'; modeEl.classList.toggle('on', S.autofocus);
     afEl.classList.toggle('ok', S.af); afEl.classList.toggle('mf', !S.autofocus);
   }
   function flash() { shutterEl.classList.remove('go'); void shutterEl.offsetWidth; shutterEl.classList.add('go'); }
 
   /* ---------- controls ---------- */
+  // the crop marks stand an equal distance from the top and the foot of the window, clear of the controls, so that
+  // the frame is centred on the lens's axis
+  const frEl = hud.querySelector('.fr');
+  function layoutFrame() {
+    hud.style.setProperty('--deck', deckEl.offsetHeight + 'px');
+    const W = innerWidth, H = innerHeight, narrow = W <= 860;
+    const side = Math.round(W * 0.035), v = Math.min(Math.round(H * 0.3), Math.max(narrow ? 72 : 76, deckEl.offsetHeight + (narrow ? 20 : 28)));
+    frEl.style.inset = `${v}px ${side}px`;
+    FR.x = (W - 2 * side) / W; FR.y = (H - 2 * v) / H;
+  }
   function enter() {
     if (S.on || !allowed()) return; S.on = true; S.afT = 0; S.afTarget = S.focus;
     if (document.pointerLockElement) document.exitPointerLock();
     hud.hidden = false; if (vignette) vignette.hidden = true; lastVF = ''; setRoll(); updateViewfinder();
-    hud.style.setProperty('--deck', deckEl.offsetHeight + 'px');
+    layoutFrame();
   }
   function exit() { if (!S.on) return; S.on = false; release(); hud.hidden = true; if (vignette) vignette.hidden = false; }
   function toggle() { S.on ? exit() : enter(); }
@@ -434,6 +468,7 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
   const setAperture = N => { S.fNumber = STOPS.reduce((a, b) => Math.abs(b - N) < Math.abs(a - N) ? b : a); };
   const stepAperture = d => { const i = STOPS.indexOf(S.fNumber); S.fNumber = STOPS[clamp((i < 0 ? 6 : i) + d, 0, STOPS.length - 1)]; };
   const setEV = ev => { S.ev = clamp(Math.round(ev * 3) / 3, -3, 3); };
+  const setVignette = v => { S.vignette = clamp(Math.round(v * 10) / 10, 0, 1); };
   const setFocus = m => { if (m === null || m === undefined) { S.autofocus = true; S.afT = 0; } else { S.autofocus = false; S.focus = clamp(m, FOCUS_MIN, FOCUS_MAX); } };
   const nudgeFocus = k => setFocus(S.focus * k);
   const zoom = k => setFocal(S.focal * k);
@@ -441,7 +476,8 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
   // the buttons that step a setting repeat while held: at once, then after 0.4 s every 70 ms (the aperture and the
   // exposure, whose steps are coarse, every 160 ms)
   const STEP = { 'zoom-': () => zoom(1 / ZOOM), 'zoom+': () => zoom(ZOOM), near: () => nudgeFocus(1 / 1.1), far: () => nudgeFocus(1.1),
-    open: () => stepAperture(-1), close: () => stepAperture(1), 'ev-': () => setEV(S.ev - 1 / 3), 'ev+': () => setEV(S.ev + 1 / 3) };
+    open: () => stepAperture(-1), close: () => stepAperture(1), 'ev-': () => setEV(S.ev - 1 / 3), 'ev+': () => setEV(S.ev + 1 / 3),
+    'vig-': () => setVignette(S.vignette - 0.1), 'vig+': () => setVignette(S.vignette + 0.1) };
   let held = null;
   function release() { if (held) { clearTimeout(held.t); held = null; } }
   hud.addEventListener('mousedown', e => e.preventDefault());   // the controls never take the keyboard's focus
@@ -449,7 +485,7 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
     const b = e.target.closest('[data-c]'); if (!b || e.button > 0) return;
     const c = b.dataset.c, fn = STEP[c]; if (!fn) return;
     e.preventDefault(); release(); fn(); updateViewfinder();
-    const every = c === 'open' || c === 'close' || c === 'ev-' || c === 'ev+' ? 160 : 70;
+    const every = c === 'open' || c === 'close' || c === 'ev-' || c === 'ev+' || c === 'vig-' || c === 'vig+' ? 160 : 70;
     const tick = () => { fn(); updateViewfinder(); held.t = setTimeout(tick, every); };
     held = { t: setTimeout(tick, 400) };
   });
@@ -479,6 +515,8 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
     else if (c === 'BracketRight') stepAperture(1);
     else if (c === 'Semicolon') setEV(S.ev - 1 / 3);
     else if (c === 'Quote') setEV(S.ev + 1 / 3);
+    else if (c === 'Comma') setVignette(S.vignette - 0.1);
+    else if (c === 'Period') setVignette(S.vignette + 0.1);
     else if (c === 'Digit9') nudgeFocus(1 / 1.1);
     else if (c === 'Digit0') nudgeFocus(1.1);
     else if (c === 'KeyU') { if (!e.repeat) setFocus(S.autofocus ? S.focus : null); }
@@ -492,10 +530,10 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
     if (e.shiftKey) nudgeFocus(Math.exp(-d * 0.0015));
     else zoom(Math.exp(-d * 0.0018));
   }, { passive: false, capture: true });
-  addEventListener('resize', () => { if (S.on) hud.style.setProperty('--deck', deckEl.offsetHeight + 'px'); });
+  addEventListener('resize', () => { if (S.on) layoutFrame(); });
 
   // the mouse turns the view less with a longer lens, so that the subject moves across the frame at the same rate
-  const lookScale = () => S.on && saved === null ? Math.tan(fovFor(S.focal, camera.aspect) * Math.PI / 360) / Math.tan(camera.fov * Math.PI / 360) : 1;
+  const lookScale = () => S.on && saved === null ? Math.tan(lensFov() * Math.PI / 360) / Math.tan(camera.fov * Math.PI / 360) : 1;
 
   const api = {
     capture, shoot, renderer, scene, camera, openGallery, closeGallery: () => G.close(),
@@ -503,8 +541,8 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
     download(i = G.photos.length - 1, j = null) { const p = G.photos[i]; if (p) G.download(j == null ? p : p.works[j]); },
     addEffectHook(fn) { hooks.push(fn); return () => { const i = hooks.indexOf(fn); if (i >= 0) hooks.splice(i, 1); }; },
     removeEffectHook(fn) { const i = hooks.indexOf(fn); if (i >= 0) hooks.splice(i, 1); },
-    get state() { return { on: S.on, focal: S.focal, fNumber: S.fNumber, focus: S.focus, autofocus: S.autofocus, ev: S.ev, focused: S.af }; },
-    enter, exit, toggle, setFocal, setAperture, setEV, setFocus,
+    get state() { return { on: S.on, focal: S.focal, fNumber: S.fNumber, focus: S.focus, autofocus: S.autofocus, ev: S.ev, vignette: S.vignette, focused: S.af }; },
+    enter, exit, toggle, setFocal, setAperture, setEV, setFocus, setVignette,
   };
   return { get on() { return S.on; }, frame, renderLens, lookScale, api };
 }

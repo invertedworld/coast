@@ -88,6 +88,10 @@ The controls of the lens lie in a panel at the foot of the screen. Each shows it
 
 **Exposure** brightens or darkens the picture in thirds of a stop, between −3 and +3 EV. **;** and **'** do the same.
 
+**Vignette** darkens the corners of the frame, from off to 100 per cent in steps of 10 per cent; the default is off. **,** and **.** do the same.
+
+The four crop marks show the frame of the picture. The part of the screen outside them is darkened and is not included in the picture.
+
 The large round button on the right is the shutter; **Enter** also takes a picture. Beneath it the latest picture is shown with the number of pictures taken, and a click on it opens the gallery.
 
 > **Example:** To photograph a bell tower against the sea, raise the camera with **K**, walk until the tower stands against the water, set the zoom to about 85 mm, close the aperture to f/8 so that both are sharp, and press the shutter.
