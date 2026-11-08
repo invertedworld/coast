@@ -1260,12 +1260,14 @@ function cvBuild(cv){
       if (!cvLand(cv,u,s) && !cvOnPath(G,u,s)) B.push({u,s,r:0.35+R()*0.7,k:6}); }
     // within CV_LZ+1.5 of the line the clifftop is the cap of rock, over the low ground behind the face: what stands there
     // stands on the cap (cvSdf has just been asked of the point)
+    // nothing grows or lies over a cave, whose roof may be thin
+    const overCave=(u,s)=>G.caves.some(A=>{ const [a,b]=cvCaveLocal(A,u,s); return a>-1.5 && a<A.Lc+1.5 && Math.abs(b)<Math.max(A.wX,A.wM)*1.6+1.2; });
     const onCap=(u,s)=>_ci>=0&&_cd<G.lz[_ci]+1.5?cvCapTop(cv,G,u,s,nat(u,s),_cd,_ci)+0.05:undefined;
     // scrub over the clifftop, thickest just behind the crest and reaching out to the brow, with stones among it
     for (let t=0;t<3000 && V.length<340;t++){ const i=Math.floor(R()*n); if (K[i]===0 && R()<0.7) continue; const to=G.toI[i], dd=to+0.25+Math.pow(R(),1.6)*10, u=U[i]-NU[i]*dd, s=S[i]-NS[i]*dd;
-      if (!cvSdf(G,u,s) || _cd<to+0.2 || cvOnPath(G,u,s) || Math.abs(u-G.pathTop.u)<1.5&&s>cv.sHead-1) continue; V.push({u,s,r:0.4+R()*0.9,pine:R()<0.06&&_cd>CV_LZ+1.5,y:onCap(u,s)}); }
+      if (!cvSdf(G,u,s) || _cd<to+0.2 || cvOnPath(G,u,s) || Math.abs(u-G.pathTop.u)<1.5&&s>cv.sHead-1 || overCave(u,s)) continue; V.push({u,s,r:0.4+R()*0.9,pine:R()<0.06&&_cd>CV_LZ+1.5,y:onCap(u,s)}); }
     for (let t=0;t<800 && B.length<420;t++){ const i=Math.floor(R()*n); if (K[i]===0 || K[i]===4 || G.top[i]-G.foot[i]<3) continue; const to=G.toI[i], dd=to+0.3+R()*5, u=U[i]-NU[i]*dd, s=S[i]-NS[i]*dd, r=0.25+R()*0.6;
-      if (!cvSdf(G,u,s) || _cd<to+0.15 || near(u,s,r) || Math.abs(u-G.pathTop.u)<2&&s>cv.sHead-1) continue; B.push({u,s,r,k:7,y:onCap(u,s)}); }
+      if (!cvSdf(G,u,s) || _cd<to+0.15 || near(u,s,r) || Math.abs(u-G.pathTop.u)<2&&s>cv.sHead-1 || overCave(u,s)) continue; B.push({u,s,r,k:7,y:onCap(u,s)}); }
     for (let t=0;t<40;t++){ const s=cv.Bh+R()*cv.Lg*0.9, sg=R()<0.5?1:-1, u=cvGAxis(cv,s)+sg*R()*cvAg(cv,s,sg);
       if (cvLand(cv,u,s) || cvPathAt(G,u,s)&&_pW>0) continue; V.push({u,s,r:0.35+R()*0.5,gully:true}); }
     G.boulders=B; G.scrub=V; }
