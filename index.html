@@ -10078,7 +10078,7 @@ addEventListener('keydown',e=>{ keys[e.code]=true;
   // sailing, 0 changes between the helm and a view from astern of the dinghy, and the train and ferry keys wait until
   // the player is ashore
   if (sailD && ['KeyR','KeyC','KeyF','KeyG'].includes(code)){
-    if (code==='KeyC' && !e.repeat && mode==='dinghy'){ dgyChase=!dgyChase; dgyLook.yaw=0; dgyLook.pitch=dgyChase?0.25:0; } }
+    if (code==='KeyC' && !e.repeat && mode==='dinghy'){ dgyChase=!dgyChase; dgyLook.yaw=0; dgyLook.pitch=dgyChase?0.25:0; toast('View',dgyChase?'Astern view':'Helm view'); } }
   else {
   if (code==='KeyR' && !e.repeat) toggleTrain();
   if (code==='KeyC' && !e.repeat && !inWater){ if (mode==='ferry') ferryView(); else toggleChase(); }
@@ -10269,10 +10269,10 @@ function jumpToGoods(){
 }
 // 0 aboard the ferry steps through its views: the deck, the view from astern, and a window seat in the saloon
 function ferryView(){
-  if (sit){ sit=null; feChase=false; fe.lx=0; fe.lz=FZE-2; fe.ey=FD0; return; }
-  if (feChase){ feChase=false; const q=windowSeat(FERRY_SEATS); fe.lx=q.x*0.4; fe.lz=q.z+0.5; fe.ey=FD0;
+  if (sit){ sit=null; feChase=false; fe.lx=0; fe.lz=FZE-2; fe.ey=FD0; toast('View','Deck view'); return; }
+  if (feChase){ toast('View','Passenger view'); feChase=false; const q=windowSeat(FERRY_SEATS); fe.lx=q.x*0.4; fe.lz=q.z+0.5; fe.ey=FD0;
     requestAnimationFrame(()=>requestAnimationFrame(()=>{ if (mode==='ferry' && !sit) sitWindow('ferry',q,[fe.lx,fe.lz,fe.ey]); })); return; }
-  feChase=true; feLook.yaw=0; feLook.pitch=0.3; feSnap=true; }
+  feChase=true; feLook.yaw=0; feLook.pitch=0.3; feSnap=true; toast('View','Astern view'); }
 // 3 boards the nearest ferry, and again steps ashore from any of its views
 function toggleFerry(){ if (mode==='ferry'||ridden){ sit=null; leaveFerry(mode==='above'?'above':prevModeF); } else boardFerry(); }
 function enterFerry(F,lx,lz){
@@ -10517,7 +10517,7 @@ function leaveCoach(to){ if (sit) sit=null; mode='train'; rideGoods=false; cam.y
 function toggleTrain(){ if (ridden) leaveFerry(prevModeF);
   if (mode==='coach' && coachFrom!==null){ leaveCoach(); return; }
   if (riding() && !rideGoods){ chase.side=false; leaveTrain(prevMode); return; }
-  if (riding() && rideGoods) leaveTrain(prevMode); ride('train','pass'); }
+  if (riding() && rideGoods) leaveTrain(prevMode); ride('train','pass'); toast('View','Cab view'); }
 function trainSeat(){
   const i=Math.min(1,train.cars.length-1), m=train.cars[i].m, q=windowSeat(COACH_SEATS);
   yaw=m.rotation.y+Math.PI; fpPitch=-0.05;
@@ -10526,16 +10526,16 @@ function trainSeat(){
   // sitting down needs the eye placed in the coach, which the next frame does
   requestAnimationFrame(()=>requestAnimationFrame(()=>{ if (mode==='coach' && !sit) sitWindow('coach',q,[0,q.z,1.3]); })); }
 function toggleGoods(){ if (ridden) leaveFerry(prevModeF); if (mode==='coach' && coachFrom!==null) leaveCoach(); if (riding() && rideGoods){ chase.side=false; leaveTrain(prevMode); return; }
-  const pm=riding()?prevMode:mode==='above'?'above':'street'; jumpToGoods(); if (!goods.R) return; ride('train','goods'); prevMode=pm; }
+  const pm=riding()?prevMode:mode==='above'?'above':'street'; jumpToGoods(); if (!goods.R) return; ride('train','goods'); prevMode=pm; toast('View','Cab view'); }
 // 0 with a train steps through its views: the cab, a window seat in the first coach (in the passenger train), following
 // from behind and the trackside view, and back to the cab. Away from a train it follows the nearer one
 function toggleChase(){ if (ridden) leaveFerry(prevModeF);
-  if (mode==='coach' && coachFrom!==null){ const pm=coachFrom; if (sit) sit=null; coachFrom=null; mode='street'; chase.side=false; ride('chase','pass'); prevMode=pm; return; }
-  if (mode==='train' && !rideGoods){ coachFrom=prevMode; leaveTrain('street'); trainSeat(); return; }
-  if (mode==='train'){ chase.side=false; ride('chase'); return; }
-  if (mode==='chase' && !chase.side){ chase.side=true; chase.spot=null; chase.fresh=true; return; }
-  if (mode==='chase'){ chase.side=false; mode='train'; cam.y=null; tYaw=0; tPitch=-0.04; camera.fov=65; camera.updateProjectionMatrix(); glowScale(); return; }
-  chase.side=false; ride('chase'); }
+  if (mode==='coach' && coachFrom!==null){ const pm=coachFrom; if (sit) sit=null; coachFrom=null; mode='street'; chase.side=false; ride('chase','pass'); prevMode=pm; toast('View','Chase view'); return; }
+  if (mode==='train' && !rideGoods){ coachFrom=prevMode; leaveTrain('street'); trainSeat(); toast('View','Passenger view'); return; }
+  if (mode==='train'){ chase.side=false; ride('chase'); toast('View','Chase view'); return; }
+  if (mode==='chase' && !chase.side){ chase.side=true; chase.spot=null; chase.fresh=true; toast('View','Trackside view'); return; }
+  if (mode==='chase'){ chase.side=false; mode='train'; cam.y=null; tYaw=0; tPitch=-0.04; camera.fov=65; camera.updateProjectionMatrix(); glowScale(); toast('View','Cab view'); return; }
+  chase.side=false; ride('chase'); toast('View','Chase view'); }
 // whether the line from one point to another passes clear of the ground and the buildings
 function sightClear(ax,ay,az,bx,by,bz){
   const n=Math.max(8,Math.ceil(Math.hypot(bx-ax,bz-az)/3));
@@ -10547,10 +10547,11 @@ function sightClear(ax,ay,az,bx,by,bz){
 function tracksideSpot(RT){
   const L=RT.lead.position;
   for (let k=0;k<30;k++){ const x=RT.x+RT.dir*(35+Math.random()*30+k*4);
-    if (RT.st(x)!=='open' || RT.st(x+RT.dir*30)!=='open') continue;
-    const y=RT.Y(x), z=RT.Z(x), s=(RT.Z(x+1)-RT.Z(x-1))/2, l=Math.hypot(1,s), nx=-s/l, nz=1/l;
-    for (const sd of (Math.random()<0.5?[1,-1]:[-1,1])){ const o=sd*(6+Math.random()*8), px=x+nx*o, pz=z+nz*o, h=heightAt(px,pz);
-      if (!(h>0.3 && Math.abs(h-y)<5 && gullTopAt(px,pz)<=walkGround(px,pz,1e3)+0.5)) continue;
+    const stx=RT.st(x); if (stx==='tunnel' || RT.st(x+RT.dir*30)==='tunnel') continue;
+    // beside a viaduct the camera stands on the ground below, further off, and looks up at the train crossing it
+    const via=stx==='viaduct', y=RT.Y(x), z=RT.Z(x), s=(RT.Z(x+1)-RT.Z(x-1))/2, l=Math.hypot(1,s), nx=-s/l, nz=1/l;
+    for (const sd of (Math.random()<0.5?[1,-1]:[-1,1])){ const o=sd*(via?14+Math.random()*16:6+Math.random()*8), px=x+nx*o, pz=z+nz*o, h=heightAt(px,pz);
+      if (!(h>0.3 && (via?h<y+2:Math.abs(h-y)<5) && gullTopAt(px,pz)<=walkGround(px,pz,1e3)+0.5)) continue;
       const ey=h+1.7+Math.random()*2.5, xm=(RT.x+x)/2;
       if (sightClear(px,ey,pz,L.x,L.y+1.8,L.z) && sightClear(px,ey,pz,xm,RT.Y(xm)+1.8,RT.Z(xm))) return {x:px,y:ey,z:pz,tx:x}; } }
   return null; }
