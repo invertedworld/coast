@@ -2,7 +2,7 @@
 
 Thank you for playing Coast.
 
-Coast is a procedurally generated Mediterranean island which is explored on foot, by train, by ferry, under sail and in the water. The island extends without end to the east and to the west. Hill towns, olive groves, harbours, coves and a coastal railway are laid out along it, and smaller islands lie offshore. The day passes from dawn to night in twelve minutes of real time. Every island is generated from a seed, so that the same seed always produces the same island and a new seed produces a different one.
+Coast is a procedurally generated Mediterranean island which is explored on foot, by train, by ferry, under sail and in the water. The island extends without end to the east and to the west. Hill towns, olive groves, harbours, coves and a coastal railway are laid out along it, and smaller islands lie offshore. The larger offshore islands have coves of the same kind as those of the main island, each with its beach, its path down from the clifftop and a cave that may be walked or swum into. The day passes from dawn to night in twelve minutes of real time. Every island is generated from a seed, so that the same seed always produces the same island and a new seed produces a different one.
 
 This guide describes how the island is explored and how each control behaves. The technical design of the program is described in the `README.md` file of the repository.
 
