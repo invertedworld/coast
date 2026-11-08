@@ -247,6 +247,24 @@ THREE.ShaderChunk.fog_pars_vertex=THREE.ShaderChunk.fog_pars_vertex.replace('var
 THREE.ShaderChunk.fog_vertex=THREE.ShaderChunk.fog_vertex.replace('vFogDepth = - mvPosition.z;','vFogDepth = - mvPosition.z; vFogY = normalize((vec4(mvPosition.xyz,0.0)*viewMatrix).xyz).y;');
 THREE.ShaderChunk.fog_pars_fragment=THREE.ShaderChunk.fog_pars_fragment.replace('varying float vFogDepth;','varying float vFogDepth; varying float vFogY; uniform vec3 uFogMid;');
 THREE.ShaderChunk.fog_fragment=THREE.ShaderChunk.fog_fragment.replace('mix( gl_FragColor.rgb, fogColor, fogFactor )','mix( gl_FragColor.rgb, mix( fogColor, uFogMid, clamp( ( vFogY + 0.04 ) / 0.16, 0.0, 1.0 ) ), fogFactor )');
+// Whatever stands in a cast shadow also loses part of the sky above it, which the awning, the parasol, the table or
+// the wall that casts the shadow hides from it. Without this the sky light alone, about as strong as the sun on level
+// ground, kept a shadow at half the brightness of the sunlit stone beside it, so that the shadows of small things such
+// as chairs and tables, and the shade of an awning, could hardly be seen. The sky light is therefore reduced by
+// SKY_BLOCK where a surface turned towards the sun is shadowed from it, in proportion to the strength of the sun, so
+// that the faint moon and the low sun at dawn and dusk leave the sky light almost as it was. Surfaces turned away from
+// the sun are left alone, so the shaded sides of the houses keep their brightness.
+const SKY_BLOCK=0.4;
+THREE.ShaderChunk.lights_fragment_begin=THREE.ShaderChunk.lights_fragment_begin
+  .replace('IncidentLight directLight;','IncidentLight directLight;\nfloat sunShade=1.0;')
+  .replace(/directLight\.color \*= \( directLight\.visible && receiveShadow \) \? getShadow\( directionalShadowMap\[ i \], ([^;]*) \) : 1\.0;/,
+    (m,args)=>`float dirSh=( directLight.visible && receiveShadow ) ? getShadow( directionalShadowMap[ i ], ${args} ) : 1.0;
+\t\tdirectLight.color *= dirSh;
+\t\t#if ( UNROLLED_LOOP_INDEX == 0 )
+\t\tsunShade=1.0-(1.0-dirSh)*smoothstep(0.0,0.2,dot(geometryNormal,directLight.direction))*clamp(dot(directionalLight.color,vec3(0.3,0.59,0.11))/2.6,0.0,1.0);
+\t\t#endif`)
+  .replace('irradiance += getHemisphereLightIrradiance( hemisphereLights[ i ], geometryNormal );',`irradiance += getHemisphereLightIrradiance( hemisphereLights[ i ], geometryNormal )*(1.0-${SKY_BLOCK.toFixed(2)}*(1.0-sunShade));`);
+if (!THREE.ShaderChunk.lights_fragment_begin.includes('sunShade=1.0-')) console.warn('the sky light in shadow was not patched');
 const PAL={
   walls:['#f3e4d0','#efd6bf','#f6ebdd','#eacbb0','#f1dcc4','#e9c3ab','#f4dfcc','#edd0b8','#f2d8c8'],
   roofs:['#d65a52','#de6b5b','#cc514c','#d8645a','#c94f48','#dd5f55'],
