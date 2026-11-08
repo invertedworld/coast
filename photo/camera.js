@@ -12,6 +12,8 @@
    - Autofocus on what lies under the AF point at the centre of the frame (the nearest surface in it, read back from
      the depth buffer a few times a second and eased in dioptres); or manual focus.
    - Exposure compensation in thirds of a stop, applied before the tone curve.
+   - The aspect ratio of the frame: the whole space between the controls, or 16:9, 3:2, 4:3, 5:4, 1:1, 4:5, 2:3 or
+     9:16, fitted within it.
    - A vignette, from off to 100 per cent in tenths, darkening the corners of the frame.
    - The frame is the part of the window inside the crop marks, centred on the lens's axis; the window around it is
      darkened, and a picture holds the frame alone. The focal length sets the field of view of the frame.
@@ -49,8 +51,8 @@
        The game's renderer, scene and camera. The camera hangs in a group shifted by the floating origin, so its
        world position is camera.position plus meta.origin.
    photo.state
-       { on, focal, fNumber, focus, autofocus, ev, vignette }; photo.enter(), photo.exit(), photo.toggle(),
-       photo.setFocal(mm), photo.setAperture(N), photo.setEV(ev), photo.setVignette(0 to 1),
+       { on, focal, fNumber, focus, autofocus, ev, vignette, ratio }; photo.enter(), photo.exit(), photo.toggle(),
+       photo.setFocal(mm), photo.setAperture(N), photo.setEV(ev), photo.setVignette(0 to 1), photo.setRatio('3:2' | index),
        photo.setFocus(metres | null for autofocus).
 
    meta = { width, height, time, on, focalLength, fNumber, focusDistance, ev, vignette, fov, aspect, near, far,
@@ -71,9 +73,11 @@ const DEPTH_FN = `
   float linZ(float d){ return uNear*uFar/(uFar-d*(uFar-uNear)); }`;
 
 export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, allowed = () => true }) {
-  const S = { on: false, focal: 35, fNumber: 2.8, focus: 5, autofocus: true, ev: 0, vignette: 0, afTarget: 5, afT: 0, af: false };
+  const S = { on: false, focal: 35, fNumber: 2.8, focus: 5, autofocus: true, ev: 0, vignette: 0, ratio: 0, afTarget: 5, afT: 0, af: false };
   // the frame within the window, as fractions of its width and height, centred; set from the viewfinder's layout
   const FR = { x: 1, y: 1 };
+  // the shapes of the frame: the whole of the space between the controls, or a fixed ratio of width to height
+  const RATIOS = [['Full', 0], ['16:9', 16 / 9], ['3:2', 3 / 2], ['4:3', 4 / 3], ['5:4', 5 / 4], ['1:1', 1], ['4:5', 4 / 5], ['2:3', 2 / 3], ['9:16', 9 / 16]];
   const hooks = [], pending = [];
 
   /* ---------- targets ---------- */
@@ -410,6 +414,7 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
       ${dial('focus', 'Focus', 'near', 'far', 'Nearer (9)', 'Further (0)', '<button class="mode" data-c="af" title="Autofocus or manual focus (U)">AF</button>')}
       ${dial('fno', 'Aperture', 'open', 'close', 'Wider aperture ([)', 'Narrower aperture (])')}
       ${dial('ev', 'Exposure', 'ev-', 'ev+', 'Darker (;)', "Brighter (')")}
+      ${dial('ratio', 'Aspect ratio', 'ratio-', 'ratio+', 'Previous shape (T with Shift)', 'Next shape (T)')}
       ${dial('vig', 'Vignette', 'vig-', 'vig+', 'Less vignette (,)', 'More vignette (.)')}</div>`;
   const shutterEl = document.createElement('div'); shutterEl.className = 'shutter';
   document.body.append(hud, shutterEl);
@@ -432,12 +437,13 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
   const logPos = (v, a, b) => clamp(Math.log(v / a) / Math.log(b / a), 0, 1);
   let lastVF = '';
   function updateViewfinder() {
-    const txt = [Math.round(S.focal), S.fNumber, S.autofocus, fmtDist(S.focus), S.ev, S.vignette, S.af, G.photos.length].join('|');
+    const txt = [Math.round(S.focal), S.fNumber, S.autofocus, fmtDist(S.focus), S.ev, S.vignette, S.ratio, S.af, G.photos.length].join('|');
     if (txt === lastVF) return; lastVF = txt;
     vfK('focal').textContent = Math.round(S.focal) + ' mm'; vfM('focal').style.left = logPos(S.focal, F_MIN, F_MAX) * 100 + '%';
     vfK('fno').textContent = fmtF(S.fNumber); vfM('fno').style.left = STOPS.indexOf(S.fNumber) / (STOPS.length - 1) * 100 + '%';
     vfK('focus').textContent = fmtDist(S.focus); vfM('focus').style.left = logPos(S.focus, FOCUS_MIN, 1000) * 100 + '%';
     vfK('ev').textContent = fmtEV(S.ev); vfM('ev').style.left = (S.ev + 3) / 6 * 100 + '%';
+    vfK('ratio').textContent = RATIOS[S.ratio][0]; vfM('ratio').style.left = S.ratio / (RATIOS.length - 1) * 100 + '%';
     vfK('vig').textContent = S.vignette ? Math.round(S.vignette * 100) + ' %' : 'Off'; vfM('vig').style.left = S.vignette * 100 + '%';
     modeEl.textContent = S.autofocus ? 'AF' : 'MF'; modeEl.classList.toggle('on', S.autofocus);
     afEl.classList.toggle('ok', S.af); afEl.classList.toggle('mf', !S.autofocus);
@@ -452,8 +458,10 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
     hud.style.setProperty('--deck', deckEl.offsetHeight + 'px');
     const W = innerWidth, H = innerHeight, narrow = W <= 860;
     const side = Math.round(W * 0.035), v = Math.min(Math.round(H * 0.3), Math.max(narrow ? 72 : 76, deckEl.offsetHeight + (narrow ? 20 : 28)));
-    frEl.style.inset = `${v}px ${side}px`;
-    FR.x = (W - 2 * side) / W; FR.y = (H - 2 * v) / H;
+    let fw = W - 2 * side, fh = H - 2 * v; const r = RATIOS[S.ratio][1];
+    if (r) { if (fw / fh > r) fw = fh * r; else fh = fw / r; }
+    frEl.style.inset = `${(H - fh) / 2}px ${(W - fw) / 2}px`;
+    FR.x = fw / W; FR.y = fh / H;
   }
   function enter() {
     if (S.on || !allowed()) return; S.on = true; S.afT = 0; S.afTarget = S.focus;
@@ -468,6 +476,7 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
   const setAperture = N => { S.fNumber = STOPS.reduce((a, b) => Math.abs(b - N) < Math.abs(a - N) ? b : a); };
   const stepAperture = d => { const i = STOPS.indexOf(S.fNumber); S.fNumber = STOPS[clamp((i < 0 ? 6 : i) + d, 0, STOPS.length - 1)]; };
   const setEV = ev => { S.ev = clamp(Math.round(ev * 3) / 3, -3, 3); };
+  const setRatio = i => { S.ratio = clamp(Math.round(i), 0, RATIOS.length - 1); if (S.on) layoutFrame(); };
   const setVignette = v => { S.vignette = clamp(Math.round(v * 10) / 10, 0, 1); };
   const setFocus = m => { if (m === null || m === undefined) { S.autofocus = true; S.afT = 0; } else { S.autofocus = false; S.focus = clamp(m, FOCUS_MIN, FOCUS_MAX); } };
   const nudgeFocus = k => setFocus(S.focus * k);
@@ -477,7 +486,7 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
   // exposure, whose steps are coarse, every 160 ms)
   const STEP = { 'zoom-': () => zoom(1 / ZOOM), 'zoom+': () => zoom(ZOOM), near: () => nudgeFocus(1 / 1.1), far: () => nudgeFocus(1.1),
     open: () => stepAperture(-1), close: () => stepAperture(1), 'ev-': () => setEV(S.ev - 1 / 3), 'ev+': () => setEV(S.ev + 1 / 3),
-    'vig-': () => setVignette(S.vignette - 0.1), 'vig+': () => setVignette(S.vignette + 0.1) };
+    'ratio-': () => setRatio(S.ratio - 1), 'ratio+': () => setRatio(S.ratio + 1), 'vig-': () => setVignette(S.vignette - 0.1), 'vig+': () => setVignette(S.vignette + 0.1) };
   let held = null;
   function release() { if (held) { clearTimeout(held.t); held = null; } }
   hud.addEventListener('mousedown', e => e.preventDefault());   // the controls never take the keyboard's focus
@@ -485,7 +494,7 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
     const b = e.target.closest('[data-c]'); if (!b || e.button > 0) return;
     const c = b.dataset.c, fn = STEP[c]; if (!fn) return;
     e.preventDefault(); release(); fn(); updateViewfinder();
-    const every = c === 'open' || c === 'close' || c === 'ev-' || c === 'ev+' || c === 'vig-' || c === 'vig+' ? 160 : 70;
+    const every = c === 'open' || c === 'close' || c === 'ev-' || c === 'ev+' || c === 'vig-' || c === 'vig+' ? 160 : c === 'ratio-' || c === 'ratio+' ? 300 : 70;
     const tick = () => { fn(); updateViewfinder(); held.t = setTimeout(tick, every); };
     held = { t: setTimeout(tick, 400) };
   });
@@ -515,6 +524,7 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
     else if (c === 'BracketRight') stepAperture(1);
     else if (c === 'Semicolon') setEV(S.ev - 1 / 3);
     else if (c === 'Quote') setEV(S.ev + 1 / 3);
+    else if (c === 'KeyT') { if (!e.repeat) setRatio((S.ratio + (e.shiftKey ? RATIOS.length - 1 : 1)) % RATIOS.length); }
     else if (c === 'Comma') setVignette(S.vignette - 0.1);
     else if (c === 'Period') setVignette(S.vignette + 0.1);
     else if (c === 'Digit9') nudgeFocus(1 / 1.1);
@@ -541,8 +551,8 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
     download(i = G.photos.length - 1, j = null) { const p = G.photos[i]; if (p) G.download(j == null ? p : p.works[j]); },
     addEffectHook(fn) { hooks.push(fn); return () => { const i = hooks.indexOf(fn); if (i >= 0) hooks.splice(i, 1); }; },
     removeEffectHook(fn) { const i = hooks.indexOf(fn); if (i >= 0) hooks.splice(i, 1); },
-    get state() { return { on: S.on, focal: S.focal, fNumber: S.fNumber, focus: S.focus, autofocus: S.autofocus, ev: S.ev, vignette: S.vignette, focused: S.af }; },
-    enter, exit, toggle, setFocal, setAperture, setEV, setFocus, setVignette,
+    get state() { return { on: S.on, focal: S.focal, fNumber: S.fNumber, focus: S.focus, autofocus: S.autofocus, ev: S.ev, vignette: S.vignette, ratio: RATIOS[S.ratio][0], focused: S.af }; },
+    enter, exit, toggle, setFocal, setAperture, setEV, setFocus, setVignette, setRatio: k => setRatio(typeof k === 'string' ? RATIOS.findIndex(q => q[0] === k) : k),
   };
   return { get on() { return S.on; }, frame, renderLens, lookScale, api };
 }

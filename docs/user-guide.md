@@ -88,6 +88,8 @@ The controls of the lens lie in a panel at the foot of the screen. Each shows it
 
 **Exposure** brightens or darkens the picture in thirds of a stop, between −3 and +3 EV. **;** and **'** do the same.
 
+**Aspect ratio** sets the shape of the frame: **Full**, the default, uses the whole space between the controls, and the fixed shapes are 16:9, 3:2, 4:3, 5:4, 1:1, 4:5, 2:3 and 9:16. **T** steps to the next shape and **Shift**+**T** to the previous one.
+
 **Vignette** darkens the corners of the frame, from off to 100 per cent in steps of 10 per cent; the default is off. **,** and **.** do the same.
 
 The four crop marks show the frame of the picture. The part of the screen outside them is darkened and is not included in the picture.
