@@ -10,7 +10,7 @@ This guide describes how the island is explored and how each control behaves. Th
 
 Coast runs in a web browser that supports WebGL 2. The published game may be played at <https://invertedworld.itch.io/coast>. A copy of the repository may also be served from any static web server, as described in `README.md`; it cannot be opened directly from the file system.
 
-The player begins at street level on a square above the sea, facing a point on the shore. A way down to that point by streets, stairs and paths leads to a beach or a quay, without a long detour. A click on the scene captures the mouse, so that moving the mouse turns the view; **Esc** releases it. The help panel, which lists every control by feature, is shown and hidden with **H**; **Esc** also hides it.
+The player begins at street level on a square above the sea, facing a point on the shore. A way down to that point by streets, stairs and paths leads to a beach or a quay, without a long detour. A click on the scene captures the mouse, so that moving the mouse turns the view; **Esc** releases it. The help panel, which lists every control by feature, is shown and hidden with **H**; **Esc** also hides it. **Field of view**, at its foot, sets the view's vertical angle at street level, in the water, at the helm and in a coach, from 50° to 100°; the default is 70°, and the setting is remembered.
 
 > **Example:** To look about a piazza, click once on the scene, then move the mouse while walking with **W A S D**.
 

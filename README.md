@@ -112,7 +112,7 @@ The panel opened with **H** lists the controls. They are reproduced here for ref
 | T, Shift+T (camera raised) | Aspect ratio of the frame: Full, 16:9, 3:2, 4:3, 5:4, 1:1, 4:5, 2:3 or 9:16. |
 | , . (camera raised) | Vignette, from off to 100 per cent in tenths. |
 | G | Shows or hides the gallery, from anywhere, without raising the camera. |
-| H | Shows or hides the help panel; Esc also hides it. |
+| H | Shows or hides the help panel; Esc also hides it. Its foot holds the field of view (`FOV`, 50° to 100°, 70° by default, kept in localStorage as `coast.fov`), used at street level, in the water, at the helm and in a coach, and the About box. |
 
 A game controller is supported through the Gamepad API (`pollPad`). The left stick walks, swims and steers and the right stick looks, at a sensitivity and with an inversion of its vertical axis set on the controller's tab of the help panel and kept in localStorage (`coast.padLook`). A jumps (Space), B crouches (Z) or, in the water, dives while held (C), X steps through the views (0), Y is the bird's-eye view (5), the bumpers bring the view nearer or further (- and +) and Menu shows the help panel (H). The right trigger takes a quick picture, or with the camera raised a picture through the lens; with the camera raised B lowers it, Y opens the gallery, the bumpers zoom, the D-pad's up and down focus and its left and right change the exposure, through the camera's API, since the camera ignores keys the program presses itself. At the helm the triggers trim the sail, and a press of the left stick changes between running and walking.
 

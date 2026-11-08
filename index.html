@@ -30,7 +30,8 @@ html,body{height:100%;margin:0;overflow:hidden;background:var(--sea);color:var(-
 .help input[type=checkbox]{accent-color:var(--verdigris);width:16px;height:16px;vertical-align:middle;margin:0}
 .help h2.part{margin:0 0 12px;font-size:.78rem;font-weight:500;letter-spacing:.16em;text-transform:uppercase;color:var(--plaster-dim)}
 .help h2.part.sep{margin-top:6px;padding-top:16px;border-top:1px solid var(--line)}
-.help .foot,.about .foot{display:flex;justify-content:flex-end;gap:8px;margin-top:6px;padding-top:12px;border-top:1px solid var(--line)}
+.help .foot .fov{margin-right:auto;display:flex;align-items:center;gap:10px;font-size:.9rem}
+.help .foot,.about .foot{display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-top:6px;padding-top:12px;border-top:1px solid var(--line)}
 .help .foot button,.about .foot button{font:inherit;font-size:.85rem;color:var(--plaster);background:rgba(245,233,215,.1);border:1px solid var(--line);border-radius:4px;padding:6px 14px;cursor:pointer}
 .help .foot button:hover,.about .foot button:hover{background:rgba(245,233,215,.18)}
 .about{position:fixed;z-index:6;top:50%;left:50%;transform:translate(-50%,-50%);width:min(440px,calc(100vw - 32px));box-sizing:border-box;background:var(--panel);border:1px solid var(--line);
@@ -178,7 +179,7 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
       <div class="row"><label for="padSens">Sensitivity</label><span><input type="range" id="padSens" min="0.25" max="3" step="0.05"> <output id="padSensV"></output></span></div>
     </div>
   </div>
-  <div class="foot"><button type="button" class="about-btn" data-a="about">About</button><button type="button" data-a="help-close">Close</button></div>
+  <div class="foot"><label class="fov">Field of view <input type="range" id="fovIn" min="50" max="100" step="1"> <output id="fovOut"></output></label><button type="button" class="about-btn" data-a="about">About</button><button type="button" data-a="help-close">Close</button></div>
 </aside>
 <aside class="about" id="about" hidden role="dialog" aria-label="About">
   <h2>Coast</h2>
@@ -4198,7 +4199,9 @@ function wrapWorld(){
 }
 const FOG=hex('#9fc0dc');
 scene.fog=new THREE.Fog(FOG,90,1500); scene.background=FOG.clone();
-const camera=new THREE.PerspectiveCamera(70,1,0.3,3600); world.add(camera);
+// the field of view at street level, in the water, at the helm and in a coach (vertical, in degrees), set on the help panel
+let FOV=70; try{ const v=+localStorage.getItem('coast.fov'); if (v>=50&&v<=100) FOV=v; }catch(_){}
+const camera=new THREE.PerspectiveCamera(FOV,1,0.3,3600); world.add(camera);
 // the diver's torch (F under the water): a spot carried with the eye, pointing where it looks. It stays in the scene
 // at nothing while off, so that turning it on does not make every material compile again
 const torch=new THREE.SpotLight(0xfff1dc,0,32,0.42,0.55,1.4), torchAim=new THREE.Object3D();
@@ -7784,7 +7787,7 @@ function followKey(kind){
   mode='follow'; camera.fov=60; camera.near=0.2; camera.far=3600; camera.updateProjectionMatrix(); glowScale();
   scene.fog.near=90; scene.fog.far=1500; sky.visible=true; sea.scale.setScalar(1); islandMesh.visible=false; farMesh.visible=farGlow.visible=true; }
 function followBack(R){ player.x=R.x; player.z=R.z; player.y=R.y; player.vy=0; player.holdT=1.5; eyeY=null; yaw=R.yaw; fpPitch=0;
-  camera.fov=70; camera.near=0.1; camera.updateProjectionMatrix(); glowScale(); }
+  camera.fov=FOV; camera.near=0.1; camera.updateProjectionMatrix(); glowScale(); }
 function followLeave(){ if (FOL.kind==='gull'){ const b=GULLS.birds[FOL.t]; if (b) b.lead=null; } const R=FOL.ret; mode='street'; FOL.kind=null; FOL.t=null; FOL.ret=null; if (R) followBack(R); }
 function followStep(dt){
   let h=followPose(FOL.p);
@@ -7820,7 +7823,7 @@ function followStep(dt){
   sky.position.copy(camera.position); }
 // 9: back to where the player first stood on this island, at street level
 function homeKey(){ leaveModes(); uwReturn=null; spawnPlayer(); player.vy=0; player.holdT=1.5; eyeY=null; lastCell=null; mode='street';
-  camera.fov=70; camera.near=0.1; camera.far=3600; camera.updateProjectionMatrix(); glowScale(); }
+  camera.fov=FOV; camera.near=0.1; camera.far=3600; camera.updateProjectionMatrix(); glowScale(); }
 function dinghyKey(){
   if (sailD){ if (!dinghyAshore(false)){ const HB=dgyHarbourAt(sailD.state.x,sailD.state.z); if (HB) dinghyDock(HB); else dinghyHome(); } return; }
   const N=dgyNearest(player.x,player.z);
@@ -7838,7 +7841,7 @@ function dinghyBoard(e){
   dgyFair(e&&e.H);
   sailD=e.D; e.D.setMode(dgyHandling); e.D.board(); mode='dinghy'; dgyChase=false; dgyLook.yaw=0; dgyLook.pitch=-0.1;
   scene.fog.near=90; scene.fog.far=1500; sky.visible=true; descent.t=ascent.t=-1;
-  camera.fov=70; camera.near=0.1; camera.far=3600; camera.updateProjectionMatrix(); glowScale();
+  camera.fov=FOV; camera.near=0.1; camera.far=3600; camera.updateProjectionMatrix(); glowScale();
   sea.scale.setScalar(1); islandMesh.visible=false; farMesh.visible=farGlow.visible=true; }
 // stepping ashore within 3 m of a quay or a beach; elsewhere it does not happen (force: leave the boat wherever it is)
 function dinghyAshore(force){
@@ -7862,7 +7865,7 @@ function dinghyAshore(force){
   sailD=null; dgyChase=false; player.x=L.x; player.z=L.z; player.y=L.y; player.vy=0; player.holdT=1.5; eyeY=null;
   // looking back at the dinghy where she lies (or, left where she was at sea, away from her bow)
   { const bx=D.state.x-L.x, bz=D.state.z-L.z; yaw=Math.hypot(bx,bz)>0.5?Math.atan2(-bx,-bz):L.head+Math.PI; fpPitch=-0.3; }
-  if (mode==='dinghy'){ mode='street'; camera.fov=70; camera.updateProjectionMatrix(); glowScale(); }
+  if (mode==='dinghy'){ mode='street'; camera.fov=FOV; camera.updateProjectionMatrix(); glowScale(); }
   return true; }
 // a dinghy moored at the berth of harbour HB: if it came from another harbour, the dinghy that lay at HB goes to the
 // berth it came from, so that each harbour keeps one; returns HB's entry
@@ -7878,14 +7881,14 @@ function dgyHarbourAt(x,z){ const HB=harbourAt(shoreSide(x,z),x);
 // the player stands on the quay beside her
 function dinghyDock(HB){
   const D=sailD; D.state.crewed=false; sailD=null; dgyChase=false;
-  if (mode==='dinghy'||mode==='above'){ mode='street'; scene.fog.near=90; scene.fog.far=1500; camera.fov=70; camera.near=0.1; camera.far=3600;
+  if (mode==='dinghy'||mode==='above'){ mode='street'; scene.fog.near=90; scene.fog.far=1500; camera.fov=FOV; camera.near=0.1; camera.far=3600;
     camera.updateProjectionMatrix(); glowScale(); sea.scale.setScalar(1); islandMesh.visible=false; farMesh.visible=farGlow.visible=true; }
   const eH=dgyBerthIn(D,HB); dgyTravel(HB,eH?eH.B:dinghyBerth(HB)); }
 // Y out at sea: the dinghy goes back to its own berth and the player stands on the quay beside it
 function dinghyHome(){
   const D=sailD, e=[...dinghies.values()].find(q=>q.D===D);
   D.state.crewed=false; sailD=null; dgyChase=false;
-  if (mode==='dinghy'||mode==='above'){ mode='street'; scene.fog.near=90; scene.fog.far=1500; camera.fov=70; camera.near=0.1; camera.far=3600;
+  if (mode==='dinghy'||mode==='above'){ mode='street'; scene.fog.near=90; scene.fog.far=1500; camera.fov=FOV; camera.near=0.1; camera.far=3600;
     camera.updateProjectionMatrix(); glowScale(); sea.scale.setScalar(1); islandMesh.visible=false; farMesh.visible=farGlow.visible=true; }
   if (!e){ dinghyGo(); return; }
   const B=e.B; D.moor(JSON.parse(JSON.stringify({x:B.x,z:B.z,head:B.head,stern:B.stern,bow:B.bow})));
@@ -9431,6 +9434,11 @@ const helpEl=document.getElementById('help');
 const aboutEl=document.getElementById('about');
 helpEl.querySelector('[data-a="about"]').addEventListener('click',()=>{ aboutEl.hidden=false; aboutEl.querySelector('[data-a="about-close"]').focus(); });
 aboutEl.querySelector('[data-a="about-close"]').addEventListener('click',()=>{ aboutEl.hidden=true; });
+{ const fi=document.getElementById('fovIn'), fo=document.getElementById('fovOut');
+  fi.value=FOV; fo.textContent=FOV+'°';
+  fi.addEventListener('input',()=>{ const old=FOV; FOV=+fi.value; fo.textContent=FOV+'°'; try{ localStorage.setItem('coast.fov',String(FOV)); }catch(_){}
+    if (Math.abs(camera.fov-old)<0.01){ camera.fov=FOV; camera.updateProjectionMatrix(); glowScale(); } });
+  fi.addEventListener('keydown',e=>e.stopPropagation()); }
 helpEl.querySelector('[data-a="help-close"]').addEventListener('click',()=>{ helpEl.hidden=true; aboutEl.hidden=true; lastCell=null; });
 /* ---------- sound ----------
    Sound files are listed in sounds.json as {"id": "path"} or {"id": ["path", ...]}; several files for one id are
@@ -10024,7 +10032,7 @@ function leaveFerry(to){ feChase=false;
   const F=ridden; ridden=null; const [qx,qz]=ferryLanding(F.R,F.wait>0?F.at:F.next);
   player.x=qx; player.z=qz; player.y=1.6; player.vy=0; player.holdT=3; eyeY=null;
   mode='street'; yaw=F.head+Math.PI;
-  camera.fov=70; camera.updateProjectionMatrix(); glowScale();
+  camera.fov=FOV; camera.updateProjectionMatrix(); glowScale();
   if (to==='above') toggleView();
 }
 // walking along the gangway: past its middle the passenger is aboard, and beyond its far end ashore
@@ -10036,7 +10044,7 @@ function gangwayStep(){
     const off=(qx-F.m.position.x)*c-(qz-F.m.position.z)*sn;
     player.x=ax+off*c; player.z=az-off*sn; player.y=1.6; player.vy=0; player.holdT=3; eyeY=player.y;
     yaw=F.head+Math.PI+fe.yaw; fpPitch=fe.pitch; ridden=null; mode='street';
-    camera.fov=70; camera.updateProjectionMatrix(); glowScale(); return; }
+    camera.fov=FOV; camera.updateProjectionMatrix(); glowScale(); return; }
   if (mode!=='street') return;
   for (const F of ferries){ if (!F.R || !F.m.visible) continue;
     const [lx,lz]=ferryLocal(F,player.x,player.z), onPlank=F.g.visible && Math.abs(lz-FGZ)<FGW-0.2 && lx*F.side>FB/2-0.2 && lx*F.side<FB/2+FPL-0.8;
@@ -10246,7 +10254,7 @@ function trainSeat(){
   const i=Math.min(1,train.cars.length-1), m=train.cars[i].m, q=windowSeat(COACH_SEATS);
   yaw=m.rotation.y+Math.PI; fpPitch=-0.05;
   coachEnter(i,0,q.z);
-  camera.fov=70; camera.near=0.1; camera.updateProjectionMatrix(); glowScale();
+  camera.fov=FOV; camera.near=0.1; camera.updateProjectionMatrix(); glowScale();
   // sitting down needs the eye placed in the coach, which the next frame does
   requestAnimationFrame(()=>requestAnimationFrame(()=>{ if (mode==='coach' && !sit) sitWindow('coach',q,[0,q.z,1.3]); })); }
 function toggleGoods(){ if (ridden) leaveFerry(prevModeF); if (mode==='coach' && coachFrom!==null) leaveCoach(); if (riding() && rideGoods){ chase.side=false; leaveTrain(prevMode); return; }
@@ -10304,14 +10312,14 @@ function leaveTrain(to){
   let best=null; for (const o of [4.5,-4.5,7,-7,10,-10]){ const px=x+nx*o, pz=zr+nz*o, h=heightAt(px,pz); if (h>0.5){ best=[px,pz,h]; break; } }
   if (best){ player.x=best[0]; player.z=best[1]; player.y=best[2]; } player.vy=0; eyeY=null;
   mode='street'; sky.visible=true; tunnelK=0; for (const c of T.cars) c.m.visible=true; yaw=Math.atan2(-Math.sin(T.lead.rotation.y),-Math.cos(T.lead.rotation.y));
-  scene.fog.near=90; scene.fog.far=1500; camera.fov=70; camera.updateProjectionMatrix(); glowScale();
+  scene.fog.near=90; scene.fog.far=1500; camera.fov=FOV; camera.updateProjectionMatrix(); glowScale();
   if (to==='above') toggleView();
 }
 function toggleView(){
   if (mode==='coach') return;
   // sailing, the bird's-eye view follows the boat, and returns to the helm
   if (sailD){ if (mode==='dinghy'){ startAscent(dgyLook.pitch); mode='above'; dist=45; scene.fog.near=160; scene.fog.far=1800; camera.fov=31; camera.updateProjectionMatrix(); glowScale(); yaw=sailD.state.head+Math.PI+dgyLook.yaw; aboveY=null; firstCam=true; if (document.pointerLockElement) document.exitPointerLock(); }
-    else { ascent.t=-1; mode='dinghy'; camera.fov=70; camera.updateProjectionMatrix(); glowScale(); } return; }
+    else { ascent.t=-1; mode='dinghy'; camera.fov=FOV; camera.updateProjectionMatrix(); glowScale(); } return; }
   if (mode==='follow'){ followLeave(); return; }
   if (riding()){ leaveTrain('street'); return; }
   // aboard a ferry the bird's-eye view follows the passenger on deck, and returns to the deck
@@ -10339,7 +10347,7 @@ async function newIsland(text){ if (seeding) return; seeding=true;
     if (mode==='swim') swimLeaveHere();
     if (riding()) leaveTrain('street');
     if (mode==='ferry'||ridden) leaveFerry('street');
-    if (mode!=='street'&&mode!=='above'){ mode='street'; camera.fov=70; camera.updateProjectionMatrix(); glowScale(); }
+    if (mode!=='street'&&mode!=='above'){ mode='street'; camera.fov=FOV; camera.updateProjectionMatrix(); glowScale(); }
     SEED_TEXT=seedText(text); SEED=seedNumber(SEED_TEXT); seedToAddress();
     resetWorld(); spawnPlayer(); player.vy=0; player.holdT=1.5; eyeY=null; lastCell=null;
     let total=0;
@@ -10773,14 +10781,14 @@ function frame(now){
     if (camera.far!==3600 || camera.near!==nearW){ camera.far=3600; camera.near=nearW; camera.updateProjectionMatrix(); sea.scale.setScalar(1); scene.fog.near=90; scene.fog.far=1500; islandMesh.visible=false; farMesh.visible=farGlow.visible=true; }
     if (descent.t>=0){ descent.t+=dt; const k=smooth(descent.t/descent.dur);
       _dq.copy(camera.quaternion); camera.position.lerpVectors(descent.p,camera.position,k); camera.quaternion.slerpQuaternions(descent.q,_dq,k);
-      camera.fov=lerp(descent.fov,70,k); camera.far=lerp(descent.far,3600,k); camera.updateProjectionMatrix(); glowScale();
+      camera.fov=lerp(descent.fov,FOV,k); camera.far=lerp(descent.far,3600,k); camera.updateProjectionMatrix(); glowScale();
       scene.fog.near=lerp(descent.fogN,90,k); scene.fog.far=lerp(descent.fogF,1500,k);
       if (descent.t>=descent.dur) descent.t=-1; }
   } else if (mode==='swim'){
     // in the water: the eye is the swimmer's, at the surface a few centimetres above the waves, or under them; the near
     // plane is the lens, which the waterline crosses
     swimmer.eye(camera); camPos.copy(camera.position);
-    if (camera.far!==3600 || camera.near!==0.08 || camera.fov!==70){ camera.far=3600; camera.near=0.08; camera.fov=70; camera.updateProjectionMatrix(); glowScale();
+    if (camera.far!==3600 || camera.near!==0.08 || camera.fov!==FOV){ camera.far=3600; camera.near=0.08; camera.fov=FOV; camera.updateProjectionMatrix(); glowScale();
       sea.scale.setScalar(1); scene.fog.near=90; scene.fog.far=1500; islandMesh.visible=false; farMesh.visible=farGlow.visible=true; sky.visible=true; descent.t=ascent.t=-1; }
   } else if (mode==='dinghy' && sailD && dgyChase){
     // from astern: the camera stands 11 m off the boat, and the mouse carries it round her and up and down
