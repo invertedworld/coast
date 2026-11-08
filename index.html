@@ -4094,7 +4094,11 @@ function genChunk(cx,cz,lod=0){
   /* --- ground --- */
   const N=lod===0?40:lod===1?20:10, step=C/N, G=N+3, hg=new Float32Array(G*G);
   for (let j=0;j<G;j++) for (let i=0;i<G;i++) hg[j*G+i]=heightAt(x0+(i-1)*step,z0+(j-1)*step);
-  const gpos=[], gnor=[], gcol=[], gpav=[], idx=[], cA=new THREE.Color();
+  const gpos=[], gnor=[], gcol=[], gpav=[], gplz=[], idx=[], cA=new THREE.Color();
+  // the paving of a large square is laid to one of four designs round its middle, in its own stone and a second one,
+  // chosen from the seed: concentric rings, a star, radiating bands over a basketweave of bricks, or a chequer turned
+  // on the diagonal; the shader draws them from the square's centre and radius, given to every vertex of the block
+  const plz=P && !P.small ? [P.x,P.z,P.r,1+Math.floor(hash(ch.cx,ch.cz,505)*4)+10*Math.floor(hash(ch.cx,ch.cz,506)*3)] : [0,0,0,0];
   const cvNear=[[x0,z0],[x0+C,z0],[x0,z0+C],[x0+C,z0+C],[xc,zc]].some(([a,b])=>coveAtXZ(a,b));
   for (let j=0;j<=N;j++) for (let i=0;i<=N;i++){
     const x=x0+i*step, z=z0+j*step, gi=(j+1)*G+(i+1), h=hg[gi];
@@ -4123,7 +4127,7 @@ function genChunk(cx,cz,lod=0){
     if (!seaRock && h<1.6 && (cvc===null||cvc===0.12)){ const t=clamp((1.6-h)/1.2,0,1)*(1-cob*0.7); cA.lerp(C_.beach,t); }
     if (h<0){ cA.lerp(C_.seabed,clamp(-h/2.2,0,1)); cob=0; flag=0; }
     if (h>-0.45 && h<0.12) cA.lerp(C_.foam,0.55*(1-Math.abs(h+0.15)/0.3));
-    gpos.push(x,h,z); gnor.push(-dx/nl,1/nl,-dz/nl); gcol.push(cA.r,cA.g,cA.b); gpav.push(cob,flag);
+    gpos.push(x,h,z); gnor.push(-dx/nl,1/nl,-dz/nl); gcol.push(cA.r,cA.g,cA.b); gpav.push(cob,flag); gplz.push(plz[0],plz[1],plz[2],plz[3]);
   }
   const portals=[]; { let pv=railState(x0-13); for (let x=x0-12; x<x0+C+12; x+=2){ const st=railState(x+1);
     if (st!==pv && (st==='tunnel'||pv==='tunnel')){ const sl=(railZ(x+1)-railZ(x-1))/2, l=Math.hypot(1,sl); portals.push({x,z:railZ(x),tx:1/l,tz:sl/l,into:st==='tunnel'?1:-1}); } pv=st; } }
@@ -4139,6 +4143,7 @@ function genChunk(cx,cz,lod=0){
   gg.setAttribute('normal',new THREE.Float32BufferAttribute(gnor,3));
   gg.setAttribute('color',new THREE.Float32BufferAttribute(gcol,3));
   gg.setAttribute('pave',new THREE.Float32BufferAttribute(gpav,2));
+  gg.setAttribute('plaza',new THREE.Float32BufferAttribute(gplz,4));
   gg.setIndex(idx); gg.computeBoundingSphere();
 
   if (ch.checker){ const K=ch.checker; gb.oy=P.level;
@@ -4375,13 +4380,52 @@ function addWinClip(sh){
 }
 // glass in the windows of a room that is built, and in the ferry's: faintly tinted and catching the light
 const glassMat=new THREE.MeshPhongMaterial({color:hex('#a9c4d4'),specular:hex('#ffffff'),shininess:90,transparent:true,opacity:0.2,depthWrite:false,side:THREE.DoubleSide});
+// the designs of the large squares' paving (see the ground's plaza attribute): each returns the tone of the stone at q,
+// metres from the square's centre, and sets tint, how far the second stone replaces the square's own there
+const PLAZA_GLSL=`
+const vec3 PLAZA_STONE[3]=vec3[3](vec3(0.47,0.49,0.52),vec3(0.70,0.50,0.43),vec3(0.58,0.40,0.30));
+float pzSlab(float m, float idv){ return mix(0.7,0.9+0.16*idv,smoothstep(0.012,0.04,m)); }
+// slabs laid in rings round the centre, each ring w wide and cut into stones about L long, the joints staggered
+float pzPolar(vec2 q, float r0, float w, float L, out float ring){
+  float d=length(q), a=atan(q.y,q.x)+PI, rr=(d-r0)/w; ring=floor(rr); float fr=fract(rr);
+  float rm=r0+(ring+0.5)*w, n=max(4.,floor(2.*PI*rm/L)), u=a/(2.*PI)*n+0.5*mod(ring,2.), fu=fract(u);
+  float m=min(min(fu,1.-fu)*2.*PI*rm/n,min(fr,1.-fr)*w); return pzSlab(m,h21(vec2(ring,mod(floor(u),n)))); }
+// bricks laid in a basketweave, pairs of them turning a quarter at each square
+float pzBasket(vec2 p, float u){ vec2 q=p/u, c=floor(q/2.), f=q-c*2.; bool vt=mod(c.x+c.y,2.)>0.5;
+  float al=vt?f.y:f.x, ac=vt?f.x:f.y, fr=fract(ac); float m=min(min(fr,1.-fr),min(al,2.-al))*u; return pzSlab(m,h21(c*2.+floor(ac))); }
+float plazaPat(vec2 q, float R, float id, out float tint){
+  float d=length(q), a=atan(q.y,q.x), ring; tint=0.;
+  // every design is framed by a band of the second stone, a little in from the edge of the square
+  if (d>R-1.05){ float c=pzPolar(q,R-1.05,0.55,1.2,ring); tint=ring<0.5?0.85:0.; return c; }
+  if (id<1.5){
+    // concentric rings of slabs, every third ring in the second stone, and a round stone at the centre
+    if (d<0.9) { tint=0.85; return pzSlab(0.9-d,0.5); }
+    float c=pzPolar(q,0.9,0.62,1.1,ring); tint=mod(ring,3.)<0.5?0.8:0.; return c; }
+  if (id<2.5){
+    // a sixteen-pointed star of slabs in both stones, each point split along its middle, over rings of slabs
+    float n=16., s=a/(2.*PI)*n, fs=fract(s), tri=abs(fs-0.5)*2.;
+    float rs=R*0.62*(0.42+0.58*(1.-tri))*(mod(floor(s),2.)<0.5?1.:0.72);
+    if (d<rs){ float side=step(0.5,fs); tint=side*0.85; float m=min(abs(fs-0.5)*2.*PI*d/n,rs-d); m=min(m,min(fs,1.-fs)*2.*PI*d/n); return pzSlab(m,h21(vec2(floor(s),side))); }
+    float c=pzPolar(q,0.,0.6,1.15,ring); return c; }
+  if (id<3.5){
+    // eight bands of the second stone radiating from a ring round the middle, over a basketweave of bricks
+    if (d<1.4){ float c=pzPolar(q,0.,0.7,1.1,ring); tint=0.8; return c; }
+    float s=a/(2.*PI)*8., off=abs(fract(s)-0.5)*2.*PI*d/8.;
+    if (abs(off)<0.0) {}
+    float band=abs(fract(s+0.5)-0.5)*2.*PI*d/8.;
+    if (band<0.26){ tint=0.85; return pzSlab(min(0.26-band,min(fract(d/0.9),1.-fract(d/0.9))*0.9),h21(vec2(floor(s+0.5),floor(d/0.9)))); }
+    return pzBasket(q,0.2); }
+  // a chequer of square slabs turned on the diagonal, in the two stones
+  vec2 r=mat2(0.7071,0.7071,-0.7071,0.7071)*q/1.25, c=floor(r), f=fract(r);
+  tint=mod(c.x+c.y,2.)>0.5?0.75:0.; float m=min(min(f.x,1.-f.x),min(f.y,1.-f.y))*1.25; return pzSlab(m,h21(c)); }
+`;
 function patchGround(mat){
   mat.onBeforeCompile=(sh)=>{
     addRoomClip(sh);
-    sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nattribute vec2 pave; varying vec2 vPave; varying vec3 vWP; varying vec3 vWN;')
-      .replace('#include <project_vertex>','#include <project_vertex>\nvPave=pave; vWP=(modelMatrix*vec4(transformed,1.0)).xyz; vWN=objectNormal;');
+    sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nattribute vec2 pave; attribute vec4 plaza; varying vec2 vPave; varying vec4 vPlz; varying vec3 vWP; varying vec3 vWN;')
+      .replace('#include <project_vertex>','#include <project_vertex>\nvPave=pave; vPlz=plaza; vWP=(modelMatrix*vec4(transformed,1.0)).xyz; vWN=objectNormal;');
     sh.uniforms.uOrig=origU;
-    sh.fragmentShader=sh.fragmentShader.replace('#include <common>','#include <common>\nvarying vec2 vPave; uniform vec3 uOrig;'+GLSL_LIB).replace('void main() {','void main() {\n  vec3 _wp=vWP+uOrig, _cp=cameraPosition+uOrig;')
+    sh.fragmentShader=sh.fragmentShader.replace('#include <common>','#include <common>\nvarying vec2 vPave; varying vec4 vPlz; uniform vec3 uOrig;'+GLSL_LIB+PLAZA_GLSL).replace('void main() {','void main() {\n  vec3 _wp=vWP+uOrig, _cp=cameraPosition+uOrig;')
       .replace('#include <color_fragment>',`#include <color_fragment>
       { float dist=length(_wp-_cp); float amp=1.-smoothstep(30.,85.,dist);
         float k=0.94+0.1*fb(_wp.xz*1.6)+0.04*vn(_wp.xz*9.);
@@ -4394,7 +4438,11 @@ function patchGround(mat){
           float c=mix(0.62,0.9+0.2*idv,edge)*(1.06-0.2*F1*F1);
           k=mix(k,c,smoothstep(0.,0.5,vPave.x));
         }
-        if (vPave.y>0.02){ float c=ashlar(_wp.xz,1.15,0.8)*(0.97+0.06*vn(_wp.xz*3.)); k=mix(k,c,smoothstep(0.,0.6,vPave.y)); }
+        float ptint=0.; vec3 pstone=vec3(1.);
+        if (vPave.y>0.02){ float c=ashlar(_wp.xz,1.15,0.8);
+          if (vPlz.z>0.){ vec2 q=_wp.xz-vPlz.xy; if (length(q)<vPlz.z-0.15){ float id=mod(vPlz.w,10.); c=plazaPat(q,vPlz.z,id,ptint); pstone=PLAZA_STONE[int(floor(vPlz.w/10.))]; } }
+          c*=0.97+0.06*vn(_wp.xz*3.); k=mix(k,c,smoothstep(0.,0.6,vPave.y)); ptint*=smoothstep(0.,0.6,vPave.y); }
+        diffuseColor.rgb=mix(diffuseColor.rgb,pstone,ptint);
         diffuseColor.rgb*=mix(0.97,k,amp); }
       // under the water, and only while the view is under it, the seabed: sand, meadow and rock by habitat (sbHab, as
       // the seabed's life is planted), with its fine relief; from above, the sea shows only the depth of the ground
