@@ -492,13 +492,20 @@ float h1(float n){ return fract(sin(n)*43758.5453); }
 float vn1(float x, float s){ float i=floor(x), f=fract(x); f=f*f*(3.0-2.0*f); return mix(h1(i+s),h1(i+1.0+s),f); }
 void main(){
   float u=vUv.x, v=vUv.y*2.0-1.0, seed=vP.x*97.0;
-  // a square-ended dab with slightly ragged sides and ends
-  float sideN=0.1*(vn1(u*6.0,seed)-0.5), endN=0.08*(vn1(v*5.0,seed+3.0)-0.5);
-  if (abs(v)+sideN>0.92 || u+endN<0.04 || u-endN>0.95) discard;
+  // the shape of the dab varies from stroke to stroke: square-ended, an oval touch, a comma that tapers to a point
+  // where the brush lifts, or a short stroke bent in an arc; each has slightly ragged sides and ends
+  float kind=h1(seed+23.0), sideN=0.1*(vn1(u*6.0,seed)-0.5), endN=0.08*(vn1(v*5.0,seed+3.0)-0.5);
+  float hw=0.92, vv=v, u0=0.04, u1=0.95;
+  if (kind<0.32){ }
+  else if (kind<0.56){ float e=2.0*u-1.0; hw=0.92*sqrt(max(0.0,1.0-e*e)); u0=0.0; u1=1.0; }
+  else if (kind<0.8){ hw=0.92*(1.0-0.78*pow(u,1.4))*smoothstep(0.0,0.12,u+0.04); u0=0.0; }
+  else { float bend=(h1(seed+31.0)-0.5)*1.2; vv=v-bend*(1.0-4.0*(u-0.5)*(u-0.5)); hw=0.6; }
+  if (abs(vv)+sideN>hw || u+endN<u0 || u-endN>u1) discard;
+  float r=abs(vv)/max(hw,1e-3);
   // bristle grooves along the stroke; the paint piles up where the brush lifts, at the end (u = 1)
-  float br=vn1(v*9.0+seed,seed)*0.55+vn1(v*21.0,seed+7.0)*0.45;
-  float h=0.55+0.08*(h1(seed+11.0)-0.5)+0.4*(br-0.5)+0.22*smoothstep(0.6,0.92,u)*(1.0-v*v);
-  h=mix(0.3,h,smoothstep(0.92,0.65,abs(v)+sideN)*smoothstep(0.02,0.16,u)*smoothstep(0.97,0.86,u));
+  float br=vn1(vv*9.0+seed,seed)*0.55+vn1(vv*21.0,seed+7.0)*0.45;
+  float h=0.55+0.08*(h1(seed+11.0)-0.5)+0.4*(br-0.5)+0.22*smoothstep(0.6,0.92,u)*(1.0-r*r);
+  h=mix(0.3,h,smoothstep(1.0,0.7,r+sideN)*smoothstep(u0-0.02,u0+0.12,u)*smoothstep(u1+0.02,u1-0.09,u));
   fragColor=vec4(vCol*(0.94+0.12*br),clamp(h,0.02,1.0)); }`;
 
 // the strokes lit as in the oil style, without its grading of colour, so that the strokes keep the pigments chosen
