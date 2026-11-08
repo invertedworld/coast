@@ -1,5 +1,5 @@
 /* ================= the camera: a mode for taking pictures =================
-   K raises the camera to the eye and lowers it again. While it is raised the frame is drawn through a lens model:
+   C raises the camera to the eye and lowers it again (in the water C dives, so there it does not). While it is raised the frame is drawn through a lens model:
 
    - Focal length, 16 to 300 mm in the equivalent of a 35 mm frame, measured across the diagonal, so that the
      field of view at a given focal length is the same whatever the shape of the window.
@@ -74,7 +74,7 @@ const DEPTH_FN = `
   uniform float uNear, uFar;
   float linZ(float d){ return uNear*uFar/(uFar-d*(uFar-uNear)); }`;
 
-export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, allowed = () => true, onShutter = null, quickOk = null }) {
+export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, allowed = () => true, onShutter = null, quickOk = null, cameraKeyOk = null }) {
   const S = { on: false, focal: 35, fNumber: 2.8, focus: 5, autofocus: true, ev: 0, vignette: 0, ratio: 0, afTarget: 5, afT: 0, af: false };
   // the frame within the window, as fractions of its width and height, centred; set from the viewfinder's layout
   const FR = { x: 1, y: 1 };
@@ -410,7 +410,7 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
     <div class="row"><button class="step" data-c="${dn}" title="${tdn}" aria-label="${tdn}">${MINUS}</button><b data-k="${k}"></b><button class="step" data-c="${up}" title="${tup}" aria-label="${tup}">${PLUS}</button></div><s><u data-m="${k}"></u></s></div>`;
   const hud = document.createElement('div'); hud.className = 'cam'; hud.hidden = true;
   hud.innerHTML = `<div class="fr"><i></i><i></i><i></i><i></i></div><div class="af"></div>
-    <button class="exit" data-c="exit" title="Leave the camera (K)" aria-label="Leave the camera">${ic('<path d="M6 6l12 12M18 6L6 18"/>')}</button>
+    <button class="exit" data-c="exit" title="Leave the camera (C)" aria-label="Leave the camera">${ic('<path d="M6 6l12 12M18 6L6 18"/>')}</button>
     <div class="rail"><button class="shut" data-c="shoot" title="Take a picture (Enter)" aria-label="Take a picture"><i></i></button>
       <button class="roll" data-c="gallery" title="Gallery (G)" aria-label="Gallery">${ic('<rect x="3.5" y="5.5" width="17" height="13" rx="1.5"/><path d="M3.5 15.5l5-4.5 4 3.5 3-2.5 5 4"/>')}<b></b></button></div>
     <div class="deck">${dial('focal', 'Zoom', 'zoom-', 'zoom+', 'Wider (−)', 'Longer (+)')}
@@ -515,7 +515,7 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
   addEventListener('keydown', e => {
     if (!e.isTrusted) return;   // keys the program presses for itself (the path tracer's draw distance) pass through
     if (G.handleKey(e)) return;
-    if (e.code === 'KeyK') { if (!e.repeat) toggle(); return stop(e); }
+    if (e.code === 'KeyC' && (!cameraKeyOk || cameraKeyOk() || S.on)) { if (!e.repeat) toggle(); return stop(e); }
     if (e.code === 'KeyL' || e.code === 'KeyG') { if (!e.repeat) openGallery(); return stop(e); }
     // Enter with the camera lowered takes a quick picture of the game's own frame, with the shutter's sound and flash
     // and no viewfinder (not while a field or a panel has the keyboard)

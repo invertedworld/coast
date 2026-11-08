@@ -80,7 +80,7 @@ The new island replaces the present one entirely, and the player begins it on fo
 
 ## The camera and the gallery
 
-**Enter**, with the camera lowered, takes a quick picture of the view as it is, which is kept in the gallery; the shutter is heard and seen. **K** raises a camera to the eye, and the island is then seen through its lens. The camera remains raised until it is lowered with the button at the top right of the screen, with **K** or with **Esc**. While it is raised the mouse is not captured: a drag across the scene turns the view, and the player walks, swims and turns with the usual keys. A click on the scene does not take a picture.
+**Enter**, with the camera lowered, takes a quick picture of the view as it is, which is kept in the gallery; the shutter is heard and seen. **C** raises a camera to the eye, and the island is then seen through its lens. The camera remains raised until it is lowered with the button at the top right of the screen, with **C** or with **Esc**. In the water **C** dives instead, and the camera is not raised. While it is raised the mouse is not captured: a drag across the scene turns the view, and the player walks, swims and turns with the usual keys. A click on the scene does not take a picture.
 
 The controls of the lens lie in a panel at the foot of the screen. Each shows its value and a scale, and is adjusted with the **−** and **+** buttons on either side, which repeat while held.
 
@@ -100,7 +100,7 @@ The four crop marks show the frame of the picture. The part of the screen outsid
 
 The large round button on the right is the shutter, which sounds as it is pressed; **Enter** also takes a picture. Beneath it the latest picture is shown with the number of pictures taken, and a click on it opens the gallery.
 
-> **Example:** To photograph a bell tower against the sea, raise the camera with **K**, walk until the tower stands against the water, set the zoom to about 85 mm, close the aperture to f/8 so that both are sharp, and press the shutter.
+> **Example:** To photograph a bell tower against the sea, raise the camera with **C**, walk until the tower stands against the water, set the zoom to about 85 mm, close the aperture to f/8 so that both are sharp, and press the shutter.
 
 The gallery is opened with **G** or **L**, from anywhere and without raising the camera, or from the camera. Each row holds one photograph, with its number and the time it was taken, followed by the artworks made from it, each labelled with its style. A click on an item selects it and shows it enlarged with its details. **Download PNG** saves the selected item as a PNG file, and the bin deletes it; deleting a photograph also deletes its artworks. Neither is available while nothing is selected. A click with **Cmd** (or **Ctrl**) held adds an item to the selection or removes it, and a click with **Shift** held selects every item between it and the last one chosen; several items selected are shown in a loose pile, the last chosen on top. **Download** then saves each of them, and the bin deletes them all once the question that follows is answered **Delete**; the question names what is to be deleted, counting the artworks that go with a photograph. Up to 24 photographs are kept, with their artworks, in the browser's own storage, so that they remain when the browser is closed and opened again. The divider between the pictures and the preview may be dragged to resize them; its place is remembered, and a double click on it restores the default.
 

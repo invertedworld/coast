@@ -147,7 +147,7 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
       <div class="row"><span><kbd>P</kbd></span><span>Pause the world</span></div>
     </div>
     <div class="group"><h3>Camera</h3>
-      <div class="row"><span><kbd>K</kbd></span><span>Raise or lower the camera</span></div>
+      <div class="row"><span><kbd>C</kbd></span><span>Raise or lower the camera</span></div>
       <div class="row"><span><kbd>Esc</kbd></span><span>Lower the camera</span></div>
       <div class="row"><span><kbd>Enter</kbd></span><span>Take a picture, with the camera raised or not</span></div>
       <div class="row"><span>Drag</span><span>Turn the camera</span></div>
@@ -206,7 +206,7 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
 // the cat of Michi-Neko: The Cat Philosopher's Path by c1t1zen1, under the MIT licence (cat/LICENSE)
 import { Cat, catRimUniforms } from './cat/cat.js';
-// the camera for taking pictures (K): lens, depth of field, exposure, viewfinder and gallery; its API is window.__village.photo
+// the camera for taking pictures (C): lens, depth of field, exposure, viewfinder and gallery; its API is window.__village.photo
 import { createPhoto } from './photo/camera.js';
 
 /* ================= random & noise ================= */
@@ -10444,7 +10444,7 @@ function diveRender(){
   const v=[farMesh.visible,farGlow.visible,outMesh.visible,sky.visible]; farMesh.visible=farGlow.visible=outMesh.visible=sky.visible=false;
   try { return UW.render(renderer,scene,camera,diveAbove); } finally { [farMesh.visible,farGlow.visible,outMesh.visible,sky.visible]=v; } }
 // the camera, while it is raised, draws the frame through its lens instead
-const PHOTO=createPhoto({renderer,scene,camera,canvas,origin:ORIGIN,onFov:()=>glowScale(),allowed:()=>started,onShutter:()=>sndPlay('camera_shutter','player',null),quickOk:()=>!islandShown()});
+const PHOTO=createPhoto({renderer,scene,camera,canvas,origin:ORIGIN,onFov:()=>glowScale(),allowed:()=>started,onShutter:()=>sndPlay('camera_shutter','player',null),quickOk:()=>!islandShown(),cameraKeyOk:()=>mode!=='swim'});
 function renderMain(){
   if (PHOTO.on && PHOTO.renderLens()) return;
   if (!(tiltShift && (mode==='above'||mode==='chase'))){ renderer.setRenderTarget(null); renderer.render(scene,camera); return; }
