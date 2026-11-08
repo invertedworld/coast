@@ -9555,7 +9555,7 @@ const SOUND_DEF={
   train_rumble:{g:0.9,ref:10}, train_bridge:{g:0.9,ref:12}, train_brakes:{g:0.8,ref:10}, train_horn:{g:1,ref:60},
   train_doors_open:{g:0.7,ref:3}, train_doors_close:{g:0.7,ref:3},
   ferry_start:{g:1,ref:15}, ferry_run:{g:1,ref:15}, ferry_stop:{g:1,ref:15}, ferry_idle:{g:0.7,ref:8}, ferry_wake:{g:0.9,ref:10},
-  ferry_horn:{g:1,ref:80}, ferry_gangway:{g:0.8,ref:5}, ferry_gate:{g:0.6,ref:3}, ferry_fender:{g:0.7,ref:4},
+  ferry_horn:{g:1,ref:35}, ferry_gangway:{g:0.8,ref:5}, ferry_gate:{g:0.6,ref:3}, ferry_fender:{g:0.7,ref:4},
   bow_wave:{g:0.8}, splash:{g:0.9}, sail_flap:{g:0.5}, sail_wind:{g:0.8}, sail_over:{g:0.8}, gybe_bang:{g:0.9}, hull_knock:{g:0.8},
 };
 const SND={asked:{}, ready:false, buf:{}, last:{}, master:null, rev:null, revOut:null, bus:{}, cut:{}, gmul:{}, send:{}, voices:[], t:{}};
@@ -9630,15 +9630,18 @@ function sndVoice(v,dt,level,x,y,z,rate=1,occl=0){
    to 2.5 km, for the first ground standing more than 25 m above the sea. The three nearest such slopes each send the
    horn back, fainter and duller, from where they stand, after the time the sound takes to go out to them and back to
    the listener beyond the time it takes to come straight; the nearer a slope, the louder its echo */
+// the horn carries some way, but not across the island: it fades from 250 m and is not heard beyond 600 m, and its
+// echoes are heard only with it
 function hornWithEchoes(pos,opts={}){
-  sndPlay('ferry_horn','ferry',pos,opts);
   if (!SND.ready) return;
-  const [fx,fy,fz]=pos, L=_sl, d0=Math.hypot(fx-L.x,fy-L.y,fz-L.z), hits=[];
+  const [fx,fy,fz]=pos, L=_sl, d0=Math.hypot(fx-L.x,fy-L.y,fz-L.z), hits=[], far=clamp(1-(d0-250)/350,0,1);
+  if (far<=0) return;
+  sndPlay('ferry_horn','ferry',pos,{...opts,gain:(opts.gain??1)*far});
   for (let k=0;k<12;k++){ const a=k*Math.PI/6, cx=Math.cos(a), cz=Math.sin(a);
     for (let r=80;r<=2500;r+=40){ const x=fx+cx*r, z=fz+cz*r, h=heightAt(x,z);
       if (h>25){ const y=h*0.6, d1=Math.hypot(x-fx,y-fy,z-fz), d2=Math.hypot(x-L.x,y-L.y,z-L.z); hits.push({x,y,z,d1,path:d1+d2}); break; } } }
   hits.sort((p,q)=>p.path-q.path);
-  for (const e of hits.slice(0,3)) sndPlay('ferry_horn','ferry',[e.x,e.y,e.z],{gain:clamp(320/(e.d1+120),0.08,0.55),delay:Math.max(0.15,(e.path-d0)/SPEED_OF_SOUND),occl:0.4,rate:0.99});
+  for (const e of hits.slice(0,3)) sndPlay('ferry_horn','ferry',[e.x,e.y,e.z],{gain:clamp(320/(e.d1+120),0.08,0.55)*far,delay:Math.max(0.15,(e.path-d0)/SPEED_OF_SOUND),occl:0.4,rate:0.99});
 }
 function sndPlay(id,group,pos,{gain=1,rate=1,vel=null,delay=0,occl=0}={}){
   if (!SND.ready) return; SND.asked[id]=(SND.asked[id]||0)+1; const buf=sndBuf(id); if (!buf) return;
@@ -9760,8 +9763,9 @@ function sndUpdate(dt){
   const shoreV=(name,id,H,lv)=>{ const v=sv(name,id,'world',true); if (!v) return; if (H&&!atSea){ if (!v.sx){ v.sx=H.x; v.sz=H.z; }
       const k=1-Math.exp(-dt*1.2); v.sx+=(H.x-v.sx)*k; v.sz+=(H.z-v.sz)*k; sndVoice(v,dt,easeTo(name,lv,dt),v.sx,0.5,v.sz); }
     else sndVoice(v,dt,easeTo(name,0,dt),v.sx||_sl.x,0.5,v.sz||_sl.z); };
-  // the water is heard near the shore only: from far off, muffled by the air, the waves would sound like wind
-  const nearK=H=>H?clamp(1-(H.d-40)/50,0,1):0;
+  // the water is heard close to it only: at its full level within 10 m of the edge, fading away by 40 m, as the
+  // houses, walls and the rise of the land soon hide it (from far off, muffled by the air, it would sound like wind)
+  const nearK=H=>H?clamp(1-(H.d-10)/30,0,1):0;
   shoreV('lap','water_lap',shore.lap,nearK(shore.lap)); shoreV('surf','surf',shore.beach,nearK(shore.beach)); shoreV('rocks','waves_rocks',shore.rock,nearK(shore.rock));
   // fountains and cafés from the nearest sources; cafés are busy from morning until late evening
   slotUpdate(slots.fountain,'fountain',dt,1,SNDS.src.filter(s=>s.id==='fountain'&&s.d<90));
