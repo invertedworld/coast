@@ -971,7 +971,7 @@ function cvTop(cv,u,s,hNat,noCut){ const e=cvExtF(cv,u), sc=s-cvShore(cv,u), Lr=
   // round the ravine the land is cut down into a valley, which runs on up the hillside beyond its head and dies out
   // some 25 m beyond it, except over a cave, whose roof keeps the rock above it, easing into the valley round it
   let keep=0; const Gc=cv.geo||cv._bg;
-  if (!noCut && s>cv.Bh-8 && Gc && Gc.caves) for (const A of Gc.caves){ const [a,b]=cvCaveLocal(A,u,s);
+  if (!noCut && noCut!==0 && s>cv.Bh-8 && Gc && Gc.caves) for (const A of Gc.caves){ const [a,b]=cvCaveLocal(A,u,s);
     keep=Math.max(keep,smooth((Math.max(A.wX,A.wM)*1.6+Math.abs(A.lean)+7-Math.abs(b))/4)*smooth((a+4)/3)*smooth((A.Lc+5-a)/3)); }
   if (!noCut && s>cv.Bh-8 && keep<1){ const T0=T; const sr=Math.min(s,cv.sHead), g=u-cvGAxis(cv,sr), w=Math.max(2,cvAg(cv,sr,g<0?-1:1))+1.5, gs=clamp((s-cv.Bh)/cv.Lg,0,1);
     T=Math.min(T,cv.bt+(cv.Thead-cv.bt)*(1-Math.pow(1-gs,1.6))+Math.max(0,Math.abs(g)-w)*0.9+Math.max(0,s-cv.sHead)*0.45+0.12*Math.max(0,s-cv.sHead-12)**2);
@@ -1120,7 +1120,7 @@ function cvBuild(cv){
     for (let k=0;k<G.ns;k++){ const o=k*G.nu+i; if (out?G.s0+k<e:!cvLand(cv,u,G.s0+k)) D[o]=-D[o]; } }
   G.D=D; G.I=I;
   const nat=(u,s)=>{ const [x,z]=cvL2W(cv,u,s); return baseH(x,z); };
-  const top=(u,s)=>cvTop(cv,u,s,nat(u,s)), topNC=(u,s)=>cvTop(cv,u,s,nat(u,s),true);
+  const top=(u,s)=>cvTop(cv,u,s,nat(u,s)), topNC=(u,s)=>cvTop(cv,u,s,nat(u,s),0);   // with the valley cut, as though no cave kept the rock over it
   G.Thead=top(cvGAxis(cv,cv.sHead),cv.sHead);
   const R=rng(cv.seed*7+3);
   // the path: a rough trodden path zigzagging up the ravine from the head of the bay, its turns set irregularly, each
@@ -1174,7 +1174,7 @@ function cvBuild(cv){
         for (const b of [-w,0,w]){ const u=A.u+A.au*a+A.lu*b, s=A.s+A.as*a+A.ls*b;
           // more rock is left beside the ravine, whose open slopes fall away from the cave's side
           if (!cvLand(cv,u,s) || !cvSdf(G,u,s) || _cd<(b===0&&a>2?2:K[_ci]===4?2.2:0.45)) { ok=false; break; }
-          if (topNC(u,s)<cvCaveF(A,a)+(b===0?hgt+1.5:hgt*0.6+0.8)){ ok=false; break; } } }   // the roof is covered across the bore's width
+          if (topNC(u,s)<cvCaveF(A,a)+(b===0?hgt+1.5:hgt*0.95+0.8)){ ok=false; break; } } }   // the roof is covered across the bore's width
       // and beyond its back, so that it never comes near the far side of a narrow arm
       if (ok){ const u=A.u+A.au*(A.Lc+2), s=A.s+A.as*(A.Lc+2); if (!cvLand(cv,u,s) || !cvSdf(G,u,s) || _cd<2) ok=false; }
       for (const B of G.caves) if (Math.hypot(B.u-A.u,B.s-A.s)<B.wM+A.wM+6) ok=false;
