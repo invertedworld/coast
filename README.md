@@ -64,7 +64,7 @@ The panel opened with **H** lists the controls. They are reproduced here for ref
 | Mouse | Look. A click captures the mouse and Esc releases it. |
 | X | Sits down on the nearest free seat within 1.5 m that the player is turned towards, or stands up again. A step with W A S D also stands the player up. See [Sitting](#sitting). |
 | Q E | Turn |
-| V | Switches between street level and the bird's-eye view. The bird's-eye view always opens at a low height (`dist = 45`), whatever the zoom was before. Moving over lower ground does not bring the view down; it rises only to keep clear of higher ground. While riding a train or a ferry, V steps off. |
+| 5 | Switches between street level and the bird's-eye view. The bird's-eye view always opens at a low height (`dist = 45`), whatever the zoom was before. Moving over lower ground does not bring the view down; it rises only to keep clear of higher ground. While riding a train or a ferry, 5 steps off. |
 | + − | Zoom the bird's-eye view in and out. − at street level changes to the bird's-eye view. A pinch also zooms. |
 | Two-finger drag | Pans across the island in the bird's-eye view. |
 | Arrow keys | Turn and tilt the bird's-eye view. |
@@ -72,17 +72,17 @@ The panel opened with **H** lists the controls. They are reproduced here for ref
 | T | Speeds up time while held, forty times. |
 | Shift + T | Runs time backwards at the same rate while held. The clock, the sun, the stars and everything timed by the clock, such as the fishing boats, go back; the church bells do not strike the hours passed backwards. |
 | P | Pauses the world: the trains, ferries, boats, dolphins, sea, lighthouse beams, cats, gulls and time of day stand still while the player walks, flies and looks about as usual. P again resumes. |
-| R | Rides in the passenger train's cab. R or V again steps off beside the track. |
-| C | Follows the train being ridden, or else the nearer of the passenger and goods trains, from behind. The mouse orbits the camera and + − change its distance. C or V again steps off beside the track. While sailing, C changes between the helm and a view from astern of the dinghy, 11 m off at first, which the mouse carries round her and + − bring nearer or further, between 5 and 80 m; R, G, C and F do not take the player to a train or a ferry until they are ashore. |
-| G | Rides in the cab of the goods train working the nearest goods line, setting it to work there if none is near. G or V again steps off beside the track. |
-| F | Boards the nearest ferry wherever it is. F or V again steps ashore, or at the next landing if the ferry is under way. Aboard, C changes between the deck and a view from astern of the ferry, 70 m off at first, which the mouse carries round her and + − bring nearer or further, between 25 and 400 m. |
-| Y | Within 6 m of a dinghy at street level, boards it. Elsewhere, takes the player to the quay beside the dinghy of the nearest harbour, leaving any train or ferry first and coming down from the bird's-eye view. While sailing, Y steps ashore when the boat lies within 3 m of a quay, a mole or a beach. Anywhere in a harbour the player comes ashore on its quay, and the dinghy is moored again at that harbour's berth on its stern line and buoy; if it came from another harbour, the dinghy that lay there goes to the berth it came from, so that every harbour keeps one. Out at sea, away from any harbour, Y returns the dinghy to its own berth and puts the player on the quay beside it, from the helm, the view from astern or the bird's-eye view. |
+| 1 | Rides in the passenger train's cab. 1 or 5 again steps off beside the track. |
+| 2 | Rides in the cab of the goods train working the nearest goods line, setting it to work there if none is near. 2 or 5 again steps off beside the track. |
+| 3 | Boards the nearest ferry wherever it is. 3 or 5 again steps ashore, or at the next landing if the ferry is under way. Aboard, 0 changes between the deck and a view from astern of the ferry, 70 m off at first, which the mouse carries round her and + − bring nearer or further, between 25 and 400 m. |
+| 4 | Within 6 m of a dinghy at street level, boards it. Elsewhere, takes the player to the quay beside the dinghy of the nearest harbour, leaving any train or ferry first and coming down from the bird's-eye view. While sailing, 4 steps ashore when the boat lies within 3 m of a quay, a mole or a beach. Anywhere in a harbour the player comes ashore on its quay, and the dinghy is moored again at that harbour's berth on its stern line and buoy; if it came from another harbour, the dinghy that lay there goes to the berth it came from, so that every harbour keeps one. Out at sea, away from any harbour, 4 returns the dinghy to its own berth and puts the player on the quay beside it, from the helm, the view from astern or the bird's-eye view. |
+| 0 | Follows the train being ridden, or else the nearer of the passenger and goods trains, from behind. The mouse orbits the camera and + − change its distance. 0 or 5 again steps off beside the track. While sailing, 0 changes between the helm and a view from astern of the dinghy, 11 m off at first, which the mouse carries round her and + − bring nearer or further, between 5 and 80 m; 1, 2, 0 and 3 do not take the player to a train or a ferry until they are ashore. |
 | A D (sailing) | Steer: A turns the bow to port and D to starboard. The tiller moves the opposite way, as on a real boat. |
 | W S (sailing) | Paddle forward or astern at up to 0.6 m/s while the boat is nearly stopped. S also lets the sail fly. |
 | Walking into the sea | Wades in from any shore that shelves, and swims once the water reaches the chest. |
 | W A S D (in the water) | Swim along the view. At the surface the head rides the waves; under the water the swimmer moves where the view points. |
 | Looking down and swimming forward | Dives from the surface. |
-| C (in the water) | Dives while held. In the water C does not follow the train. |
+| C (in the water) | Dives while held. |
 | Space (in the water) | Rises while held; near the surface the head comes out of the water. |
 | Shift (in the water) | Swims faster, at the cost of more breath. |
 | J | Jumps into the sea from the edge of a quay, a mole or a moored boat that is being faced, over the side of the dinghy the view faces, or from the rail of a ferry. A ferry under way sails on. |
@@ -319,7 +319,7 @@ A boat on its way home has its catch aboard: 4–7 of the nearest gulls within 4
 
 ### Sailing
 
-Each harbour within 400 m of the player has a dinghy at its berth, and **Y** sails it. The dinghy is an original design about 4 m long and 1.5 m in the beam, in the manner of a Mediterranean harbour dinghy: clinker-planked and painted in the island's colours, with a varnished gunwale, thwarts and foredeck, a short wooden mast, a boom and a plain cream mainsail, a daggerboard, a rudder and a tiller with an extension. The colours are drawn from the harbour's seed.
+Each harbour within 400 m of the player has a dinghy at its berth, and **4** sails it. The dinghy is an original design about 4 m long and 1.5 m in the beam, in the manner of a Mediterranean harbour dinghy: clinker-planked and painted in the island's colours, with a varnished gunwale, thwarts and foredeck, a short wooden mast, a boom and a plain cream mainsail, a daggerboard, a rudder and a tiller with an extension. The colours are drawn from the harbour's seed.
 
 The code is in two blocks that are the same in `testbench/sailing.html`, where they may be examined on their own:
 

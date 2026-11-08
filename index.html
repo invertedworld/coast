@@ -81,7 +81,7 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
       <div class="row"><span>Walk into a door</span><span>Open the door</span></div>
     </div>
     <div class="group"><h3>Bird’s-eye view</h3>
-      <div class="row"><span><kbd>V</kbd></span><span>Bird’s-eye view or street level</span></div>
+      <div class="row"><span><kbd>5</kbd></span><span>Bird’s-eye view or street level</span></div>
       <div class="row"><span><kbd>+</kbd><kbd>−</kbd></span><span>Zoom</span></div>
       <div class="row"><span>Pinch</span><span>Zoom</span></div>
       <div class="row"><span>Two-finger drag</span><span>Pan</span></div>
@@ -90,36 +90,36 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
       <div class="row"><span><kbd>B</kbd></span><span>Tilt-shift</span></div>
     </div>
     <div class="group"><h3>Passenger train</h3>
-      <div class="row"><span><kbd>R</kbd></span><span>Ride in the cab</span></div>
-      <div class="row"><span><kbd>C</kbd></span><span>Follow from behind</span></div>
+      <div class="row"><span><kbd>1</kbd></span><span>Ride in the cab</span></div>
+      <div class="row"><span><kbd>0</kbd></span><span>Follow from behind</span></div>
       <div class="row"><span><kbd>+</kbd><kbd>−</kbd></span><span>Following distance</span></div>
       <div class="row"><span><kbd>B</kbd></span><span>Tilt-shift</span></div>
-      <div class="row"><span><kbd>V</kbd></span><span>Step off</span></div>
+      <div class="row"><span><kbd>5</kbd></span><span>Step off</span></div>
     </div>
     <div class="group"><h3>Goods train</h3>
-      <div class="row"><span><kbd>G</kbd></span><span>Ride in the cab</span></div>
-      <div class="row"><span><kbd>C</kbd></span><span>Follow from behind</span></div>
+      <div class="row"><span><kbd>2</kbd></span><span>Ride in the cab</span></div>
+      <div class="row"><span><kbd>0</kbd></span><span>Follow from behind</span></div>
       <div class="row"><span><kbd>B</kbd></span><span>Tilt-shift</span></div>
-      <div class="row"><span><kbd>V</kbd></span><span>Step off</span></div>
+      <div class="row"><span><kbd>5</kbd></span><span>Step off</span></div>
     </div>
     <div class="group"><h3>Ferry</h3>
-      <div class="row"><span><kbd>F</kbd></span><span>Board the nearest ferry</span></div>
+      <div class="row"><span><kbd>3</kbd></span><span>Board the nearest ferry</span></div>
       <div class="row"><span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><span>Walk about the decks</span></div>
-      <div class="row"><span><kbd>F</kbd></span><span>Step ashore</span></div>
-      <div class="row"><span><kbd>C</kbd></span><span>Deck or view from astern</span></div>
+      <div class="row"><span><kbd>3</kbd></span><span>Step ashore</span></div>
+      <div class="row"><span><kbd>0</kbd></span><span>Deck or view from astern</span></div>
       <div class="row"><span><kbd>+</kbd><kbd>−</kbd></span><span>Distance from astern</span></div>
-      <div class="row"><span><kbd>V</kbd></span><span>Bird’s-eye view</span></div>
+      <div class="row"><span><kbd>5</kbd></span><span>Bird’s-eye view</span></div>
     </div>
     <div class="group"><h3>Sailing</h3>
-      <div class="row"><span><kbd>Y</kbd></span><span>Go to the nearest dinghy</span></div>
-      <div class="row"><span><kbd>Y</kbd></span><span>Board, within 6 m</span></div>
+      <div class="row"><span><kbd>4</kbd></span><span>Go to the nearest dinghy</span></div>
+      <div class="row"><span><kbd>4</kbd></span><span>Board, within 6 m</span></div>
       <div class="row"><span><kbd>A</kbd><kbd>D</kbd></span><span>Steer</span></div>
       <div class="row"><span><kbd>W</kbd><kbd>S</kbd></span><span>Paddle</span></div>
       <div class="row"><span><kbd>Q</kbd><kbd>E</kbd></span><span>Turn the head</span></div>
-      <div class="row"><span><kbd>C</kbd></span><span>Helm or view from astern</span></div>
+      <div class="row"><span><kbd>0</kbd></span><span>Helm or view from astern</span></div>
       <div class="row"><span><kbd>+</kbd><kbd>−</kbd></span><span>Distance from astern</span></div>
-      <div class="row"><span><kbd>V</kbd></span><span>Bird’s-eye view</span></div>
-      <div class="row"><span><kbd>Y</kbd></span><span>Step ashore, or back to the quay</span></div>
+      <div class="row"><span><kbd>5</kbd></span><span>Bird’s-eye view</span></div>
+      <div class="row"><span><kbd>4</kbd></span><span>Step ashore, or back to the quay</span></div>
     </div>
     <div class="group"><h3>Swimming and diving</h3>
       <div class="row"><span>Walk into the sea</span><span>Swim</span></div>
@@ -7679,8 +7679,8 @@ const DGY_COLS=[['#f2ede4','#2f5f8f','#b5473a','#2f5f8f'],['#2f5f8f','#f2ede4','
 const dinghies=new Map();   // harbour key -> {H,B,D}
 let sailD=null, dgyScan=0, dgySeed=SEED, dgyHandling='assisted';
 const dgyLook={yaw:0,pitch:-0.1};
-let dgyChase=false, dgyChaseD=11;   // sailing, viewed from astern (C) instead of from the helm
-// aboard a ferry, viewed from astern (C) instead of from the deck, the mouse carrying the camera round her
+let dgyChase=false, dgyChaseD=11;   // sailing, viewed from astern (0) instead of from the helm
+// aboard a ferry, viewed from astern (0) instead of from the deck, the mouse carrying the camera round her
 let feChase=false, feSnap=false, feChaseD=70; const feLook={yaw:0,pitch:0.3};
 const dgyCtx={wind:WIND,depthAt:(x,z)=>-heightAt(x,z),surfaceAt:dgySea,obstacles:{obbs:[],circles:[]},boats:[],input:{steer:0,trim:0,paddle:0},walkAt:dgyWalkAt,paused:false};
 const dgyIdle={wind:WIND,depthAt:(x,z)=>-heightAt(x,z),surfaceAt:dgySea,obstacles:{obbs:[],circles:[]},boats:[],input:{},walkAt:dgyWalkAt,paused:false};
@@ -9667,44 +9667,51 @@ function sndFerries(dt){
     if (F.wait>0){ S.fender=(S.fender??3)-dt; if (S.fender<=0){ S.fender=3+Math.random()*6; sndPlay('ferry_fender','ferry',at(F.side*FB/2,0.6,(Math.random()-0.5)*16),{rate:0.9+Math.random()*0.2}); } }
   }
 }
+// the views are on the number keys: 1 the passenger train, 2 the goods train, 3 the ferry, 4 the dinghy, 5 the bird's-eye
+// view, and 0 the view from behind (the train followed, the ferry or the dinghy from astern). Each is translated to the
+// name the handlers below use; the letters that once did the same no longer do (C is still held to dive)
+const VIEW_KEY={Digit1:'KeyR',Numpad1:'KeyR',Digit2:'KeyG',Numpad2:'KeyG',Digit3:'KeyF',Numpad3:'KeyF',Digit4:'KeyY',Numpad4:'KeyY',
+  Digit5:'KeyV',Numpad5:'KeyV',Digit0:'KeyC',Numpad0:'KeyC'};
+const OLD_VIEW=new Set(['KeyR','KeyG','KeyF','KeyY','KeyV','KeyC']);
 addEventListener('keydown',e=>{ keys[e.code]=true;
-  // in the water C dives (it is held, and read by the swimmer), V does nothing, and the keys that take the player to a
+  const code=VIEW_KEY[e.code]||(OLD_VIEW.has(e.code)?'':e.code);
+  // in the water C dives (it is held, and read by the swimmer), 5 does nothing, and the keys that take the player to a
   // train, a ferry or a dinghy first bring them out of the water where they are
   const inWater=mode==='swim';
-  if (inWater && !e.repeat && ['KeyR','KeyF','KeyG','KeyY'].includes(e.code)) swimLeaveHere();
-  if (e.code==='KeyJ' && !e.repeat) jumpKey();
-  if (e.code==='KeyV' && !e.repeat && !inWater) toggleView();
-  // sailing, C changes between the helm and a view from astern of the dinghy, and the train and ferry keys wait until
+  if (inWater && !e.repeat && ['KeyR','KeyF','KeyG','KeyY'].includes(code)) swimLeaveHere();
+  if (code==='KeyJ' && !e.repeat) jumpKey();
+  if (code==='KeyV' && !e.repeat && !inWater) toggleView();
+  // sailing, 0 changes between the helm and a view from astern of the dinghy, and the train and ferry keys wait until
   // the player is ashore
-  if (sailD && ['KeyR','KeyC','KeyF','KeyG'].includes(e.code)){
-    if (e.code==='KeyC' && !e.repeat && mode==='dinghy'){ dgyChase=!dgyChase; dgyLook.yaw=0; dgyLook.pitch=dgyChase?0.25:0; } }
+  if (sailD && ['KeyR','KeyC','KeyF','KeyG'].includes(code)){
+    if (code==='KeyC' && !e.repeat && mode==='dinghy'){ dgyChase=!dgyChase; dgyLook.yaw=0; dgyLook.pitch=dgyChase?0.25:0; } }
   else {
-  if (e.code==='KeyR' && !e.repeat) toggleTrain();
-  if (e.code==='KeyC' && !e.repeat && !inWater){ if (mode==='ferry'){ feChase=!feChase; feLook.yaw=0; feLook.pitch=0.3; feSnap=true; } else toggleChase(); }
-  if (e.code==='KeyF' && !e.repeat) toggleFerry();
-  if (e.code==='KeyG' && !e.repeat) toggleGoods(); }
-  if (e.code==='KeyY' && !e.repeat) dinghyKey();
-  if (e.code==='KeyB') setTilt(!tiltShift);
-  if (e.code==='KeyP' && !e.repeat){ paused=!paused; lastClock=null; }
-  if (e.code==='KeyH' && !e.repeat){ helpEl.hidden=!helpEl.hidden; lastCell=null; }
-  if (e.code==='KeyI' && !e.repeat) openIsland();
-  if (e.code==='KeyZ' && !e.repeat) crouch=!crouch;
-  if (e.code==='KeyX' && !e.repeat) sitKey();
-  if (e.code==='PageUp'){ e.preventDefault(); if (!e.repeat) setDrawLvl(1); }
-  if (e.code==='PageDown'){ e.preventDefault(); if (!e.repeat) setDrawLvl(-1); }
-  if (e.code==='Home'){ e.preventDefault(); if (!e.repeat) setDrawLvl(0); }
-  if (e.code==='KeyO' && !e.repeat){ statsEl.hidden=!statsEl.hidden; statsT=0; }
-  if (e.code==='KeyN' && !e.repeat){ hour=nightU.value>0.5?10:22; SNDS.hour=Math.floor(hour); }   // to night, or back to day, without the bells striking the jump
-  if (e.code==='KeyM' && !e.repeat) setMuted(!muted);
-  if (e.code==='Tab'){ e.preventDefault(); if (!e.repeat) try{ if (document.fullscreenElement) document.exitFullscreen(); else { const q=document.documentElement.requestFullscreen(); if (q&&q.catch) q.catch(()=>{}); } }catch(_){} }
-  if ((e.code==='Minus'||e.code==='NumpadSubtract') && (mode==='street'||(mode==='ferry'&&!feChase)) && !e.repeat) toggleView();
-  if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault(); });
+  if (code==='KeyR' && !e.repeat) toggleTrain();
+  if (code==='KeyC' && !e.repeat && !inWater){ if (mode==='ferry'){ feChase=!feChase; feLook.yaw=0; feLook.pitch=0.3; feSnap=true; } else toggleChase(); }
+  if (code==='KeyF' && !e.repeat) toggleFerry();
+  if (code==='KeyG' && !e.repeat) toggleGoods(); }
+  if (code==='KeyY' && !e.repeat) dinghyKey();
+  if (code==='KeyB') setTilt(!tiltShift);
+  if (code==='KeyP' && !e.repeat){ paused=!paused; lastClock=null; }
+  if (code==='KeyH' && !e.repeat){ helpEl.hidden=!helpEl.hidden; lastCell=null; }
+  if (code==='KeyI' && !e.repeat) openIsland();
+  if (code==='KeyZ' && !e.repeat) crouch=!crouch;
+  if (code==='KeyX' && !e.repeat) sitKey();
+  if (code==='PageUp'){ e.preventDefault(); if (!e.repeat) setDrawLvl(1); }
+  if (code==='PageDown'){ e.preventDefault(); if (!e.repeat) setDrawLvl(-1); }
+  if (code==='Home'){ e.preventDefault(); if (!e.repeat) setDrawLvl(0); }
+  if (code==='KeyO' && !e.repeat){ statsEl.hidden=!statsEl.hidden; statsT=0; }
+  if (code==='KeyN' && !e.repeat){ hour=nightU.value>0.5?10:22; SNDS.hour=Math.floor(hour); }   // to night, or back to day, without the bells striking the jump
+  if (code==='KeyM' && !e.repeat) setMuted(!muted);
+  if (code==='Tab'){ e.preventDefault(); if (!e.repeat) try{ if (document.fullscreenElement) document.exitFullscreen(); else { const q=document.documentElement.requestFullscreen(); if (q&&q.catch) q.catch(()=>{}); } }catch(_){} }
+  if ((code==='Minus'||code==='NumpadSubtract') && (mode==='street'||(mode==='ferry'&&!feChase)) && !e.repeat) toggleView();
+  if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(code)) e.preventDefault(); });
 addEventListener('keyup',e=>{ keys[e.code]=false; });
 /* ---------- game controller (standard mapping): sticks move and look, buttons stand in for keys ---------- */
 const pad={x:0,y:0,lt:0,rt:0,held:new Set(),armed:true,mode:null,yCode:null};
 // Y (3) rides with the train, except while sailing or within reach of a dinghy, when it stands for the Y key; a press
 // of the right stick (11) always does. While sailing the triggers trim the sail instead of zooming
-const PAD_KEYS={0:'Space',1:'KeyV',2:'KeyF',4:'KeyC',5:'KeyB',6:'Minus',7:'Equal',8:'KeyM',9:'KeyH',11:'KeyY',12:'ArrowUp',13:'ArrowDown',14:'ArrowLeft',15:'ArrowRight'};
+const PAD_KEYS={0:'Space',1:'Digit5',2:'Digit3',4:'Digit0',5:'KeyB',6:'Minus',7:'Equal',8:'KeyM',9:'KeyH',11:'Digit4',12:'ArrowUp',13:'ArrowDown',14:'ArrowLeft',15:'ArrowRight'};
 let padRun=false, padL3=false;   // pressing the left stick switches between running and walking
 const padKey=(code,down)=>dispatchEvent(new KeyboardEvent(down?'keydown':'keyup',{code}));
 function pollPad(dt){
@@ -9723,7 +9730,7 @@ function pollPad(dt){
   const sailing=!!sailD, helm=mode==='dinghy'||mode==='swim';
   pad.lt=helm&&gp.buttons[6]?gp.buttons[6].value:0; pad.rt=helm&&gp.buttons[7]?gp.buttons[7].value:0;
   { const b=gp.buttons[3], on=!!b&&(b.pressed||b.value>0.5);
-    if (on && !pad.yCode){ const N=dgyNearest(player.x,player.z); pad.yCode=sailing||(N&&N.d<=6)?'KeyY':'KeyR'; padKey(pad.yCode,true); }
+    if (on && !pad.yCode){ const N=dgyNearest(player.x,player.z); pad.yCode=sailing||(N&&N.d<=6)?'Digit4':'Digit1'; padKey(pad.yCode,true); }
     else if (!on && pad.yCode){ padKey(pad.yCode,false); pad.yCode=null; } }
   // the D-pad's down sits or stands at street level, in a coach and on the ferry, and tilts the bird's-eye view
   { const b=gp.buttons[13], on=!!b&&(b.pressed||b.value>0.5);

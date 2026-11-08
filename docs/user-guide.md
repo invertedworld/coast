@@ -20,7 +20,7 @@ Two principal views are provided.
 
 **Street level** shows the island from the player's eye, 1.62 m above the ground. It is the view used for walking, sitting, climbing, swimming and riding.
 
-**The bird's-eye view** shows the island from above. **V** changes between the two views. The bird's-eye view always opens at a low height. **+** and **−** set its height, and a pinch on a touch screen does the same; **−** at street level changes to the bird's-eye view. The arrow keys turn and tilt the view, and a two-finger drag pans across the island. The view rises to keep clear of higher ground but does not descend over lower ground.
+**The bird's-eye view** shows the island from above. **5** changes between the two views. The bird's-eye view always opens at a low height. **+** and **−** set its height, and a pinch on a touch screen does the same; **−** at street level changes to the bird's-eye view. The arrow keys turn and tilt the view, and a two-finger drag pans across the island. The view rises to keep clear of higher ground but does not descend over lower ground.
 
 A double click on land in the bird's-eye view brings the camera down to street level at the point clicked over one and a half seconds, facing the same way. A double click on open water has no effect.
 
@@ -38,21 +38,21 @@ Doors open when they are walked into. A door swings away from the side from whic
 
 A passenger railway runs along the coast, with stations in the villages and tunnels through the headlands. Goods lines branch from it.
 
-**R** rides in the cab of the passenger train. **G** rides in the cab of the goods train working the nearest goods line, and sets one to work there if none is near. **C** follows the train being ridden, or otherwise the nearer train, from behind; the mouse moves the camera round the train and **+** and **−** set its distance. In each case the same key, or **V**, steps off beside the track.
+**1** rides in the cab of the passenger train. **2** rides in the cab of the goods train working the nearest goods line, and sets one to work there if none is near. **0** follows the train being ridden, or otherwise the nearer train, from behind; the mouse moves the camera round the train and **+** and **−** set its distance. In each case the same key, or **5**, steps off beside the track.
 
 ## Travelling by ferry
 
-Ferries run from the harbours of the main island to the offshore islands. **F** boards the nearest ferry wherever it lies. **F** or **V** again steps ashore at once if the ferry is at a landing, or at the next landing if it is under way. The ferry sounds its horn three seconds before it leaves a landing, and the horn echoes from the hills.
+Ferries run from the harbours of the main island to the offshore islands. **3** boards the nearest ferry wherever it lies. **3** or **5** again steps ashore at once if the ferry is at a landing, or at the next landing if it is under way. The ferry sounds its horn three seconds before it leaves a landing, and the horn echoes from the hills.
 
 ## Sailing
 
-Every harbour keeps a sailing dinghy at a berth. **Y** within 6 m of a dinghy boards it. Elsewhere, **Y** takes the player to the quay beside the dinghy of the nearest harbour.
+Every harbour keeps a sailing dinghy at a berth. **4** within 6 m of a dinghy boards it. Elsewhere, **4** takes the player to the quay beside the dinghy of the nearest harbour.
 
 At the helm, **A** turns the bow to port and **D** turns it to starboard; the tiller moves the opposite way, as on a real boat. **W** and **S** paddle forward and astern at up to 0.6 m/s while the boat is nearly stopped, and **S** also lets the sail fly. The sail is trimmed with the triggers of a game controller. The boat is driven by the wind, which varies in strength and direction across the day; the sail luffs and flaps when the boat points too close to the wind, and comes over in a tack or a gybe.
 
-**C** changes between the helm and a view from astern, which the mouse moves round the boat and **+** and **−** bring nearer or further, between 5 m and 80 m.
+**0** changes between the helm and a view from astern, which the mouse moves round the boat and **+** and **−** bring nearer or further, between 5 m and 80 m.
 
-**Y** steps ashore when the boat lies within 3 m of a quay, a mole or a beach. Within a harbour the dinghy is moored again at that harbour's berth. Out at sea, **Y** returns the dinghy to its own berth and places the player on the quay beside it.
+**4** steps ashore when the boat lies within 3 m of a quay, a mole or a beach. Within a harbour the dinghy is moored again at that harbour's berth. Out at sea, **4** returns the dinghy to its own berth and places the player on the quay beside it.
 
 ## Swimming and diving
 
