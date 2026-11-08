@@ -7782,7 +7782,8 @@ function dinghyAshore(force){
     if (L && inHarbour && dinghyBerth(HB)) dgyBerthIn(D,HB); }
   if (!L){ if (!force) return false; D.state.crewed=false; L={x:D.state.x,y:Math.max(0,heightAt(D.state.x,D.state.z)),z:D.state.z,head:D.state.head}; }
   sailD=null; dgyChase=false; player.x=L.x; player.z=L.z; player.y=L.y; player.vy=0; player.holdT=1.5; eyeY=null;
-  yaw=L.head+Math.PI; fpPitch=-0.15;
+  // looking back at the dinghy where she lies (or, left where she was at sea, away from her bow)
+  { const bx=D.state.x-L.x, bz=D.state.z-L.z; yaw=Math.hypot(bx,bz)>0.5?Math.atan2(-bx,-bz):L.head+Math.PI; fpPitch=-0.3; }
   if (mode==='dinghy'){ mode='street'; camera.fov=70; camera.updateProjectionMatrix(); glowScale(); }
   return true; }
 // a dinghy moored at the berth of harbour HB: if it came from another harbour, the dinghy that lay at HB goes to the
@@ -10098,7 +10099,10 @@ function toggleGoods(){ if (ridden) leaveFerry(prevModeF); if (mode==='train' &&
 function toggleChase(){ if (ridden) leaveFerry(prevModeF); if (mode==='chase') leaveTrain(prevMode); else ride('chase'); }
 // the train the cab and chase views ride with: the passenger train, or the goods train when that is the nearer
 let rideGoods=false;
-function rideTrain(){ if (rideGoods){ const g=goods, R=g.R; return {x:g.x,dir:g.dir,Z:x=>routeZ(R,x),Y:x=>routeY(R,x),st:()=>'open',lead:g.cars[g.lead?g.cars.length-1:0].m,cars:g.cars}; }
+function rideTrain(){ if (rideGoods){ const g=goods, R=g.R;
+    // standing at a quay before it reverses, the cab is the shunter that will lead away, at the end clear of the buffers
+    const rev=g.wait>0 && !g.legs.length && g.tail!==undefined, ld=rev?1-g.lead:g.lead;
+    return {x:rev?g.tail:g.x,dir:rev?-g.dir:g.dir,Z:x=>routeZ(R,x),Y:x=>routeY(R,x),st:()=>'open',lead:g.cars[ld?g.cars.length-1:0].m,cars:g.cars}; }
   return {x:train.x,dir:train.dir,Z:railZ,Y:railY,st:railState,lead:leadCar().m,cars:train.cars}; }
 function ride(kind,which){
   if (!riding()){ prevMode=mode==='above'?'above':'street'; cam.y=null;
