@@ -564,14 +564,15 @@ function palette() {
 
 // chooses a pigment for every cell of a cols x rows lattice whose colours (linear sRGB) are in T; returns indices
 // into the palette
-function divide(T, cols, rows, rnd) {
+function divide(T, cols, rows, rnd, plain = false) {
   const P = palette(), n = P.length, E = new Float32Array(cols * rows * 3), out = new Int16Array(cols * rows).fill(-1);
   const tl = [0, 0, 0], Tl = [0, 0, 0];
   // the colours are averaged in linear light raised to the power 0.7: the eye mixes the strokes in linear light when
   // the picture is seen from a distance, but a reduced copy on a screen is mostly averaged in the display's own
   // values, which are nearer to the power 0.45; between the two, the mixture comes out close in both
   const Wf = v => Math.sign(v) * Math.pow(Math.abs(v), 0.7), Wi = v => Math.sign(v) * Math.pow(Math.abs(v), 1 / 0.7);
-  const KV = 7, KR = 0.004, KF = 0.0025, KH = 0.22, KC = 0.6, ACC = 0.06, ED = 0.72;
+  // plain: each cell takes the pigment nearest its own colour, with no accents and nothing carried to its neighbours
+  const KV = 7, KR = 0.004, KF = 0.0025, KH = 0.22, KC = 0.6, ACC = plain ? 0 : 0.06, ED = plain ? 0 : 0.72;
   for (let y = 0; y < rows; y++) {
     const ltr = (y & 1) === 0;
     for (let xi = 0; xi < cols; xi++) {
@@ -643,10 +644,12 @@ function opticalOil(srcTex, w, h, o) {
     const cols = Math.ceil(w / cs) + 1, rows = Math.ceil(h / cs) + 1, R = li ? RF : RB, T = new Float32Array(cols * rows * 3);
     for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) { const k = at((x + 0.5) * cs, (y + 0.5) * cs), m = (y * cols + x) * 3;
       T[m] = toLin(R[k]); T[m + 1] = toLin(R[k + 1]); T[m + 2] = toLin(R[k + 2]); }
-    const pick = divide(T, cols, rows, rnd), layer = [];
+    // the fine strokes only sharpen the edges and details: each takes the pigment nearest the colour there, so that
+    // they do not lay a second, contrasting mixture over the finished broad one
+    const pick = divide(T, cols, rows, rnd, li === 1), layer = [];
     for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
       const cx = (x + 0.5 + (rnd() - 0.5) * 0.5) * cs, cy = (y + 0.5 + (rnd() - 0.5) * 0.5) * cs;
-      if (li && RD[at(cx, cy)] < 0.3 + 0.15 * rnd()) continue;
+      if (li && RD[at(cx, cy)] < 0.45 + 0.15 * rnd()) continue;
       const t = at(cx, cy); let ang = Math.atan2(RT[t + 1], RT[t]) + (rnd() - 0.5) * 0.5;
       const sgn = rnd() < 0.5 ? 1 : -1, c = P[pick[y * cols + x]].srgb;
       const len = cs * (1.15 + 0.45 * S) * (0.9 + 0.2 * rnd()), wid = cs * (1.25 + 0.15 * rnd());
