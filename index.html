@@ -966,12 +966,14 @@ function cvHc(cv,u,Lr){ const e=cvExtF(cv,u); if (e<=0) return 0;
 function cvTop(cv,u,s,hNat,noCut){ const e=cvExtF(cv,u), sc=s-cvShore(cv,u), Lr=cvLr(cv,u), Hc=cvHc(cv,u,Lr);
   let T=hNat+Math.max(0,0.4-hNat)*e;
   if (Lr>0) T+=Hc*(1-smooth(sc/Lr))+2.4*(fbm((cv.X+u)*0.04,s*0.04,cv.seed+7,3)-0.5)*e*(1-smooth(sc/(Lr+6)));
-  // round the ravine the land is cut down into a valley, which runs on up the hillside beyond its head, except over a
-  // cave, whose roof keeps the rock above it
-  let cut=!noCut && s>cv.Bh; const Gc=cv.geo||cv._bg;
-  if (cut && Gc && Gc.caves) for (const A of Gc.caves){ const [a,b]=cvCaveLocal(A,u,s); if (a>-2 && a<A.Lc+3 && Math.abs(b)<Math.max(A.wX,A.wM)*1.6+3){ cut=false; break; } }
-  if (cut){ const sr=Math.min(s,cv.sHead), g=u-cvGAxis(cv,sr), w=Math.max(2,cvAg(cv,sr,g<0?-1:1))+1.5, gs=clamp((s-cv.Bh)/cv.Lg,0,1);
-    T=Math.min(T,cv.bt+(cv.Thead-cv.bt)*(1-Math.pow(1-gs,1.6))+Math.max(0,Math.abs(g)-w)*0.9+Math.max(0,s-cv.sHead)*0.45+0.12*Math.max(0,s-cv.sHead-12)**2); }   // dying out some 25 m beyond the ravine's head
+  // round the ravine the land is cut down into a valley, which runs on up the hillside beyond its head and dies out
+  // some 25 m beyond it, except over a cave, whose roof keeps the rock above it, easing into the valley round it
+  let keep=0; const Gc=cv.geo||cv._bg;
+  if (!noCut && s>cv.Bh && Gc && Gc.caves) for (const A of Gc.caves){ const [a,b]=cvCaveLocal(A,u,s);
+    keep=Math.max(keep,smooth((Math.max(A.wX,A.wM)*1.6+3-Math.abs(b))/5)*smooth((a+3)/3)*smooth((A.Lc+4-a)/4)); }
+  if (!noCut && s>cv.Bh && keep<1){ const T0=T; const sr=Math.min(s,cv.sHead), g=u-cvGAxis(cv,sr), w=Math.max(2,cvAg(cv,sr,g<0?-1:1))+1.5, gs=clamp((s-cv.Bh)/cv.Lg,0,1);
+    T=Math.min(T,cv.bt+(cv.Thead-cv.bt)*(1-Math.pow(1-gs,1.6))+Math.max(0,Math.abs(g)-w)*0.9+Math.max(0,s-cv.sHead)*0.45+0.12*Math.max(0,s-cv.sHead-12)**2);
+    T=lerp(T,T0,keep); }
   for (const K of cv.stacks){ const d=Math.hypot(u-K.u,s-K.s); if (d<K.r*1.6+1) T=lerp(T,cv.Hc*(0.45+0.4*hash(Math.round(K.u*10),Math.round(K.s*10),2401)),smooth((K.r*1.6+1-d)/1.5)); }
   return T; }
 // the cove's frame is straight: its origin (X,Z0) inland of the shore (on it while the site is chosen), u along the
