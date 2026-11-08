@@ -1,7 +1,7 @@
 /* Picture effects for photographs taken in the village.
 
    applyEffect(name, source, opts) -> Promise<HTMLCanvasElement>
-     name    'watercolour', 'oil', 'impressionist' or 'woodcut'
+     name    'watercolour', 'oil', 'vangogh' or 'woodcut'
      source  an HTMLCanvasElement, HTMLImageElement or ImageBitmap holding the picture
      opts    seed (a number, for the random parts), and per-effect settings listed with each effect below
              (opts.debug names an intermediate stage to return instead, for the testbench)
@@ -22,7 +22,7 @@
    picture. */
 import * as THREE from 'three';
 
-export const EFFECTS = ['watercolour', 'oil', 'impressionist', 'woodcut'];
+export const EFFECTS = ['watercolour', 'oil', 'vangogh', 'woodcut'];
 
 /* ---------- the private GL context and full-screen passes ---------- */
 let G = null;
@@ -679,61 +679,7 @@ function opticalOil(srcTex, w, h, o) {
   return { frame, dispose };
 }
 
-/* ---------- impressionist ----------
-   Painted with many short strokes in layers, from broad strokes that cover a toned ground to small ones where the
-   picture has detail. Each stroke takes the colour of the picture under its centre, varied in hue and value and
-   sometimes shifted towards a complementary tint (blue and violet in shadow, warm in light), and lies across the
-   gradient of the picture. The strokes carry bristle marks and a little relief.
-   opts: strokes (density, default 1), size (stroke size, default 1), jitter (colour variation, default 1) */
-const IMP_VERT = `in vec3 position; in vec2 uv; in vec4 iA; in vec4 iB; in vec4 iC;
-uniform vec2 uRes; uniform float uFirst;
-out vec2 vUv; out vec3 vCol; out vec4 vP;
-void main(){
-  // iA: centre (px), length, width; iB: direction, seed, load; iC: colour, unused
-  vec2 dir=iB.xy, nrm=vec2(-dir.y,dir.x);
-  vec2 q=position.xy*vec2(iA.z,iA.w);
-  vec2 px=iA.xy+dir*q.x+nrm*q.y;
-  vUv=uv; vCol=iC.rgb; vP=vec4(iB.z,iB.w,iA.z/iA.w,iC.a);
-  gl_Position=vec4(px/uRes*2.0-1.0,0.0,1.0);
-  if (float(gl_InstanceID)<uFirst) gl_Position=vec4(2.0,2.0,2.0,1.0);      // already on the canvas
-}`;
-
-const IMP_FRAG = `precision highp float; in vec2 vUv; in vec3 vCol; in vec4 vP; out vec4 fragColor; uniform float uHeight;
-float h1(float n){ return fract(sin(n)*43758.5453); }
-float vn1(float x, float s){ float i=floor(x), f=fract(x); f=f*f*(3.0-2.0*f); return mix(h1(i+s),h1(i+1.0+s),f); }
-void main(){
-  float u=vUv.x, v=vUv.y*2.0-1.0, seed=vP.x*97.0;
-  // the stroke's outline: rounded where the brush lands, tapering and breaking up where it lifts
-  float half_=0.95-0.3*u;
-  float edgeN=0.14*(vn1(u*7.0,seed)-0.5);
-  float side=1.0-smoothstep(half_-0.3,half_,abs(v)+edgeN);
-  float start=smoothstep(0.0,0.18,u-0.12*v*v), end=1.0-smoothstep(0.7,1.0,u+0.2*vn1(v*5.0,seed+3.0));
-  // bristles: grooves along the stroke, paint running out towards its end
-  float br=vn1(v*14.0+seed,seed)*0.6+vn1(v*31.0,seed+7.0)*0.4;
-  float load=vP.y;
-  float dry=smoothstep(load-0.25,load+0.15,u*0.9+0.3*br);
-  float a=side*start*end*(1.0-0.8*dry*(1.0-br));
-  a=clamp(a*1.15,0.0,1.0);
-  if (a<0.02) discard;
-  vec3 col=vCol*(0.88+0.22*br)*(1.04-0.08*u);
-  if (uHeight>0.5){ fragColor=vec4(vec3(0.35+0.65*br)*(1.0-0.5*u),a); return; }
-  fragColor=vec4(col,a); }`;
-
-const IMP_FINAL = `uniform sampler2D tPaint, tHeight;
-void main(){
-  vec2 d=1.0/uRes;
-  float h=texture(tHeight,vUv).r;
-  float hx=texture(tHeight,vUv+vec2(d.x,0)).r-texture(tHeight,vUv-vec2(d.x,0)).r;
-  float hy=texture(tHeight,vUv+vec2(0,d.y)).r-texture(tHeight,vUv-vec2(0,d.y)).r;
-  vec3 n=normalize(vec3(-hx*1.8/uS,-hy*1.8/uS,1.0)); vec3 L=normalize(vec3(-0.5,0.6,0.7));
-  vec3 c=texture(tPaint,vUv).rgb;
-  float diff=dot(n,L)/L.z;
-  vec2 p=vUv*uRes/uS;
-  float weave=0.5+0.5*sin(p.x*1.6)*sin(p.y*1.6);
-  float spec=pow(max(dot(n,normalize(L+vec3(0,0,1))),0.0),24.0)*h;
-  c*=0.9+0.12*diff; c*=1.0-0.03*weave; c+=vec3(1.0,0.97,0.9)*spec*0.12;
-  fragColor=vec4(clamp(c,0.0,1.0),1.0); }`;
-
+/* ---------- helpers for the painted strokes ---------- */
 function mulberry(seed) { let a = seed >>> 0 || 1; return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 
 function readTarget(rt) {
@@ -751,96 +697,6 @@ function rgb2hsv(r, g, b) { const mx = Math.max(r, g, b), mn = Math.min(r, g, b)
   return [h, mx > 0 ? d / mx : 0, mx]; }
 function hsv2rgb(h, s, v) { h = ((h % 1) + 1) % 1; const i = Math.floor(h * 6), f = h * 6 - i, p = v * (1 - s), q = v * (1 - f * s), t = v * (1 - (1 - f) * s);
   return [[v, t, p], [q, v, p], [p, v, t], [p, q, v], [t, p, v], [v, p, q]][i % 6]; }
-
-function impressionist(srcTex, w, h, o) {
-  const g = ctx(), s = h / 800, rnd = mulberry((o.seed ?? 1) * 7919), J = o.jitter ?? 1, SZ = o.size ?? 1, DEN = o.strokes ?? 1;
-  const tfm = orientation(srcTex, w, h, 6.0 * s);
-  // colour sampled from slightly softened copies of the picture, one per layer
-  const tmp = target(w, h), soft = [target(w, h), target(w, h), target(w, h)];
-  const sig = [9 * s, 4 * s, 1.5 * s];
-  pass(`uniform sampler2D tSrc; void main(){ fragColor=texture(tSrc,vUv); }`, { tSrc: srcTex }, soft[2]);
-  for (let i = 0; i < 3; i++) blur(soft[2], sig[i], tmp, soft[i]);
-  // read back orientation and the layers' colours at a reduced size
-  const dw = Math.ceil(w / 2), dh = Math.ceil(h / 2), small = target(dw, dh, THREE.FloatType);
-  const read = rt => { pass(`uniform sampler2D tSrc; void main(){ fragColor=texture(tSrc,vUv); }`, { tSrc: rt }, small); return readTarget(small); };
-  const T = read(tfm), C = soft.map(read);
-  // the canvas and its height
-  const paint = target(w, h, THREE.UnsignedByteType), height = target(w, h, THREE.UnsignedByteType);
-  // a thin underpainting: the picture's broad colours rubbed into a warm ground
-  pass(`uniform sampler2D tSrc; void main(){ vec3 c=texture(tSrc,vUv).rgb; fragColor=vec4(mix(c,vec3(0.84,0.78,0.66),0.35),1.0); }`, { tSrc: soft[0] }, paint);
-  g.renderer.setRenderTarget(height); g.renderer.setClearColor(new THREE.Color(0, 0, 0), 1); g.renderer.clear();
-  const geo = new THREE.PlaneGeometry(1, 1); geo.translate(0.5, 0, 0);   // u runs along the stroke from where the brush lands
-  const matC = new THREE.RawShaderMaterial({ glslVersion: THREE.GLSL3, vertexShader: `precision highp float;\n` + IMP_VERT, fragmentShader: IMP_FRAG,
-    uniforms: { uRes: { value: new THREE.Vector2(w, h) }, uHeight: { value: 0 }, uFirst: { value: 0 } }, transparent: true, depthTest: false, depthWrite: false,
-    blending: THREE.CustomBlending, blendSrc: THREE.SrcAlphaFactor, blendDst: THREE.OneMinusSrcAlphaFactor, blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.OneFactor });
-  const matH = matC.clone(); matH.uniforms = { uRes: matC.uniforms.uRes, uHeight: { value: 1 }, uFirst: matC.uniforms.uFirst };
-  const sample = (A, x, y) => { const i = (Math.min(dh - 1, Math.max(0, Math.floor(y / 2))) * dw + Math.min(dw - 1, Math.max(0, Math.floor(x / 2)))) * 4; return [A[i], A[i + 1], A[i + 2], A[i + 3]]; };
-  const layers = [{ r: 11, gap: 6.5, src: 0, all: true }, { r: 6.5, gap: 4.8, src: 1, all: false }, { r: 3.6, gap: 3.0, src: 2, all: false }];
-  const all = [], ends = [];
-  for (const [li, L] of layers.entries()) {
-    const R = L.r * s * SZ, gap = L.gap * s * SZ / Math.sqrt(DEN), strokes = [];
-    // where the painting so far differs from the picture, the next layer adds strokes (Hertzmann's layered painting)
-    for (let y = 0; y < h; y += gap) for (let x = 0; x < w; x += gap) {
-      const px = x + (rnd() - 0.5) * gap * 1.6, py = y + (rnd() - 0.5) * gap * 1.6;
-      const c = sample(C[L.src], px, py);
-      // smaller strokes go only where the picture has detail at their scale: where it differs from its softer copy
-      if (!L.all) { const k = sample(C[L.src - 1], px, py), e = Math.hypot(k[0] - c[0], k[1] - c[1], k[2] - c[2]);
-        if (e < (L.src === 1 ? 0.05 : 0.07) * (0.7 + 0.6 * rnd())) continue; }
-      const t = sample(T, px, py);
-      let ang = Math.atan2(t[1], t[0]);
-      // where the picture is flat, the strokes follow a slow drift instead of noise in the tensor
-      const aniso = t[3]; ang += (rnd() - 0.5) * (0.35 + 0.5 * (1 - aniso));
-      const len = R * (1.6 + 1.4 * rnd()) * (0.85 + 0.4 * aniso), wid = R * (0.8 + 0.35 * rnd());
-      // colour: hue and value jittered, chroma raised, sometimes broken towards a complementary tint
-      let [hh, ss, vv] = rgb2hsv(c[0], c[1], c[2]);
-      hh += (rnd() - 0.5) * 0.05 * J; ss = Math.min(1, ss * (1.1 + 0.3 * rnd() * J)); vv = Math.min(1, vv * (1 + (rnd() - 0.5) * 0.1 * J));
-      let col = hsv2rgb(hh, ss, vv);
-      const lum = c => 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2], lumv = lum(col);
-      // broken colour: shadows laid with ultramarine and violet, lights with warm cream and pink, and the middle
-      // values with the neighbouring hues, so that the colours mix in the eye rather than on the palette
-      if (rnd() < 0.35 * J) {
-        let tint;
-        if (lumv < 0.42) tint = rnd() < 0.6 ? [0.32, 0.32, 0.72] : [0.5, 0.33, 0.62];
-        else if (lumv > 0.72) tint = rnd() < 0.6 ? [1.0, 0.9, 0.62] : [1.0, 0.76, 0.72];
-        if (tint) { const k = 0.25 + 0.25 * rnd(); col = col.map((v, i) => v * (1 - k) + tint[i] * k); }
-        else col = hsv2rgb(hh + (rnd() < 0.5 ? -1 : 1) * (0.03 + 0.025 * rnd()), Math.min(1, ss * 1.12), vv);
-        // the broken colour keeps the value of the colour it replaces, so that the picture's light holds together
-        const k2 = lumv / Math.max(0.02, lum(col)); col = col.map(v => Math.min(1, v * (0.7 + 0.3 * k2)));
-      }
-      // starts behind the centre so that the stroke is centred on the sample
-      const dx = Math.cos(ang), dy = Math.sin(ang), sgn = rnd() < 0.5 ? 1 : -1;
-      strokes.push([px - dx * sgn * len * 0.5, py - dy * sgn * len * 0.5, len, wid, dx * sgn, dy * sgn, rnd(), 0.65 + 0.35 * rnd(), col[0], col[1], col[2], 1]);
-    }
-    // random order, so that no direction of the grid shows
-    for (let i = strokes.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [strokes[i], strokes[j]] = [strokes[j], strokes[i]]; }
-    all.push(...strokes); ends.push(all.length);
-  }
-  const n = all.length, iA = new Float32Array(n * 4), iB = new Float32Array(n * 4), iC = new Float32Array(n * 4);
-  all.forEach((k, i) => { iA.set(k.slice(0, 4), i * 4); iB.set(k.slice(4, 8), i * 4); iC.set(k.slice(8, 12), i * 4); });
-  const ig = new THREE.InstancedBufferGeometry(); ig.index = geo.index; ig.attributes.position = geo.attributes.position; ig.attributes.uv = geo.attributes.uv;
-  ig.setAttribute('iA', new THREE.InstancedBufferAttribute(iA, 4)); ig.setAttribute('iB', new THREE.InstancedBufferAttribute(iB, 4)); ig.setAttribute('iC', new THREE.InstancedBufferAttribute(iC, 4));
-  const mesh = new THREE.Mesh(ig, matC); mesh.frustumCulled = false;
-  const sc = new THREE.Scene(); sc.add(mesh);
-  // the strokes go down in the order they were made: broad ones over the underpainting first, then middle, then fine
-  const span = [[0.04, 0.46], [0.46, 0.8], [0.8, 1.0]];
-  const countAt = t => { if (t >= 1) return n; let c = 0;
-    for (let i = 0; i < 3; i++) { const lo = i ? ends[i - 1] : 0, [t0, t1] = span[i]; c = t <= t0 ? c : lo + Math.round((ends[i] - lo) * Math.min(1, (t - t0) / (t1 - t0))); if (t < t1) break; }
-    return c; };
-  let drawn = 0;
-  const dispose = () => { [tfm, tmp, ...soft, small, paint, height].forEach(t => t.dispose()); matC.dispose(); matH.dispose(); geo.dispose(); ig.dispose(); };
-  const frame = t => {
-    const upto = countAt(t);
-    if (upto > drawn) {
-      ig.instanceCount = upto; matC.uniforms.uFirst.value = drawn;
-      mesh.material = matC; g.renderer.setRenderTarget(paint); g.renderer.render(sc, g.cam);
-      mesh.material = matH; g.renderer.setRenderTarget(height); g.renderer.render(sc, g.cam);
-      drawn = upto;
-    }
-    if (o.debug === 'paint') return show(paint, w, h); if (o.debug === 'height') return show(height, w, h);
-    pass(IMP_FINAL, { tPaint: paint, tHeight: height }, null, { w, h });
-  };
-  return { frame, dispose };
-}
 
 /* ---------- woodcut ----------
    A relief print from a carved block of plank wood, in black ink on off-white paper. The picture is simplified with
@@ -1113,7 +969,257 @@ function woodcut(srcTex, w, h, o) {
   return { dispose, frame: t => pass(WOOD_FINAL, { ...U, uT: t }, null, { w, h }) };
 }
 
-const RUN = { watercolour, oil, impressionist, woodcut };
+/* ---------- Van Gogh ----------
+   Painted in the manner of Van Gogh's late work: long, curving strokes of thick paint that follow the forms of the
+   picture and wind into eddies in the sky, laid side by side in parallel rows over a thin underpainting. The colours
+   are raised in saturation and drawn towards a small palette of chrome yellow, orange, viridian and ultramarine, with
+   the shadows in Prussian blue, and each stroke carries streaks of a second, lighter or neighbouring colour. Strong
+   edges are outlined with dark blue strokes. The strokes are traced along the orientation of the picture, stopping
+   where its colour changes, and in the sky along a field of vortices placed in the open sky and about the sun.
+   opts: size (stroke size, default 1), swirl (eddies in the sky, default 1), colour (intensity, default 1),
+         outline (dark outlines, default 1), impasto (relief of the paint, default 1),
+         distort (default 0: how far the forms of the picture are bent into waves and flames before it is painted) */
+const VG_VERT = `precision highp float; in vec3 position; in vec2 uv; in vec3 aC1; in vec3 aC2; in vec2 aP;
+uniform vec2 uRes; out vec2 vUv; out vec3 vC1; out vec3 vC2; out vec2 vP;
+void main(){ vUv=uv; vC1=aC1; vC2=aC2; vP=aP; gl_Position=vec4(position.xy/uRes*2.0-1.0,0.0,1.0); }`;
+
+const VG_FRAG = `precision highp float; in vec2 vUv; in vec3 vC1; in vec3 vC2; in vec2 vP; out vec4 fragColor; uniform float uHeight;
+float h1(float n){ return fract(sin(n)*43758.5453); }
+float vn1(float x, float s){ float i=floor(x), f=fract(x); f=f*f*(3.0-2.0*f); return mix(h1(i+s),h1(i+1.0+s),f); }
+void main(){
+  float u=vUv.x, v=vUv.y, seed=vP.x*97.0, load=vP.y;
+  // the outline of the stroke: full where the loaded brush lands, narrowing a little and breaking up where it lifts
+  float half_=0.98-0.22*u, edgeN=0.12*(vn1(u*9.0,seed)-0.5);
+  float side=1.0-smoothstep(half_-0.2,half_,abs(v)+edgeN);
+  float start=smoothstep(0.0,0.07,u-0.05*v*v), end=1.0-smoothstep(0.84,1.0,u+0.1*vn1(v*5.0,seed+3.0));
+  // bristle grooves along the stroke, and the paint running out towards its end
+  float br=vn1(v*10.0+seed,seed)*0.6+vn1(v*25.0,seed+7.0)*0.4;
+  float dry=smoothstep(load-0.2,load+0.12,u*0.75+0.35*br);
+  float a=clamp(side*start*end*(1.0-0.75*dry*(1.0-br))*1.2,0.0,1.0);
+  if (a<0.02) discard;
+  // streaks of the second colour picked up on the brush
+  float band=smoothstep(0.5,0.66,vn1(v*3.2+seed*1.7,seed+11.0));
+  vec3 col=mix(vC1,vC2,band)*(0.93+0.1*br);
+  if (uHeight>0.5){ fragColor=vec4(vec3((0.3+0.7*br)*(1.0-0.35*u)),a); return; }
+  fragColor=vec4(col,a); }`;
+
+// the picture bent before it is painted: a slow sway that grows with height, as in the cypresses and hills of the late
+// paintings, with smaller ripples over it
+const VG_WARP = `uniform sampler2D tSrc; uniform float uAmt;
+void main(){ vec2 p=vUv*uRes/uS;
+  float sway=0.6*sin(p.y*0.011+uSeed*3.1)+2.0*(fbm3(p*0.0035+uSeed)-0.5);
+  vec2 d=vec2(42.0*sway*(0.4+0.6*vUv.y)+36.0*(fbm3(p*0.009+uSeed+5.0)-0.5), 24.0*(fbm3(p*0.009+uSeed+9.0)-0.5))*uAmt;
+  fragColor=texture(tSrc,clamp(vUv+d*uS/uRes,0.0,1.0)); }`;
+
+const VG_FINAL = `uniform sampler2D tPaint, tHeight; uniform float uImpasto;
+void main(){
+  vec2 d=1.0/uRes;
+  float h=texture(tHeight,vUv).r;
+  float hx=texture(tHeight,vUv+vec2(d.x,0)).r-texture(tHeight,vUv-vec2(d.x,0)).r;
+  float hy=texture(tHeight,vUv+vec2(0,d.y)).r-texture(tHeight,vUv-vec2(0,d.y)).r;
+  float k=2.6*uImpasto/uS;
+  vec3 n=normalize(vec3(-hx*k,-hy*k,1.0)); vec3 L=normalize(vec3(-0.5,0.6,0.7));
+  vec3 c=texture(tPaint,vUv).rgb;
+  float diff=dot(n,L)/L.z;
+  vec2 p=vUv*uRes/uS;
+  float weave=0.5+0.5*sin(p.x*1.5)*sin(p.y*1.5);
+  float spec=pow(max(dot(n,normalize(L+vec3(0,0,1))),0.0),30.0)*h;
+  c*=1.0+(diff-1.0)*0.22*min(uImpasto,1.5); c*=1.0-0.035*weave; c+=vec3(1.0,0.97,0.88)*spec*0.16*min(uImpasto,1.5);
+  fragColor=vec4(clamp(c,0.0,1.0),1.0); }`;
+
+// the picture's colour moved towards Van Gogh's palette
+const VG_HUES = [0.0, 0.075, 0.135, 0.2, 0.3, 0.44, 0.57, 0.63, 0.74];
+function vgColour(c, k, sky) {
+  let [hh, ss, vv] = rgb2hsv(c[0], c[1], c[2]);
+  let best = VG_HUES[0], bd = 9;
+  for (const q of VG_HUES) { const d = Math.abs(((hh - q + 1.5) % 1) - 0.5); if (d < bd) { bd = d; best = q; } }
+  const dh = ((best - hh + 1.5) % 1) - 0.5;
+  hh += dh * 0.55 * Math.min(1, k);
+  ss = Math.min(1, ss * (1 + 0.55 * k) + 0.06 * k);
+  vv = Math.min(1, Math.max(0, 0.5 + (vv - 0.5) * (1 + 0.15 * k)));
+  let col = hsv2rgb(hh, ss, vv);
+  const l = 0.299 * col[0] + 0.587 * col[1] + 0.114 * col[2];
+  // shadows in Prussian blue and ultramarine; in the sky the lights lean towards lemon and white
+  if (l < 0.38) { const m = (0.38 - l) / 0.38 * 0.55 * Math.min(1, k); col = col.map((v, i) => v * (1 - m) + [0.1, 0.16, 0.36][i] * m); }
+  if (sky && l > 0.75) { const m = (l - 0.75) * 1.2 * Math.min(1, k); col = col.map((v, i) => v * (1 - m) + [0.98, 0.95, 0.72][i] * m); }
+  return col;
+}
+
+function vangogh(srcTex, w, h, o) {
+  const g = ctx(), s = h / 800, rnd = mulberry((o.seed ?? 1) * 6007 + 11), SZ = o.size ?? 1, SW = o.swirl ?? 1, K = o.colour ?? 1, OL = o.outline ?? 1;
+  const DI = o.distort ?? 0, bent = DI > 0 ? target(w, h) : null;
+  if (bent) { pass(VG_WARP, { tSrc: srcTex, uAmt: DI, uSeed: ((o.seed ?? 1) % 89) * 0.37 }, bent); srcTex = bent.texture; }
+  const tfm = orientation(srcTex, w, h, 9.0 * s, 0.012, (o.seed ?? 1) % 97, 1.0);
+  const tmp = target(w, h), soft = [target(w, h), target(w, h), target(w, h)];
+  const sig = [7 * s, 3 * s, 1.2 * s];
+  pass(COPY, { tSrc: srcTex, uGain: 1 }, soft[2]);
+  for (let i = 0; i < 3; i++) blur(soft[2], sig[i], tmp, soft[i]);
+  const dw = Math.ceil(w / 2), dh = Math.ceil(h / 2), small = target(dw, dh, THREE.FloatType);
+  const read = rt => { pass(COPY, { tSrc: rt, uGain: 1 }, small); return readTarget(small); };
+  const T = read(tfm), C = soft.map(read);
+  // the sky, found on a small copy of the broad colours
+  const mh = Math.min(h, 300), mw = Math.max(8, Math.round(mh * w / h)), sm = target(mw, mh, THREE.FloatType);
+  pass(COPY, { tSrc: soft[0], uGain: 1 }, sm);
+  const ss = skyAndSea(readTarget(sm), mw, mh); sm.dispose();
+  // pale walls and paving can join the sky's fill; the eddies keep to the parts that are bluer than they are warm
+  for (let i = 0; i < mw * mh; i++) if (ss.sky[i] && ss.C[i * 3 + 2] < ss.C[i * 3] + 0.03) ss.sky[i] = 0;
+  const skyAt = (x, y) => ss.sky[(mh - 1 - Math.min(mh - 1, Math.max(0, Math.floor(y / h * mh)))) * mw + Math.min(mw - 1, Math.max(0, Math.floor(x / w * mw)))];
+  const at = (A, x, y) => (Math.min(dh - 1, Math.max(0, Math.floor(y / 2))) * dw + Math.min(dw - 1, Math.max(0, Math.floor(x / 2)))) * 4;
+  const sample = (A, x, y) => { const i = at(A, x, y); return [A[i], A[i + 1], A[i + 2], A[i + 3]]; };
+  // eddies in the open sky: one about the brightest part (the sun, or the lightest cloud) and a few more of varied size
+  const skyPx = []; for (let i = 0; i < mw * mh; i++) if (ss.sky[i]) skyPx.push(i);
+  const vort = [];
+  if (skyPx.length > mw * mh * 0.04 && SW > 0) {
+    let bi = skyPx[0], bl = -1;
+    for (const i of skyPx) { const l = ss.C[i * 3] + ss.C[i * 3 + 1] + ss.C[i * 3 + 2]; if (l > bl) { bl = l; bi = i; } }
+    const toPx = i => { const x = i % mw, y = (i - x) / mw; return [(x + 0.5) / mw * w, (mh - 1 - y + 0.5) / mh * h]; };
+    const [sx, sy] = toPx(bi); vort.push({ x: sx, y: sy, r: h * 0.07, k: 1.2 });
+    const n = Math.round((2 + 2.5 * rnd()) * Math.min(1.4, skyPx.length / (mw * mh * 0.3)));
+    for (let tries = 0; vort.length < n + 1 && tries < 200; tries++) {
+      const [x, y] = toPx(skyPx[Math.floor(rnd() * skyPx.length)]), r = h * (0.07 + 0.11 * rnd());
+      if (vort.some(v => Math.hypot(v.x - x, v.y - y) < (v.r + r) * 0.9)) continue;
+      vort.push({ x, y, r, k: (rnd() < 0.7 ? 1 : -1) * (0.8 + 0.5 * rnd()) });
+    }
+  }
+  const lam = h * (0.22 + 0.1 * rnd()), ph = rnd() * 6.28;
+  const field = (x, y, prev) => {
+    let dx, dy;
+    if (skyAt(x, y) && SW > 0) {
+      // the sky moves in long waves along the horizon, wound into the eddies
+      const a = 0.45 * Math.sin(x / lam * 6.283 + ph + 1.4 * Math.sin(y / (lam * 0.7) * 6.283));
+      dx = Math.cos(a); dy = Math.sin(a);
+      for (const v of vort) { const rx = x - v.x, ry = y - v.y, d = Math.hypot(rx, ry) + 1e-3, q = d / v.r;
+        const wgt = 3.2 * v.k * SW * Math.exp(-(Math.max(0, q - 0.35) ** 2) * 1.6);
+        dx += -ry / d * wgt; dy += rx / d * wgt; }
+      if (SW < 1) { const t = sample(T, x, y); dx = dx * SW + t[0] * (1 - SW); dy = dy * SW + t[1] * (1 - SW); }
+    } else { const t = sample(T, x, y); dx = t[0]; dy = t[1]; }
+    const l = Math.hypot(dx, dy) || 1; dx /= l; dy /= l;
+    if (prev && dx * prev[0] + dy * prev[1] < 0) { dx = -dx; dy = -dy; }
+    return [dx, dy];
+  };
+  // a stroke traced along the field from its middle in both directions, ending where the colour changes
+  const trace = (x0, y0, len, wid, ref, tol, src) => {
+    const step = Math.max(1.5, wid * 0.55), nh = Math.max(1, Math.round(len * 0.5 / step));
+    const run = sgn => { const pts = []; let x = x0, y = y0, d = field(x, y, null); d = [d[0] * sgn, d[1] * sgn];
+      for (let i = 0; i < nh; i++) {
+        const m = field(x + d[0] * step * 0.5, y + d[1] * step * 0.5, d);
+        const nd = field(x + m[0] * step, y + m[1] * step, d);
+        if (nd[0] * d[0] + nd[1] * d[1] < 0.6) break;
+        x += m[0] * step; y += m[1] * step; d = nd;
+        if (x < -wid || y < -wid || x > w + wid || y > h + wid) break;
+        const c = sample(C[src], x, y); if (Math.abs(c[0] - ref[0]) + Math.abs(c[1] - ref[1]) + Math.abs(c[2] - ref[2]) > tol) break;
+        pts.push([x, y]); }
+      return pts; };
+    const back = run(-1).reverse(), fwd = run(1);
+    return [...back, [x0, y0], ...fwd];
+  };
+  const strokes = [], ends = [];
+  const lum = c => 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
+  const layers = [{ wid: 10.5, len: [40, 80], src: 0, all: true }, { wid: 6.5, len: [26, 50], src: 1, all: false, thr: 0.05 }, { wid: 4.0, len: [14, 30], src: 2, all: false, thr: 0.07 }];
+  for (const L of layers) {
+    const wid0 = L.wid * s * SZ, gap = wid0 * 0.95, list = [];
+    for (let y = 0; y < h; y += gap) for (let x = 0; x < w; x += gap) {
+      const px = x + (rnd() - 0.5) * gap * 1.4, py = y + (rnd() - 0.5) * gap * 1.4;
+      const c = sample(C[L.src], px, py);
+      if (!L.all) { const k = sample(C[L.src - 1], px, py); if (Math.abs(k[0] - c[0]) + Math.abs(k[1] - c[1]) + Math.abs(k[2] - c[2]) < L.thr * 1.7 * (0.7 + 0.6 * rnd())) continue; }
+      const sky = !!skyAt(px, py), wid = wid0 * (0.8 + 0.4 * rnd());
+      const len = (L.len[0] + (L.len[1] - L.len[0]) * rnd()) * s * SZ * (sky ? 1.3 : 1);
+      const pts = trace(px, py, len, wid, c, sky ? 0.32 : 0.16, L.src);
+      if (pts.length < 2) continue;
+      let col = vgColour(c, K, sky);
+      // the hue and value vary a little from stroke to stroke; the streaks are lighter or of a neighbouring hue
+      let [hh, sa, vv] = rgb2hsv(...col);
+      col = hsv2rgb(hh + (rnd() - 0.5) * 0.04, sa, Math.min(1, vv * (0.93 + 0.14 * rnd())));
+      let c2;
+      const r2 = rnd();
+      if (sky && r2 < 0.45) c2 = col.map((v, i) => v * 0.45 + [0.97, 0.96, 0.85][i] * 0.55);
+      else if (r2 < 0.6) c2 = hsv2rgb(hh + (rnd() < 0.5 ? -1 : 1) * (0.04 + 0.04 * rnd()), Math.min(1, sa * 1.1), Math.min(1, vv * 1.08));
+      else if (sa < 0.25 && !sky) c2 = hsv2rgb(rnd() < 0.5 ? 0.1 : 0.05, 0.35 + 0.2 * rnd(), Math.min(1, vv * 0.98));
+      else c2 = hsv2rgb(hh, sa * 0.8, Math.min(1, vv * 1.22 + 0.04));
+      if (lum(col) < 0.3 && rnd() < 0.5) c2 = col.map((v, i) => v * 0.5 + [0.15, 0.25, 0.55][i] * 0.5);
+      list.push({ pts, wid, col, c2, seed: rnd(), load: 0.7 + 0.3 * rnd() });
+    }
+    for (let i = list.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [list[i], list[j]] = [list[j], list[i]]; }
+    strokes.push(...list); ends.push(strokes.length);
+  }
+  // dark blue outlines along the strongest edges of the picture
+  if (OL > 0) {
+    const list = [], gap = 6 * s, A = C[1];
+    for (let y = gap; y < h - gap; y += gap) for (let x = gap; x < w - gap; x += gap) {
+      const px = x + (rnd() - 0.5) * gap, py = y + (rnd() - 0.5) * gap, e2 = 2.5 * s;
+      const gx = lum(sample(A, px + e2, py)) - lum(sample(A, px - e2, py)), gy = lum(sample(A, px, py + e2)) - lum(sample(A, px, py - e2));
+      const e = Math.hypot(gx, gy);
+      if (e < 0.16 / Math.max(0.3, OL) * (0.8 + 0.4 * rnd()) || skyAt(px, py)) continue;
+      // the line lies on the darker side of the edge
+      const ox = px - gx / e * 1.5 * s, oy = py - gy / e * 1.5 * s, c = sample(A, ox, oy);
+      const pts = trace(ox, oy, (14 + 14 * rnd()) * s * SZ, 2.4 * s, c, 0.3, 1);
+      if (pts.length < 2) continue;
+      const k = 0.55 + 0.2 * rnd(), dk = vgColour(c, K, false).map((v, i) => v * 0.35 * (1 - k) + [0.06, 0.1, 0.3][i] * k);
+      list.push({ pts, wid: (2.2 + 1.2 * rnd()) * s * Math.min(1.4, 0.7 + 0.3 * OL), col: dk, c2: dk.map(v => v * 1.3), seed: rnd(), load: 0.8 + 0.2 * rnd() });
+    }
+    for (let i = list.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [list[i], list[j]] = [list[j], list[i]]; }
+    strokes.push(...list);
+  }
+  ends.push(strokes.length);
+  // the strokes as ribbons along their traced paths
+  let nv = 0, ni = 0; for (const k of strokes) { nv += k.pts.length * 2; ni += (k.pts.length - 1) * 6; }
+  const P = new Float32Array(nv * 3), UV = new Float32Array(nv * 2), C1 = new Float32Array(nv * 3), C2 = new Float32Array(nv * 3), PP = new Float32Array(nv * 2), I = new Uint32Array(ni), iEnd = [];
+  let v = 0, ii = 0;
+  for (const k of strokes) {
+    const p = k.pts, n = p.length; let tot = 0; const acc = [0];
+    for (let j = 1; j < n; j++) { tot += Math.hypot(p[j][0] - p[j - 1][0], p[j][1] - p[j - 1][1]); acc.push(tot); }
+    // the ribbon reaches half a width beyond the end points, for the rounded ends
+    const ext = k.wid * 0.5, span = tot + 2 * ext;
+    for (let j = 0; j < n; j++) {
+      const a = p[Math.max(0, j - 1)], b = p[Math.min(n - 1, j + 1)]; let tx = b[0] - a[0], ty = b[1] - a[1]; const tl = Math.hypot(tx, ty) || 1; tx /= tl; ty /= tl;
+      let x = p[j][0], y = p[j][1], u = (acc[j] + ext) / span;
+      if (j === 0) { x -= tx * ext; y -= ty * ext; u = 0; } else if (j === n - 1) { x += tx * ext; y += ty * ext; u = 1; }
+      const hw = k.wid * 0.5;
+      for (const sd of [-1, 1]) {
+        P[v * 3] = x - ty * hw * sd; P[v * 3 + 1] = y + tx * hw * sd; UV[v * 2] = u; UV[v * 2 + 1] = sd;
+        C1.set(k.col, v * 3); C2.set(k.c2, v * 3); PP[v * 2] = k.seed; PP[v * 2 + 1] = k.load; v++; }
+      if (j < n - 1) { const b0 = v - 2; I.set([b0, b0 + 1, b0 + 2, b0 + 1, b0 + 3, b0 + 2], ii); ii += 6; }
+    }
+    iEnd.push(ii);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(P, 3)); geo.setAttribute('uv', new THREE.BufferAttribute(UV, 2));
+  geo.setAttribute('aC1', new THREE.BufferAttribute(C1, 3)); geo.setAttribute('aC2', new THREE.BufferAttribute(C2, 3)); geo.setAttribute('aP', new THREE.BufferAttribute(PP, 2));
+  geo.setIndex(new THREE.BufferAttribute(I, 1));
+  const matC = new THREE.RawShaderMaterial({ glslVersion: THREE.GLSL3, vertexShader: VG_VERT, fragmentShader: VG_FRAG,
+    uniforms: { uRes: { value: new THREE.Vector2(w, h) }, uHeight: { value: 0 } }, transparent: true, depthTest: false, depthWrite: false, side: THREE.DoubleSide,
+    blending: THREE.CustomBlending, blendSrc: THREE.SrcAlphaFactor, blendDst: THREE.OneMinusSrcAlphaFactor, blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.OneFactor });
+  const matH = matC.clone(); matH.uniforms = { uRes: matC.uniforms.uRes, uHeight: { value: 1 } };
+  const mesh = new THREE.Mesh(geo, matC); mesh.frustumCulled = false;
+  const sc = new THREE.Scene(); sc.add(mesh);
+  const paint = target(w, h, THREE.UnsignedByteType), height = target(w, h, THREE.UnsignedByteType);
+  // a thin underpainting of the broad colours over a warm ground, of which a little shows between the strokes
+  pass(`uniform sampler2D tSrc; uniform float uK; void main(){ vec3 c=texture(tSrc,vUv).rgb; vec3 hv=rgb2hsv(c); hv.y=min(1.0,hv.y*(1.0+0.5*uK));
+    fragColor=vec4(mix(hsv2rgb(hv),vec3(0.8,0.66,0.45),0.3),1.0); }`, { tSrc: soft[0], uK: K }, paint);
+  g.renderer.setRenderTarget(height); g.renderer.setClearColor(new THREE.Color(0, 0, 0), 1); g.renderer.clear();
+  // the layers are laid in turn: the broad strokes, then the middle, the fine and last the outlines
+  const span = [[0.03, 0.42], [0.42, 0.68], [0.68, 0.88], [0.88, 1.0]];
+  const strokeAt = t => { if (t >= 1) return strokes.length; let c = 0;
+    for (let i = 0; i < 4; i++) { const lo = i ? ends[i - 1] : 0, [t0, t1] = span[i]; c = t <= t0 ? c : lo + Math.round((ends[i] - lo) * Math.min(1, (t - t0) / (t1 - t0))); if (t < t1) break; }
+    return c; };
+  let drawn = 0;
+  const dispose = () => { [tfm, tmp, ...soft, small, paint, height, bent].filter(Boolean).forEach(t => t.dispose()); matC.dispose(); matH.dispose(); geo.dispose(); };
+  const frame = t => {
+    const upto = strokeAt(t);
+    if (upto > drawn) {
+      const i0 = drawn ? iEnd[drawn - 1] : 0, i1 = iEnd[upto - 1];
+      geo.setDrawRange(i0, i1 - i0);
+      mesh.material = matC; g.renderer.setRenderTarget(paint); g.renderer.render(sc, g.cam);
+      mesh.material = matH; g.renderer.setRenderTarget(height); g.renderer.render(sc, g.cam);
+      drawn = upto;
+    }
+    if (o.debug === 'paint') return show(paint, w, h); if (o.debug === 'height') return show(height, w, h);
+    pass(VG_FINAL, { tPaint: paint, tHeight: height, uImpasto: o.impasto ?? 1 }, null, { w, h });
+  };
+  return { frame, dispose };
+}
+
+const RUN = { watercolour, oil, vangogh, woodcut };
 
 function stopped(signal) { if (signal && signal.aborted) throw new DOMException('The painting was stopped.', 'AbortError'); }
 

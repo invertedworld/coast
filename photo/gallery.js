@@ -4,7 +4,7 @@
    selects it and shows it large; Download PNG and Delete act on the item selected. Artist mode opens for a selected
    photo.
 
-   Artist mode makes artworks from one photo. A style is chosen (Watercolour, Oil, Impressionist, Woodcut or
+   Artist mode makes artworks from one photo. A style is chosen (Watercolour, Oil, Van Gogh, Woodcut or
    3D render), then its settings, which are kept in the browser's local storage (key coast.pictureSettings) as soon as
    they change. Render paints the photo in the style chosen, or path-traces the scene again from the photo's own
    camera, and shows it being made; a render in progress is stopped by another render, by a change of style or by
@@ -21,8 +21,8 @@ const KEEP = 24;
 const Q_KEY = 'coast.pictureSettings';
 // the version of the stored settings: version 2 lowered the 3D render's default samples and bounces, version 3
 // gave the 3D render a time limit, with the samples per pixel its upper bound, and version 4 replaced the charcoal
-// style with the woodcut; the values kept from an earlier version give way to the new defaults
-const Q_VERSION = 4;
+// style with the woodcut, and version 5 replaced the impressionist style with the Van Gogh style; the values kept from an earlier version give way to the new defaults
+const Q_VERSION = 5;
 const sl = (k, label, def, min, max, step, fmt = v => '× ' + v.toFixed(2)) => ({ k, label, def, min, max, step, fmt });
 // a slider's value is a multiple of the style's own amount (1 is as designed)
 export const Q_GROUPS = [
@@ -43,12 +43,14 @@ export const Q_GROUPS = [
     sl('abstraction', 'Simplification', 8, 2, 16, 1, v => v + ' px'), sl('washes', 'Washes', 1, 0, 2, 0.05), sl('bleed', 'Bleeding', 1, 0, 2, 0.05),
     sl('edge', 'Dark edges', 1, 0, 2, 0.05), sl('granulation', 'Granulation', 1, 0, 2, 0.05), sl('pencil', 'Pencil', 1, 0, 2, 0.05), sl('margin', 'Paper margin', 1, 0, 2, 0.05) ] },
   { id: 'oil', title: 'Oil', fields: [ { k: 'mixing', label: 'Colour mixing', opts: [[0, 'On the palette'], [1, 'Optical']], def: 0 }, sl('radius', 'Brush size', 6, 2, 14, 1, v => v + ' px'), sl('stroke', 'Stroke length', 1, 0.25, 2, 0.05), sl('impasto', 'Impasto', 1, 0, 2, 0.05) ] },
-  { id: 'impressionist', title: 'Impressionist', fields: [ sl('size', 'Dab size', 1, 0.4, 2.5, 0.05), sl('strokes', 'Number of dabs', 1, 0.3, 2, 0.05), sl('jitter', 'Broken colour', 1, 0, 2, 0.05) ] },
+  { id: 'vangogh', title: 'Van Gogh', fields: [ sl('size', 'Stroke size', 1, 0.5, 2, 0.05), sl('swirl', 'Eddies in the sky', 1, 0, 2, 0.05),
+    sl('colour', 'Colour intensity', 1, 0, 2, 0.05), sl('outline', 'Outlines', 1, 0, 2, 0.05), sl('impasto', 'Impasto', 1, 0, 2, 0.05),
+    sl('distort', 'Distortion', 0, 0, 2, 0.05) ] },
   { id: 'woodcut', title: 'Woodcut', fields: [ sl('spacing', 'Line spacing', 9, 5, 16, 1, v => v + ' px'), sl('weight', 'Boldness', 1, 0.4, 2, 0.05),
     sl('contrast', 'Contrast', 1, 0, 2, 0.05), sl('outline', 'Outlines', 1, 0, 2, 0.05), sl('grain', 'Wood grain', 1, 0, 2, 0.05),
     sl('colours', 'Colour blocks', 0, 0, 4, 1, v => v ? String(v) : 'None') ] },
 ];
-export const STYLES = [['watercolour', 'Watercolour'], ['oil', 'Oil'], ['impressionist', 'Impressionist'], ['woodcut', 'Woodcut'], ['render3d', '3D render']];
+export const STYLES = [['watercolour', 'Watercolour'], ['oil', 'Oil'], ['vangogh', 'Van Gogh'], ['woodcut', 'Woodcut'], ['render3d', '3D render']];
 const styleName = id => (STYLES.find(s => s[0] === id) || [id, id])[1];
 
 const svg = (d, extra = '') => `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" ${extra}>${d}</svg>`;
@@ -60,7 +62,7 @@ export const ICON = {
   easel: svg('<path d="M12 3v2M5.5 5h13v10h-13zM8 15l-2.5 6M16 15l2.5 6M12 15v3"/>'),
   watercolour: svg('<path d="M12 3.5c3 4 5.5 7 5.5 10a5.5 5.5 0 0 1-11 0c0-3 2.5-6 5.5-10z"/><path d="M9.2 14.5a2.8 2.8 0 0 0 2.8 2.6" opacity=".7"/>'),
   oil: svg('<path d="M20.5 3.5l-7.2 7.8"/><path d="M11.4 10.2l2.4 2.4"/><path d="M10.6 11.2c-2.2-.1-3.8 1.2-4.2 3.2-.3 1.7-.9 3.4-2.4 4.9 2.6.5 5.5 0 7.1-1.7 1.4-1.4 1.8-3.2 1.4-4.5z"/>'),
-  impressionist: svg('<circle cx="7" cy="8" r="1.6"/><circle cx="13" cy="6.5" r="1.6"/><circle cx="18" cy="10" r="1.6"/><circle cx="9" cy="14" r="1.6"/><circle cx="15.5" cy="15.5" r="1.6"/><circle cx="6" cy="19" r="1.3"/><circle cx="12" cy="19.5" r="1.3"/>'),
+  vangogh: svg('<path d="M4 9c2-3 6-3 7 0s-2 5-4 3 0-4 2-3"/><path d="M13 7c2-2 5-2 7 0"/><path d="M3 15c3-1.5 6 1.5 9 0s6-1.5 9 0"/><path d="M3 19c3-1.5 6 1.5 9 0s6-1.5 9 0"/>'),
   woodcut: svg('<path d="M3.5 20.5l7-7"/><path d="M9 12l3 3 2.5-2.5L20.5 6.5 17.5 3.5 11.5 9.5z"/><path d="M14 20.5h6.5M16 17.5h4.5"/>'),
   render3d: svg('<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/>'),
   stop: svg('<rect x="7" y="7" width="10" height="10" rx="1.2"/>'),
