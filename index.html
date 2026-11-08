@@ -1672,7 +1672,9 @@ const core=(cx,cz)=>vnoise(cx*0.23+0.5,cz*0.23+0.5,77);
 const vgCache=new Map();
 function isVillage(cx,cz){ const k=cx+','+cz; let v=vgCache.get(k); if (v===undefined){ v=!highGround(cx,cz) && seaDist(cx*C+C/2,cz*C+C/2)>-150 && (fbm(cx*0.12+3.3,cz*0.12+1.7,990,3)>0.5 || !!peakNear(cx*C+C/2,cz*C+C/2,1.05)); if (vgCache.size>50000) vgCache.clear(); vgCache.set(k,v); } return v; }
 const COUNTRY=new Set(['olives','rocky','farm','coast','wild','isle','mount']);
-function chunkKind(cx,cz){
+// The kind each block would have on its own, drawn from the seed before every village is given its one church: a
+// summit, and about one block of town in six, would hold a church here.
+function kind0(cx,cz){
   if (seaDist(cx*C+C/2,cz*C+C/2)<-150) return 'isle';
   if (highGround(cx,cz)) return 'mount';
   if (peakInChunk(cx,cz)) return 'church';
@@ -1689,15 +1691,120 @@ function chunkKind(cx,cz){
   if (r<0.48+k*0.08) return 'piazza';
   return 'quarter';
 }
+/* ---------- one church to each village ----------
+   A village is a group of village blocks joined at their sides or corners (eight neighbours), so that two blocks
+   which touch only across a crossroads belong to the same village. A group with fewer than HAMLET blocks of houses
+   (quarters, squares and church blocks; beaches and wild hillsides do not count) is a hamlet and has no church,
+   unless it holds a summit. Each village has exactly one church:
+   - on a summit within it, where it has one, so that the hill town's church on the top is the church of the whole
+     village; where there are two or more summits, on the highest, and the others keep a plain square;
+   - otherwise in one of its blocks drawn as a church block by the seed (kind0), then in one of its squares, then in
+     one of its quarters, and within each of these the block nearest the middle of its houses, where a church will
+     fit beside its square (churchSite). The other church blocks of the village become squares of the same size, so
+     that their ground and layout are as before.
+   The group is found once by a flood fill and cached for every block in it; one that would grow beyond VG_MAX blocks
+   is divided at fixed lines VG_W blocks apart, so that the result never depends on the block it was reached from.
+   While a village's church is being chosen its blocks report the kind they would have without it (V.pending), and
+   anything cached for the chosen block in that time is forgotten afterwards. */
+const HAMLET=6, VG_MAX=8000, VG_W=120, vmCache=new Map(), ckCache=new Map(), TOWN_TIER={church:2,piazza:1,quarter:0};
+let vgPend=0;
+// the deterministic places tried for a church once the block's own random tries have failed: the nave set beside the
+// square in each of 24 directions, at five lengths from 16 m down to the 10.5 m of the shortest random try
+const CHURCH_SITES=[]; for (const [L,W] of [[16,7.6],[14.5,7.6],[13,7.6],[11.75,7],[10.5,7]]) for (let i=0;i<24;i++) CHURCH_SITES.push({a:i/24*Math.PI*2,L,W});
+function churchOb(P,a,L,W){ const dx=Math.cos(a), dz=Math.sin(a), rot=Math.atan2(-dx,-dz);
+  return {x:P.peak?P.x:P.x+dx*(P.r+L/2+0.4),z:P.peak?P.z:P.z+dz*(P.r+L/2+0.4),hw:W/2,hd:L/2+W*0.35,rot,dx,dz}; }
+function villageOf(cx,cz){
+  if (!isVillage(cx,cz)) return null;
+  const key=cx*1048576+cz; { const V=vmCache.get(key); if (V) return V; }
+  const fill=w=>{ const cells=[], seen=new Set([key]), st=[cx,cz];
+    while (st.length){ const b=st.pop(), a=st.pop(); cells.push(a,b); if (w===null && cells.length>2*VG_MAX) return null;
+      for (let db=-1;db<=1;db++) for (let da=-1;da<=1;da++){ const A=a+da, B=b+db, k=A*1048576+B;
+        if (seen.has(k) || (w!==null && Math.floor(A/VG_W)!==w)) continue; seen.add(k); if (isVillage(A,B)) st.push(A,B); } }
+    return cells; };
+  const cells=fill(null)||fill(Math.floor(cx/VG_W));
+  if (vmCache.size+cells.length/2>60000 && !vgPend) vmCache.clear();
+  const V={n:cells.length/2,cells,church:null,pending:true};
+  for (let q=0;q<cells.length;q+=2) vmCache.set(cells[q]*1048576+cells[q+1],V);
+  vgPend++;
+  try { V.church=pickChurch(V); } finally { vgPend--; V.pending=false; }
+  if (V.church){ const k=V.church.cx*1048576+V.church.cz; pzCache.delete(k); alCache.delete(k); ckCache.delete(k); }
+  return V;
+}
+function pickChurch(V){
+  const c=V.cells; let best=null;
+  for (let q=0;q<c.length;q+=2){ const PK=peakInChunk(c[q],c[q+1]);
+    if (PK && (!best || PK.H>best.H) && piazzaFor(c[q],c[q+1],'church')) best={cx:c[q],cz:c[q+1],H:PK.H}; }
+  if (best) return best;
+  const list=[]; let mx=0, mz=0;
+  for (let q=0;q<c.length;q+=2){ const a=c[q], b=c[q+1], kd=kind0(a,b), t=TOWN_TIER[kd];
+    if (t!==undefined){ list.push({cx:a,cz:b,t,d:0}); mx+=a; mz+=b; } }
+  if (list.length<HAMLET) return null;
+  mx/=list.length; mz/=list.length;
+  for (const B of list) B.d=Math.hypot(B.cx-mx,B.cz-mz);
+  list.sort((u,v)=>v.t-u.t || u.d-v.d || u.cx-v.cx || u.cz-v.cz);
+  for (const B of list) if (churchSite(B.cx,B.cz)) return {cx:B.cx,cz:B.cz};
+  return null;
+}
+// whether a church will fit beside the square of a block if it is made the church block: the same tests as the
+// block's own (blockSiteOk), with the ground worked out as it will be, the square and alleys of a church block in
+// place (KO); the heights are held a little inside the block's own limits
+let KO=null;
+function churchSite(cx,cz){
+  const P=piazzaFor(cx,cz,'church'); if (!P || P.small) return false;
+  const xc=cx*C+C/2, zc=cz*C+C/2, al=alleysFor(cx,cz,'church'), circles=lightsNear(xc,zc,C*0.71+11).map(L=>({x:L.x,z:L.z,r:L.foot}));
+  const prev=KO; KO={cx,cz,P,al};
+  try { for (const s of CHURCH_SITES) if (blockSiteOk(cx,cz,churchOb(P,s.a,s.L,s.W),al,circles,null,heightAtExact,7.5,1.0)) return true; }
+  finally { KO=prev; }
+  return false;
+}
+// whether a building's footprint o fits in block (cx,cz): inside the block's streets and clear of a cove's cliffs, on
+// one side of each alley, off the square (where one is given) and the circles, clear of the railway, the coast road
+// and the harbours, and on ground at least hMin above the sea that rises no more than maxRange across it; the
+// buildings already placed are the caller's to test
+function blockSiteOk(cx,cz,o,alleys,circles,piazza,hAt,maxRange,hMin){
+  const pts=obbSamples(o);
+  for (const p of pts) if (!insideCell(cx,cz,p[0],p[1],-0.35) || coveCore(p[0],p[1])) return false;
+  for (const A of alleys){ let sg=0;
+    for (const p of pts){ const s=A.dir==='h'?p[1]-A.f(p[0]):p[0]-A.f(p[1]); if (Math.abs(s)<A.hw-0.2) return false; const g=Math.sign(s); if (sg&&g!==sg) return false; sg=g; } }
+  if (piazza){ const P=piazza; for (const p of pts) if (Math.hypot(p[0]-P.x,p[1]-P.z)<P.r) return false; if (obbCircleDist(o,P.x,P.z)<P.r) return false; }
+  for (const c of circles) if (obbCircleDist(o,c.x,c.z)<c.r) return false;
+  for (const p of pts){ const rp=railPerp(p[0],p[1]); if (rp<5.5 || (rp<19 && stationNear(p[0],48))) return false; }
+  for (const sd of SIDES){ let cs=0;
+    for (const p of pts){
+      const dz=sd*(p[1]-coastRoadZ(sd,p[0])); if (Math.abs(dz)<CR_HW+0.15 || (dz<0 && dz>-14)) return false;
+      const g=Math.sign(dz); if (cs&&g!==cs) return false; cs=g;
+      const HB=harbourAt(sd,p[0]); if (HB){ const sh=hbS(HB,p[0],p[1]); if (sh<0.6) return false; if (sh<6 && Math.abs(Math.abs(p[0]-HB.x)-HB.W/2)<3.4) return false; }
+    } }
+  let hmin=1e9, hmax=-1e9;
+  for (const p of pts){ const h=hAt(p[0],p[1]); hmin=Math.min(hmin,h); hmax=Math.max(hmax,h); }
+  return hmin>=hMin && hmax-hmin<=maxRange;
+}
+// the kind of a block: its kind0, but with the church of its village in one block alone
+function chunkKind(cx,cz){
+  const key=cx*1048576+cz; { const v=ckCache.get(key); if (v!==undefined) return v; }
+  let k=kind0(cx,cz);
+  if (k==='church'||k==='piazza'||k==='quarter'){ const V=villageOf(cx,cz);
+    if (V && V.pending) return k==='church'?'piazza':k;
+    k = V && V.church && V.church.cx===cx && V.church.cz===cz ? 'church' : k==='church' ? 'piazza' : k; }
+  if (ckCache.size>50000) ckCache.clear();
+  ckCache.set(key,k); return k;
+}
 // squares are levelled into the hillside, so they are part of the height function
 const pzCache=new Map();
 function piazzaInfo(cx,cz){
   const k=cx*1048576+cz; { const v=pzCache.get(k); if (v!==undefined) return v; }
-  const kind=chunkKind(cx,cz), xc=cx*C+C/2, zc=cz*C+C/2, h1=hash(cx,cz,501), h2=hash(cx,cz,502), h3=hash(cx,cz,503);
+  const p=piazzaFor(cx,cz,chunkKind(cx,cz));
+  if (pzCache.size>20000) pzCache.clear();
+  pzCache.set(k,p); return p;
+}
+// the square a block of the given kind would have; a block drawn as a church block keeps a church square's size
+// when another block of its village holds the church
+function piazzaFor(cx,cz,kind){
+  const xc=cx*C+C/2, zc=cz*C+C/2, h1=hash(cx,cz,501), h2=hash(cx,cz,502), h3=hash(cx,cz,503);
   let p=null;
   const PK=peakInChunk(cx,cz);
   if (PK) p={x:PK.x,z:PK.z,r:12.5,small:false,peak:true};
-  else if (kind==='piazza'||kind==='church') p={x:xc+(h1-0.5)*5,z:zc+(h2-0.5)*5,r:kind==='piazza'?8.5+h3*3.5:7.5+h3*2.5,small:false};
+  else if (kind==='piazza'||kind==='church') p={x:xc+(h1-0.5)*5,z:zc+(h2-0.5)*5,r:kind==='piazza'&&kind0(cx,cz)!=='church'?8.5+h3*3.5:7.5+h3*2.5,small:false};
   else if (kind==='quarter' && hash(cx,cz,504)<0.5) p={x:xc+(h1-0.5)*10,z:zc+(h2-0.5)*10,r:4.4+h3*2.0,small:true};
   if (p){
     for (let it=0; it<20; it++){ let bad=false;
@@ -1708,14 +1815,19 @@ function piazzaInfo(cx,cz){
   // no square where levelling it would leave a cliff: the downhill drop and the uphill cut stay modest
   if (p && !p.peak){ let lo=1e9, hi=-1e9; for (let s2=0;s2<16;s2++){ const a=s2/16*6.283, h=baseH(p.x+Math.cos(a)*(p.r+2.6),p.z+Math.sin(a)*(p.r+2.6)); lo=Math.min(lo,h); hi=Math.max(hi,h); }
     if (p.level-lo>6 || hi-p.level>9) p=null; }
-  if (pzCache.size>20000) pzCache.clear();
-  pzCache.set(k,p); return p;
+  return p;
 }
 // alleys are decided per block from the seed, so the terrain can level them too
 const alCache=new Map();
 function alleyInfo(cx,cz){
   const k=cx*1048576+cz; { const v=alCache.get(k); if (v!==undefined) return v; }
-  const kind=chunkKind(cx,cz), xc=cx*C+C/2, zc=cz*C+C/2, list=[];
+  const list=alleysFor(cx,cz,chunkKind(cx,cz));
+  if (alCache.size>20000) alCache.clear();
+  alCache.set(k,list); return list;
+}
+// the alleys a block of the given kind would have
+function alleysFor(cx,cz,kind){
+  const xc=cx*C+C/2, zc=cz*C+C/2, list=[];
   const want = kind==='quarter' ? (hash(cx,cz,701)<0.85?(hash(cx,cz,702)<0.45?2:1):0) : (kind==='piazza'||kind==='church'||kind==='shore') ? (hash(cx,cz,703)<0.4?1:0) : 0;
   const dirs = hash(cx,cz,704)<0.5?['h','v']:['v','h'];
   for (let q=0;q<want;q++){
@@ -1723,8 +1835,7 @@ function alleyInfo(cx,cz){
     if (dir==='h' && vSegOn(cx,cz) && vSegOn(cx+1,cz)){ const za=zc+off; list.push({dir,hw,f:x=>za+amp*Math.sin(x*0.15+ph)}); }
     else if (dir==='v' && hSegOn(cx,cz) && hSegOn(cx,cz+1)){ const xa=xc+off; list.push({dir,hw,f:z=>xa+amp*Math.sin(z*0.15+ph)}); }
   }
-  if (alCache.size>20000) alCache.clear();
-  alCache.set(k,list); return list;
+  return list;
 }
 // streets and alleys are cut level across their width; the hillside blends back over 1.6 m beyond the kerb
 let HG=null; // {x0,z0,d,n,a}: precomputed heights for the block being generated
@@ -1742,7 +1853,8 @@ function heightAtExact(x,z){
   const i=Math.round(x/C); if (!offshore && vSegOn(i,vSegAt(x,z))){ const xr=vRoadX(i,z), hc=vRoadCenterH(i,xr,z), fw=Math.max(1.6,1.5*(hc-baseH(xr,z)));
     if (fw>1.6){ const d=Math.abs(x-xr)-vRoadW(i,z), w=1-smooth(d/fw); if (w>0){ h=Math.max(h,lerp(h,hc,w)); } } else add(Math.abs(x-xr),vRoadW(i,z),hc); }
   const j=Math.round(z/C); if (!offshore && hSegOn(hSegAt(x,z),j)){ const zr=hRoadZ(j,x); add(Math.abs(z-zr),hRoadW(j,x),baseH(x,zr)); }
-  for (const A of alleyInfo(Math.floor(x/C),Math.floor(z/C))){
+  const bx=Math.floor(x/C), bz=Math.floor(z/C), ko=KO!==null && KO.cx===bx && KO.cz===bz;
+  for (const A of ko?KO.al:alleyInfo(bx,bz)){
     if (A.dir==='h'){ const zr=A.f(x); add(Math.abs(z-zr),A.hw,baseH(x,zr)); } else { const xr=A.f(z); add(Math.abs(x-xr),A.hw,baseH(xr,z)); } }
   for (const sd of SIDES){ const zr=coastRoadZ(sd,x), dr=Math.abs(z-zr); if (dr<CR_HW+1.6) add(dr,CR_HW,coastRoadH(sd,x)); }
   if (wsum>0) h=lerp(h,tsum/wsum,wmax);
@@ -1756,7 +1868,7 @@ function heightAtExact(x,z){
   for (const B of branchesAt(x)){ if (!brIn(B,x,2)) continue; const d=brPerp(B,x,z), hw=brTerm(B,x)?5:4.0;
     if (d<hw+4.6){ const dr=Math.abs(z-coastRoadZ(B.sd,x)), w=(1-smooth((d-hw)/4.5))*smooth((dr-CR_HW)/1.6); h=lerp(h,brY(B,x)-0.2,w); } }
   for (const sd of SIDES){ const HB=harbourAt(sd,x); if (HB) h=harbourShape(HB,x,z,h); }
-  const P=piazzaInfo(Math.floor(x/C),Math.floor(z/C));
+  const P=ko?KO.P:piazzaInfo(bx,bz);
   if (P){ const d=Math.hypot(x-P.x,z-P.z); if (d<P.outer){
     const t = h<P.level ? (d<=P.r+1.25?1:1-smooth((d-P.r-1.25)/0.55)) : (d<=P.r+0.8?1:1-smooth((d-P.r-0.8)/(P.outer-P.r-0.8)));
     h=lerp(h,P.level,t); } }
@@ -3516,20 +3628,7 @@ function genChunk(cx,cz,lod=0){
   const cellOk=(x,z,m)=>insideCell(cx,cz,x,z,m);
   const alleyS=(A,x,z)=>A.dir==='h'?z-A.f(x):x-A.f(z);
   function canPlace(o,pad=0.04,opt={}){
-    const pts=obbSamples(o); let hmin=1e9, hmax=-1e9;
-    for (const p of pts){ if (!cellOk(p[0],p[1],-0.35) || coveCore(p[0],p[1])) return false; const h=heightAt(p[0],p[1]); hmin=Math.min(hmin,h); hmax=Math.max(hmax,h); }
-    if (hmin<0.9 || hmax-hmin>(opt.maxRange||MR)) return false;
-    for (const A of ch.alleys){ let sg=0;
-      for (const p of pts){ const s=alleyS(A,p[0],p[1]); if (Math.abs(s)<A.hw-0.2) return false; const g=Math.sign(s); if (sg&&g!==sg) return false; sg=g; } }
-    if (ch.piazza && !opt.ignorePiazza){ const P=ch.piazza; for (const p of pts) if (Math.hypot(p[0]-P.x,p[1]-P.z)<P.r) return false; if (obbCircleDist(o,P.x,P.z)<P.r) return false; }
-    for (const c of ch.placeCircles) if (obbCircleDist(o,c.x,c.z)<c.r) return false;
-    for (const p of pts){ const rp=railPerp(p[0],p[1]); if (rp<5.5 || (rp<19 && stationNear(p[0],48))) return false; }
-    for (const sd of SIDES){ let cs=0;
-      for (const p of pts){
-        const dz=sd*(p[1]-coastRoadZ(sd,p[0])); if (Math.abs(dz)<CR_HW+0.15 || (dz<0 && dz>-14)) return false;
-        const g=Math.sign(dz); if (cs&&g!==cs) return false; cs=g;
-        const HB=harbourAt(sd,p[0]); if (HB){ const sh=hbS(HB,p[0],p[1]); if (sh<0.6) return false; if (sh<6 && Math.abs(Math.abs(p[0]-HB.x)-HB.W/2)<3.4) return false; }
-      } }
+    if (!blockSiteOk(cx,cz,o,ch.alleys,ch.placeCircles,opt.ignorePiazza?null:ch.piazza,heightAt,opt.maxRange||MR,0.9)) return false;
     for (const q of ch.place) if (obbOverlap(o,q,pad)) return false;
     return true;
   }
@@ -3562,13 +3661,21 @@ function genChunk(cx,cz,lod=0){
   if (P){
     gb.oy=P.level;
     if (!P.small && R()<0.4){ const s=1.25, n=Math.floor(P.r*1.1/s)*2; ch.checker={x:P.x,z:P.z,n,s,rot:R()*Math.PI}; }
-    if (ch.kind==='church'){
-      let placed=false;
-      for (let t=0;t<12 && !placed;t++){
-        const a=R()*Math.PI*2, L=16-t*0.5+R()*2, W=7+R()*1.6, dx=Math.cos(a), dz=Math.sin(a);
-        const cxp=P.peak?P.x:P.x+dx*(P.r+L/2+0.4), czp=P.peak?P.z:P.z+dz*(P.r+L/2+0.4), rot=Math.atan2(-dx,-dz);
-        const ob={x:cxp,z:czp,hw:W/2,hd:L/2+W*0.35,rot};
-        if (!P.peak && !canPlace(ob,0.04,{ignorePiazza:true,maxRange:8})) continue;
+    // a block drawn as a church block makes the same random tries for its church whether or not it holds its
+    // village's church, so that one which now does not keeps the rest of its layout
+    if (ch.kind==='church' || kind0(cx,cz)==='church'){
+      let site=null;
+      for (let t=0;t<12;t++){
+        const a=R()*Math.PI*2, L=16-t*0.5+R()*2, W=7+R()*1.6, ob=churchOb(P,a,L,W);
+        if (P.peak || canPlace(ob,0.04,{ignorePiazza:true,maxRange:8})){ site={L,W,ob}; break; }
+      }
+      // the church of a village is always built: where the random tries fail, the places of CHURCH_SITES are tried
+      if (!site && ch.kind==='church') for (const s of CHURCH_SITES){ const ob=churchOb(P,s.a,s.L,s.W);
+        if (canPlace(ob,0.04,{ignorePiazza:true,maxRange:8})){ site={L:s.L,W:s.W,ob}; break; } }
+      if (ch.kind!=='church') site=null;
+      const placed=!!site;
+      if (site){
+        const {L,W}=site, {x:cxp,z:czp,rot,dx,dz}=site.ob, ob={x:cxp,z:czp,hw:W/2,hd:L/2+W*0.35,rot};
         const sx=Math.cos(rot), sz=-Math.sin(rot), S=3.2+R()*0.8;
         let tower=null;
         for (const side of (R()<0.5?[1,-1]:[-1,1])){
@@ -3576,7 +3683,6 @@ function genChunk(cx,cz,lod=0){
           const tob={x:tx,z:tz,hw:S/2,hd:S/2,rot};
           if (canPlace(tob,0.04,{ignorePiazza:true,maxRange:8}) && !obbOverlap(tob,ob,0.02)){ tower=tob; break; }
         }
-        placed=true;
         let hmin=1e9; for (const p of obbSamples(ob)) hmin=Math.min(hmin,heightAt(p[0],p[1]));
         const fb=Math.min(-0.3,hmin-P.level-0.8);
         const h=8+R()*2.2, wall=shade(C_.stone,R,0.03), roofC=shade(pick(R,C_.roofs),R,0.04);
@@ -3617,7 +3723,8 @@ function genChunk(cx,cz,lod=0){
       if (!placed) ch.kind='piazza';
       ch.name='Chiesa di '+saint; ch.label=P.peak?'Hilltop church':'Parish church'; ch.desc=P.peak?'Parish church and campanile on the summit of a steep hill town, with views to both seas.':'Church square with a campanile beside the facade.';
     }
-    const feat = P.peak ? 'none' : P.small ? pick(R,['small','small','small','well','tree'])
+    // a summit whose village has its church on a higher one keeps a plain square with a market cross
+    const feat = P.peak ? (ch.kind==='church'?'none':'cross') : P.small ? pick(R,['small','small','small','well','tree'])
       : ch.kind==='church' ? (R()<0.5?'well':(R()<0.5?'tree':'cross')) : pick(R,['clock','clock','fountain','fountain','well','cross','tree']);
     ch.feature=feat;
     if (ch.kind==='piazza'){ ch.name=FEATURE_INFO[feat][0]; ch.label='Piazza'; ch.desc=FEATURE_INFO[feat][1]; }
@@ -5753,7 +5860,7 @@ function updateChunks(px,pz,budgetMs,loading=budgetMs>=1e8){
     if (ch.lod>=2 && ch.fade>=1) tilesDirty.add(tileKey(ch));
   }
 }
-function resetWorld(){ chunkState=''; farCache.clear(); lhCache.clear(); hbCache.clear(); rxCache.clear(); farOrigin=''; for (const T of tiles.values()) disposeTile(T); tiles.clear(); tilesDirty.clear(); tilesUrgent.clear(); for (const ch of chunks.values()) disposeChunk(ch); chunks.clear(); for (const ch of dying) disposeChunk(ch); dying.length=0; pkCache.clear(); pzCache.clear(); alCache.clear(); hbCache.clear(); vgCache.clear(); ryCache.clear(); rzCache.clear(); rrCache.clear(); rsCache.clear(); stCache.clear(); rxCache.clear(); lhCache.clear(); rkCache.clear(); ruCache.clear(); cvCache.clear(); icvCache.clear(); cvSlots.clear(); cvMemoN=NaN; cvMemoL=[];
+function resetWorld(){ chunkState=''; farCache.clear(); lhCache.clear(); hbCache.clear(); rxCache.clear(); farOrigin=''; for (const T of tiles.values()) disposeTile(T); tiles.clear(); tilesDirty.clear(); tilesUrgent.clear(); for (const ch of chunks.values()) disposeChunk(ch); chunks.clear(); for (const ch of dying) disposeChunk(ch); dying.length=0; pkCache.clear(); pzCache.clear(); alCache.clear(); hbCache.clear(); vgCache.clear(); vmCache.clear(); ckCache.clear(); ryCache.clear(); rzCache.clear(); rrCache.clear(); rsCache.clear(); stCache.clear(); rxCache.clear(); lhCache.clear(); rkCache.clear(); ruCache.clear(); cvCache.clear(); icvCache.clear(); cvSlots.clear(); cvMemoN=NaN; cvMemoL=[];
   // the goods lines, the offshore islands, the ferry ports and the ferries' routes all belong to the old island
   brZones.clear(); brBucket.clear(); isCache.clear(); fpCache.clear(); irCache.clear(); hgCache.clear(); sgCache.clear(); mtxCache.clear();
   goods.R=null; goods.check=0; for (const c of goods.cars) c.m.visible=false;
@@ -12462,7 +12569,7 @@ window.__village={ get seed(){ return SEED_TEXT; }, share:{state:sceneState,link
   photo:PHOTO.api,
   get swimDebug(){ const S=swimmer.state; return {mode,swim:S.mode,under:S.under,lens:UW.lens,wet:UW.wet,x:S.x,y:S.y,z:S.z,water:S.water,air:S.air,surface:SEA.heightAt(S.x,S.z)}; }};
 // the shape of the land, for tests: the mountains, the islands and how each block is used
-window.__village.terrain={baseH,mtnH,mtLevel,mtSpine,mtCrest,halfW,ridgeZ,coastZ,highGround,isVillage,chunkKind,islandInfo,islandRoute,islandLight,ISL,WRAP_Z,railZ,railY,railState,stationInfo,ST_SP};
+window.__village.terrain={baseH,mtnH,mtLevel,mtSpine,mtCrest,halfW,ridgeZ,coastZ,highGround,isVillage,chunkKind,villageOf,islandInfo,islandRoute,islandLight,ISL,WRAP_Z,railZ,railY,railState,stationInfo,ST_SP};
 // the boats' footprints, for tests: no two moored or anchored boats may overlap, nor lie off a beach with sunbeds
 window.__village.boats={BOATS,boatBox,fishBoats,nearSunbeds,obbOverlap,beachStretch,BCH_SP,harbourInfo,HARB};
 </script>
