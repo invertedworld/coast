@@ -87,6 +87,7 @@ The panel opened with **H** lists the controls. They are reproduced here for ref
 | 8 | Follows the nearest dolphin. The camera stays under the water while the dolphin is submerged, through the water's passes, and rises with it as it surfaces or leaps. 8 or 5 again returns the player to where they were. |
 | 9 | Returns the player to the place where they first stood on the island (`spawnPlayer`), leaving any vehicle or view first. |
 | C (in the water) | Dives while held. |
+| F (under the water) | Turns the diver's torch on or off: a spot light carried with the eye (`torch`), kept in the scene at zero intensity while off so that no material is compiled again. |
 | Space (in the water) | Rises while held; near the surface the head comes out of the water. |
 | Shift (in the water) | Swims faster, at the cost of more breath. |
 | J | Jumps into the sea from the edge of a quay, a mole or a moored boat that is being faced, over the side of the dinghy the view faces, or from the rail of a ferry. A ferry under way sails on. |

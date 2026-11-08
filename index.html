@@ -133,6 +133,7 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
       <div class="row"><span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><span>Swim</span></div>
       <div class="row"><span>Look down and swim</span><span>Dive</span></div>
       <div class="row"><span><kbd>C</kbd></span><span>Dive</span></div>
+      <div class="row"><span><kbd>F</kbd></span><span>Torch, under the water</span></div>
       <div class="row"><span><kbd>Space</kbd></span><span>Rise</span></div>
       <div class="row"><span><kbd>Shift</kbd></span><span>Swim faster</span></div>
       <div class="row"><span><kbd>J</kbd></span><span>Jump in from a quay or a boat</span></div>
@@ -4205,6 +4206,11 @@ function wrapWorld(){
 const FOG=hex('#9fc0dc');
 scene.fog=new THREE.Fog(FOG,90,1500); scene.background=FOG.clone();
 const camera=new THREE.PerspectiveCamera(70,1,0.3,3600); world.add(camera);
+// the diver's torch (F under the water): a spot carried with the eye, pointing where it looks. It stays in the scene
+// at nothing while off, so that turning it on does not make every material compile again
+const torch=new THREE.SpotLight(0xfff1dc,0,32,0.42,0.55,1.4), torchAim=new THREE.Object3D();
+torchAim.position.set(0,0,-1); camera.add(torch,torchAim); torch.target=torchAim; torch.position.set(0.15,-0.1,0);
+let torchOn=false;
 const skyU={uTop:{value:new THREE.Color()},uMid:{value:new THREE.Color()},uHor:{value:new THREE.Color()},uSun:{value:new THREE.Vector3(0,1,0)},uSunCol:{value:new THREE.Color()},uNight:{value:0},uDay:{value:1},uRot:{value:0}};
 const sky=new THREE.Mesh(new THREE.SphereGeometry(500,48,24),new THREE.ShaderMaterial({uniforms:skyU,side:THREE.BackSide,depthWrite:false,fog:false,
   vertexShader:`varying vec3 vDir; void main(){ vDir=normalize(position); gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
@@ -9796,6 +9802,7 @@ addEventListener('keydown',e=>{ keys[e.code]=true;
   if (code==='KeyF' && !e.repeat) toggleFerry();
   if (code==='KeyG' && !e.repeat) toggleGoods(); }
   if (code==='KeyY' && !e.repeat) dinghyKey();
+  if (e.code==='KeyF' && !e.repeat && mode==='swim') torchOn=!torchOn;
   if (code==='Under' && !e.repeat) underwaterKey();
   if (code==='Gull' && !e.repeat) followKey('gull');
   if (code==='Dolphin' && !e.repeat) followKey('dolphin');
@@ -10498,13 +10505,14 @@ const _dvSun=new THREE.Color(), _dvSky=new THREE.Color(), _dvEye={x:0,y:0,z:0};
 function diveFrame(dt,wdt){
   // out of the water, what has come into the scene is compiled for the water's passes every few seconds
   if (!wetView() && (uwWarmT-=dt)<=0){ uwWarmT=3; uwWarmMs=UW.warm(renderer,scene,camera); }
-  if (!wetView()){ if (diveOn){ diveOn=false; UW.uniforms.uUnderOn.value=0; UW.surface.visible=UW.particles.visible=false; if (seabedLife) seabedLife.update(0,{active:false}); } return; }
+  if (!wetView()){ torch.intensity=0; if (diveOn){ diveOn=false; UW.uniforms.uUnderOn.value=0; UW.surface.visible=UW.particles.visible=false; if (seabedLife) seabedLife.update(0,{active:false}); } return; }
   diveOn=true; const S=swimmer.state, L=seabedLifeNow(), sw=mode==='swim';
   // taken under by a key (6), the swimmer is simply there: the rush of bubbles belongs to jumping or diving in
   const quiet=sw && diveQuiet; if (sw && S.under) diveQuiet=false;
   UW.update(dt,{under:sw?S.under:false,quiet,camera,parent:world,sunDir:LIGHT_DIR,sunColor:_dvSun.copy(sun.color).multiplyScalar(sun.intensity),skyColor:_dvSky.copy(hemi.color).multiplyScalar(hemi.intensity),
     skyTop:skyU.uTop.value,skyMid:skyU.uMid.value,skyHorizon:skyU.uHor.value,bright:surfMat.uniforms.uBright.value,
     shadow:sun.shadow.map?{map:sun.shadow.map.texture,matrix:sun.shadow.matrix}:null,offset:ORIGIN,low:sw?S.low:0,pulse:sw?S.pulse:0,paused});
+  torch.intensity=torchOn && sw && UW.lens!=='above' ? 90 : 0;
   // wholly under the water the sea's depth pass has nothing to show
   if (UW.lens==='under') seaDepth.on=false;
   _dvEye.x=camera.position.x; _dvEye.y=camera.position.y; _dvEye.z=camera.position.z;
