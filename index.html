@@ -622,7 +622,7 @@ function headlandLight0(sd,n){
       let clear=true; for (let q=hb-1;q<=hb+1;q++){ const H=harbourInfo(sd,q); if (H && Math.abs(H.x-x)<H.W/2+90) clear=false; }
       for (const s of [6,8,10]){ const z=coastZ(sd,x)+sd*s;
         if (clear && baseH(x,z)>1.4 && railPerp(x,z)>16 && !stationNear(x,120)){ L=lhMake(k,sd,x,z,0,sd,'head',R); break; } } } }
-  lhCache.set(k,L); return L;
+  if (lhCache.size>4000) lhCache.clear(); lhCache.set(k,L); return L;
 }
 function islandLight(sd,m){ return noCove(()=>islandLight0(sd,m)); }
 function islandLight0(sd,m){
@@ -638,12 +638,12 @@ function islandLight0(sd,m){
       if (!best || sd*last.z>sd*best.z) best=last; }
     if (best){ const x=best.x-best.ca*7, z=best.z-best.sa*7;
       if (islandH(sd,x,z)>1.5) L=lhMake(k,sd,x,z,-best.ca,-best.sa,'isle',R); } }
-  lhCache.set(k,L); return L;
+  if (lhCache.size>4000) lhCache.clear(); lhCache.set(k,L); return L;
 }
 function rockLight(sd,n){
   const k='r'+sd+':'+n; if (lhCache.has(k)) return lhCache.get(k);
   const K=seaRockInfo(sd,n), L=K?lhMake(k,sd,K.x,K.z,0,sd,'rock',q=>hash(n,q,1821+(sd>0?0:30))):null;
-  lhCache.set(k,L); return L;
+  if (lhCache.size>4000) lhCache.clear(); lhCache.set(k,L); return L;
 }
 /* ---------- ancient ruins: a temple or a round tholos on open hillsides and on some islands ---------- */
 const RUIN=650, ruCache=new Map();
@@ -1459,7 +1459,7 @@ function harbourInfo(sd,n){
     let c0=coastZ(sd,H.x); for (let x=H.x-H.W/2-3; x<=H.x+H.W/2+3; x+=1.5){ const c=coastZ(sd,x); if (sd*c<sd*c0) c0=c; }
     H.zo=c0-sd*H.L;
   }
-  hbCache.set(k,H); return H;
+  if (hbCache.size>8000) hbCache.clear(); hbCache.set(k,H); return H;
 }
 function harbourAt(sd,x){ const n=Math.floor(x/HARB); for (const k of [n,n-1,n+1]){ const H=harbourInfo(sd,k); if (H && Math.abs(x-H.x)<H.W/2+8) return H; } return null; }
 // inland distance from a harbour's shore (negative out to sea)
@@ -1622,7 +1622,7 @@ function railCross(i){
     for (const [sg,rl] of [[-1,rN],[1,rS]]) for (let e=3; ok && e<=rl+12; e+=6){ const zz=z+sg*(flat+e), xx=vRoadX(i,zz);
       if (!vSegOn(i,vSegAt(xx,zz)) || mainPerp(xx,zz)<8.6) ok=false; }
     if (ok) X={i,x,z,ry,rot,sinT,flat,deck,rN,rS}; }
-  rxCache.set(i,X); return X;
+  if (rxCache.size>20000) rxCache.clear(); rxCache.set(i,X); return X;
 }
 function vRoadCenterH(i,xr,z){ const h=baseH(xr,z), X=railCross(i); if (!X) return h; const d=Math.abs(z-X.z), rl=z<X.z?X.rN:X.rS; if (d>X.flat+rl) return h; return lerp(X.deck,h,clamp((d-X.flat)/rl,0,1)); }
 function roadDist(x,z){
@@ -5727,7 +5727,7 @@ function updateChunks(px,pz,budgetMs,loading=budgetMs>=1e8){
     if (ch.lod>=2 && ch.fade>=1) tilesDirty.add(tileKey(ch));
   }
 }
-function resetWorld(){ chunkState=''; farCache.clear(); farOrigin=''; for (const T of tiles.values()) disposeTile(T); tiles.clear(); tilesDirty.clear(); tilesUrgent.clear(); for (const ch of chunks.values()) disposeChunk(ch); chunks.clear(); for (const ch of dying) disposeChunk(ch); dying.length=0; pkCache.clear(); pzCache.clear(); alCache.clear(); hbCache.clear(); vgCache.clear(); ryCache.clear(); rzCache.clear(); rrCache.clear(); rsCache.clear(); stCache.clear(); rxCache.clear(); lhCache.clear(); rkCache.clear(); ruCache.clear(); cvCache.clear(); icvCache.clear(); cvSlots.clear(); cvMemoN=NaN; cvMemoL=[];
+function resetWorld(){ chunkState=''; farCache.clear(); lhCache.clear(); hbCache.clear(); rxCache.clear(); farOrigin=''; for (const T of tiles.values()) disposeTile(T); tiles.clear(); tilesDirty.clear(); tilesUrgent.clear(); for (const ch of chunks.values()) disposeChunk(ch); chunks.clear(); for (const ch of dying) disposeChunk(ch); dying.length=0; pkCache.clear(); pzCache.clear(); alCache.clear(); hbCache.clear(); vgCache.clear(); ryCache.clear(); rzCache.clear(); rrCache.clear(); rsCache.clear(); stCache.clear(); rxCache.clear(); lhCache.clear(); rkCache.clear(); ruCache.clear(); cvCache.clear(); icvCache.clear(); cvSlots.clear(); cvMemoN=NaN; cvMemoL=[];
   // the goods lines, the offshore islands, the ferry ports and the ferries' routes all belong to the old island
   brZones.clear(); brBucket.clear(); isCache.clear(); fpCache.clear(); irCache.clear(); hgCache.clear(); sgCache.clear(); mtxCache.clear();
   goods.R=null; goods.check=0; for (const c of goods.cars) c.m.visible=false;
@@ -12063,6 +12063,8 @@ function updateStats(){
     ['Blocks',`${lods[0]} full, ${lods[1]} simplified, ${lods[2]} outline${queue.length?`, ${queue.length} waiting`:''}`],
     ['Draw calls',`${info.render.calls}`],
     ['Triangles',`${(info.render.triangles/1e6).toFixed(2)} million`],
+    // the script's memory in use and its limit (where the browser reports it), and what is held on the graphics card
+    ['Memory',(performance.memory?`${Math.round(performance.memory.usedJSHeapSize/1048576)} of ${Math.round(performance.memory.jsHeapSizeLimit/1048576)} MB, `:'')+`${info.memory.geometries} geometries, ${info.memory.textures} textures`],
     ['Position',`${player.x.toFixed(0)}, ${player.z.toFixed(0)}, height ${player.y.toFixed(1)} m`],
     ['Seed',SEED_TEXT]];
   statsEl.innerHTML=rows.map(([k,v])=>`<span>${k}</span><span>${v}</span>`).join('');
