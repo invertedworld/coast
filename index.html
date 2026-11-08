@@ -971,7 +971,7 @@ function cvTop(cv,u,s,hNat,noCut){ const e=cvExtF(cv,u), sc=s-cvShore(cv,u), Lr=
   let cut=!noCut && s>cv.Bh; const Gc=cv.geo||cv._bg;
   if (cut && Gc && Gc.caves) for (const A of Gc.caves){ const [a,b]=cvCaveLocal(A,u,s); if (a>-2 && a<A.Lc+3 && Math.abs(b)<Math.max(A.wX,A.wM)*1.6+3){ cut=false; break; } }
   if (cut){ const sr=Math.min(s,cv.sHead), g=u-cvGAxis(cv,sr), w=Math.max(2,cvAg(cv,sr,g<0?-1:1))+1.5, gs=clamp((s-cv.Bh)/cv.Lg,0,1);
-    T=Math.min(T,cv.bt+(cv.Thead-cv.bt)*(1-Math.pow(1-gs,1.6))+Math.max(0,Math.abs(g)-w)*0.9+Math.max(0,s-cv.sHead)*0.45); }
+    T=Math.min(T,cv.bt+(cv.Thead-cv.bt)*(1-Math.pow(1-gs,1.6))+Math.max(0,Math.abs(g)-w)*0.9+Math.max(0,s-cv.sHead)*0.45+0.12*Math.max(0,s-cv.sHead-12)**2); }   // dying out some 25 m beyond the ravine's head
   for (const K of cv.stacks){ const d=Math.hypot(u-K.u,s-K.s); if (d<K.r*1.6+1) T=lerp(T,cv.Hc*(0.45+0.4*hash(Math.round(K.u*10),Math.round(K.s*10),2401)),smooth((K.r*1.6+1-d)/1.5)); }
   return T; }
 // the cove's frame is straight: its origin (X,Z0) inland of the shore (on it while the site is chosen), u along the
@@ -1602,9 +1602,9 @@ function coveCaveCell(x,z,hmin){ const cv=coveAtXZ(x,z); if (!cv || !cv.geo) ret
   return false; }
 // the land above the rocky coast: patches of bare grey rock near the edge, and scrub over most of it, which runs on
 // over the crest and down the slopes to the brow of the rock
-function cvTopTint(cA,cv,x,z,d){ const n1=vnoise(x*0.9,z*0.9,cv.seed+50), n2=vnoise(x*0.13,z*0.13,cv.seed+51), n3=vnoise(x*0.31,z*0.31,cv.seed+53), near=smooth((22-d)/10);
+function cvTopTint(cA,cv,x,z,d){ const n1=vnoise(x*0.9,z*0.9,cv.seed+50), n2=vnoise(x*0.13,z*0.13,cv.seed+51), n3=vnoise(x*0.31,z*0.31,cv.seed+53), near=smooth((15.5-d)/9);   // the distance grid stops at 16 m
   if (n3>0.48) cA.lerp(CV_ROCK[cv.tint<0.33?6:0].clone().multiplyScalar(0.85+0.15*n1),0.6*smooth((n3-0.48)/0.16)*near);
-  if (n2>0.28) cA.lerp(hex('#647040'),0.62*smooth((n2-0.28)/0.2));
+  if (n2>0.28) cA.lerp(hex('#647040'),0.62*smooth((n2-0.28)/0.2)*near);
   return cA; }
 // the ground's own colour as the terrain gives it, for the cap of rock over the clifftop, which stands in for the ground
 function cvGroundTone(cv,x,z,h,d){ const n1=vnoise(x*0.3,z*0.3,5), n2=vnoise(x*1.1,z*1.1,6), g=vnoise(x*0.07,z*0.07,8), gth=0.58-clamp((h-20)/60,0,0.3);
@@ -1615,7 +1615,7 @@ function coveGroundCol(x,z,h,cA){ const cv=coveAtXZ(x,z); if (!cv || !cv.geo) re
   if (!cvSdf(G,u,s)) return null; const d=_cd, n1=vnoise(x*0.9,z*0.9,cv.seed+50), n2=vnoise(x*0.13,z*0.13,cv.seed+51);
   if (d>=0){ if (Math.abs(u-G.pathTop.u)<0.8 && s>cv.sHead && s<G.roadS){ cA.lerp(DIRT,0.75); return 0.12; }
     if (_ci>=0 && d<G.lz[_ci]+1.5 && h<0.2){ cA.copy(GREY_ROCK).multiplyScalar(0.55); return 0; }   // the low ground behind a face, should any of it show
-    if (d<22){ cvTopTint(cA,cv,x,z,d); if (d<10 && h<2.5 && cvExtF(cv,u)>0.4) return 0; } return null; }
+    if (d<15.5){ cvTopTint(cA,cv,x,z,d); if (d<10 && h<2.5 && cvExtF(cv,u)>0.4) return 0; } return null; }
   if (s>=cv.Bh && Math.abs(u-cvGAxis(cv,s))<cv.Ag0+3){ 
     cA.copy(GREY_ROCK).lerp(LIMESTONE,0.1+0.3*n1).multiplyScalar(0.66+0.14*vnoise(x*0.35,z*0.35,cv.seed+52)); if (n2>0.42) cA.lerp(hex('#66703e'),0.7*smooth((n2-0.42)/0.15));
     return 0; }
