@@ -83,6 +83,9 @@ The panel opened with **H** lists the controls. They are reproduced here for ref
 | W A S D (in the water) | Swim along the view. At the surface the head rides the waves; under the water the swimmer moves where the view points. |
 | Looking down and swimming forward | Dives from the surface. |
 | 6 | Takes the player under the water beside the nearest wreck (`diveProps`, within 5 km), 6.5 m off her beam on the shallower side and 2.6 m above the seabed, facing her; failing a wreck, at the nearest open water between 4.5 and 9 m deep, outside the harbours and open for 15 m all round, facing up the slope of the seabed towards the shore, leaving any train, ferry or dinghy first. 6 again returns the player to where they were, at street level. |
+| 7 | Follows the nearest gull in flight. The gull is led (`b.lead`) from one point to the next along the coast, 150 to 260 m apart and 15 to 35 m above the ground and the roofs; it flaps every few seconds. The mouse orbits the camera and + − change its distance. 7 or 5 again returns the player to where they were. |
+| 8 | Follows the nearest dolphin. The camera stays under the water while the dolphin is submerged, through the water's passes, and rises with it as it surfaces or leaps. 8 or 5 again returns the player to where they were. |
+| 9 | Returns the player to the place where they first stood on the island (`spawnPlayer`), leaving any vehicle or view first. |
 | C (in the water) | Dives while held. |
 | Space (in the water) | Rises while held; near the surface the head comes out of the water. |
 | Shift (in the water) | Swims faster, at the cost of more breath. |
