@@ -10099,9 +10099,10 @@ addEventListener('keydown',e=>{ keys[e.code]=true;
   if (code==='KeyI' && !e.repeat) openIsland();
   if (code==='KeyZ' && !e.repeat) crouch=!crouch;
   if (code==='KeyX' && !e.repeat) sitKey();
-  if (code==='PageUp'){ e.preventDefault(); if (!e.repeat) setDrawLvl(1); }
-  if (code==='PageDown'){ e.preventDefault(); if (!e.repeat) setDrawLvl(-1); }
-  if (code==='Home'){ e.preventDefault(); if (!e.repeat) setDrawLvl(0); }
+  // on a Mac without these keys, Fn with an arrow gives them: matched by the key as well as by its code
+  if (code==='PageUp'||(e.key==='PageUp'&&code!=='PageUp')){ e.preventDefault(); if (!e.repeat) setDrawLvl(1); }
+  if (code==='PageDown'||(e.key==='PageDown'&&code!=='PageDown')){ e.preventDefault(); if (!e.repeat) setDrawLvl(-1); }
+  if (code==='Home'||(e.key==='Home'&&code!=='Home')){ e.preventDefault(); if (!e.repeat) setDrawLvl(0); }
   if (code==='KeyO' && !e.repeat){ statsEl.hidden=!statsEl.hidden; statsT=0; }
   if (code==='KeyN' && !e.repeat){ hour=nightU.value>0.5?10:22; SNDS.hour=Math.floor(hour); }   // to night, or back to day, without the bells striking the jump
   if (code==='KeyM' && !e.repeat) setMuted(!muted);
