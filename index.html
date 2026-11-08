@@ -20,6 +20,10 @@ html,body{height:100%;margin:0;overflow:hidden;background:var(--sea);color:var(-
 .help{position:fixed;z-index:4;top:50%;left:50%;transform:translate(-50%,-50%);width:min(1320px,calc(100vw - 32px));max-height:calc(100% - 32px);overflow:auto;box-sizing:border-box;
   background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:18px 22px 20px;backdrop-filter:blur(8px);font-size:clamp(.92rem,.62rem + .4vw,1.08rem);line-height:1.4;
   display:block}
+.toast{position:fixed;z-index:4;top:22px;left:50%;transform:translate(-50%,-6px);padding:9px 16px;background:var(--panel);border:1px solid var(--line);border-radius:4px;backdrop-filter:blur(8px);
+  font-size:.92rem;font-variant-numeric:lining-nums tabular-nums;pointer-events:none;opacity:0;transition:opacity .25s,transform .25s}
+.toast.on{opacity:1;transform:translate(-50%,0)}
+.toast b{font-weight:500;color:var(--verdigris);margin-right:8px;letter-spacing:.12em;text-transform:uppercase;font-size:.72rem}
 .help .controls{columns:280px;column-gap:28px}
 .help .controls[hidden]{display:none}
 .help .tabs{display:flex;gap:4px;margin:0 0 16px;border-bottom:1px solid var(--line)}
@@ -65,6 +69,7 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
 <div class="vignette"></div>
 <div class="loading" id="loading">World building…</div>
 <div class="stats" id="stats" hidden aria-label="Statistics"></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 <div class="seeding" id="seeding" hidden><span></span><b><i></i></b></div>
 
 <div class="joy" id="joy" hidden><i></i></div>
@@ -5466,6 +5471,10 @@ function updateTiles(budgetMs=2){
 let LOD0=2;
 const lodRing=()=>Math.max(VIEW+2,Math.min(36,VIEW*4));
 // Page Up and Page Down step to the next fixed draw distance beyond or within the present one; Home restores the automatic one
+// a short note at the top of the screen, which fades after a moment
+let toastT=0;
+function toast(label,text){ const el=document.getElementById('toast'); el.textContent=''; const b=document.createElement('b'); b.textContent=label; el.append(b,text);
+  el.classList.add('on'); clearTimeout(toastT); toastT=setTimeout(()=>el.classList.remove('on'),1600); }
 function setDrawLvl(step){
   if (step===0){ drawLvl=-1; LOD0=2; VIEW=Math.min(Math.max(VIEW,VIEW_MIN),VIEW_MAX); }
   else { let i=drawLvl;
@@ -5473,6 +5482,8 @@ function setDrawLvl(step){
     else i=clamp(i+step,0,DRAW_LVLS.length-1);
     drawLvl=i; [LOD0,VIEW]=DRAW_LVLS[i]; }
   perf.t=perf.n=perf.sum=perf.good=0; statsT=1e9;
+  { const km=v=>v>=1000?(v/1000).toFixed(1)+' km':Math.round(v)+' m', far=(VIEW+0.5)*C;
+    toast('Draw distance',drawLvl<0?`Automatic, now ${km(far)}`:`${km(far)} (${drawLvl+1} of ${DRAW_LVLS.length})`); }
   const vs=document.getElementById('viewState'); if (vs) vs.textContent=`${drawLvl<0?'automatic':'fixed'}, full detail to about ${(LOD0+0.5)*C} m, simplified to about ${(VIEW+0.5)*C} m and outlines to about ${(lodRing()+0.5)*C} m`;
 }
 function wantLod(dx,dz){ const d=Math.max(Math.abs(dx),Math.abs(dz)); return d<=LOD0?0:d<=VIEW?1:d<=lodRing()?2:-1; }
