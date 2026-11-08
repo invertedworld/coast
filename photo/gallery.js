@@ -286,7 +286,7 @@ export function createGallery({ renderer, scene, camera, origin, onClose }) {
         <section><h3>Style</h3><div class="tiles">${STYLES.map(([id, name]) => `<button type="button" data-style="${id}" aria-pressed="false">${ICON[id]}${name}</button>`).join('')}</div></section>
         <section class="opts" hidden><h3></h3><form></form><button type="button" class="reset" data-a="reset">Reset to default</button></section></div>
       <div class="dock"><div class="state"><span class="st"></span><span class="bar"><i></i></span></div>
-        <div class="btns"><button class="pri" data-a="render" disabled>Render</button><button class="ok" data-a="save" disabled>Save</button></div></div></aside>
+        <div class="btns"><button class="pri" data-a="render" disabled>Create</button><button class="ok" data-a="save" disabled>Save</button></div></div></aside>
       <div class="stage"><canvas></canvas></div></div>
     <div class="ask" hidden><div role="alertdialog" aria-label="Unsaved artwork"><h3>Save this artwork?</h3>
       <div class="btns"><button class="pri" data-a="ask-save">Save</button><button data-a="ask-del">Delete</button><button data-a="ask-cancel">Cancel</button></div></div></div>`;
@@ -302,7 +302,7 @@ export function createGallery({ renderer, scene, camera, origin, onClose }) {
   }
   function syncButtons() {
     const rb = $(art, '[data-a="render"]');
-    rb.textContent = A.job ? 'Cancel' : 'Render'; rb.classList.toggle('pri', !A.job); rb.disabled = !A.job && !A.style;
+    rb.textContent = A.job ? 'Cancel' : 'Create'; rb.classList.toggle('pri', !A.job); rb.disabled = !A.job && !A.style;
     $(art, '[data-a="save"]').disabled = !(A.result && !A.saved && !A.job);
   }
   // the picture on the stage is drawn as large as the stage allows, keeping its shape

@@ -89,6 +89,12 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
       <div class="row"><span>Double click</span><span>Down to street level here</span></div>
       <div class="row"><span><kbd>B</kbd></span><span>Tilt-shift</span></div>
     </div>
+    <div class="group"><h3>Following</h3>
+      <div class="row"><span><kbd>7</kbd></span><span>Follow a gull, or return</span></div>
+      <div class="row"><span><kbd>8</kbd></span><span>Follow a dolphin, or return</span></div>
+      <div class="row"><span><kbd>+</kbd><kbd>−</kbd></span><span>Distance</span></div>
+      <div class="row"><span><kbd>9</kbd></span><span>Back to the start</span></div>
+    </div>
     <div class="group"><h3>Passenger train</h3>
       <div class="row"><span><kbd>1</kbd></span><span>Ride in the cab</span></div>
       <div class="row"><span><kbd>0</kbd></span><span>Follow from behind</span></div>
@@ -6911,7 +6917,8 @@ ${GLSL} uniform float uPx; attribute vec2 aPar; varying float vA;
     st.lens=lensState(cam); st.under=st.lens!=='above';
     // the bubbles and the fade belong to a dive (ctx.under, the swimmer's state), not to a wave across the lens
     const dv=ctx.under!==undefined?!!ctx.under:st.lens==='under', was=st.dive; st.dive=dv;
-    if (dv && !was){ st.imm=1; st.bub=0; cam.getWorldPosition(BU.uBubO.value); cam.getWorldDirection(BU.uBubF.value); BU.uBubF.value.y*=0.3; BU.uBubF.value.normalize(); BU.uBubO.value.y-=0.35; }
+    if (dv && !was && ctx.quiet){ st.imm=0; st.bub=1e3; }
+    else if (dv && !was){ st.imm=1; st.bub=0; cam.getWorldPosition(BU.uBubO.value); cam.getWorldDirection(BU.uBubF.value); BU.uBubF.value.y*=0.3; BU.uBubF.value.normalize(); BU.uBubO.value.y-=0.35; }
     if (!dv){ st.imm=0; }
     MU.uTimeL.value=sea.uniforms.uTime.value;
     SPU.uSplT.value+=dt; spray.visible=SPU.uSplT.value<1.0; SPU.uSplB.value=ctx.bright??1; SPU.uSplPx.value=renderer.getDrawingBufferSize(_sz).y/(2*Math.tan((cam.fov||60)*Math.PI/360));
@@ -7744,7 +7751,67 @@ function underwaterKey(){
   yaw=spot.yaw; fpPitch=spot.pitch;
   player.x=spot.x; player.z=spot.z; mode='swim';
   swimmer.enter({x:spot.x,y:spot.y,z:spot.z,yaw,pitch:fpPitch});
-  const S=swimmer.state; S.mode='under'; S.under=true; S.underT=2; }
+  const S=swimmer.state; S.mode='under'; S.under=true; S.underT=2; diveQuiet=true; }
+// following a gull (7) or a dolphin (8): the camera flies behind the nearest one in flight or in the water, the mouse
+// carries it round, and + and − bring it nearer or further; the same key again, or 5, returns the player to where they
+// were before. FOL.t is the creature followed: a gull's index, or a dolphin
+const FOL={kind:null,t:null,yaw:0,pitch:0.25,d:10,fresh:true,ret:null,p:new THREE.Vector3()};
+function leaveModes(){
+  if (sailD) dinghyAshore(true); if (riding()) leaveTrain('street'); if (mode==='ferry'||ridden) leaveFerry('street'); if (mode==='coach') mode='street';
+  if (mode==='above') toggleView(); if (mode==='swim'){ if (uwReturn){ const R=uwReturn; uwReturn=null; swimToStreet(R); } else swimLeaveHere(); }
+  if (mode==='follow') followLeave(); }
+function followTarget(kind){
+  let best=null, bd=Infinity;
+  if (kind==='gull'){ const B=GULLS.birds; for (let i=0;i<B.length;i++){ const b=B[i]; if (b.mode>2) continue; const d=Math.hypot(b.x-player.x,b.z-player.z); if (d<bd){ bd=d; best=i; } } }
+  else for (const d of dolphins.dolphins){ if (d.pod.dormant) continue; const q=Math.hypot(d.x-player.x,d.z-player.z); if (q<bd){ bd=q; best=d; } }
+  return best; }
+function followPose(out){
+  if (FOL.kind==='gull'){ const b=GULLS.birds[FOL.t]; if (!b) return null; out.set(b.x,b.y,b.z); return b.psi; }
+  const d=FOL.t; if (!d || dolphins.dolphins.indexOf(d)<0) return null; out.set(d.x,d.y,d.z); return d.head; }
+function followKey(kind){
+  if (mode==='follow' && FOL.kind===kind){ followLeave(); return; }
+  const ret=mode==='follow'?FOL.ret:null;
+  if (mode==='follow'){ if (FOL.kind==='gull' && GULLS.birds[FOL.t]) GULLS.birds[FOL.t].lead=null; mode='street'; } else leaveModes();
+  const t=followTarget(kind); if (t===null){ if (ret) followBack(ret); return; }
+  FOL.kind=kind; FOL.t=t; FOL.yaw=0; FOL.pitch=kind==='gull'?0.15:0.08; FOL.d=kind==='gull'?4.5:7; FOL.fresh=true;
+  FOL.ret=ret||{x:player.x,y:player.y,z:player.z,yaw};
+  if (document.pointerLockElement) document.exitPointerLock();
+  mode='follow'; camera.fov=60; camera.near=0.2; camera.far=3600; camera.updateProjectionMatrix(); glowScale();
+  scene.fog.near=90; scene.fog.far=1500; sky.visible=true; sea.scale.setScalar(1); islandMesh.visible=false; farMesh.visible=farGlow.visible=true; }
+function followBack(R){ player.x=R.x; player.z=R.z; player.y=R.y; player.vy=0; player.holdT=1.5; eyeY=null; yaw=R.yaw; fpPitch=0;
+  camera.fov=70; camera.near=0.1; camera.updateProjectionMatrix(); glowScale(); }
+function followLeave(){ if (FOL.kind==='gull'){ const b=GULLS.birds[FOL.t]; if (b) b.lead=null; } const R=FOL.ret; mode='street'; FOL.kind=null; FOL.t=null; FOL.ret=null; if (R) followBack(R); }
+function followStep(dt){
+  let h=followPose(FOL.p);
+  // a gull that has come down to perch, or a dolphin gone from the water, hands over to the nearest one still about
+  if (h===null || (FOL.kind==='gull' && GULLS.birds[FOL.t].mode>2)){ if (FOL.kind==='gull' && GULLS.birds[FOL.t]) GULLS.birds[FOL.t].lead=null; const t=followTarget(FOL.kind); if (t===null){ followLeave(); return; } FOL.t=t; FOL.fresh=true; h=followPose(FOL.p); }
+  // the gull followed flaps in short bursts every few seconds, and instead of circling in a thermal it is led along
+  // the coast from one point to the next, some 150 to 260 m apart, over the shore, the harbours and the edge of the
+  // village, 15 to 35 m above whatever lies beneath
+  if (FOL.kind==='gull'){ const b=GULLS.birds[FOL.t]; if (b.nextBurst>3) b.nextBurst=0.8+Math.random()*2;
+    if (!b.lead || Math.hypot(b.lead.x-b.x,b.lead.z-b.z)<35){
+      FOL.dir=FOL.dir||(Math.random()<0.5?1:-1); if (Math.random()<0.15) FOL.dir=-FOL.dir;
+      const sd=shoreSide(b.x,b.z), x=b.x+FOL.dir*(150+Math.random()*110), off=-50+Math.random()*170, z=coastZ(sd,x)-sd*off;
+      let top=0; for (let k=0;k<=8;k++){ const t=k/8; top=Math.max(top,gullTopAt(lerp(b.x,x,t),lerp(b.z,z,t))); }
+      b.lead={x,z,y:top+15+Math.random()*20}; } }
+  const zk=((keys.Minus||keys.NumpadSubtract)?1:0)-((keys.Equal||keys.NumpadAdd)?1:0);
+  if (zk) FOL.d=clamp(FOL.d*Math.exp(zk*dt*1.5),4,120);
+  const P=FOL.p, a=h+Math.PI+FOL.yaw, cp=Math.cos(FOL.pitch), wet=FOL.kind==='dolphin';
+  camTarget.set(P.x,P.y,P.z);
+  const want=_cv.set(P.x+Math.sin(a)*cp*FOL.d, camTarget.y+Math.sin(FOL.pitch)*FOL.d, P.z+Math.cos(a)*cp*FOL.d);
+  // the dolphin's camera is under the water while it swims under, and comes up with it as it surfaces or leaps
+  const sub=wet && P.y<-0.3;
+  if (wet) want.y=sub?Math.min(want.y,-0.7):Math.max(want.y,1.2);
+  want.y=Math.max(want.y,heightAt(want.x,want.z)+(wet?0.8:2));
+  if (FOL.fresh || camPos.distanceTo(want)>60){ camPos.copy(want); FOL.fresh=false; } else camPos.lerp(want,1-Math.exp(-dt*4));
+  camPos.y=Math.max(camPos.y,heightAt(camPos.x,camPos.z)+(wet?0.6:1.5));
+  camera.position.copy(camPos); camLookAt(camTarget);
+  // the player is carried with the creature, so that the world, the flock and the pods are built and kept round it
+  player.x=P.x; player.z=P.z; player.y=Math.max(0,heightAt(P.x,P.z)); player.vy=0; eyeY=player.y;
+  sky.position.copy(camera.position); }
+// 9: back to where the player first stood on this island, at street level
+function homeKey(){ leaveModes(); uwReturn=null; spawnPlayer(); player.vy=0; player.holdT=1.5; eyeY=null; lastCell=null; mode='street';
+  camera.fov=70; camera.near=0.1; camera.far=3600; camera.updateProjectionMatrix(); glowScale(); }
 function dinghyKey(){
   if (sailD){ if (!dinghyAshore(false)){ const HB=dgyHarbourAt(sailD.state.x,sailD.state.z); if (HB) dinghyDock(HB); else dinghyHome(); } return; }
   const N=dgyNearest(player.x,player.z);
@@ -9706,10 +9773,10 @@ function sndFerries(dt){
   }
 }
 // the views are on the number keys: 1 the passenger train, 2 the goods train, 3 the ferry, 4 the dinghy, 5 the bird's-eye
-// view, 6 under the water, and 0 the view from behind (the train followed, the ferry or the dinghy from astern). Each is translated to the
+// view, 6 under the water, 7 following a gull, 8 following a dolphin, 9 back to the start, and 0 the view from behind (the train followed, the ferry or the dinghy from astern). Each is translated to the
 // name the handlers below use; the letters that once did the same no longer do (C is still held to dive)
 const VIEW_KEY={Digit1:'KeyR',Numpad1:'KeyR',Digit2:'KeyG',Numpad2:'KeyG',Digit3:'KeyF',Numpad3:'KeyF',Digit4:'KeyY',Numpad4:'KeyY',
-  Digit5:'KeyV',Numpad5:'KeyV',Digit6:'Under',Numpad6:'Under',Digit0:'KeyC',Numpad0:'KeyC'};
+  Digit5:'KeyV',Numpad5:'KeyV',Digit6:'Under',Numpad6:'Under',Digit7:'Gull',Numpad7:'Gull',Digit8:'Dolphin',Numpad8:'Dolphin',Digit9:'Home',Numpad9:'Home',Digit0:'KeyC',Numpad0:'KeyC'};
 const OLD_VIEW=new Set(['KeyR','KeyG','KeyF','KeyY','KeyV','KeyC']);
 addEventListener('keydown',e=>{ keys[e.code]=true;
   const code=VIEW_KEY[e.code]||(OLD_VIEW.has(e.code)?'':e.code);
@@ -9730,6 +9797,9 @@ addEventListener('keydown',e=>{ keys[e.code]=true;
   if (code==='KeyG' && !e.repeat) toggleGoods(); }
   if (code==='KeyY' && !e.repeat) dinghyKey();
   if (code==='Under' && !e.repeat) underwaterKey();
+  if (code==='Gull' && !e.repeat) followKey('gull');
+  if (code==='Dolphin' && !e.repeat) followKey('dolphin');
+  if (code==='Home' && !e.repeat) homeKey();
   if (code==='KeyB') setTilt(!tiltShift);
   if (code==='KeyP' && !e.repeat){ paused=!paused; lastClock=null; }
   if (code==='KeyH' && !e.repeat){ helpEl.hidden=!helpEl.hidden; lastCell=null; }
@@ -9819,7 +9889,7 @@ addEventListener('mousemove',e=>{
 });
 const cam={y:null,head:0}, chase={d:34,yaw:0,pitch:0.32,fresh:true,lift:0}, _cv=new THREE.Vector3();
 const riding=()=>mode==='train'||mode==='chase';
-const onBoard=()=>riding()||mode==='ferry'||mode==='coach'||(mode==='above'&&ridden!==null);
+const onBoard=()=>riding()||mode==='ferry'||mode==='coach'||mode==='follow'||(mode==='above'&&ridden!==null);
 // riding the ferry: F boards it, from its deck if it is in port, otherwise at the nearest ferry port;
 // F or V again steps ashore onto the mole, or at the next port of call while it is under way
 const fe={yaw:0,pitch:-0.06,lx:0.9,lz:FL/2-5.4,lv:0,ey:FD0}, FERRY_EYE=new THREE.Vector3();
@@ -10063,7 +10133,7 @@ function tunnelLight(dt,on){
   scene.fog.color.lerp(_c2.set('#0c0a08'),tunnelK); scene.background.copy(scene.fog.color);
   if (tunnelK>0.001) _c1.copy(skyU.uMid.value).lerp(_c2,tunnelK).getRGB(FOG_MID);
 }
-function look(dx,dy){ if (mode==='dinghy'){ dgyLook.yaw-=dx*0.0026; dgyLook.pitch=clamp(dgyLook.pitch-dy*0.0026,-1.1,1.1); return; } if (mode==='coach'){ co.yaw-=dx*0.0026; co.pitch=clamp(co.pitch-dy*0.0026,-1.1,1.1); return; } if (mode==='ferry' && feChase){ feLook.yaw-=dx*0.004; feLook.pitch=clamp(feLook.pitch+dy*0.003,0.02,1.3); return; } if (mode==='ferry'){ fe.yaw-=dx*0.0026; fe.pitch=clamp(fe.pitch-dy*0.0026,-1.1,1.1); return; } if (mode==='chase'){ chase.yaw-=dx*0.004; chase.pitch=clamp(chase.pitch+dy*0.003,0.02,1.3); return; } if (mode==='train'){ tYaw=clamp(tYaw-dx*0.0026,-2.6,2.6); tPitch=clamp(tPitch-dy*0.0026,-1,1); return; } if (mode==='above'){ yaw-=dx*0.005; pitch=clamp(pitch+dy*0.004,0.25,1.35); } else { const pl=mode==='swim'?1.5:1.2; yaw-=dx*0.0026; fpPitch=clamp(fpPitch-dy*0.0026,-pl,pl); } }
+function look(dx,dy){ if (mode==='dinghy'){ dgyLook.yaw-=dx*0.0026; dgyLook.pitch=clamp(dgyLook.pitch-dy*0.0026,-1.1,1.1); return; } if (mode==='coach'){ co.yaw-=dx*0.0026; co.pitch=clamp(co.pitch-dy*0.0026,-1.1,1.1); return; } if (mode==='ferry' && feChase){ feLook.yaw-=dx*0.004; feLook.pitch=clamp(feLook.pitch+dy*0.003,0.02,1.3); return; } if (mode==='ferry'){ fe.yaw-=dx*0.0026; fe.pitch=clamp(fe.pitch-dy*0.0026,-1.1,1.1); return; } if (mode==='chase'){ chase.yaw-=dx*0.004; chase.pitch=clamp(chase.pitch+dy*0.003,0.02,1.3); return; } if (mode==='follow'){ FOL.yaw-=dx*0.004; FOL.pitch=clamp(FOL.pitch+dy*0.003,-0.3,1.3); return; } if (mode==='train'){ tYaw=clamp(tYaw-dx*0.0026,-2.6,2.6); tPitch=clamp(tPitch-dy*0.0026,-1,1); return; } if (mode==='above'){ yaw-=dx*0.005; pitch=clamp(pitch+dy*0.004,0.25,1.35); } else { const pl=mode==='swim'?1.5:1.2; yaw-=dx*0.0026; fpPitch=clamp(fpPitch-dy*0.0026,-pl,pl); } }
 // bird's-eye: two-finger drag pans, pinch zooms; a classic mouse wheel still zooms
 function panView(dx,dy){ const k=dist*0.0016, fx=-Math.sin(yaw), fz=-Math.cos(yaw), rx=Math.cos(yaw), rz=-Math.sin(yaw);
   player.x+=(rx*dx+fx*dy)*k; player.z+=(rz*dx+fz*dy)*k; player.y=Math.max(heightAt(player.x,player.z),0); player.vy=0; eyeY=player.y; }
@@ -10131,6 +10201,7 @@ function toggleView(){
   // sailing, the bird's-eye view follows the boat, and returns to the helm
   if (sailD){ if (mode==='dinghy'){ startAscent(dgyLook.pitch); mode='above'; dist=45; scene.fog.near=160; scene.fog.far=1800; camera.fov=31; camera.updateProjectionMatrix(); glowScale(); yaw=sailD.state.head+Math.PI+dgyLook.yaw; aboveY=null; firstCam=true; if (document.pointerLockElement) document.exitPointerLock(); }
     else { ascent.t=-1; mode='dinghy'; camera.fov=70; camera.updateProjectionMatrix(); glowScale(); } return; }
+  if (mode==='follow'){ followLeave(); return; }
   if (riding()){ leaveTrain('street'); return; }
   // aboard a ferry the bird's-eye view follows the passenger on deck, and returns to the deck
   if (ridden){ if (mode==='ferry'){ startAscent(fe.pitch); mode='above'; dist=45; scene.fog.near=160; scene.fog.far=1800; camera.fov=31; camera.updateProjectionMatrix(); glowScale(); yaw=ridden.head+Math.PI+fe.yaw; firstCam=true; }
@@ -10281,7 +10352,7 @@ function seaDepthPass(){
 function render(){
   seaDepthPass();
   // in the water, under it or with the waterline across the lens, the water draws the frame
-  try { if (mode==='swim' && diveRender()) return; renderMain(); } finally { scene.matrixWorldAutoUpdate=true; } }
+  try { if (wetView() && diveRender()) return; renderMain(); } finally { scene.matrixWorldAutoUpdate=true; } }
 // wholly under the water nothing lies within reach but the water, so the distant terrain, its outline and the sky,
 // which the near far plane would clip, are not drawn at all
 function diveRender(){
@@ -10372,7 +10443,9 @@ function swimStandAt(x,z){ const h=surfaceTopAt(x,z); return h>0.15?h:null; }
 const swimmer=createSwimmer({groundAt:(x,z)=>heightAt(x,z),surfaceAt:(x,z)=>SEA.heightAt(x,z),normalAt:(x,z,o)=>SEA.normalAt(x,z,o),standAt:swimStandAt,
   collide:swimCollide,exits:[],seaLevel:0,eye:1.62,breath:75,onSound:swimSound,waveAmp:()=>SEA.info().hs*0.5+swH*0.5});
 const swimIn={fwd:0,strafe:0,rise:0,sprint:false,yaw:0,pitch:0};
-let diveOn=false, swimExitT=0;
+let diveOn=false, swimExitT=0, diveQuiet=false;
+// the water's passes run for the swimmer, and for the camera following a dolphin, which goes under with it
+const wetView=()=>mode==='swim'||(mode==='follow'&&FOL.kind==='dolphin');
 // into the water from the shore, wading on from where the walker stood
 function swimEnter(dt){
   mode='swim'; swimmer.enter({x:player.x,y:(eyeY??player.y)+1.62,z:player.z,yaw,pitch:fpPitch,vx:(player.x-(player.ox??player.x))/Math.max(dt,1e-3),vz:(player.z-(player.oz??player.z))/Math.max(dt,1e-3)}); }
@@ -10424,12 +10497,14 @@ let uwWarmT=3, uwWarmMs=0;
 const _dvSun=new THREE.Color(), _dvSky=new THREE.Color(), _dvEye={x:0,y:0,z:0};
 function diveFrame(dt,wdt){
   // out of the water, what has come into the scene is compiled for the water's passes every few seconds
-  if (mode!=='swim' && (uwWarmT-=dt)<=0){ uwWarmT=3; uwWarmMs=UW.warm(renderer,scene,camera); }
-  if (mode!=='swim'){ if (diveOn){ diveOn=false; UW.uniforms.uUnderOn.value=0; UW.surface.visible=UW.particles.visible=false; if (seabedLife) seabedLife.update(0,{active:false}); } return; }
-  diveOn=true; const S=swimmer.state, L=seabedLifeNow();
-  UW.update(dt,{under:S.under,camera,parent:world,sunDir:LIGHT_DIR,sunColor:_dvSun.copy(sun.color).multiplyScalar(sun.intensity),skyColor:_dvSky.copy(hemi.color).multiplyScalar(hemi.intensity),
+  if (!wetView() && (uwWarmT-=dt)<=0){ uwWarmT=3; uwWarmMs=UW.warm(renderer,scene,camera); }
+  if (!wetView()){ if (diveOn){ diveOn=false; UW.uniforms.uUnderOn.value=0; UW.surface.visible=UW.particles.visible=false; if (seabedLife) seabedLife.update(0,{active:false}); } return; }
+  diveOn=true; const S=swimmer.state, L=seabedLifeNow(), sw=mode==='swim';
+  // taken under by a key (6), the swimmer is simply there: the rush of bubbles belongs to jumping or diving in
+  const quiet=sw && diveQuiet; if (sw && S.under) diveQuiet=false;
+  UW.update(dt,{under:sw?S.under:false,quiet,camera,parent:world,sunDir:LIGHT_DIR,sunColor:_dvSun.copy(sun.color).multiplyScalar(sun.intensity),skyColor:_dvSky.copy(hemi.color).multiplyScalar(hemi.intensity),
     skyTop:skyU.uTop.value,skyMid:skyU.uMid.value,skyHorizon:skyU.uHor.value,bright:surfMat.uniforms.uBright.value,
-    shadow:sun.shadow.map?{map:sun.shadow.map.texture,matrix:sun.shadow.matrix}:null,offset:ORIGIN,low:S.low,pulse:S.pulse,paused});
+    shadow:sun.shadow.map?{map:sun.shadow.map.texture,matrix:sun.shadow.matrix}:null,offset:ORIGIN,low:sw?S.low:0,pulse:sw?S.pulse:0,paused});
   // wholly under the water the sea's depth pass has nothing to show
   if (UW.lens==='under') seaDepth.on=false;
   _dvEye.x=camera.position.x; _dvEye.y=camera.position.y; _dvEye.z=camera.position.z;
@@ -10686,6 +10761,7 @@ function frame(now){
     sky.position.copy(camera.position);
     tunnelLight(dt,mode==='train');
   }
+  if (mode==='follow') followStep(dt);
   if (mode==='coach') tunnelLight(dt,true);
   sitStep(dt);
   sndUpdate(dt);
@@ -11091,6 +11167,8 @@ function createGulls(parent, opts={}){
           for (const B of boats) if (!B.catch && Math.hypot(B.x-b.x,B.z-b.z)<150){ startFollow(b,B); break; }
       }
       b.flare=0; b.extra=0;
+      // a gull led by the host (the one the camera follows) flies to the point it is given, clear of what lies below
+      if (b.lead && b.mode<=FOLLOW){ const L=b.lead; fly(b,ctx,h,L.x-b.x,L.z-b.z,L.y,11,0.7,0.8,false); continue; }
       switch (b.mode){
       case SOAR: {
         const T=b.th; if (!T||!thermals.includes(T)){ startSoar(b,nearestThermal(b),ctx); break; }
@@ -11339,7 +11417,13 @@ function gullBoats(){
   if (sailD){ const S=sailD.state; add(sailD,S.x,S.z,S.head,Math.max(0,S.u),4); }
   return gullBoatList;
 }
-const gullCtx={player,daylight:1,wind:undefined,groundHeight:(x,z)=>walkGround(x,z,1e3),seaLevel:0,seaAt:(x,z)=>swellH(x,z),shoreDist:seaDist,boats:gullBoatList,perches:[],paused:false,origin:ORIGIN};
+// what a gull must clear: the ground, and the walls and roofs of the buildings, with a margin of 2 m round each
+function gullTopAt(x,z){ let g=walkGround(x,z,1e3); const cx=Math.floor(x/C), cz=Math.floor(z/C);
+  for (let j=-1;j<=1;j++) for (let i=-1;i<=1;i++){ const ch=chunks.get(key(cx+i,cz+j)); if (!ch) continue;
+    for (const o of ch.obbs){ const top=o.roof?o.roof.y0+(o.roof.rise||0)+(o.roof.kind==='spire'?Math.max(o.roof.w,o.roof.d)*1.6:0):o.top; if (top===Infinity||top<=g) continue;
+      const [lu,lv]=obbLocal(o,x,z); if (Math.abs(lu)<=o.hw+2&&Math.abs(lv)<=o.hd+2) g=top; } }
+  return g; }
+const gullCtx={player,daylight:1,wind:undefined,groundHeight:gullTopAt,seaLevel:0,seaAt:(x,z)=>swellH(x,z),shoreDist:seaDist,boats:gullBoatList,perches:[],paused:false,origin:ORIGIN};
 let gullSeed=SEED;
 let gullsOn=true;
 function updateGulls(dt){
