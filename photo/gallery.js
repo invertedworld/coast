@@ -1,5 +1,5 @@
 /* ================= the gallery and artist mode =================
-   The gallery (L) keeps the photographs taken with the camera, each with the artworks made from it. It lists them
+   The gallery (G) keeps the photographs taken with the camera, each with the artworks made from it. It lists them
    newest first, one row to a photo: the photo, then its artworks, each labelled with its style. A click on any item
    selects it and shows it large; Download PNG and Delete act on the item selected. Artist mode opens for a selected
    photo.
@@ -576,7 +576,7 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
       return true;
     }
     if (!gask.hidden){ if (e.code === 'Escape'){ e.preventDefault(); gask.hidden = true; } return true; }
-    if (e.code === 'Escape' || ((e.code === 'KeyL' || e.code === 'KeyG') && !e.repeat)) { e.preventDefault(); close(); return true; }
+    if (e.code === 'Escape' || (e.code === 'KeyG' && !e.repeat)) { e.preventDefault(); close(); return true; }
     if (!field && (e.code === 'ArrowLeft' || e.code === 'ArrowRight')) {
       e.preventDefault();
       const list = order();

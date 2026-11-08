@@ -516,7 +516,7 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
     if (!e.isTrusted) return;   // keys the program presses for itself (the path tracer's draw distance) pass through
     if (G.handleKey(e)) return;
     if (e.code === 'KeyC' && (!cameraKeyOk || cameraKeyOk() || S.on)) { if (!e.repeat) toggle(); return stop(e); }
-    if (e.code === 'KeyL' || e.code === 'KeyG') { if (!e.repeat) openGallery(); return stop(e); }
+    if (e.code === 'KeyG') { if (!e.repeat) openGallery(); return stop(e); }
     // Enter with the camera lowered takes a quick picture of the game's own frame, with the shutter's sound and flash
     // and no viewfinder (not while a field or a panel has the keyboard)
     if (!S.on && (e.code === 'Enter' || e.code === 'NumpadEnter')) {
