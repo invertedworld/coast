@@ -5046,7 +5046,10 @@ const beamMat=new THREE.ShaderMaterial({uniforms:THREE.UniformsUtils.merge([THRE
     #include <fog_pars_fragment>
     uniform float uK; varying float vT; varying vec3 vN; varying vec3 vV;
     void main(){ float core=pow(abs(dot(normalize(vN),normalize(vV))),2.0);
-      float a=uK*core*pow(1.0-vT,2.2)*smoothstep(0.0,0.015,vT);
+      // the far rim lies at vT = 1, where rounding can carry vT a hair past it, and the power of a negative number is
+      // undefined: drawn into the camera's floating-point target, such a pixel is black and the depth of field spreads
+      // it round the rim as a broken dark ring
+      float a=uK*core*pow(clamp(1.0-vT,0.0,1.0),2.2)*smoothstep(0.0,0.015,vT);
       float ff=0.0;
       #ifdef USE_FOG
         ff=smoothstep(fogNear,fogFar*2.2,vFogDepth);
