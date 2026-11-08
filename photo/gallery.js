@@ -140,6 +140,7 @@ export function createGallery({ renderer, scene, camera, origin, onClose }) {
 .art .tiles button:last-child{grid-column:1/-1;flex-direction:row;min-height:48px}
 .art form{display:flex;flex-direction:column;gap:14px;margin:0}
 .art form:empty{display:none}
+.art .opts .reset{margin-top:16px;width:100%}
 .art form label{display:flex;flex-direction:column;gap:6px;color:var(--plaster-dim,#d9c8b0);font-size:.9rem}
 .art form label>span{display:flex;justify-content:space-between;align-items:baseline}
 .art form output{color:var(--plaster,#f5e9d7);font-size:.88rem}
@@ -278,7 +279,7 @@ export function createGallery({ renderer, scene, camera, origin, onClose }) {
   art.innerHTML = `<header><button class="ib" data-a="back" title="Back to the pictures (Esc)" aria-label="Back">${ICON.back}</button><h2>Artist mode</h2><span class="src"></span></header>
     <div class="body"><aside><div class="scroll">
         <section><h3>Style</h3><div class="tiles">${STYLES.map(([id, name]) => `<button type="button" data-style="${id}" aria-pressed="false">${ICON[id]}${name}</button>`).join('')}</div></section>
-        <section class="opts" hidden><h3></h3><form></form></section></div>
+        <section class="opts" hidden><h3></h3><form></form><button type="button" class="reset" data-a="reset">Reset to default</button></section></div>
       <div class="dock"><div class="state"><span class="st"></span><span class="bar"><i></i></span></div>
         <div class="btns"><button class="pri" data-a="render" disabled>Render</button><button class="ok" data-a="save" disabled>Save</button></div></div></aside>
       <div class="stage"><canvas></canvas></div></div>
@@ -309,10 +310,19 @@ export function createGallery({ renderer, scene, camera, origin, onClose }) {
   const sizeStage = (w, h) => { if (stage.width !== w || stage.height !== h) { stage.width = w; stage.height = h; fitStage(); } };
   function showSource() { sizeStage(A.p.canvas.width, A.p.canvas.height); g2.drawImage(A.p.canvas, 0, 0); }
 
+  // the settings groups shown for the chosen style: the 3D render's own, or the painting time and the style's own
+  const formGroups = () => A.style === 'render3d' ? ['render3d'] : ['all', A.style];
+  const atDefault = () => formGroups().every(gid => Q_GROUPS.find(x => x.id === gid).fields.every(f => QS[gid][f.k] === f.def));
+  function syncReset() { const b = $(art, '[data-a="reset"]'); if (b) b.disabled = !A.style || atDefault(); }
+  function resetSettings() {
+    for (const gid of formGroups()) for (const f of Q_GROUPS.find(x => x.id === gid).fields) QS[gid][f.k] = f.def;
+    storeQS(); buildForm();
+  }
   function buildForm() {
     form.textContent = ''; const opts = $(art, '.opts'); opts.hidden = !A.style; if (!A.style) return;
     $(opts, 'h3').textContent = styleName(A.style);
-    const groups = A.style === 'render3d' ? ['render3d'] : ['all', A.style];
+    const groups = formGroups();
+    syncReset();
     groups.forEach((gid, gi) => {
       const g = Q_GROUPS.find(x => x.id === gid);
       if (gi) form.appendChild(document.createElement('hr'));
@@ -340,7 +350,7 @@ export function createGallery({ renderer, scene, camera, origin, onClose }) {
     const [gid, k] = (e.target.name || '').split('.'), g = Q_GROUPS.find(x => x.id === gid), f = g && g.fields.find(x => x.k === k); if (!f) return;
     QS[gid][k] = f.check ? e.target.checked : Number(e.target.value);
     if (!f.check && !f.opts) e.target.parentNode.querySelector('output').textContent = f.fmt(QS[gid][k]);
-    storeQS();
+    storeQS(); syncReset();
   });
 
   function openArt(p) {
@@ -446,6 +456,7 @@ export function createGallery({ renderer, scene, camera, origin, onClose }) {
     if (a === 'back') leaveArt();
     else if (a === 'render') A.job ? stopJob() : render();
     else if (a === 'save') save();
+    else if (a === 'reset') resetSettings();
     else if (a === 'ask-save' || a === 'ask-del') { if (a === 'ask-save') save(); const then = A.after; shutArt(); then && then(); }
     else if (a === 'ask-cancel') { ask.hidden = true; A.after = null; }
   });
