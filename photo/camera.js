@@ -327,7 +327,8 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
     const mw = camera.matrixWorld.elements.slice();
     c.photo = { width: c.width, height: c.height, time: Date.now(), on: S.on, focalLength: S.on ? S.focal : null, fNumber: S.on ? S.fNumber : null,
       focusDistance: S.on ? S.focus : null, ev: S.on ? S.ev : 0, vignette: S.on ? S.vignette : 0, fov, aspect, near: camera.near, far: camera.far,
-      projectionMatrix: pm, matrixWorld: mw, origin: origin ? { x: origin.x, y: origin.y, z: origin.z } : { x: 0, y: 0, z: 0 } };
+      projectionMatrix: pm, matrixWorld: mw, origin: origin ? { x: origin.x, y: origin.y, z: origin.z } : { x: 0, y: 0, z: 0 },
+      hour: window.__village ? window.__village.hour : null };
     if (depthOut && crop) { const d = new Float32Array(cw * ch); for (let y = 0; y < ch; y++) d.set(depthOut.subarray((y + y0) * W + x0, (y + y0) * W + x0 + cw), y * cw); depthOut = d; }
     if (depthOut) c.photo.depth = depthOut;
     job.resolve(c);

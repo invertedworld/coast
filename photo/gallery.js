@@ -563,8 +563,10 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
     // world also stands still, so that what moves in it (the trains, the boats, the people) stands where it stood in
     // every pass of the picture, and the game leaves the page's time to the picture
     const draw = renderer.render; renderer.render = () => {};
-    const V = window.__village, wasPaused = V ? V.paused : true;
+    // the scene is lit as it was at the hour the photo was taken, and the game's own hour is restored afterwards
+    const V = window.__village, wasPaused = V ? V.paused : true, h0 = V && V.hour, lit = V && V.lightHour && typeof m.hour === 'number';
     if (V) V.paused = true;
+    if (lit) V.lightHour(m.hour);
     try {
       return await pathTrace({ renderer, scene, camera: cam, signal, width: W, height: H,
         timeBudget: Q.timeBudget, startTime: t0,
@@ -572,7 +574,7 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
         onProgress: ({ phase, fraction }) => { if (live() && (phase !== 'trace' || first)) setState(phases[phase] || phase, fraction || 0); },
         // the first picture, shown before the tracing begins, leaves the phase as it is
         onFrame: (c, k) => { if (!live()) return; if (first) { sizeStage(W, H); first = false; } g2.drawImage(c, 0, 0, W, H); if (k > 0) setState(`Tracing ${Math.round(k * 100)} %`, k); } });
-    } finally { renderer.render = draw; if (V) V.paused = wasPaused; }
+    } finally { renderer.render = draw; if (lit) V.lightHour(h0); if (V) V.paused = wasPaused; }
   }
   function save() {
     const r = A.result; if (!r || A.saved || A.job) return;
