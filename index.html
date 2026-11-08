@@ -10033,7 +10033,8 @@ const descent={t:-1,dur:1.5,p:new THREE.Vector3(),q:new THREE.Quaternion(),fov:3
 // rising into the bird's-eye view the camera keeps the heading and downward tilt it had, and eases up and back from
 // the eye to its place above the player, its field of view narrowing as it goes
 const ascent={t:-1,dur:1.2,p:new THREE.Vector3(),q:new THREE.Quaternion(),fov:70,fogN:90,fogF:1500};
-function startAscent(tilt){ pitch=clamp(-tilt,0.25,1.35);
+let aerUp=0;   // how far the bird's-eye view is raised above the player, looking out towards the sky
+function startAscent(tilt){ pitch=0.25; aerUp=0;   // the bird's-eye view opens at its shallowest tilt, looking out ahead rather than down
   Object.assign(ascent,{t:0,fov:camera.fov,fogN:scene.fog.near,fogF:scene.fog.far}); ascent.p.copy(camera.position); ascent.q.copy(camera.quaternion); }
 canvas.addEventListener('dblclick',e=>{ if (mode!=='above') return;
   const r=canvas.getBoundingClientRect(); _rp.set((e.clientX-r.left)/r.width*2-1,-(e.clientY-r.top)/r.height*2+1); _ray.setFromCamera(_rp,camera); _ray.ray.origin.add(ORIGIN);
@@ -10312,7 +10313,10 @@ function tunnelLight(dt,on){
   scene.fog.color.lerp(_c2.set('#0c0a08'),tunnelK); scene.background.copy(scene.fog.color);
   if (tunnelK>0.001) _c1.copy(skyU.uMid.value).lerp(_c2,tunnelK).getRGB(FOG_MID);
 }
-function look(dx,dy){ if (mode==='dinghy'){ dgyLook.yaw-=dx*0.0026; dgyLook.pitch=clamp(dgyLook.pitch-dy*0.0026,-1.1,1.1); return; } if (mode==='coach'){ co.yaw-=dx*0.0026; co.pitch=clamp(co.pitch-dy*0.0026,-1.1,1.1); return; } if (mode==='ferry' && feChase){ feLook.yaw-=dx*0.004; feLook.pitch=clamp(feLook.pitch+dy*0.003,0.02,1.3); return; } if (mode==='ferry'){ fe.yaw-=dx*0.0026; fe.pitch=clamp(fe.pitch-dy*0.0026,-1.1,1.1); return; } if (mode==='chase'){ chase.yaw-=dx*0.004; chase.pitch=clamp(chase.pitch+dy*0.003,0.02,1.3); return; } if (mode==='follow'){ FOL.yaw-=dx*0.004; FOL.pitch=clamp(FOL.pitch+dy*0.003,-0.3,1.3); return; } if (mode==='train'){ tYaw=clamp(tYaw-dx*0.0026,-2.6,2.6); tPitch=clamp(tPitch-dy*0.0026,-1,1); return; } if (mode==='above'){ yaw-=dx*0.005; pitch=clamp(pitch+dy*0.004,0.25,1.35); } else { const pl=mode==='swim'?1.5:1.2; yaw-=dx*0.0026; fpPitch=clamp(fpPitch-dy*0.0026,-pl,pl); } }
+function look(dx,dy){ if (mode==='dinghy'){ dgyLook.yaw-=dx*0.0026; dgyLook.pitch=clamp(dgyLook.pitch-dy*0.0026,-1.1,1.1); return; } if (mode==='coach'){ co.yaw-=dx*0.0026; co.pitch=clamp(co.pitch-dy*0.0026,-1.1,1.1); return; } if (mode==='ferry' && feChase){ feLook.yaw-=dx*0.004; feLook.pitch=clamp(feLook.pitch+dy*0.003,0.02,1.3); return; } if (mode==='ferry'){ fe.yaw-=dx*0.0026; fe.pitch=clamp(fe.pitch-dy*0.0026,-1.1,1.1); return; } if (mode==='chase'){ chase.yaw-=dx*0.004; chase.pitch=clamp(chase.pitch+dy*0.003,0.02,1.3); return; } if (mode==='follow'){ FOL.yaw-=dx*0.004; FOL.pitch=clamp(FOL.pitch+dy*0.003,-0.3,1.3); return; } if (mode==='train'){ tYaw=clamp(tYaw-dx*0.0026,-2.6,2.6); tPitch=clamp(tPitch-dy*0.0026,-1,1); return; } if (mode==='above'){ yaw-=dx*0.005; const d=dy*0.004;
+    // past the shallowest tilt, the mouse raises the view itself, up to the sky; brought back, it lowers it first
+    if (d<0){ const use=Math.min(pitch-0.25,-d); pitch-=use; aerUp=Math.min(1.2,aerUp-d-use); }
+    else { const back=Math.min(aerUp,d); aerUp-=back; pitch=Math.min(1.35,pitch+d-back); } } else { const pl=mode==='swim'?1.5:1.2; yaw-=dx*0.0026; fpPitch=clamp(fpPitch-dy*0.0026,-pl,pl); } }
 // bird's-eye: two-finger drag pans, pinch zooms; a classic mouse wheel still zooms
 function panView(dx,dy){ const k=dist*0.0016, fx=-Math.sin(yaw), fz=-Math.cos(yaw), rx=Math.cos(yaw), rz=-Math.sin(yaw);
   player.x+=(rx*dx+fx*dy)*k; player.z+=(rz*dx+fz*dy)*k; player.y=Math.max(heightAt(player.x,player.z),0); player.vy=0; eyeY=player.y; }
@@ -10867,7 +10871,7 @@ function frame(now){
     if (firstCam) camPos.copy(desired); else camPos.lerp(desired,1-Math.exp(-dt*10));
     // the eased camera can lag behind rising ground, so it is also held clear of the ground where it actually is
     camPos.y=Math.max(camPos.y,heightAt(camPos.x,camPos.z)+2);
-    camera.position.copy(camPos); camLookAt(camTarget);
+    camera.position.copy(camPos); camLookAt(camTarget); if (aerUp>0) camera.rotateX(aerUp);
     // the view widens with the zoom: fog, far plane and sea grow so nothing is clipped
     const far=Math.max(3600,dist*6), fogFar=Math.max(1800,dist*4), near=Math.max(0.3,dist*0.004);
     if (camera.far!==far||camera.near!==near){ camera.far=far; camera.near=near; camera.updateProjectionMatrix(); }

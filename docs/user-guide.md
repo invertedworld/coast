@@ -20,7 +20,7 @@ Two principal views are provided.
 
 **Street level** shows the island from the player's eye, 1.62 m above the ground. It is the view used for walking, sitting, climbing, swimming and riding.
 
-**The bird's-eye view** shows the island from above. **5** changes between the two views. The bird's-eye view always opens at a low height. **+** and **−** set its height, and a pinch on a touch screen does the same; **−** at street level changes to the bird's-eye view. The arrow keys turn and tilt the view, and a two-finger drag pans across the island. The view rises to keep clear of higher ground but does not descend over lower ground.
+**The bird's-eye view** shows the island from above. **5** changes between the two views. The bird's-eye view always opens at a low height, looking out ahead; moving the mouse upwards past its shallowest tilt raises the view towards the sky. **+** and **−** set its height, and a pinch on a touch screen does the same; **−** at street level changes to the bird's-eye view. The arrow keys turn and tilt the view, and a two-finger drag pans across the island. The view rises to keep clear of higher ground but does not descend over lower ground.
 
 A double click on land in the bird's-eye view brings the camera down to street level at the point clicked over one and a half seconds, facing the same way. A double click on open water has no effect.
 
