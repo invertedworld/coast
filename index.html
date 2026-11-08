@@ -6664,7 +6664,11 @@ function createDinghy(parent, opts={}){
       S.u+=(uT-S.u)*(1-Math.exp(-h/tau));
       // a slow paddle or scull when nearly stopped
       const pd=cl(inp.paddle||0,-1,1), pg=1-sm(0.35,0.9,Math.abs(S.u));
-      if (pd) S.u+=(0.6*pd-S.u)*1.2*h*pg*Math.abs(pd);
+      // with the assisted handling a stroke forward always makes way, at up to 1.6 m/s, into the wind as well, so
+      // that a cove or a quay to windward can always be reached
+      const pull=S.mode==='assisted' && pd>0.15;
+      if (pull){ const want=1.6*pd; if (S.u<want) S.u+=(want-S.u)*1.5*h; }
+      else if (pd) S.u+=(0.6*pd-S.u)*1.2*h*pg*Math.abs(pd);
       S.u-=Math.abs(S.rud)*0.08*S.u*h;
       // leeway: more when slow, more with the board raised
       const vT=-side*(0.09*Math.abs(S.u)*(2-S.board)+0.14*sm(1,6,S.aws)*(1-sm(0,1.5,Math.abs(S.u)))*(1-luffNoGo*0.5));
@@ -6677,7 +6681,8 @@ function createDinghy(parent, opts={}){
       if (T<44 && S.u<0.55) S.ironsT+=h; else S.ironsT=Math.max(0,S.ironsT-2*h);
       S.inIrons=S.ironsT>0.6;
       // (fall +1 turns the bow to starboard; the tiller, when held over, decides the side, else the wind does)
-      if (S.inIrons){ const fall=Math.abs(S.rud)>0.1?(S.rud>0?1:-1):Math.abs(S.twa)>0.03?(S.twa>0?1:-1):S.bs;
+      if (S.inIrons && pull) S.ironsT=0;
+      if (S.inIrons && !pull){ const fall=Math.abs(S.rud)>0.1?(S.rud>0?1:-1):Math.abs(S.twa)>0.03?(S.twa>0?1:-1):S.bs;
         yawCmd=-fall*(0.12+0.10*Math.min(S.ironsT,3)+0.3*Math.abs(S.rud)); }
       S.yawRate+=(yawCmd-S.yawRate)*(1-Math.exp(-h/0.35));
       // realistic trim
@@ -8018,6 +8023,12 @@ function dinghyKey(){
   if (sailD){ if (!dinghyAshore(false)){ const HB=dgyHarbourAt(sailD.state.x,sailD.state.z); if (HB) dinghyDock(HB); else dinghyHome(); } return; }
   const N=dgyNearest(player.x,player.z);
   if (mode==='street' && N && N.e.D.canBoard(player.x,player.z)){ dinghyBoard(N.e); return; }
+  // within 100 m of a dinghy (from the street, the water or the bird's-eye view), the player takes her helm where she
+  // lies, rather than travelling to a harbour
+  if (N && N.d<100 && (mode==='street'||mode==='swim'||mode==='above')){
+    if (mode==='swim') swimLeaveHere(); const S=N.e.D.state; ridden=null;
+    if (mode==='above'){ startSwoop(camera); }
+    player.x=S.x; player.z=S.z; player.y=0; player.vy=0; eyeY=null; descent.t=ascent.t=-1; dinghyBoard(N.e); return; }
   dinghyGo(); }
 // a wind that lets the boat sail out of her harbour: if the prevailing wind comes from within 70 degrees of the
 // heading straight out to sea from the basin, it is turned to blow across that heading, from the side nearer to
@@ -10570,9 +10581,14 @@ function leaveTrain(to){
 }
 function toggleView(){
   if (mode==='coach') return;
-  // sailing, the bird's-eye view follows the boat, and returns to the helm
-  if (sailD){ if (mode==='dinghy'){ startAscent(dgyLook.pitch); mode='above'; dist=45; scene.fog.near=160; scene.fog.far=1800; camera.fov=31; camera.updateProjectionMatrix(); glowScale(); yaw=sailD.state.head+Math.PI+dgyLook.yaw; aboveY=null; firstCam=true; if (document.pointerLockElement) document.exitPointerLock(); }
-    else { ascent.t=-1; mode='dinghy'; camera.fov=FOV; camera.updateProjectionMatrix(); glowScale(); } return; }
+  // sailing, the bird's-eye view leaves the dinghy where she is, afloat, and rises over her as the ordinary view does,
+  // high enough to fly over the water, so that the view can be moved and a double click goes anywhere
+  if (sailD){ const head=sailD.state.head;
+    if (mode==='dinghy'){ dinghyAshore(true); startAscent(dgyLook.pitch); mode='above'; dist=heightAt(player.x,player.z)<0?80:45; descent.t=-1;
+      scene.fog.near=160; scene.fog.far=Math.max(1800,dist*4); camera.fov=31; camera.updateProjectionMatrix(); glowScale(); yaw=head+Math.PI+dgyLook.yaw; aboveY=null; firstCam=true;
+      if (document.pointerLockElement) document.exitPointerLock(); return; }
+    // (the view from above that followed the boat, before this change, is left the same way)
+    dinghyAshore(true); }
   if (mode==='follow'){ followLeave(); return; }
   if (riding()){ leaveTrain('street'); return; }
   // aboard a ferry the bird's-eye view follows the passenger on deck, and returns to the deck
