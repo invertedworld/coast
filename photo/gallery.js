@@ -68,6 +68,37 @@ export const ICON = {
   stop: svg('<rect x="7" y="7" width="10" height="10" rx="1.2"/>'),
 };
 
+// zooming and panning a picture in its frame: a pinch on a trackpad or a touch screen, or the mouse wheel, zooms about
+// the point under the fingers or the pointer, from the whole picture to eight times; a drag pans while it is zoomed;
+// a double click returns to the whole picture. The picture is moved with a transform, so its own size is unchanged
+function zoomPan(box, pick) {
+  const Z = { s: 1, x: 0, y: 0 }, pts = new Map(); let last = null;
+  const el = () => pick();
+  const apply = () => { const c = el(); if (!c) return; const r = box.getBoundingClientRect(), cw = c.offsetWidth, ch = c.offsetHeight;
+    // the picture never leaves the frame: it may move only as far as its enlargement allows
+    const mx = Math.max(0, (cw * Z.s - r.width) / 2, cw * (Z.s - 1) / 2), my = Math.max(0, (ch * Z.s - r.height) / 2, ch * (Z.s - 1) / 2);
+    Z.x = Math.max(-mx, Math.min(mx, Z.x)); Z.y = Math.max(-my, Math.min(my, Z.y));
+    c.style.transform = Z.s === 1 ? '' : `translate(${Z.x}px,${Z.y}px) scale(${Z.s})`; box.style.cursor = Z.s > 1 ? 'grab' : ''; };
+  const zoomAt = (k, px, py) => { const r = box.getBoundingClientRect(), cx = px - r.left - r.width / 2, cy = py - r.top - r.height / 2;
+    const s2 = Math.max(1, Math.min(8, Z.s * k)), f = s2 / Z.s; Z.x = cx - (cx - Z.x) * f; Z.y = cy - (cy - Z.y) * f; Z.s = s2;
+    if (Z.s === 1) Z.x = Z.y = 0; apply(); };
+  box.addEventListener('wheel', e => { if (!el() || box.classList.contains('stack')) return; e.preventDefault();
+    const d = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY; zoomAt(Math.exp(-d * (e.ctrlKey ? 0.012 : 0.0025)), e.clientX, e.clientY); }, { passive: false });
+  box.addEventListener('pointerdown', e => { if (!el() || box.classList.contains('stack') || e.button > 0) return; box.setPointerCapture(e.pointerId);
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY }); last = null; });
+  box.addEventListener('pointermove', e => { if (!pts.has(e.pointerId)) return; const p0 = pts.get(e.pointerId);
+    if (pts.size === 1){ if (Z.s > 1){ Z.x += e.clientX - p0.x; Z.y += e.clientY - p0.y; apply(); } }
+    else { const [a, b] = [...pts.values()], d0 = Math.hypot(a.x - b.x, a.y - b.y), mid0 = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      pts.set(e.pointerId, { x: e.clientX, y: e.clientY }); const [c, d] = [...pts.values()], d1 = Math.hypot(c.x - d.x, c.y - d.y), mid1 = { x: (c.x + d.x) / 2, y: (c.y + d.y) / 2 };
+      if (d0 > 0) zoomAt(d1 / d0, mid1.x, mid1.y); Z.x += mid1.x - mid0.x; Z.y += mid1.y - mid0.y; apply(); return; }
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY }); });
+  const up = e => { pts.delete(e.pointerId); };
+  box.addEventListener('pointerup', up); box.addEventListener('pointercancel', up);
+  box.addEventListener('dblclick', () => { Z.s = 1; Z.x = Z.y = 0; apply(); });
+  box.style.touchAction = 'none'; box.style.overflow = 'hidden';
+  return { reset() { Z.s = 1; Z.x = Z.y = 0; const c = el(); if (c && !box.classList.contains('stack')) c.style.transform = ''; box.style.cursor = ''; } };
+}
+
 export function createGallery({ renderer, scene, camera, origin, onClose, onLoad }) {
   const photos = [];
   let count = 0, sel = null;   // sel: { p: photo, w: artwork or null }, the item shown
@@ -207,6 +238,7 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
       <div class="btns"><button class="pri" data-a="del-yes">Delete</button><button data-a="del-no">Cancel</button></div></div></div>`;
   const $ = (root, q) => root.querySelector(q);
   const sheet = $(gal, '.sheet'), big = $(gal, '.big'), info = $(gal, '.info'), gask = $(gal, '.ask');
+  const bigZoom = zoomPan(big, () => big.querySelector('canvas'));
   // the divider between the pictures and the preview is dragged to resize them; its place is kept in the browser
   { const SPLIT_KEY = 'coast.gallerySplit', body = $(gal, '.body'), sp = $(gal, '.split');
     const setSplit = f => { f = Math.min(0.8, Math.max(0.15, f)); body.style.setProperty('--split', (f * 100).toFixed(2) + '%'); return f; };
@@ -253,7 +285,7 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
     $(gal, '.sum').textContent = photos.length ? `${photos.length} ${photos.length === 1 ? 'photo' : 'photos'} · ${nw} ${nw === 1 ? 'artwork' : 'artworks'}` : '';
   }
   function showSel() {
-    big.textContent = ''; info.textContent = '';
+    bigZoom.reset(); big.textContent = ''; info.textContent = '';
     if (!sel) big.innerHTML = photos.length ? '<span class="none">No picture selected</span>' : '';
     else {
       const item = sel.w || sel.p, m = item.meta;
@@ -412,8 +444,9 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
     if (k > 0 && isFinite(k)) { stage.style.width = Math.floor(stage.width * k) + 'px'; stage.style.height = Math.floor(stage.height * k) + 'px'; }
   }
   new ResizeObserver(() => { if (!art.hidden) fitStage(); }).observe($(art, '.stage'));
+  const stageZoom = zoomPan($(art, '.stage'), () => stage);
   const sizeStage = (w, h) => { if (stage.width !== w || stage.height !== h) { stage.width = w; stage.height = h; fitStage(); } };
-  function showSource() { sizeStage(A.p.canvas.width, A.p.canvas.height); g2.drawImage(A.p.canvas, 0, 0); }
+  function showSource() { stageZoom.reset(); sizeStage(A.p.canvas.width, A.p.canvas.height); g2.drawImage(A.p.canvas, 0, 0); }
 
   // the settings groups shown for the chosen style: the 3D render's own, or the painting time and the style's own
   const formGroups = () => A.style === 'render3d' ? ['render3d'] : ['all', A.style];
