@@ -10765,7 +10765,7 @@ canvas.addEventListener('wheel',e=>{ e.preventDefault(); if (mode!=='above') ret
   if (e.ctrlKey){ dist=clamp(dist*Math.exp(clamp(e.deltaY,-60,60)*0.012),7,60000); return; }
   const mouseWheel=e.deltaMode===1 || (e.deltaX===0 && Math.abs(e.deltaY)>=50 && Math.abs(e.deltaY%1)<1e-6 && Math.abs(e.deltaY)%10===0);
   if (mouseWheel){ dist=clamp(dist*Math.exp(clamp(e.deltaY,-150,150)*0.0012),7,60000); return; }
-  panView(-e.deltaX,-e.deltaY); },{passive:false});   // the camera moves the way the fingers swipe: down brings the distance nearer, and sideways likewise
+  panView(e.deltaX,-e.deltaY); },{passive:false});   // a two-finger swipe moves over the landscape as the mouse's drag does: up the trackpad travels forward, and sideways carries the landscape with the fingers
 let pinch=null;
 canvas.addEventListener('touchstart',e=>{ if (e.touches.length===2 && mode==='above'){ const [a,b]=e.touches; pinch={mx:(a.clientX+b.clientX)/2,my:(a.clientY+b.clientY)/2,d:Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY)}; } },{passive:true});
 canvas.addEventListener('touchmove',e=>{ if (pinch && e.touches.length===2){ const [a,b]=e.touches, mx=(a.clientX+b.clientX)/2, my=(a.clientY+b.clientY)/2, d=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY);
