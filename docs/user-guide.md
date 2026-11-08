@@ -46,7 +46,7 @@ Ferries run from the harbours of the main island to the offshore islands. **3** 
 
 ## Sailing
 
-Every harbour keeps a sailing dinghy at a berth. **4** within 6 m of a dinghy boards it. Elsewhere, **4** takes the player to the quay beside the dinghy of the nearest harbour.
+Every harbour keeps a sailing dinghy at a berth. In the bird's-eye view, a double click on open water brings a dinghy there and puts the player at its helm. **4** within 6 m of a dinghy boards it. Elsewhere, **4** takes the player to the quay beside the dinghy of the nearest harbour.
 
 At the helm, **A** turns the bow to port and **D** turns it to starboard; the tiller moves the opposite way, as on a real boat. **W** and **S** paddle forward and astern at up to 0.6 m/s while the boat is nearly stopped, and **S** also lets the sail fly. The sail is trimmed with the triggers of a game controller. The boat is driven by the wind, which varies in strength and direction across the day; the sail luffs and flaps when the boat points too close to the wind, and comes over in a tack or a gybe.
 

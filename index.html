@@ -10043,7 +10043,13 @@ canvas.addEventListener('dblclick',e=>{ if (mode!=='above') return;
   let a=0, b=-1; for (let t=st;t<camera.far;t+=st) if (above(t)<=0){ a=t-st; b=t; break; }
   if (b<0) return;
   for (let k=0;k<12;k++){ const m=(a+b)/2; if (above(m)>0) a=m; else b=m; }
-  const x=o.x+d.x*b, z=o.z+d.z*b, top=surfaceTopAt(x,z); if (top<0.1) return;   // open water
+  const x=o.x+d.x*b, z=o.z+d.z*b, top=surfaceTopAt(x,z);
+  // on open water at least 1.5 m deep, the nearest harbour's dinghy is brought there, heading the way the view looks,
+  // and the player takes the helm
+  if (top<0.1){ if (sailD || heightAt(x,z)>-1.5) return;
+    const H=dgyHarbourNear(x,z), e=H&&dgyMake(H); if (!e) return;
+    e.D.moor({x,z,head:Math.atan2(d.x,d.z)}); e.D.moor(null);
+    ridden=null; player.x=x; player.z=z; player.y=0; player.vy=0; eyeY=null; dinghyBoard(e); return; }
   ridden=null;
   player.x=x; player.z=z; player.y=top; player.vy=0; player.grounded=true; player.holdT=2; eyeY=null; fpPitch=0;
   const from={p:camera.position.clone(),q:camera.quaternion.clone(),fov:camera.fov,far:camera.far,fogN:scene.fog.near,fogF:scene.fog.far};
