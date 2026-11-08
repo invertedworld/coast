@@ -100,6 +100,8 @@ const DEFAULTS = {
   maxVertices: null,       // the most vertices: the path tracer keeps four float4 textures of this length on the GPU;
                            // null takes 6 million, or less likewise
   materials: true,         // glass and metal are given physical materials of their own
+  reflectivity: 1,         // how strongly glass, metal and the trains' paint reflect: 0 not at all, 1 as designed, 2 nearly
+                           // as mirrors (glass reflects more of the light, and metal and paint are made smoother)
   haze: true,              // aerial perspective in place of the game's fog
   hazeVisibility: 28000,   // metres: the meteorological visibility at sea level (extinction 3.912 / visibility)
   hazeHeight: 1200,        // metres: the scale height over which the haze thins with altitude
@@ -451,6 +453,23 @@ function convertMaterial(m, cache, list, noShadow = false, cls = CLS.BASE, own =
   if (noShadow) p.castShadow = false;
   i = list.length; list.push(p); cache.set(key, i);
   return i;
+}
+// sets the reflectivity of the glass, metal and paint among the materials: k scales the roughness of metal and paint by
+// 4^(1-k), and takes glass's index of refraction from 1 (no reflection) through 1.5 at k = 1 to 2.4 at k = 2, which
+// raises the share of light it reflects head on from 4 % to 17 %
+function setReflectivity(materials, k) {
+  for (const p of materials) {
+    const c = p.userData.cls;
+    if (c === CLS.DARK_GLASS || c === CLS.CLEAR_GLASS) {
+      if (p.userData.ior0 === undefined) p.userData.ior0 = p.ior;
+      p.ior = 1 + (p.userData.ior0 - 1) * Math.pow(Math.max(0, k), 1.5);
+      if (k <= 0) p.roughness = 1;
+      else p.roughness = 0.02;
+    } else if (c === CLS.STEEL || c === CLS.IRON || c === CLS.BRONZE || c === CLS.RAIL_TOP || c === CLS.PAINT) {
+      if (p.userData.rough0 === undefined) p.userData.rough0 = p.roughness;
+      p.roughness = Math.min(1, Math.max(0.02, p.userData.rough0 * Math.pow(4, 1 - k)));
+    }
+  }
 }
 // the classes whose pixels keep the path tracer's own colour, without the game's surface patterns
 const isDirectClass = c => c === CLS.DARK_GLASS || c === CLS.CLEAR_GLASS || c === CLS.STEEL || c === CLS.IRON || c === CLS.BRONZE || c === CLS.RAIL_TOP;
@@ -1759,6 +1778,13 @@ export async function pathTrace(opts = {}) {
   m.setDefine('RANDOM_TYPE', opt.randomType ?? 0);
   m.uniforms.uSampleClamp.value = opt.sampleClamp;
   m.uniforms.uSpecSky.value.set(1 / sky.gains[0], 1 / sky.gains[1], 1 / sky.gains[2]);
+  const reflect = Math.max(0, opt.reflectivity ?? 1);
+  if (ctx.uploaded !== S || ctx.reflect !== reflect) setReflectivity(materials, reflect);
+  if (ctx.uploaded === S && ctx.reflect !== reflect) {
+    const textures = [...new Set(materials.flatMap(x => [x.map, x.normalMap]).filter(Boolean))];
+    m.materials.updateFrom(materials, textures);
+  }
+  ctx.reflect = reflect;
   if (ctx.uploaded !== S) {
     m.bvh.updateFrom(bvh); await yieldPage();
     m.attributesArray.updateFrom(geo.attributes.normal, geo.attributes.tangent, geo.attributes.uv, geo.attributes.color); await yieldPage();

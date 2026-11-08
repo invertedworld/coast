@@ -36,6 +36,7 @@ export const Q_GROUPS = [
     { k: 'hazeVisibility', label: 'Visibility in the haze', opts: [[8000, '8 km'], [15000, '15 km'], [28000, '28 km'], [50000, '50 km'], [100000, '100 km']], def: 28000 },
     { k: 'denoise', label: 'Noise filter', opts: [[0, 'Off'], [2, 'Light'], [5, 'Normal'], [8, 'Strong']], def: 5 },
     { k: 'materials', label: 'Glass and metal', check: true, def: true },
+    { k: 'reflectivity', label: 'Reflectivity of glass and metal', opts: [[0, 'None'], [0.5, 'Low'], [1, 'Normal'], [1.5, 'High'], [2, 'Very high']], def: 1 },
     { k: 'haze', label: 'Haze', check: true, def: true } ] },
   { id: 'all', title: 'Painting', fields: [ sl('duration', 'Time to paint', 6, 0, 30, 1, v => v ? v + ' s' : 'At once') ] },
   { id: 'watercolour', title: 'Watercolour', fields: [
@@ -419,7 +420,7 @@ export function createGallery({ renderer, scene, camera, origin, onClose }) {
     try {
       return await pathTrace({ renderer, scene, camera: cam, signal, width: W, height: H,
         timeBudget: Q.timeBudget, startTime: t0,
-        samples: Q.samples, bounces: Q.bounces, horizonReach: Q.horizonReach, ptReach: Q.ptReach, hazeVisibility: Q.hazeVisibility, denoise: Q.denoise, materials: Q.materials, haze: Q.haze,
+        samples: Q.samples, bounces: Q.bounces, horizonReach: Q.horizonReach, ptReach: Q.ptReach, hazeVisibility: Q.hazeVisibility, denoise: Q.denoise, materials: Q.materials, reflectivity: Q.reflectivity, haze: Q.haze,
         onProgress: ({ phase, fraction }) => { if (live() && (phase !== 'trace' || first)) setState(phases[phase] || phase, fraction || 0); },
         // the first picture, shown before the tracing begins, leaves the phase as it is
         onFrame: (c, k) => { if (!live()) return; if (first) { sizeStage(W, H); first = false; } g2.drawImage(c, 0, 0, W, H); if (k > 0) setState(`Tracing ${Math.round(k * 100)} %`, k); } });
