@@ -7709,30 +7709,41 @@ function dgyHarbourNear(x,z){
 function dgyNearest(x,z){ let best=null, bd=1e9; for (const e of dinghies.values()){ const d=Math.hypot(e.D.state.x-x,e.D.state.z-z); if (d<bd){ bd=d; best=e; } } return best&&{e:best,d:bd}; }
 // Y: step ashore while sailing near land, or out at sea return to the quay beside the dinghy's berth; board a dinghy
 // within 6 m; otherwise go to the quay beside the nearest one
-// the underwater view (6): from wherever the player is, down to the nearest open water between 4.5 and 9 m deep, under
-// the surface and facing the shore, where the seabed and its life are in view; 6 again brings the player back to where
-// they were before, at street level
+// the underwater view (6): from wherever the player is, down to the nearest wreck on the sand offshore, some 6.5 m from
+// it and 2.6 m above the seabed, facing it; where no wreck lies within reach, the nearest open water between 4.5 and 9 m
+// deep, facing the shore. 6 again brings the player back to where they were before, at street level
 let uwReturn=null;
 function underwaterKey(){
   if (mode==='swim' && uwReturn){ const R=uwReturn; uwReturn=null; swimToStreet(R); yaw=R.yaw; fpPitch=0; return; }
   if (sailD) dinghyAshore(true); if (riding()) leaveTrain('street'); if (mode==='ferry'||ridden) leaveFerry('street'); if (mode==='above') toggleView();
   if (mode==='swim') swimLeaveHere();
   const x0=player.x, z0=player.z;
-  let best=null;
-  for (let r=10; r<=1500 && !best; r+=10){ const n=Math.max(8,Math.round(r*2*Math.PI/12));
-    for (let k=0;k<n;k++){ const a=k/n*2*Math.PI, x=x0+Math.cos(a)*r, z=z0+Math.sin(a)*r, d=-heightAt(x,z);
-      if (d<4.5 || d>9 || dgyHarbourAt(x,z)) continue;
-      // open water outside the harbours, deeper than 2 m for 15 m all round, so that the swimmer is not put in a rock
-      // pool, a harbour basin or under a quay
-      let open=true; for (let q=0;q<12&&open;q++){ const b=q/12*2*Math.PI; for (const rr of [6,15]) if (-heightAt(x+Math.cos(b)*rr,z+Math.sin(b)*rr)<2) open=false; }
-      if (open){ best={x,z,d}; break; } } }
-  if (!best) return;
+  let spot=null;
+  for (const R of [800,2000,5000]){
+    const W=diveProps(x0,z0,R).filter(P=>P.kind==='wreck').sort((a,b)=>Math.hypot(a.x-x0,a.z-z0)-Math.hypot(b.x-x0,b.z-z0))[0];
+    if (!W) continue;
+    // the swimmer lies off the wreck's beam, on whichever side the water is shallower, looking at her
+    const bx=Math.cos(W.head), bz=-Math.sin(W.head);
+    const sds=[1,-1].map(k=>({k,h:heightAt(W.x+bx*k*6.5,W.z+bz*k*6.5)})).sort((a,b)=>b.h-a.h);
+    const x=W.x+bx*sds[0].k*6.5, z=W.z+bz*sds[0].k*6.5;
+    spot={x,z,y:heightAt(x,z)+2.6,yaw:Math.atan2(-(W.x-x),-(W.z-z)),pitch:-0.3}; break; }
+  if (!spot){
+    let best=null;
+    for (let r=10; r<=1500 && !best; r+=10){ const n=Math.max(8,Math.round(r*2*Math.PI/12));
+      for (let k=0;k<n;k++){ const a=k/n*2*Math.PI, x=x0+Math.cos(a)*r, z=z0+Math.sin(a)*r, d=-heightAt(x,z);
+        if (d<4.5 || d>9 || dgyHarbourAt(x,z)) continue;
+        // open water outside the harbours, deeper than 2 m for 15 m all round, so that the swimmer is not put in a rock
+        // pool, a harbour basin or under a quay
+        let open=true; for (let q=0;q<12&&open;q++){ const b=q/12*2*Math.PI; for (const rr of [6,15]) if (-heightAt(x+Math.cos(b)*rr,z+Math.sin(b)*rr)<2) open=false; }
+        if (open){ best={x,z,d}; break; } } }
+    if (!best) return;
+    // facing up the slope of the seabed, towards the shore
+    const e=4, gx=heightAt(best.x+e,best.z)-heightAt(best.x-e,best.z), gz=heightAt(best.x,best.z+e)-heightAt(best.x,best.z-e);
+    spot={x:best.x,z:best.z,y:-Math.min(3,best.d*0.45),yaw:Math.atan2(-gx,-gz),pitch:-0.25}; }
   uwReturn={x:player.x,y:player.y,z:player.z,yaw};
-  // facing up the slope of the seabed, towards the shore
-  const e=4, gx=heightAt(best.x+e,best.z)-heightAt(best.x-e,best.z), gz=heightAt(best.x,best.z+e)-heightAt(best.x,best.z-e);
-  yaw=Math.atan2(-gx,-gz); fpPitch=-0.25;
-  player.x=best.x; player.z=best.z; mode='swim';
-  swimmer.enter({x:best.x,y:-Math.min(3,best.d*0.45),z:best.z,yaw,pitch:fpPitch});
+  yaw=spot.yaw; fpPitch=spot.pitch;
+  player.x=spot.x; player.z=spot.z; mode='swim';
+  swimmer.enter({x:spot.x,y:spot.y,z:spot.z,yaw,pitch:fpPitch});
   const S=swimmer.state; S.mode='under'; S.under=true; S.underT=2; }
 function dinghyKey(){
   if (sailD){ if (!dinghyAshore(false)){ const HB=dgyHarbourAt(sailD.state.x,sailD.state.z); if (HB) dinghyDock(HB); else dinghyHome(); } return; }

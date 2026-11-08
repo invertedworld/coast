@@ -82,7 +82,7 @@ The panel opened with **H** lists the controls. They are reproduced here for ref
 | Walking into the sea | Wades in from any shore that shelves, and swims once the water reaches the chest. |
 | W A S D (in the water) | Swim along the view. At the surface the head rides the waves; under the water the swimmer moves where the view points. |
 | Looking down and swimming forward | Dives from the surface. |
-| 6 | Takes the player under the water at the nearest open water between 4.5 and 9 m deep, outside the harbours and open for 15 m all round, facing up the slope of the seabed towards the shore, leaving any train, ferry or dinghy first. 6 again returns the player to where they were, at street level. |
+| 6 | Takes the player under the water beside the nearest wreck (`diveProps`, within 5 km), 6.5 m off her beam on the shallower side and 2.6 m above the seabed, facing her; failing a wreck, at the nearest open water between 4.5 and 9 m deep, outside the harbours and open for 15 m all round, facing up the slope of the seabed towards the shore, leaving any train, ferry or dinghy first. 6 again returns the player to where they were, at street level. |
 | C (in the water) | Dives while held. |
 | Space (in the water) | Rises while held; near the surface the head comes out of the water. |
 | Shift (in the water) | Swims faster, at the cost of more breath. |

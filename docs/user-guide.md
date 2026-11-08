@@ -58,7 +58,7 @@ At the helm, **A** turns the bow to port and **D** turns it to starboard; the ti
 
 The player wades into the sea from any shore that shelves, and swims once the water reaches the chest. **J** jumps into the sea from the edge of a quay, a mole or a moored boat, over the side of the dinghy, or from the rail of a ferry.
 
-**6** takes the player under the water, to the nearest open water between 4.5 m and 9 m deep, facing the shore. **6** again returns the player to where they were before.
+**6** takes the player under the water, beside the nearest wreck on the seabed offshore, or where no wreck lies within reach, to the nearest open water between 4.5 m and 9 m deep, facing the shore. **6** again returns the player to where they were before.
 
 In the water, **W A S D** swim in the direction of the view. At the surface the head rides the waves. Looking down while swimming forward dives; **C** held also dives, and **Space** held rises. **Shift** swims faster at the cost of more breath. Under the water the light dims and colours with depth, and wrecks, amphorae and the life of the sea bed may be found.
 
