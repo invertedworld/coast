@@ -8,7 +8,7 @@
 /* Layout: full-bleed 3D scene; plaster-and-sea panels float over it. Single deliberate look in both themes. */
 :root{
   --sea:#1d5189; --sea-deep:#123761; --plaster:#f5e9d7; --plaster-dim:#d9c8b0;
-  --coral:#d85d52; --coral-deep:#b9463d; --verdigris:#7cc3ad; --ink:#26232b;
+  --coral:#d85d52; --coral-deep:#b9463d; --accent:#2f72b8; --accent-deep:#235c97; --verdigris:#7cc3ad; --ink:#26232b;
   --panel:rgba(18,55,97,.86); --line:rgba(245,233,215,.22);
   --font-display:'Marcellus','Trajan Pro',Georgia,serif;
   --font-body:'Alegreya Sans','Gill Sans','Segoe UI',system-ui,sans-serif;
@@ -61,8 +61,8 @@ html,body{height:100%;margin:0;overflow:hidden;background:var(--sea);color:var(-
 .island button{font:500 .95rem/1 var(--font-body);color:var(--plaster);background:rgba(245,233,215,.11);border:1px solid transparent;border-radius:4px;padding:0 14px;height:38px;cursor:pointer;transition:background .12s,opacity .12s}
 .island button:hover:not(:disabled){background:rgba(245,233,215,.18)}
 .island button:disabled{opacity:.35;cursor:default}
-.island button.pri{background:var(--coral);color:#fff}
-.island button.pri:hover:not(:disabled){background:var(--coral-deep)}
+.island button.pri{background:var(--accent);color:#fff}
+.island button.pri:hover:not(:disabled){background:var(--accent-deep)}
 .island input:focus-visible,.island button:focus-visible{outline:2px solid var(--verdigris);outline-offset:2px}
 kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink);border-radius:3px;padding:3px 6px;margin-right:3px;display:inline-block;min-width:1em;text-align:center;box-shadow:0 2px 0 var(--plaster-dim)}
 .joy{position:fixed;width:110px;height:110px;margin:-55px 0 0 -55px;border-radius:50%;border:2px solid rgba(245,233,215,.55);pointer-events:none;z-index:3}
@@ -97,15 +97,16 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
       <div class="row"><span>Mouse</span><span>Look</span></div>
     </div>
     <div class="group"><h3>Scenes</h3>
-      <div class="row"><span><kbd>1</kbd></span><span>Passenger train</span></div>
-      <div class="row"><span><kbd>2</kbd></span><span>Freight train</span></div>
-      <div class="row"><span><kbd>3</kbd></span><span>Ferry</span></div>
-      <div class="row"><span><kbd>4</kbd></span><span>Sailing dinghy (press again to sail)</span></div>
-      <div class="row"><span><kbd>5</kbd></span><span>Aerial</span></div>
-      <div class="row"><span><kbd>6</kbd></span><span>Shipwreck</span></div>
+      <div class="row"><span><kbd>1</kbd></span><span>Return to origin</span></div>
+      <div class="row"><span><kbd>2</kbd></span><span>Aerial</span></div>
+      <div class="row"><span><kbd>3</kbd></span><span>Passenger train</span></div>
+      <div class="row"><span><kbd>4</kbd></span><span>Freight train</span></div>
+      <div class="row"><span><kbd>5</kbd></span><span>Ferry</span></div>
+      <div class="row"><span><kbd>6</kbd></span><span>Sailing dinghy (press again to sail)</span></div>
       <div class="row"><span><kbd>7</kbd></span><span>Seagull</span></div>
       <div class="row"><span><kbd>8</kbd></span><span>Dolphin</span></div>
-      <div class="row"><span><kbd>9</kbd></span><span>Return to origin</span></div>
+      <div class="row"><span><kbd>9</kbd></span><span>Shipwreck</span></div>
+      <div class="row"><span><kbd>0</kbd></span><span>Cycle view</span></div>
     </div>
     <div class="group"><h3>Underwater</h3>
       <div class="row"><span><kbd>J</kbd></span><span>Jump in</span></div>
@@ -120,7 +121,6 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
       <div class="row"><span><kbd>Q</kbd><kbd>E</kbd></span><span>Turn head</span></div>
     </div>
     <div class="group"><h3>Camera</h3>
-      <div class="row"><span><kbd>0</kbd></span><span>Switch view</span></div>
       <div class="row"><span><kbd>+</kbd><kbd>−</kbd></span><span>Zoom in and out</span></div>
       <div class="row"><span><kbd>B</kbd></span><span>Tilt-shift effect</span></div>
     </div>
@@ -8240,9 +8240,9 @@ function updateWisps(dt,wdt){
     wispPos[n*3]=WX[i]-ORIGIN.x; wispPos[n*3+1]=WY[i]-ORIGIN.y; wispPos[n*3+2]=WZ[i]-ORIGIN.z;
     wispDir[n*3]=WDx[i]; wispDir[n*3+1]=0.04*Math.sin(WSeed[i]*20); wispDir[n*3+2]=WDz[i]+1e-4;
     wispP[n*4]=0.25*env*WStr[i]*Math.max(k,0.35); wispP[n*4+1]=WLen[i]; wispP[n*4+2]=WSeed[i]; wispP[n*4+3]=0.05+0.03*WSeed[i]; n++; }
-  // the wind's lines are a sailing aid, not part of the scene: they are not drawn while the camera is raised, so no
-  // picture holds them
-  wispGeo.instanceCount=n; wisps.visible=n>0 && !PHOTO.on; wisps.position.copy(ORIGIN);
+  // the wind's lines are a sailing aid, not part of the scene: they are not drawn while the camera is raised, nor in
+  // the frame a picture is taken from, so no picture holds them
+  wispGeo.instanceCount=n; wisps.visible=n>0 && !PHOTO.on && !PHOTO.capturing; wisps.position.copy(ORIGIN);
   for (const k2 of ['iPos','iDir','iP']) wispGeo.attributes[k2].needsUpdate=true;
   wispU.uBright.value=surfMat.uniforms.uBright.value; wispU.uFocus.value.set(fx-ORIGIN.x,0,fz-ORIGIN.z);
 }
@@ -10063,11 +10063,11 @@ function sndFerries(dt){
     if (F.wait>0){ S.fender=(S.fender??3)-dt; if (S.fender<=0){ S.fender=3+Math.random()*6; sndPlay('ferry_fender','ferry',at(F.side*FB/2,0.6,(Math.random()-0.5)*16),{rate:0.9+Math.random()*0.2}); } }
   }
 }
-// the views are on the number keys: 1 the passenger train, 2 the goods train, 3 the ferry, 4 the dinghy, 5 the bird's-eye
-// view, 6 under the water, 7 following a gull, 8 following a dolphin, 9 back to the start, and 0 the view from behind (the train followed, the ferry or the dinghy from astern). Each is translated to the
+// the views are on the number keys: 1 back to the start, 2 the bird's-eye view, 3 the passenger train, 4 the goods train,
+// 5 the ferry, 6 the dinghy, 7 following a gull, 8 following a dolphin, 9 under the water by a wreck, and 0 the view from behind (the train followed, the ferry or the dinghy from astern). Each is translated to the
 // name the handlers below use; the letters that once did the same no longer do (C is still held to dive)
-const VIEW_KEY={Digit1:'KeyR',Numpad1:'KeyR',Digit2:'KeyG',Numpad2:'KeyG',Digit3:'KeyF',Numpad3:'KeyF',Digit4:'KeyY',Numpad4:'KeyY',
-  Digit5:'KeyV',Numpad5:'KeyV',Digit6:'Under',Numpad6:'Under',Digit7:'Gull',Numpad7:'Gull',Digit8:'Dolphin',Numpad8:'Dolphin',Digit9:'ToStart',Numpad9:'ToStart',Digit0:'KeyC',Numpad0:'KeyC'};
+const VIEW_KEY={Digit1:'ToStart',Numpad1:'ToStart',Digit2:'KeyV',Numpad2:'KeyV',Digit3:'KeyR',Numpad3:'KeyR',Digit4:'KeyG',Numpad4:'KeyG',
+  Digit5:'KeyF',Numpad5:'KeyF',Digit6:'KeyY',Numpad6:'KeyY',Digit7:'Gull',Numpad7:'Gull',Digit8:'Dolphin',Numpad8:'Dolphin',Digit9:'Under',Numpad9:'Under',Digit0:'KeyC',Numpad0:'KeyC'};
 const OLD_VIEW=new Set(['KeyR','KeyG','KeyF','KeyY','KeyV','KeyC']);
 addEventListener('keydown',e=>{ keys[e.code]=true;
   const code=VIEW_KEY[e.code]||(OLD_VIEW.has(e.code)?'':e.code);
@@ -10120,7 +10120,7 @@ const pad={x:0,y:0,lt:0,rt:0,held:new Set(),armed:true,mode:null,yCode:null,ltOn
 // the right trigger takes a picture, the bumpers zoom, the D-pad's up and down focus further and nearer and its left and
 // right change the exposure; with the camera lowered the right trigger takes a quick picture. At the helm the triggers
 // trim the sail. Pressing the left stick changes between running and walking
-const PAD_KEYS={0:'Space',2:'Digit0',3:'Digit5',4:'Minus',5:'Equal',9:'KeyH'};
+const PAD_KEYS={0:'Space',2:'Digit0',3:'Digit2',4:'Minus',5:'Equal',9:'KeyH'};
 // the look: its sensitivity and whether up and down are inverted, kept in the browser
 const padLook=(()=>{ let o={sens:1,invert:false}; try{ Object.assign(o,JSON.parse(localStorage.getItem('coast.padLook')||'{}')); }catch(_){} return o; })();
 function padLookSave(){ try{ localStorage.setItem('coast.padLook',JSON.stringify(padLook)); }catch(_){} }

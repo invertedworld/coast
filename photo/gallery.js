@@ -132,8 +132,8 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
 .gal button:hover:not(:disabled),.art button:hover:not(:disabled){background:rgba(245,233,215,.18)}
 .gal button:disabled,.art button:disabled{opacity:.35;cursor:default}
 .gal button svg,.art button svg{width:20px;height:20px;flex:none}
-.gal button.pri,.art button.pri{background:var(--coral,#d85d52);color:#fff}
-.gal button.pri:hover:not(:disabled),.art button.pri:hover:not(:disabled){background:var(--coral-deep,#b9463d)}
+.gal button.pri,.art button.pri{background:var(--accent,#2f72b8);color:#fff}
+.gal button.pri:hover:not(:disabled),.art button.pri:hover:not(:disabled){background:var(--accent-deep,#235c97)}
 .gal button.ib,.art button.ib{width:40px;padding:0;background:transparent}
 .gal button:focus-visible,.art button:focus-visible,.art input:focus-visible,.art select:focus-visible{outline:2px solid var(--verdigris,#7cc3ad);outline-offset:2px}
 .gal .body{flex:1;min-height:0;display:grid;grid-template-columns:var(--split,41.6%) 7px minmax(0,1fr)}

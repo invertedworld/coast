@@ -583,7 +583,7 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
     quick: () => quickShot(),
     enter, exit, toggle, setFocal, setAperture, setEV, setFocus, setVignette, setRatio: k => setRatio(typeof k === 'string' ? RATIOS.findIndex(q => q[0] === k) : k),
   };
-  return { get on() { return S.on; }, frame, renderLens, lookScale, api };
+  return { get on() { return S.on; }, get capturing() { return pending.length > 0; }, frame, renderLens, lookScale, api };
 }
 
 function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
