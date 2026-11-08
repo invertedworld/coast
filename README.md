@@ -111,7 +111,7 @@ The panel opened with **H** lists the controls. They are reproduced here for ref
 | ; ' (camera raised) | Exposure compensation, in thirds of a stop from −3 to +3 EV. |
 | T, Shift+T (camera raised) | Aspect ratio of the frame: Full, 16:9, 3:2, 4:3, 5:4, 1:1, 4:5, 2:3 or 9:16. |
 | , . (camera raised) | Vignette, from off to 100 per cent in tenths. |
-| L | Shows or hides the gallery. |
+| G, L | Shows or hides the gallery, from anywhere, without raising the camera. |
 | H | Shows or hides the help panel. |
 
 A game controller is supported through the Gamepad API. The left stick moves and the right stick looks. A jumps, B switches the view, X boards the ferry, Y rides in the cab and LB follows the train. Within 6 m of a dinghy, or while sailing, Y stands for the Y key instead, and a press of the right stick always does. At the helm the left stick steers and paddles and the triggers trim the sail, in place of zooming. In the water the left stick swims, A and the right trigger rise and the left trigger dives. RB sets tilt-shift, the triggers zoom, a press of the left stick switches between running and walking, the D-pad turns and tilts, Back mutes and Start shows the panel. At street level, in a coach and aboard a ferry, where the D-pad's down has nothing to tilt, it stands for the X key and sits or stands; in the bird's-eye view it tilts the view as before. Every other button already has a use, and the D-pad's down was the only one free in the places where one sits. The sticks have a wide dead zone, and after any change of view the left stick is ignored until it has returned to the centre.

@@ -576,7 +576,7 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
       return true;
     }
     if (!gask.hidden){ if (e.code === 'Escape'){ e.preventDefault(); gask.hidden = true; } return true; }
-    if (e.code === 'Escape' || (e.code === 'KeyL' && !e.repeat)) { e.preventDefault(); close(); return true; }
+    if (e.code === 'Escape' || ((e.code === 'KeyL' || e.code === 'KeyG') && !e.repeat)) { e.preventDefault(); close(); return true; }
     if (!field && (e.code === 'ArrowLeft' || e.code === 'ArrowRight')) {
       e.preventDefault();
       const list = order();
