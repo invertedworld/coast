@@ -38,11 +38,11 @@ Doors open when they are walked into. A door swings away from the side from whic
 
 A passenger railway runs along the coast, with stations in the villages and tunnels through the headlands. Goods lines branch from it.
 
-**1** rides in the cab of the passenger train; **1** again takes the player to a seat by a window in the first coach, and **1** once more steps off. **2** rides in the cab of the goods train working the nearest goods line, and sets one to work there if none is near. **0** follows the train being ridden, or otherwise the nearer train, from behind; the mouse moves the camera round the train and **+** and **−** set its distance. While following, **0** again changes to a view from beside the line, which turns to watch the train pass and then moves on to a new place ahead; **0** once more steps off. In each case **5** also steps off beside the track.
+**1** rides in the cab of the passenger train; **1** again seats the player by a window in the first coach, looking out, and **1** once more steps off. **2** rides in the cab of the goods train working the nearest goods line, and sets one to work there if none is near. **0** follows the train being ridden, or otherwise the nearer train, from behind; the mouse moves the camera round the train and **+** and **−** set its distance. While following, **0** again changes to a view from beside the line, which turns to watch the train pass and then moves on to a new place ahead; **0** once more steps off. In each case **5** also steps off beside the track.
 
 ## Travelling by ferry
 
-Ferries run from the harbours of the main island to the offshore islands. **3** boards the nearest ferry wherever it lies. **3** or **5** again steps ashore at once if the ferry is at a landing, or at the next landing if it is under way. The ferry sounds its horn three seconds before it leaves a landing, and the horn echoes from the hills.
+Ferries run from the harbours of the main island to the offshore islands. **3** boards the nearest ferry wherever it lies. **3** again seats the player by a window in the saloon, looking out; **3** once more, or **5**, steps ashore at once if the ferry is at a landing, or at the next landing if it is under way. The ferry sounds its horn three seconds before it leaves a landing, and the horn echoes from the hills.
 
 ## Sailing
 

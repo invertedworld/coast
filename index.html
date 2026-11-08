@@ -9946,7 +9946,11 @@ function jumpToGoods(){
   player.x=px; player.z=pz; player.y=Math.max(heightAt(px,pz),m.position.y-0.35); player.vy=0; player.holdT=3; eyeY=null;
   yaw=Math.atan2(px-m.position.x,pz-m.position.z); fpPitch=-0.2;
 }
-function toggleFerry(){ if (mode==='ferry'||ridden) leaveFerry(mode==='above'?'above':prevModeF); else boardFerry(); }
+// 3 steps through the ferry: aboard on the foredeck, then a window seat in the saloon, then ashore
+function toggleFerry(){
+  if (mode==='ferry' && ridden && !sit){ const q=windowSeat(FERRY_SEATS); fe.lx=q.x*0.4; fe.lz=q.z+0.5; fe.ey=FD0; feChase=false;
+    requestAnimationFrame(()=>requestAnimationFrame(()=>{ if (mode==='ferry' && !sit) sitWindow('ferry',q,[fe.lx,fe.lz,fe.ey]); })); return; }
+  if (mode==='ferry'||ridden){ sit=null; leaveFerry(mode==='above'?'above':prevModeF); } else boardFerry(); }
 function enterFerry(F,lx,lz){
   const same=ridden===F; ridden=F; mode='ferry'; fe.lx=lx; fe.lz=lz; fe.lv=0; if (!same) fe.ey=FD0;
   scene.fog.near=90; scene.fog.far=1500; sky.visible=true;
@@ -10086,9 +10090,9 @@ function sitFind(){
     const sc=d-0.6*c; if (sc<bs){ bs=sc; best=s; } }
   return best?{s:best,fr,home:[px,pz,py]}:null;
 }
-function sitKey(){
-  if (sit && sit.dir>0){ sitStand(); return; }
-  const f=sitFind(); if (!f) return;
+function sitKey(f0){
+  if (sit && sit.dir>0 && !f0){ sitStand(); return; }
+  const f=f0&&f0.s?f0:sitFind(); if (!f) return;
   const {s,fr}=f; sitM(fr);
   // where the eye is now, in the seat's frame, to ease from
   const inv=_sm.clone().invert();
@@ -10174,6 +10178,12 @@ canvas.addEventListener('touchend',endTouch); canvas.addEventListener('touchcanc
 // riding the train: the cab view (R) and the chase view (C); each key again steps off beside the track
 // R: the passenger train's cab; G: the goods train's cab; C: the chase view of the train being ridden, or else of the
 // nearer of the two
+// a window seat in a coach or the ferry's saloon, near the middle, the passenger looking half out of the window
+function windowSeat(list){ const m=Math.max(...list.map(q=>Math.abs(q.x))), W=list.filter(q=>Math.abs(q.x)>m-0.05).sort((a,b)=>Math.abs(a.z)-Math.abs(b.z));
+  return W[Math.min(W.length-1,2)]; }
+function sitWindow(fr,q,home){
+  sitKey({s:q,fr,home});
+  if (sit){ const L0=Math.atan2(q.fx,q.fz), Lw=Math.atan2(Math.sign(q.x),0); sit.L0=L0+Math.atan2(Math.sin(Lw-L0),Math.cos(Lw-L0))*0.55; sitLookSet(fr,sit.L0,-0.05); } }
 // 1 steps through the passenger train's views: the cab, then a seat by a window in the first coach, then off the train
 let coachFrom=null;
 function toggleTrain(){ if (ridden) leaveFerry(prevModeF);
@@ -10181,13 +10191,12 @@ function toggleTrain(){ if (ridden) leaveFerry(prevModeF);
   if (mode==='coach'){ if (sit) sit=null; mode='train'; rideGoods=false; cam.y=null; leaveTrain(coachFrom||'street'); coachFrom=null; return; }
   if (riding() && rideGoods) leaveTrain(prevMode); ride('train','pass'); }
 function trainSeat(){
-  const i=Math.min(1,train.cars.length-1), m=train.cars[i].m, ws=COACH_SEATS.filter(q=>Math.abs(q.x)>0.5);
-  const q=ws.length?ws[Math.floor(ws.length/2)]:{x:0,z:0};
-  yaw=m.rotation.y+Math.PI+(q.x>0?-1:1)*Math.PI/2; fpPitch=-0.05;
+  const i=Math.min(1,train.cars.length-1), m=train.cars[i].m, q=windowSeat(COACH_SEATS);
+  yaw=m.rotation.y+Math.PI; fpPitch=-0.05;
   coachEnter(i,0,q.z);
   camera.fov=70; camera.near=0.1; camera.updateProjectionMatrix(); glowScale();
   // sitting down needs the eye placed in the coach, which the next frame does
-  requestAnimationFrame(()=>requestAnimationFrame(()=>{ if (mode==='coach' && !sit) sitKey(); })); }
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{ if (mode==='coach' && !sit) sitWindow('coach',q,[0,q.z,1.3]); })); }
 function toggleGoods(){ if (ridden) leaveFerry(prevModeF); if (mode==='train' && rideGoods){ leaveTrain(prevMode); return; }
   const pm=riding()?prevMode:mode==='above'?'above':'street'; jumpToGoods(); if (!goods.R) return; ride('train','goods'); prevMode=pm; }
 // 0 with a train: following from behind, then the trackside view, then off the train
