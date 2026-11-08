@@ -1896,7 +1896,7 @@ function churchRoom(ch,cx,cz,rot,base,W,L,h,wz,seed){
     C.walls.push({x,z,hw:Math.PI*rr/n/2+0.08,hd:0.25,rot:rot+t,top:Infinity}); }
   { const [x,z]=localToWorld(C,0,-ra/2); C.area={x,z,hw:hw,hd:hl+ra/2,rot}; }
   // what is cut away inside: the nave below its roof, and the apse below its dome, clear of the walls round them
-  C.clip=[[0,0,iw,hl-WTC,h-0.3],[0,-hl-0.05-r*0.33,r*0.68,r*0.33,s+r+0.05]]; C.top=h-0.3;
+  C.clip=[[0,0,iw,hl-WTC,h-0.3,WTC],[0,-hl-0.05-r*0.33,r*0.68,r*0.33,s+r+0.05]]; C.top=h-0.3;
   (ch.rooms||(ch.rooms=[])).push(C);
   for (const sg of [1,-1]){ const [hx,hz]=localToWorld(C,-sg*CHURCH_DOOR.r,hl-WTC/2);
     const lf={x:cx,z:cz,rot,w:W,d:L,hx,hz,y:base+CF,fl:base+CF,s:sg,lw:CHURCH_DOOR.r,leaf:'church',owner:C,a:0,av:0,idle:9,col:hex('#5a3a28'),idx:-1};
@@ -2005,9 +2005,22 @@ const DOOR_GEO=(()=>{ const sh=new THREE.Shape(), Sy=DS-DF;
     gb.add(T.sph, mat(DOOR_W-0.13,1.0,z*0.075,0.07,0.07,0.07), iron, null);
     for (const y of [0.3,1.45]) gb.add(T.boxC, mat(0.22,y,z*0.04,0.42,0.05,0.025), iron, null); }
   return gb.geometry(); })();
+// whether the ground outside a window of width w, whose sill is at (x,ys,z) on the outer face of a wall in the frame
+// H and which faces ry, stands at or above the sill anywhere across the window within half a metre of the wall. A
+// house set into a slope has no window where the hillside rises against it: from the street the window would be
+// half buried, and from its room the hillside would fill it. (Ground within the wall's thickness is cut away while
+// the room is built: see addRoomClip.) The exact height is used so that every detail of a block agrees.
+function winBuried(H,oy,x,ys,z,ry,w){
+  const nx=Math.sin(ry), nz=Math.cos(ry), sill=_v2.set(x,ys,z).applyMatrix4(H).y+oy;
+  for (const o of [0.02,0.2,0.5]) for (const t of [-0.5,0,0.5]){
+    const P=_v2.set(x+nx*o+nz*t*w,ys,z+nz*o-nx*t*w).applyMatrix4(H);
+    if (heightAtExact(P.x,P.z)>sill-0.05) return true; }
+  return false;
+}
 // a window pane, drawn without its inner face, so that from inside a room the window can be seen out of but from
 // the street it cannot be seen into; a house that can be entered records its windows for its rooms
 function addWin(gb,H,x,y,z,ry,w=0.5,h=0.78,shut=null,room=null){
+  if (winBuried(H,gb.oy,x,y-h/2,z,ry,w)) return;
   gb.add(T.boxC5, mm(H,mat(x,y,z,w,h,0.12,ry)), C_.win, null, Math.random()<0.5?5:10);
   if (room) room.wins.push({x,y,z,ry,w,h});
   if (shut){ const L=mm(H,mat(x,y,z,1,1,1,ry));
@@ -3288,11 +3301,13 @@ function buildLighthouse(gb,ch,R,L){
     // at full detail the cottage can be entered: its door is on the side towards the tower, so its room is laid
     // out turned a quarter so that the door lies in its front wall
     const o2={x:hx,z:hz,rot:rot-Math.PI/2}, room=gb.lod===0?doorwayFor(ch,o2,base,0,d,h,w,1):null, H2=mat(hx,base,hz,1,1,1,o2.rot);
-    if (room) for (const v of [-1.6,1.6]) room.wins.push({x:v,y:1.9,z:-w/2,ry:Math.PI,w:0.7,h:0.95});
+    // its two windows look out from the side away from the tower, unless the ground stands against them there
+    const cwins=[-1.6,1.6].filter(v=>!winBuried(H2,0,v,1.9-0.475,-w/2,Math.PI,0.7));
+    if (room) for (const v of cwins) room.wins.push({x:v,y:1.9,z:-w/2,ry:Math.PI,w:0.7,h:0.95});
     if (room) shellWithDoor(gb,H2,d,h,w,0,wallC,base,SP,room); else gb.add(T.box, mat(hx,base,hz,w,h,d,rot), wallC, base, SP);
     gb.add(T.pyr, mat(hx,base+h,hz,w+0.7,1.7,d+0.7,rot), shade(C_.roofs[1],R,0.04), null, SR);
     gb.add(T.box, mat(hx,base+h+0.6,hz,0.6,1.6,0.6,rot), wallC, null, SP);
-    for (const v of [-1.6,1.6]){ const [px,pz]=localToWorld({x:hx,z:hz,rot},w/2+0.04,v); gb.add(T.boxC5, mat(px,base+1.9,pz,0.7,0.95,0.1,rot+Math.PI/2), C_.win, null, 5);
+    for (const v of cwins){ const [px,pz]=localToWorld({x:hx,z:hz,rot},w/2+0.04,v); gb.add(T.boxC5, mat(px,base+1.9,pz,0.7,0.95,0.1,rot+Math.PI/2), C_.win, null, 5);
     }
     if (room) addDoorFrame(gb,H2,0,w/2);
     else { const [px,pz]=localToWorld({x:hx,z:hz,rot},-w/2-0.04,0); gb.add(T.boxC, mat(px,base+1.05,pz,0.1,2.1,1.0,rot), C_.door, null, SW); }
@@ -4361,13 +4376,16 @@ function patchBuildings(mat,clip=false,local=false){
         else if (vSurf>5.5 && vSurf<6.5) totalEmissiveRadiance += diffuseColor.rgb*(0.12+2.4*uNight);`); };
   mat.customProgramCacheKey=()=>local?'buildings-local':'buildings';
 }
-// nothing of the ground or of the town outside a room is drawn inside it
-function addRoomClip(sh){
+// nothing of the ground or of the town outside a room is drawn inside it. The ground is also cut away within the
+// thickness of the room's walls (uRoomP), so that where the hillside runs into a wall it cannot be seen in the
+// reveal of a window; the walls hide it from the street.
+function addRoomClip(sh,ground=false){
   Object.assign(sh.uniforms,roomClip);
+  const P=ground?'+uRoomP[i]':'';
   sh.fragmentShader=sh.fragmentShader.replace('#include <clipping_planes_fragment>',`#include <clipping_planes_fragment>
       for (int i=0;i<${ROOM_MAX};i++){ if (i>=uRoomN) break; vec4 A=uRoomA[i], B=uRoomB[i]; vec2 d=vWP.xz-A.xy;
-        if (abs(d.x*A.z-d.y*A.w)<B.x && abs(d.x*A.w+d.y*A.z)<B.y && vWP.y>B.z && vWP.y<B.w) discard; }`)
-    .replace('#include <common>',`#include <common>\nuniform int uRoomN; uniform vec4 uRoomA[${ROOM_MAX}]; uniform vec4 uRoomB[${ROOM_MAX}];`);
+        if (abs(d.x*A.z-d.y*A.w)<B.x${P} && abs(d.x*A.w+d.y*A.z)<B.y${P} && vWP.y>B.z && vWP.y<B.w) discard; }`)
+    .replace('#include <common>',`#include <common>\nuniform int uRoomN; uniform vec4 uRoomA[${ROOM_MAX}]; uniform vec4 uRoomB[${ROOM_MAX}]; uniform float uRoomP[${ROOM_MAX}];`);
 }
 // the window panes of a room that is built are cut away, so that the room can be seen through them
 const winClip={uWinN:{value:0},uWinA:{value:Array.from({length:16},()=>new THREE.Vector4())},uWinB:{value:Array.from({length:16},()=>new THREE.Vector4())}};
@@ -4421,7 +4439,7 @@ float plazaPat(vec2 q, float R, float id, out float tint){
 `;
 function patchGround(mat){
   mat.onBeforeCompile=(sh)=>{
-    addRoomClip(sh);
+    addRoomClip(sh,true);
     sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nattribute vec2 pave; attribute vec4 plaza; varying vec2 vPave; varying vec4 vPlz; varying vec3 vWP; varying vec3 vWN;')
       .replace('#include <project_vertex>','#include <project_vertex>\nvPave=pave; vPlz=plaza; vWP=(modelMatrix*vec4(transformed,1.0)).xyz; vWN=objectNormal;');
     sh.uniforms.uOrig=origU;
@@ -4484,7 +4502,7 @@ const matTrain=new THREE.MeshLambertMaterial({vertexColors:true}); patchBuilding
 const roomU={value:new THREE.Color(1,1,1)};
 // the boxes of the rooms that are built, inside which the ground is not drawn: centre, cosine and sine of the
 // heading in A; half width, half depth and the heights between which the ground is cut away in B
-const ROOM_MAX=16, roomClip={uRoomN:{value:0},uRoomA:{value:Array.from({length:ROOM_MAX},()=>new THREE.Vector4())},uRoomB:{value:Array.from({length:ROOM_MAX},()=>new THREE.Vector4())}};
+const ROOM_MAX=16, roomClip={uRoomN:{value:0},uRoomA:{value:Array.from({length:ROOM_MAX},()=>new THREE.Vector4())},uRoomB:{value:Array.from({length:ROOM_MAX},()=>new THREE.Vector4())},uRoomP:{value:new Float32Array(ROOM_MAX)}};
 // stained glass: irregular pieces of coloured glass between lead cames, a border of one colour round each light.
 // p is in metres across the light (x, from -0.3 to 0.3) and up from its sill (y); seed picks four of six colours
 const SG_GLSL=`
@@ -9216,8 +9234,11 @@ function roomsUpdate(dt){
   for (const D of want) if (!D.room && rooms.size<ROOM_MAX-1){ D.room=D.kind==='church'?buildChurch(D):new THREE.Mesh(buildRoomGeo(D),makeRoomMaterial(false)); setRoomLights(D); D.room.position.set(D.x,0,D.z); D.room.updateMatrix(); D.room.matrixAutoUpdate=false;
     if (D.glassGB && D.glassGB.p.length){ const g=new THREE.Mesh(D.glassGB.geometry(D.x,D.z),glassMat); g.renderOrder=5; D.room.add(g); } D.glassGB=null;
     world.add(D.room); rooms.add(D); break; }
-  let n=0; for (const D of rooms) for (const b of (D.clip||[[0,(D.zb+D.zf)/2,D.iw,(D.zf-D.zb)/2]])){ if (n>=ROOM_MAX) break; const [cx,cz]=localToWorld(D,b[0],b[1]);
-    roomClip.uRoomA.value[n].set(cx-ORIGIN.x,cz-ORIGIN.z,Math.cos(D.rot),Math.sin(D.rot)); roomClip.uRoomB.value[n].set(b[2],b[3],D.fl-40,D.base+(b[4]??D.top+0.05)); n++; }
+  // each box is [u,v,half width,half depth,top,wall]: the ground is cut away a further 'wall' beyond it, 2 cm short
+  // of the outer face, so that no gap opens between the hillside and the wall
+  let n=0; for (const D of rooms) for (const b of (D.clip||[[0,(D.zb+D.zf)/2,D.iw,(D.zf-D.zb)/2,undefined,WT]])){ if (n>=ROOM_MAX) break; const [cx,cz]=localToWorld(D,b[0],b[1]);
+    roomClip.uRoomA.value[n].set(cx-ORIGIN.x,cz-ORIGIN.z,Math.cos(D.rot),Math.sin(D.rot)); roomClip.uRoomB.value[n].set(b[2],b[3],D.fl-40,D.base+(b[4]??D.top+0.05));
+    roomClip.uRoomP.value[n]=Math.max(0,(b[5]||0)-0.02); n++; }
   roomClip.uRoomN.value=n;
   let m=0; for (const D of rooms){ if (m>=ROOM_MAX) continue; const [cx,cz]=[D.x,D.z];
     winClip.uWinA.value[m].set(cx-ORIGIN.x,cz-ORIGIN.z,Math.cos(D.rot),Math.sin(D.rot));
