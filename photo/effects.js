@@ -215,6 +215,17 @@ void main(){ vec2 p=vUv*uRes/uS;
   fragColor=texture(tSrc,vUv+o*uS/uRes); }`;
 
 const WC_FINAL = `uniform sampler2D tAbs, tWet, tEdge, tP1, tP2, tGap, tTfm; uniform float uEdge, uGran, uBleed, uMargin, uWashes, uPencil;
+// a thin line where the simplified picture changes value sharply: the step in lightness across one pixel, less what
+// remains of it two pixels further out, so that broad soft changes draw nothing
+float pencilEdge(vec2 uv){
+  vec2 d=uS/uRes;
+  float gx=lum(texture(tP1,uv+vec2(d.x,0.0)).rgb)-lum(texture(tP1,uv-vec2(d.x,0.0)).rgb);
+  float gy=lum(texture(tP1,uv+vec2(0.0,d.y)).rgb)-lum(texture(tP1,uv-vec2(0.0,d.y)).rgb);
+  float g=length(vec2(gx,gy));
+  float gx2=lum(texture(tP2,uv+vec2(d.x,0.0)*2.0).rgb)-lum(texture(tP2,uv-vec2(d.x,0.0)*2.0).rgb);
+  float gy2=lum(texture(tP2,uv+vec2(0.0,d.y)*2.0).rgb)-lum(texture(tP2,uv-vec2(0.0,d.y)*2.0).rgb);
+  float g2=length(vec2(gx2,gy2))*0.5;
+  return smoothstep(0.035,0.09,g-0.6*g2); }
 float paperH(vec2 p){ // cold-pressed paper: rounded tooth and finer fibre
   vec2 w=worley(p*0.24); float t=1.0-smoothstep(0.0,0.95,w.x);
   return clamp(0.55*t+0.45*fbm(p*0.55),0.0,1.0); }
@@ -272,10 +283,21 @@ void main(){
   float edgeG=length(texture(tGap,vUv).rgb-c);
   float gap=smoothstep(0.05,0.14,edgeG)*smoothstep(0.5,0.62,fbm(p*0.015+uSeed+70.0))*hard;
   col=mix(col,paper,0.8*gap);
-  // a faint pencil drawing beneath the paint, broken where the pencil lifted
-  float e=lum(texture(tP1,vUv).rgb)-lum(texture(tP2,vUv).rgb);
-  float line=smoothstep(0.012,0.04,-e)*smoothstep(0.35,0.6,fbm(p*0.05+uSeed+30.0)+0.2);
-  col*=1.0-uPencil*0.28*line*(0.6+0.4*ph)*reveal(0.0,0.14,fbm(p*0.006+uSeed+92.0));
+  // the pencil drawing beneath the paint: thin grey graphite lines along the main edges, each drawn twice by a
+  // wandering hand, pressed harder in places, lifted here and there, and broken on the tooth of the paper, where
+  // the graphite catches the raised grain and skips the hollows
+  float st=0.0;
+  for (int k=0;k<2;k++){
+    float fk=float(k);
+    vec2 wob=vec2(fbm(p*0.012+uSeed+40.0+fk*7.3),fbm(p*0.012+uSeed+47.0+fk*5.1))-0.5;
+    vec2 uv=vUv+wob*(1.6+1.4*fk)*uS/uRes;
+    float g=pencilEdge(uv);
+    float press=(0.55+0.6*fbm(p*0.02+uSeed+33.0+fk*3.0))*(k==0?1.0:0.6);
+    float lift=smoothstep(0.32,0.46,fbm(p*0.035+uSeed+30.0+fk*11.0));
+    st=max(st,g*press*lift);
+  }
+  float grain=smoothstep(0.25,0.6,ph+0.45*(hash12(floor(px*0.9)+uSeed)-0.5));
+  float lead=clamp(uPencil*1.0*st*(0.3+0.7*grain),0.0,0.9)*reveal(0.0,0.14,fbm(p*0.006+uSeed+92.0));
   // the edge of the painting: irregular, with dry-brush breaks where the brush skipped over the tooth
   vec2 q=abs(vUv-0.5)*2.0;
   float edgeN=(fbm(p*0.0035+uSeed+21.0)-0.5)*0.5+(fbm(p*0.025+uSeed+2.0)-0.5)*0.12+(fbm(vec2(atan(vUv.y-0.5,vUv.x-0.5)*1.3,uSeed+4.0))-0.5)*0.3;
@@ -286,6 +308,9 @@ void main(){
   float erim=smoothstep(0.05,0.35,cover)*(1.0-smoothstep(0.35,0.95,cover));
   col*=1.0-0.12*erim*uEdge*lateEdge;
   col=mix(paper,col,cover);
+  // the drawing runs on past the paint into the bare paper, fading before the edge of the sheet
+  float drawn=1.0-smoothstep(0.5,0.62,e2*uMargin+edgeN*0.6*uMargin);
+  col*=mix(vec3(1.0),vec3(0.42,0.43,0.47),lead*drawn);
   // the paper's tooth, lit from the upper left
   float hx=paperH(p+vec2(1.0,0.0))-ph, hy=paperH(p+vec2(0.0,1.0))-ph;
   col*=1.0+0.09*(-hx*0.7+hy*0.7)-0.035*(1.0-ph);
@@ -303,7 +328,7 @@ function watercolour(srcTex, w, h, o) {
   blur(wob, 1.2 * s, tmp, gap);
   blur(wob, 8 * s, tmp, wet);
   blur(wob, 3 * s, tmp, edge);
-  blur(A, 1.0 * s, tmp, p1); blur(A, 2.0 * s, tmp, p2);
+  blur(srcTex, 0.8 * s, tmp, p1); blur(srcTex, 2.5 * s, tmp, p2);
   const all = [tfm, A, B, wob, wet, edge, tmp, p1, p2, gap], dispose = () => all.forEach(t => t.dispose());
   const dbg = { A, B, wob, wet, edge }[o.debug]; if (dbg) return { frame: () => show(dbg, w, h), dispose };
   return { dispose, frame: t => pass(WC_FINAL, { tAbs: wob, tGap: gap, tTfm: tfm, tWet: wet, tEdge: edge, tP1: p1, tP2: p2, uEdge: o.edge ?? 1,
