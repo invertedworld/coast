@@ -10548,11 +10548,13 @@ function tracksideSpot(RT){
   const L=RT.lead.position;
   for (let k=0;k<30;k++){ const x=RT.x+RT.dir*(35+Math.random()*30+k*4);
     const stx=RT.st(x); if (stx==='tunnel' || RT.st(x+RT.dir*30)==='tunnel') continue;
-    // beside a viaduct the camera stands on the ground below, further off, and looks up at the train crossing it
+    // beside a viaduct the camera keeps to the level of the track: on the hillside further off, where the ground rises to
+    // the rails, so that it sees the train across the deck rather than the arches from below
     const via=stx==='viaduct', y=RT.Y(x), z=RT.Z(x), s=(RT.Z(x+1)-RT.Z(x-1))/2, l=Math.hypot(1,s), nx=-s/l, nz=1/l;
-    for (const sd of (Math.random()<0.5?[1,-1]:[-1,1])){ const o=sd*(via?14+Math.random()*16:6+Math.random()*8), px=x+nx*o, pz=z+nz*o, h=heightAt(px,pz);
-      if (!(h>0.3 && (via?h<y+2:Math.abs(h-y)<5) && gullTopAt(px,pz)<=walkGround(px,pz,1e3)+0.5)) continue;
-      const ey=h+1.7+Math.random()*2.5, xm=(RT.x+x)/2;
+    const offs=via?[14,20,28,38,50,65]:[6+Math.random()*8];
+    for (const sd of (Math.random()<0.5?[1,-1]:[-1,1])) for (const oo of offs){ const o=sd*oo, px=x+nx*o, pz=z+nz*o, h=heightAt(px,pz);
+      if (!(h>0.3 && Math.abs(h-y)<(via?3:5) && gullTopAt(px,pz)<=walkGround(px,pz,1e3)+0.5)) continue;
+      const ey=via?Math.max(h+1.7,y+1.8):h+1.7+Math.random()*2.5, xm=(RT.x+x)/2;
       if (sightClear(px,ey,pz,L.x,L.y+1.8,L.z) && sightClear(px,ey,pz,xm,RT.Y(xm)+1.8,RT.Z(xm))) return {x:px,y:ey,z:pz,tx:x}; } }
   return null; }
 // the train the cab and chase views ride with: the passenger train, or the goods train when that is the nearer
