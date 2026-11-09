@@ -10940,7 +10940,7 @@ function coachStep(dt,turnIn){
   if (mode!=='coach') return;
   co.yaw+=turnIn*dt*1.8;
   let wx=(keys.KeyD?1:0)-(keys.KeyA?1:0)+joy.x+pad.x, wz=(keys.KeyW||keys.ArrowUp?1:0)-(keys.KeyS||keys.ArrowDown?1:0)-joy.y-pad.y; const wl=Math.hypot(wx,wz);
-  if (wl>0.05){ if (wl>1){ wx/=wl; wz/=wl; } const sp=((keys.ShiftLeft||keys.ShiftRight)?2.6:1.5)*dt, sy=Math.sin(co.yaw), cy=Math.cos(co.yaw);
+  if (wl>0.05){ if (wl>1){ wx/=wl; wz/=wl; } const sp=((keys.ShiftLeft||keys.ShiftRight)?2.6:1.5)*(1-0.55*crouchK)*dt, sy=Math.sin(co.yaw), cy=Math.cos(co.yaw);
     const nx=co.lx+(sy*wz-cy*wx)*sp, nz=co.lz+(cy*wz+sy*wx)*sp;
     if (coachValid(nx,nz)){ co.lx=nx; co.lz=nz; }
     // walking at a narrow opening (the doorway into the saloon or the gangway) eases the walker to its centre
@@ -10960,9 +10960,9 @@ function coachStep(dt,turnIn){
     player.x=_cvv.x; player.z=_cvv.z; player.y=_cvv.y; player.vy=0; player.holdT=0; eyeY=null;
     yaw=m.rotation.y+Math.PI+co.yaw; fpPitch=co.pitch; mode='street';
     tunnelK=0; sky.visible=true; scene.fog.near=90; scene.fog.far=1500; return; }
-  _cvv.set(co.lx,1.25+1.6,co.lz).applyMatrix4(m.matrix);
+  _cvv.set(co.lx,1.25+lerp(1.6,0.95,crouchK),co.lz).applyMatrix4(m.matrix);
   camera.position.copy(_cvv); camera.rotation.set(co.pitch,m.rotation.y+Math.PI+co.yaw,0,'YXZ');
-  player.x=_cvv.x; player.z=_cvv.z; player.y=_cvv.y-1.6; eyeY=player.y; sky.position.copy(camera.position);
+  player.x=_cvv.x; player.z=_cvv.z; player.y=_cvv.y-lerp(1.6,0.95,crouchK); eyeY=player.y; sky.position.copy(camera.position);
 }
 /* ---------- sitting ----------
    X sits on the nearest free seat within SIT_REACH that the player is turned towards: a chair, a bench, a pew, the
@@ -11792,7 +11792,7 @@ function glowScale(){ glowU.uScale.value=renderer.getPixelRatio()*innerHeight/(2
 function resize(){ const w=innerWidth, h=innerHeight; renderer.setSize(w,h,false); camera.aspect=w/h; camera.updateProjectionMatrix(); glowScale(); }
 addEventListener('resize',resize); resize();
 const camPos=new THREE.Vector3(), camTarget=new THREE.Vector3();
-let crouch=false, crouchK=0;   // Z: crouching at street level, the eye at 0.95 m instead of 1.62 m and the pace slowed
+let crouch=false, crouchK=0;   // Z: crouching at street level, in a coach and aboard the ferry, the eye at 0.95 m instead of 1.62 m and the pace slowed
 let paused=false, last=performance.now(), time=0, firstCam=true, eyeY=null, aboveY=null; const perf={t:0,n:0,sum:0,good:0};
 function frame(now){
   // P pauses the world (trains, ferries, boats, the sea, the lighthouses, the cats and the time of day) while the
@@ -11809,7 +11809,7 @@ function frame(now){
   if (sit && sit.dir>0 && Math.hypot(mx,mz)>0.3) sitStand();   // a step stands the sitter up
   const ml=Math.hypot(mx,mz), moving=started&&ml>0.05&&!onBoard()&&!sailD&&mode!=='swim'&&!(sit&&sit.dir>0);
   player.ox=player.x; player.oz=player.z;
-  crouchK+=((crouch&&mode==='street'?1:0)-crouchK)*(1-Math.exp(-dt*10));
+  crouchK+=((crouch&&(mode==='street'||mode==='coach'||mode==='ferry')?1:0)-crouchK)*(1-Math.exp(-dt*10));
   if (moving){
     if (ml>1){ mx/=ml; mz/=ml; }
     const fly=mode==='above'&&dist>60, sp=Math.min((fly?dist*0.45:4.6)*((keys.ShiftLeft||keys.ShiftRight)?(fly?2.5:1.96):1)*(fly?1:1-0.55*crouchK),fly||player.grounded||mode!=='street'?1e9:AIR_SP);
@@ -11976,10 +11976,10 @@ function frame(now){
     // walking about the main deck relative to where one looks; the eye rides the ferry's gentle motion
     fe.yaw+=turn*dt*1.8;
     { let wx=(keys.KeyD?1:0)-(keys.KeyA?1:0)+joy.x+pad.x, wz=(keys.KeyW||keys.ArrowUp?1:0)-(keys.KeyS||keys.ArrowDown?1:0)-joy.y-pad.y; const wl=Math.hypot(wx,wz);
-      if (started && wl>0.05){ if (wl>1){ wx/=wl; wz/=wl; } const sp=((keys.ShiftLeft||keys.ShiftRight)?3.4:1.9)*dt, sy=Math.sin(fe.yaw), cy=Math.cos(fe.yaw);
+      if (started && wl>0.05){ if (wl>1){ wx/=wl; wz/=wl; } const sp=((keys.ShiftLeft||keys.ShiftRight)?3.4:1.9)*(1-0.55*crouchK)*dt, sy=Math.sin(fe.yaw), cy=Math.cos(fe.yaw);
         fe.lx+=(sy*wz-cy*wx)*sp; fe.lz+=(cy*wz+sy*wx)*sp; } }
     const fox=fe.lx, foz=fe.lz;
-    ferryDeckClamp(); ferryInside(dt,fe.px??fox,fe.pz??foz); fe.px=fe.lx; fe.pz=fe.lz; fe.ey+=(ferryFloor()-fe.ey)*(1-Math.exp(-dt*12)); FERRY_EYE.set(fe.lx,fe.ey+1.65,fe.lz);
+    ferryDeckClamp(); ferryInside(dt,fe.px??fox,fe.pz??foz); fe.px=fe.lx; fe.pz=fe.lz; fe.ey+=(ferryFloor()-fe.ey)*(1-Math.exp(-dt*12)); FERRY_EYE.set(fe.lx,fe.ey+lerp(1.65,0.95,crouchK),fe.lz);
     const m=ridden.m; m.updateMatrixWorld();
     camera.position.copy(FERRY_EYE).applyMatrix4(m.matrix);
     // the eye turns with the ship as it pitches and rolls, so the deck stays level under it and the horizon moves
