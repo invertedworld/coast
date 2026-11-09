@@ -11029,15 +11029,29 @@ function sitStep(dt){
 }
 let tYaw=0, tPitch=-0.04, tunnelK=0, prevMode='street';
 // inside a tunnel the world goes dark beyond the headlights, and the darkness lifts as daylight at the far
-// portal comes into view
+// portal comes into view. While the far portal lies in a straight line of sight within 600 m, the bore up to it is
+// left clear of the dark fog and the land beyond it is seen through a glare of daylight that thins as the train draws
+// nearer, rather than lying hidden in darkness until the last fifty metres and then appearing all at once
+const tunV={vis:0}, _tc1=new THREE.Color(), _tc2=new THREE.Color();
 function tunnelLight(dt,on){
-  const RT=rideTrain(); let inT=0; if (on && RT.st(camera.position.x)==='tunnel'){ const sg=RT.dir; let ah=0; while (ah<70 && RT.st(camera.position.x+sg*(ah+2))==='tunnel') ah+=2; inT=clamp((ah-4)/50,0,1); }
+  const RT=rideTrain(), P=camera.position; let inT=0, vis=0, ah=600;
+  if (on && RT.st(P.x)==='tunnel'){ const sg=RT.dir; ah=0; while (ah<600 && RT.st(P.x+sg*(ah+2))==='tunnel') ah+=2; inT=clamp((ah-4)/50,0,1);
+    // the line from the eye to the middle of the far opening, 2.9 m above the rails there, keeps within the bore
+    // (2.6 m either side of the track and from 0.3 m to 6.5 m above the rails) all the way to it
+    if (ah<600){ const xe=P.x+sg*(ah+2), ez=RT.Z(xe), ey=RT.Y(xe)+2.9; vis=1;
+      for (let d=6;d<ah;d+=6){ const t=d/(ah+2), x=P.x+sg*d, h=lerp(P.y,ey,t)-RT.Y(x);
+        if (Math.abs(lerp(P.z,ez,t)-RT.Z(x))>2.0 || h<0.3 || h>6.5){ vis=0; break; } }
+      vis*=1-smooth((ah-350)/250); } }
   tunnelK+=(inT-tunnelK)*(1-Math.exp(-dt*4));
+  tunV.vis+=(vis-tunV.vis)*(1-Math.exp(-dt*3)); if (!on) tunV.vis=0;
   hemi.intensity*=lerp(1,0.1,tunnelK); sun.intensity*=1-tunnelK;
   sky.visible=tunnelK<0.9;
-  scene.fog.near=lerp(90,25,tunnelK); scene.fog.far=lerp(1500,140,tunnelK);
-  scene.fog.color.lerp(_c2.set('#0c0a08'),tunnelK); scene.background.copy(scene.fog.color);
-  if (tunnelK>0.001) _c1.copy(skyU.uMid.value).lerp(_c2,tunnelK).getRGB(FOG_MID);
+  // the fog inside: dark from 25 m to 140 m, or, with the far portal in sight, clear up to the portal and thickening
+  // into the colour of the daylit horizon over the 250 m beyond it
+  const v=tunV.vis, dark=_tc1.set('#0c0a08');
+  scene.fog.near=lerp(90,lerp(25,ah,v),tunnelK); scene.fog.far=lerp(1500,lerp(140,ah+250,v),tunnelK);
+  _tc2.copy(dark).lerp(scene.fog.color,v); scene.fog.color.lerp(_tc2,tunnelK); scene.background.copy(scene.fog.color);
+  if (tunnelK>0.001){ _tc2.copy(dark).lerp(skyU.uMid.value,v); _c1.copy(skyU.uMid.value).lerp(_tc2,tunnelK).getRGB(FOG_MID); }
 }
 function look(dx,dy){ if (mode==='dinghy'){ dgyLook.yaw-=dx*0.0026; dgyLook.pitch=clamp(dgyLook.pitch-dy*0.0026,-1.1,1.1); return; } if (mode==='coach'){ co.yaw-=dx*0.0026; co.pitch=clamp(co.pitch-dy*0.0026,-1.1,1.1); return; } if (mode==='ferry' && feChase){ feLook.yaw-=dx*0.004; feLook.pitch=clamp(feLook.pitch+dy*0.003,0.02,1.3); return; } if (mode==='ferry'){ fe.yaw-=dx*0.0026; fe.pitch=clamp(fe.pitch-dy*0.0026,-1.1,1.1); return; } if (mode==='chase'){ chase.yaw-=dx*0.004; chase.pitch=clamp(chase.pitch+dy*0.003,0.02,1.3); return; } if (mode==='follow'){ FOL.yaw-=dx*0.004; FOL.pitch=clamp(FOL.pitch+dy*0.003,-0.3,1.3); return; } if (mode==='train'){ tYaw=clamp(tYaw-dx*0.0026,-2.6,2.6); tPitch=clamp(tPitch-dy*0.0026,-1,1); return; } if (mode==='above'){ yaw-=dx*0.005; const d=dy*0.004;
     // past the shallowest tilt, the mouse raises the view itself, up to the sky; brought back, it lowers it first
