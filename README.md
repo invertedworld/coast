@@ -24,6 +24,7 @@ Coast may be played at <https://invertedworld.itch.io/coast>. The user guide is 
 | `testbench/sailing.html` | A stand-alone page for developing the dinghy and the wind, with a harbour, a beach and a cove (see [Sailing](#sailing)). |
 | `testbench/diving.html` | A stand-alone page for developing swimming and diving, with a beach, a rocky point, a short quay, the dinghy and the seabed to 20 m (see [Swimming and diving](#swimming-and-diving)). |
 | `testbench/trees.html` | A stand-alone page for developing the trees and plants, in the game's palette, daylight and fog: each species between an olive and a cypress, seen from 3 m or 15 m at any level of detail, and in groups in a garden, a piazza, open country, a wild hillside and on a clifftop (see [Trees and plants](#trees-and-plants)). |
+| `testbench/people.html` | A stand-alone page for developing the townspeople, who are not yet in the game: their bodies, clothes and poses, and a crowd that walks, sits, talks and plays in a small piazza with four streets. A line-up shows two rows of people standing, walking, running, sitting or talking. The research behind it is in [`docs/people-research.md`](docs/people-research.md). |
 
 ## Running the program
 
