@@ -9040,8 +9040,9 @@ function updateTrainLights(){
   headSpot.position.copy(_hv.set(0,1.3,LOCO.L/2+0.4).applyMatrix4(loco.matrix));   // the lead locomotive's nose is always its +z end
   headSpot.target.position.copy(_hv.set(0,-0.2,LOCO.L/2+60).applyMatrix4(loco.matrix));
   headSpot.intensity=12+900*dark;
-  // the saloon lamps are lit after dusk, and in a tunnel while the train is ridden, cab or coach alike
-  const lampK=Math.max(nightU.value, mode==='train'||mode==='coach'?0.2*tunnelK:0);
+  // the saloon lamps are lit after dusk, and in a tunnel while the train is ridden, cab or coach alike; they are kept
+  // low so that the saloon is not washed out
+  const lampK=Math.max(0.25*nightU.value, mode==='train'||mode==='coach'?0.2*tunnelK:0);
   const want=coachLampsOn?lampK>0.04:lampK>0.06;
   if (want!==coachLampsOn){ coachLampsOn=want; for (const c of coachLamps) c.l.intensity=0; }
   if (coachLampsOn) for (const c of coachLamps){ const m=train.cars[c.i].m; c.l.position.set(m.position.x,m.position.y+2.4,m.position.z); c.l.intensity=60*lampK; }
