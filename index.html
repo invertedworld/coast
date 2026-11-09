@@ -5765,8 +5765,11 @@ function catFits(x,z,fx,fz,y){
     for (const t of T) if (t>y+1.9) return false; }
   return true; }
 const catSurf=(T,lim)=>{ let b=-1e9; for (const t of T) if (t<=lim && t>b) b=t; return b; };
+// cats keep off the railway: the track and its bed, out to the edge of a platform
+const CAT_RAIL=2.3, catOffRail=(x,z)=>railPerp(x,z)>=CAT_RAIL;
 // a route in short steps from where the cat stands: level or gently sloping ground is walked, a rise of up to 1.9 m is
-// a leap up and a fall of up to 3 m a jump down. The route fails at a building, a tree, deep water or a higher wall
+// a leap up and a fall of up to 3 m a jump down. The route fails at a building, a tree, deep water, a higher wall or
+// the railway
 function catPlan(s,tx,tz){
   const d=Math.hypot(tx-s.x,tz-s.z), n=Math.max(1,Math.ceil(d/0.35)), pts=[]; let y=s.y;
   const fx=(tx-s.x)/(d||1), fz=(tz-s.z)/(d||1);
@@ -5777,6 +5780,7 @@ function catPlan(s,tx,tz){
     else if (Math.max(...T)>y+1.9) return null;                         // a wall too high to climb
     if (ny<y-0.45){ if (y-ny>3) return null; jump=true; }               // an edge: jump down
     if (ny<0.3) return null;                                            // water
+    if (!catOffRail(x,z)) return null;                                  // the railway
     if (!catFits(x,z,fx,fz,ny)) return null;
     pts.push({x,z,y:ny,jump}); y=ny; }
   return pts; }
@@ -5788,7 +5792,7 @@ function catHome(ch){
   if (ch.lod===0 && CAT_KINDS.has(ch.kind) && hash(ch.cx,ch.cz,2101)<0.4){
     const R=rng(Math.floor(hash(ch.cx,ch.cz,2102)*4294967296)), P=ch.piazza;
     for (let t=0;t<30;t++){ const x=P?P.x+(R()-0.5)*P.r*1.6:ch.cx*C+R()*C, z=P?P.z+(R()-0.5)*P.r*1.6:ch.cz*C+R()*C, T=catTops(x,z);
-      if (T && T[0]>0.4 && [[1,0],[0,1],[0.7,0.7],[0.7,-0.7]].every(([fx,fz])=>catFits(x,z,fx,fz,catSurf(T,T[0]+0.45)))){ ch.catHome={x,z,y:catSurf(T,T[0]+0.45),id:ch.cx+','+ch.cz,coat:Math.floor(hash(ch.cx,ch.cz,2103)*CAT_COATS.length),owl:hash(ch.cx,ch.cz,2104)<0.4}; break; } } }
+      if (T && T[0]>0.4 && catOffRail(x,z) && [[1,0],[0,1],[0.7,0.7],[0.7,-0.7]].every(([fx,fz])=>catFits(x,z,fx,fz,catSurf(T,T[0]+0.45)))){ ch.catHome={x,z,y:catSurf(T,T[0]+0.45),id:ch.cx+','+ch.cz,coat:Math.floor(hash(ch.cx,ch.cz,2103)*CAT_COATS.length),owl:hash(ch.cx,ch.cz,2104)<0.4}; break; } } }
   return ch.catHome; }
 function makeCat(coat){
   const K=CAT_COATS[coat], c=new Cat({...K,audio:null});
@@ -12930,7 +12934,7 @@ window.__village={ get seed(){ return SEED_TEXT; }, share:{state:sceneState,link
   findHarbour(){ for (let d=0;d<12;d++) for (const sd of SIDES) for (const n of [Math.floor(player.x/HARB)+d,Math.floor(player.x/HARB)-d]){ const H=harbourInfo(sd,n); if (H) return {x:H.x,z:coastZ(sd,H.x)+sd*7,W:H.W,sd,qz:coastZ(sd,H.x+H.W/2-1)+sd*2.5}; } return null; },
   findBeach(){ for (let x=player.x; x<player.x+3000; x+=10) for (const sd of SIDES){ const z=coastZ(sd,x)+sd*5; if (heightAt(x,z)<0.6 && heightAt(x,z)>0.1 && !harbourAt(sd,x)) return {x,z,sd}; } return null; },
   ridge(x){ return {x,z:ridgeZ(x)}; },
-  sea,farMesh,scene,setTilt,audioState:()=>({ctx:audioCtx&&audioCtx.state,muted,ready:SND.ready,loaded:Object.keys(SND.buf)}),SND,SNDV,SNDS,shore,surfaceAt,startAudio,updateChunks:(x,z)=>updateChunks(x,z,1e9),disposeChunk,farPoint(gi,gj){ COVE_FAST++; try{ return farPoint(gi,gj); } finally{ COVE_FAST--; } },FS,findPeak(){ const i0=Math.floor(player.x/PEAK), j0=Math.floor(player.z/PEAK); for (let r=0;r<30;r++) for (let i=-r;i<=r;i++) for (let j=-r;j<=r;j++){ const P=peakInfo(i0+i,j0+j); if (P) return P; } return null; },toggleTrain,get tunnelK(){return tunnelK;},get chase(){return chase;},railZ,railY,railState,findStation(){ const n0=Math.floor(player.x/ST_SP); for (let k=0;k<200;k++) for (const sg of [1,-1]){ const S=stationInfo(n0+sg*k); if (S) return S; } return null; },findBridge(){ const i0=Math.round(player.x/C); for (let k=0;k<300;k++) for (const sg of [1,-1]){ const X=railCross(i0+sg*k); if (X) return X; } return null; },get view(){return VIEW;},findRail(kind){ for (let x=player.x; x<player.x+6000; x+=8){ if (railState(x)===kind) return {x,z:railZ(x),y:railY(x)}; } return null; },findCountry(kind){ for (let r=0;r<20;r++) for (let i=-r;i<=r;i++) for (let j=-r;j<=r;j++){ const cx=Math.floor(player.x/C)+i, cz=Math.floor(player.z/C)+j; if (chunkKind(cx,cz)===kind) return {x:cx*C+C/2,z:cz*C+C/2}; } return null; },train,setHour:v=>{hour=v;}, get hour(){ return hour; }, lightHour(h){ hour=h; updateDaylight(); updateShadowFrame(); },
+  sea,farMesh,scene,setTilt,audioState:()=>({ctx:audioCtx&&audioCtx.state,muted,ready:SND.ready,loaded:Object.keys(SND.buf)}),SND,SNDV,SNDS,shore,surfaceAt,startAudio,updateChunks:(x,z)=>updateChunks(x,z,1e9),disposeChunk,farPoint(gi,gj){ COVE_FAST++; try{ return farPoint(gi,gj); } finally{ COVE_FAST--; } },FS,findPeak(){ const i0=Math.floor(player.x/PEAK), j0=Math.floor(player.z/PEAK); for (let r=0;r<30;r++) for (let i=-r;i<=r;i++) for (let j=-r;j<=r;j++){ const P=peakInfo(i0+i,j0+j); if (P) return P; } return null; },toggleTrain,get tunnelK(){return tunnelK;},get chase(){return chase;},cats,railPerp,railZ,railY,railState,findStation(){ const n0=Math.floor(player.x/ST_SP); for (let k=0;k<200;k++) for (const sg of [1,-1]){ const S=stationInfo(n0+sg*k); if (S) return S; } return null; },findBridge(){ const i0=Math.round(player.x/C); for (let k=0;k<300;k++) for (const sg of [1,-1]){ const X=railCross(i0+sg*k); if (X) return X; } return null; },get view(){return VIEW;},findRail(kind){ for (let x=player.x; x<player.x+6000; x+=8){ if (railState(x)===kind) return {x,z:railZ(x),y:railY(x)}; } return null; },findCountry(kind){ for (let r=0;r<20;r++) for (let i=-r;i<=r;i++) for (let j=-r;j<=r;j++){ const cx=Math.floor(player.x/C)+i, cz=Math.floor(player.z/C)+j; if (chunkKind(cx,cz)===kind) return {x:cx*C+C/2,z:cz*C+C/2}; } return null; },train,setHour:v=>{hour=v;}, get hour(){ return hour; }, lightHour(h){ hour=h; updateDaylight(); updateShadowFrame(); },
   boatCam(){ for (const ch of chunks.values()) for (const b of ch.boats) if (b.floating) return {x:b.m.position.x,z:b.m.position.z,rot:b.m.rotation.y}; return null; },
   ferries,islandRoute,coastZ,harbourInfo,ferryLanding,ferryPortInfo,hbS,sailers,harbourAt,
   // whether a walker starting at (x0,z0,y0) can reach a point where goal(x,z) holds, under the player's own rules:
