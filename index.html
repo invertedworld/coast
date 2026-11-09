@@ -6133,7 +6133,7 @@ const tileable=(ch,pcx,pcz)=>ch.lod>=2 || (ch.lod===1 && Math.max(Math.abs(ch.cx
 // still arriving it is not merged over and over again (a tile of simplified blocks takes some milliseconds); a tile a
 // block has left is rebuilt at once, whatever its state
 function updateTiles(budgetMs=2){
-  const t0=performance.now(), pcx=Math.floor(player.x/C), pcz=Math.floor(player.z/C);
+  const t0=performance.now(), pcx=ringX, pcz=ringZ;
   for (const tk of [...tilesUrgent,...tilesDirty]){
     if (performance.now()-t0>budgetMs) break;
     const urgent=tilesUrgent.has(tk); tilesUrgent.delete(tk); tilesDirty.delete(tk);
@@ -6183,23 +6183,49 @@ function setDrawLvl(step){
 }
 function wantLod(dx,dz){ const d=Math.max(Math.abs(dx),Math.abs(dz)); return d<=LOD0?0:d<=VIEW?1:d<=lodRing()?2:-1; }
 let chunkState='', queueT=0;
-const _vf=new THREE.Frustum(), _vm=new THREE.Matrix4(), _vb=new THREE.Box3();
-// The blocks waiting to be built are taken nearest first, but those the camera does not see wait longer, as though
-// eight times as far off (all but the few right round the player), so that after the draw distance is raised the view
-// fills in long before the land behind the camera. The order is worked out again whenever the rings change, and every
-// third of a second while blocks are waiting, as the camera turns
+const _vf=new THREE.Frustum(), _vm=new THREE.Matrix4(), _vb=new THREE.Box3(), _vd=new THREE.Vector3(), sortDir=new THREE.Vector3();
+// The player's velocity over the ground, smoothed over about a third of a second, whichever way they travel (on foot,
+// by train, ferry or dinghy, or carried across the bird's-eye view); a jump of more than 60 m in one frame (a journey,
+// a click to somewhere else, the world wrapping round) starts it afresh from rest
+const mot={x:NaN,z:NaN,vx:0,vz:0,ox:0,oz:0};
+function trackMotion(dt){
+  if (!(dt>0)) return;
+  const dx=player.x-mot.x, dz=player.z-mot.z; mot.x=player.x; mot.z=player.z;
+  if (!(Math.abs(dx)+Math.abs(dz)<60)){ mot.vx=mot.vz=0; mot.ox=mot.oz=0; return; }
+  const k=1-Math.exp(-dt*3); mot.vx+=(dx/dt-mot.vx)*k; mot.vz+=(dz/dt-mot.vz)*k;
+  // the rings of detail are centred up to LOD0-1 blocks ahead of a moving player, where they will be in three seconds,
+  // so that detail is added further ahead and shed sooner behind, with as many blocks in each ring as before. The
+  // player's own block and those beside it stay at full detail. The offset is a whole number of blocks, and only
+  // changes when the place three seconds ahead is three quarters of a block from it, so that it does not flicker
+  const m=Math.max(0,LOD0-1), tx=clamp(mot.vx*3/C,-m,m), tz=clamp(mot.vz*3/C,-m,m);
+  if (Math.abs(tx-mot.ox)>0.75) mot.ox=Math.round(tx); if (Math.abs(tz-mot.oz)>0.75) mot.oz=Math.round(tz);
+  mot.ox=clamp(mot.ox,-m,m); mot.oz=clamp(mot.oz,-m,m); }
+// The blocks waiting to be built are taken in the order in which they will be wanted. That is nearest the camera first
+// while the player stands still (in the bird's-eye view, the land below the camera before that further off); on the
+// move, nearest to where the camera will be in four seconds (no further ahead than half the simplified ring), so that
+// a train, a boat or a view carried across the island builds what it is heading for before what it leaves behind.
+// Those the camera does not see wait longer, as though eight times as far off, so that after the draw distance is
+// raised the view fills in long before the land behind the camera; the few blocks right round the player come first
+// of all. The order is worked out again whenever the rings change, every third of a
+// second while blocks are waiting, and at once when the camera has turned through more than 20 degrees
 function inView(cx,cz){
   const gj=Math.round((cz+0.5)*C/FS), F=farPoint(Math.round((cx+0.5)*C/FS),gj-WRAP_J*Math.round(gj/WRAP_J)), h=Math.max(F.h,0);   // the distant terrain's height there, as a guide to the block's
   _vb.min.set(cx*C-8,h-40,cz*C-8); _vb.max.set(cx*C+C+8,h+60,cz*C+C+8); return _vf.intersectsBox(_vb); }
 // loading (a whole island at once, as at the start or while a new one is seeded) builds every block outright,
 // without fading, in slices of budgetMs
+let ringX=0, ringZ=0;   // the block on which the rings of detail are centred
 function updateChunks(px,pz,budgetMs,loading=budgetMs>=1e8){
   if (window.__holdChunks && !loading) return;   // for automated checks: the blocks held as they are
-  const pcx=Math.floor(px/C), pcz=Math.floor(pz/C), RR=lodRing(), st=pcx+','+pcz+','+VIEW+','+LOD0, now=performance.now();
-  // the rings only change when the player crosses into another block or the draw distance changes
+  const lead=!loading, bx=Math.floor(px/C), bz=Math.floor(pz/C), pcx=bx+(lead?mot.ox:0), pcz=bz+(lead?mot.oz:0);
+  const RR=lodRing(), st=pcx+','+pcz+','+VIEW+','+LOD0, now=performance.now();
+  // the rings only change when the player crosses into another block, the offset ahead changes or the draw distance changes
   if (st===chunkState && !queue.length && !loading) return;
-  if (st!==chunkState || loading || now-queueT>330){
-    chunkState=st; queueT=now;
+  let turned=false; if (!loading && queue.length && now-queueT>100){ camera.getWorldDirection(_vd); turned=_vd.dot(sortDir)<0.94; }
+  if (st!==chunkState || loading || turned || now-queueT>330){
+    chunkState=st; queueT=now; ringX=pcx; ringZ=pcz; camera.getWorldDirection(sortDir);
+    // where the camera will be in four seconds, and its height above the player, in blocks
+    let ax=0, az=0; if (lead){ const L=Math.hypot(mot.vx,mot.vz)*4, Lm=Math.max(1,VIEW/2)*C, k=L>Lm?Lm/L:1; ax=mot.vx*4*k/C; az=mot.vz*4*k/C; }
+    const cam=!loading && time>2.5, qx=(cam?camera.position.x:px)/C+ax-0.5, qz=(cam?camera.position.z:pz)/C+az-0.5, qy=cam?Math.max(0,camera.position.y-player.y)/C:0, qy2=qy*qy;
     for (const [k,ch] of chunks) if (wantLod(ch.cx-pcx,ch.cz-pcz)<0){ chunks.delete(k); farDirty=true; maskDirty=true; untile(ch);
       if (!loading){ if (ch.prev){ disposeChunk(ch.prev); ch.prev=null; } dying.push(ch); } else disposeChunk(ch); }
       else if (ch.tiled && !tileable(ch,pcx,pcz)) untile(ch);   // come near enough to cast its own shadow again
@@ -6210,12 +6236,12 @@ function updateChunks(px,pz,budgetMs,loading=budgetMs>=1e8){
       queue=[];
       for (let dz=-RR;dz<=RR;dz++) for (let dx=-RR;dx<=RR;dx++){
         const w=wantLod(dx,dz); if (w<0) continue;
-        const ch=chunks.get(key(pcx+dx,pcz+dz)), d2=dx*dx+dz*dz;
-        // as [cx, cz, priority, detail wanted, squared distance in blocks]
-        const pr=()=>look && d2>8 && !inView(pcx+dx,pcz+dz)?d2*8:d2;
-        if (!ch) queue.push([pcx+dx,pcz+dz,pr(),w,d2]);
-        else if (ch.lod>w) queue.push([pcx+dx,pcz+dz,pr(),w,d2]);         // needs more detail
-        else if (ch.lod<w) queue.push([pcx+dx,pcz+dz,1e6+d2,w,d2]);       // can shed detail, low priority
+        const cx=pcx+dx, cz=pcz+dz, ch=chunks.get(key(cx,cz)), d2=(cx-bx)*(cx-bx)+(cz-bz)*(cz-bz), a2=(cx-qx)*(cx-qx)+(cz-qz)*(cz-qz)+qy2;
+        // as [cx, cz, priority, detail wanted, squared distance from the player's block, in blocks]
+        const pr=()=>d2<=2?d2-10:look && d2>8 && !inView(cx,cz)?(a2+2)*8:a2;
+        if (!ch) queue.push([cx,cz,pr(),w,d2]);
+        else if (ch.lod>w) queue.push([cx,cz,pr(),w,d2]);         // needs more detail
+        else if (ch.lod<w) queue.push([cx,cz,1e6+d2,w,d2]);       // can shed detail, low priority
       }
     } finally { if (look) COVE_FAST--; }
     queue.sort((a,b)=>a[2]-b[2]);
@@ -6233,7 +6259,8 @@ function updateChunks(px,pz,budgetMs,loading=budgetMs>=1e8){
     if (ch.fade>=1) tilesDirty.add(tileKey(ch));
   }
 }
-// for automated checks: the blocks waiting, each as [cx, cz, priority, detail wanted, squared distance in blocks]
+// for automated checks: the blocks waiting, each as [cx, cz, priority, detail wanted, squared distance from the player's
+// block, in blocks]
 window.__chunkQueue=()=>queue;
 // for automated checks of pop-in: of the blocks wanted round the player that the camera sees within the fog, those
 // missing and those built with less detail than wanted, counted out to 400 m and to the fog; and the blocks that
@@ -11827,7 +11854,7 @@ function frame(now){
   { const q=camera.quaternion, P=camStill.p, Q=camStill.q;
     if (Math.abs(camera.position.x-P.x)+Math.abs(camera.position.y-P.y)+Math.abs(camera.position.z-P.z)>0.02 || Math.abs(q.dot(Q))<0.999999) camStill.t=0; else camStill.t+=dt;
     P.copy(camera.position); Q.copy(q); }
-  updateChunks(player.x,player.z,fillBoost?(camStill.t>0.25?24:12):6); if (fillBoost && !queue.length) fillBoost=false; updateFades(dt); updateTiles(fillBoost?6:2); roomsUpdate(dt);
+  trackMotion(dt); updateChunks(player.x,player.z,fillBoost?(camStill.t>0.25?24:12):6); if (fillBoost && !queue.length) fillBoost=false; updateFades(dt); updateTiles(fillBoost?6:2); roomsUpdate(dt);
   // dynamic draw distance: frames spent building blocks are ignored; slow frames shrink the view, sustained headroom grows it
   // a draw distance fixed with Page Up or Page Down is left as it is
   // (with the eye in the water the draw distance is left as it was: under the water the land beyond reach is not drawn,
