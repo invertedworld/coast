@@ -72,11 +72,11 @@ The clock runs continuously. **T** held speeds time forty times; **Shift** and *
 
 ## People
 
-**K** shows or hides the townspeople. They are hidden when the game starts. When shown, people go about the streets of the villages near the player, and gather in the squares, on the station platforms and at the ferry landings. More are about in the evening, fewer in the early afternoon and few at night. They walk alone, in couples, with friends or with children, stop to talk, sit on the benches and the café chairs, and look about them; children run ahead, hold a parent's hand or play together. They step aside for one another and for the player.
+**K** raises the population level and **Shift+K** lowers it, from 0, at which there is no one, to 9, at which the streets are crowded; the new level is shown briefly at the top of the screen. The level is 0 when the game starts. At a level above 0, people go about the streets of the villages near the player, and gather in the squares, on the station platforms and at the ferry landings. More are about in the evening, fewer in the early afternoon and few at night. They walk alone, in couples, with friends or with children, stop to talk, sit on the benches and the café chairs, and look about them; children run ahead, hold a parent's hand or play together. They step aside for one another and for the player.
 
-People arrive and leave out of the player's sight, so that no one appears or vanishes in view. Passengers sit in the coaches of the train and the saloon of the ferry. When the train stands at a station, some passengers walk out through the doors on the platform side and people waiting on the platform walk aboard; when a ferry lies at a landing, passengers come down the gangway and those waiting on the quay go up it. A seat on which a person is sitting cannot be taken with **X**.
+A change of level takes effect at once: people appear or leave wherever they are. Otherwise people arrive and leave out of the player's sight, so that no one appears or vanishes in view. Passengers sit in the coaches of the train and the saloon of the ferry. When the train stands at a station, some passengers walk out through the doors on the platform side and people waiting on the platform walk aboard; when a ferry lies at a landing, passengers come down the gangway and those waiting on the quay go up it. A seat on which a person is sitting cannot be taken with **X**.
 
-> **Example:** To watch passengers boarding, show the people with **K**, wait on a station platform and stand clear of the doors when the train comes to rest.
+> **Example:** To watch passengers boarding, raise the population level with **K**, wait on a station platform and stand clear of the doors when the train comes to rest.
 
 ## The island
 
@@ -146,7 +146,7 @@ The arrow at the top left returns to the gallery, as does **Esc**. If the finish
 
 **Tab** sets full screen. **Page Up** and **Page Down** increase and reduce the draw distance through eleven fixed levels. **Home** returns the draw distance to automatic, in which the distance is adjusted to keep the frame rate near 60 frames per second. **O** shows or hides an overlay with the frame rate, the frame time, the draw distance, the number of blocks drawn, the draw calls, the triangles, the player's position and the seed of the island.
 
-**K** shows or hides the townspeople (see People). **M** mutes or restores the sound. The sound is positional: fountains, church bells, the sea, trains, ferries, gulls and cats are heard from where they are, and the ambience changes between day and night.
+**K** and **Shift+K** raise and lower the population level (see People). **M** mutes or restores the sound. The sound is positional: fountains, church bells, the sea, trains, ferries, gulls and cats are heard from where they are, and the ambience changes between day and night.
 
 ## Game controllers and touch screens
 

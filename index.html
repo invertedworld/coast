@@ -149,7 +149,8 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
     <div class="group"><h3>Other</h3>
       <div class="row"><span><kbd>Tab</kbd></span><span>Full screen</span></div>
       <div class="row"><span><kbd>M</kbd></span><span>Mute sound</span></div>
-      <div class="row"><span><kbd>K</kbd></span><span>Show or hide people</span></div>
+      <div class="row"><span><kbd>K</kbd></span><span>More people</span></div>
+      <div class="row"><span><kbd>Shift</kbd>+<kbd>K</kbd></span><span>Fewer people</span></div>
       <div class="row"><span><kbd>P</kbd></span><span>Pause</span></div>
       <div class="row"><span><kbd>T</kbd></span><span>Advance time</span></div>
       <div class="row"><span><kbd>Shift</kbd>+<kbd>T</kbd></span><span>Reverse time</span></div>
@@ -10638,7 +10639,7 @@ addEventListener('keydown',e=>{ keys[e.code]=true;
   if (code==='KeyO' && !e.repeat){ statsEl.hidden=!statsEl.hidden; statsT=0; }
   if (code==='KeyN' && !e.repeat){ hour=nightU.value>0.5?10:22; SNDS.hour=Math.floor(hour); }   // to night, or back to day, without the bells striking the jump
   if (code==='KeyM' && !e.repeat) setMuted(!muted);
-  if (code==='KeyK' && !e.repeat){ PEOPLE.setOn(!PEOPLE.on); toast('People',PEOPLE.on?'On':'Off'); }
+  if (code==='KeyK' && !e.repeat){ PEOPLE.setLevel(PEOPLE.level+(e.shiftKey?-1:1)); toast('Population level',`${PEOPLE.level}`); }   // 0, no one, to 9
   if (code==='Tab'){ e.preventDefault(); if (!e.repeat) try{ if (document.fullscreenElement) document.exitFullscreen(); else { const q=document.documentElement.requestFullscreen(); if (q&&q.catch) q.catch(()=>{}); } }catch(_){} }
   if ((code==='Minus'||code==='NumpadSubtract') && (mode==='street'||(mode==='ferry'&&!feChase)) && !e.repeat) toggleView();
   if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(code)) e.preventDefault(); });
@@ -11715,8 +11716,9 @@ addEventListener('resize',resize); resize();
 const camPos=new THREE.Vector3(), camTarget=new THREE.Vector3();
 let crouch=false, crouchK=0;   // Z: crouching at street level, the eye at 0.95 m instead of 1.62 m and the pace slowed
 /* ---------- people ----------
-   The townspeople (people/people.js): a few in each square, waiting on the platforms and at the ferry landings, and
-   passengers on the trains and the ferries. K turns them on and off; they are off at first. */
+   The townspeople (people/people.js): in the streets and squares, waiting on the platforms and at the ferry landings,
+   and passengers on the trains and the ferries. K raises the population level and Shift+K lowers it, from 0 (no
+   one, the level at first) to 9. */
 const PEOPLE=createPeople({ world, origin:ORIGIN, camera, C, topAt, heightAt,
   block:(cx,cz)=>chunks.get(key(cx,cz))||null,
   // a place comes to life once its block is built in full and the blocks round it are built
@@ -12866,7 +12868,7 @@ function updateStats(){
     ['Triangles',`${(info.render.triangles/1e6).toFixed(2)} million`],
     // the script's memory in use and its limit (where the browser reports it), and what is held on the graphics card
     ['Memory',(performance.memory?`${Math.round(performance.memory.usedJSHeapSize/1048576)} of ${Math.round(performance.memory.jsHeapSizeLimit/1048576)} MB, `:'')+`${info.memory.geometries} geometries, ${info.memory.textures} textures`],
-    ['People',PEOPLE.on?(q=>`${q.people} about, ${q.passengers} travelling, in ${q.places} places`)(PEOPLE.stats()):'off'],
+    ['People',PEOPLE.on?(q=>`level ${PEOPLE.level}: ${q.people} about, ${q.passengers} travelling, in ${q.places} places`)(PEOPLE.stats()):'level 0'],
     ['Position',`${player.x.toFixed(0)}, ${player.z.toFixed(0)}, height ${player.y.toFixed(1)} m`],
     ['Seed',SEED_TEXT]];
   statsEl.innerHTML=rows.map(([k,v])=>`<span>${k}</span><span>${v}</span>`).join('');

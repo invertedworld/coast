@@ -514,7 +514,10 @@ function buildPose(p, t, Q){
           seatTaken(seat): whether the player or a cat is on one of a block's seats,
           train: { cars(), wait(), doorOpen(), obj() (the train's state: x, dir, v, wait), stationNear(x,r), railZ(x), CDX, CDZ, seats, playerCar() },
           ferry: { list(), quay(R,stop), FB, FPL, FGZ, FD0, FSZ0, seats, ridden() } } */
-const VIEW_FAR=420, ACT_R=120, CAP=40, MAXP=72, SQUARE_KINDS=new Set(['piazza','church']), TOWN_KINDS=new Set(['quarter','piazza','church','shore']), TOWN_W=160;
+/* The population level, 0 (no one) to 9, scales every place's numbers, the cap and the passengers; level 3 is the
+   ordinary town. */
+const LEVELS=[0,0.3,0.6,1,1.5,2.2,3.2,4.6,6.6,10];
+const VIEW_FAR=420, ACT_R=120, CAP0=40, MAXP=520, SQUARE_KINDS=new Set(['piazza','church']), TOWN_KINDS=new Set(['quarter','piazza','church','shore']), TOWN_W=160;
 const NB=[[1,0,1],[-1,0,1],[0,1,1],[0,-1,1],[1,1,1.4142],[1,-1,1.4142],[-1,1,1.4142],[-1,-1,1.4142]];
 
 // a place's grid: walkable cells with their heights, clearance to walls and drops, and paths by flow fields
@@ -580,7 +583,7 @@ export function createPeople(ctx){
   const O=ctx.origin, cam=ctx.camera;
   const body=createPeopleMesh(ctx.world, MAXP, O); body.mesh.visible=false;
   const people=[], groups=[], places=new Map(), games=[], pax=[];
-  let on=false, simT=0, NEXT=1, scanT=0, wasWait=0; const ferryWas=new Map();
+  let on=false, level=0, mult=0, fillUntil=-1, simT=0, NEXT=1, scanT=0, wasWait=0; const ferryWas=new Map();
   const POSE=newPose(), rnd=Math.random, rand=(a,b)=>a+rnd()*(b-a);
 
   /* ---------- what the camera sees ---------- */
@@ -593,7 +596,7 @@ export function createPeople(ctx){
   /* ---------- places ---------- */
   function hashS(s){ let h=0; for (let i=0;i<s.length;i++) h=Math.imul(h,31)+s.charCodeAt(i)|0; return (h>>>0)/4294967296; }
   function newPlace(key,kind,cx,cz,w,d,surf,extra){
-    return Object.assign({key,kind,x:cx,z:cz,G:makeGrid(cx-w/2,cz-d/2,w,d,surf),seen:simT,base:2+Math.floor(hashS(key)*3),seatSets:[],spots:[],exits:[],spawnT:0,setup:false},extra);
+    return Object.assign({key,kind,x:cx,z:cz,G:makeGrid(cx-w/2,cz-d/2,w,d,surf),seen:simT,base:2+Math.floor(hashS(key)*3),seatSets:[],spots:[],exits:[],spawnT:0,setup:false,filled:simT>fillUntil},extra);
   }
   // once the grid is built: the places to stop, the ways in and out, and the seats whose approach lies on the grid
   function setupPlace(pl){
@@ -651,9 +654,9 @@ export function createPeople(ctx){
   function target(pl){
     if (pl.gone||!pl.G.ready) return 0;
     const h=ctx.hour(), n=ctx.night(), f=n>0.7?0.3:(h>13.5&&h<16)?0.5:(h>18&&h<21.5)?1.4:1;
-    if (pl.kind==='town') return Math.round(14*f);
-    if (pl.kind==='square') return Math.round(pl.base*f);
-    return Math.max(1,Math.round(pl.base*Math.max(0.5,f)*0.7));   // someone is nearly always waiting for the train or the ferry
+    if (pl.kind==='town') return Math.round(14*f*mult);
+    if (pl.kind==='square') return Math.round(pl.base*f*mult);
+    return Math.max(mult>0?1:0,Math.round(pl.base*Math.max(0.5,f)*0.7*mult));   // someone is nearly always waiting for the train or the ferry
   }
 
   /* ---------- people and groups ---------- */
@@ -1061,9 +1064,9 @@ export function createPeople(ctx){
         g.dest=e?{kind:'leave',x:e.x,z:e.z}:{kind:'spot',x:p.x,z:p.z}; continue; }
       if (Math.hypot(p.x-cam.position.x,p.z-cam.position.z)>600&&hiddenAt(p.x,p.y,p.z)) pax.splice(pax.indexOf(p),1); }
     // a few passengers take their seats while the train or the ferry is out of sight
-    if (wait<=0&&cars.length&&pax.filter(p=>p.veh.kind==='coach').length<6){ const ci=1+Math.floor(rnd()*(cars.length-2)), c=cars[ci], w=toWorld(c.m,0,1.5,0);
+    if (wait<=0&&cars.length&&pax.filter(p=>p.veh.kind==='coach').length<Math.round(6*Math.min(mult,4))){ const ci=1+Math.floor(rnd()*(cars.length-2)), c=cars[ci], w=toWorld(c.m,0,1.5,0);
       if (c&&!c.loco&&hiddenAt(w.x,w.y,w.z)&&T.playerCar()!==ci&&Math.hypot(w.x-cam.position.x,w.z-cam.position.z)<500){ const s=pick(rnd,ctx.train.seats), v={kind:'coach',car:ci,seat:s,state:'sit'}; if (seatFree(v,s)){ const p=makePax(v); pax.push(p); paxStep(p,0); } } }
-    for (const F of ctx.ferry.list()){ if (!F.R||F.wait>0||!F.m.visible||ctx.ferry.ridden()===F) continue; if (pax.filter(p=>p.veh.F===F).length>=5) continue;
+    for (const F of ctx.ferry.list()){ if (!F.R||F.wait>0||!F.m.visible||ctx.ferry.ridden()===F) continue; if (pax.filter(p=>p.veh.F===F).length>=Math.round(5*Math.min(mult,4))) continue;
       const w=toWorld(F.m,0,2,0); if (!hiddenAt(w.x,w.y,w.z)||Math.hypot(w.x-cam.position.x,w.z-cam.position.z)>500) continue;
       const s=pick(rnd,ctx.ferry.seats), v={kind:'ferry',F,seat:s,state:'sit'}; if (seatFree(v,s)){ const p=makePax(v); pax.push(p); paxStep(p,0); } }
   }
@@ -1073,16 +1076,18 @@ export function createPeople(ctx){
     let total=people.length, buildLeft=1200;
     for (const pl of places.values()){
       if (!pl.G.ready){ if (buildLeft>0){ const n=Math.min(buildLeft,900); pl.G.build(n); buildLeft-=n; } continue; } if (!pl.setup) setupPlace(pl);
-      pl.spawnT-=dt; if (pl.spawnT>0) continue; pl.spawnT=pl.kind==='town'?0.6+rnd()*0.8:1.2+rnd()*1.5;
-      const here=people.filter(p=>p.place===pl).length, t=target(pl);
-      if (here<t&&total<CAP){
+      const now=!pl.filled; pl.spawnT-=dt; if (pl.spawnT>0&&!now) continue; pl.spawnT=(pl.kind==='town'?0.6+rnd()*0.8:1.2+rnd()*1.5)/Math.max(1,mult/2);
+      let here=people.filter(p=>p.place===pl).length; const t=target(pl);
+      for (let k=0;k<(now?60:Math.ceil(Math.max(1,mult/2)));k++){ if (!(here<t&&total<CAP0*mult)) break;
         // where no one sees: a way into the place, or a spot within it, out of view
         const P=ctx.player(), cands=pl.kind==='town'?pl.spots.filter(c=>{ const d=Math.hypot(c.x-P.x,c.z-P.z); return d>25&&d<80; }).sort(()=>rnd()-0.5).slice(0,20)
           :[...pl.exits.slice().sort(()=>rnd()-0.5).slice(0,12),...pl.spots.slice().sort(()=>rnd()-0.5).slice(0,8)];
-        const at=cands.find(c=>hiddenAt(c.x,pl.G.ground(c.x,c.z,0),c.z)); if (!at) continue;
-        const g=compose(pl); if (here+g.members.length>t+2) continue;
-        placeGroup(g,at.x,at.z,rnd()*TAU); chooseDest(g); if (g.dest.kind==='leave') chooseDest(g); startWalk(g); total+=g.members.length; }
-      else if (here>t){ const g=groups.find(g=>g.place===pl&&g.state==='walk'&&!g.board&&g.dest&&g.dest.kind!=='leave'); if (g&&pl.exits.length){ const e=pick(rnd,pl.exits); g.dest={kind:'leave',x:e.x,z:e.z}; g.wp=null; } }
+        const any=now?(pl.kind==='town'?pl.spots.filter(c=>Math.hypot(c.x-P.x,c.z-P.z)<80):pl.spots):null;
+        const at=now?(any.length?pick(rnd,any):null):cands.find(c=>hiddenAt(c.x,pl.G.ground(c.x,c.z,0),c.z)); if (!at) break;
+        const g=compose(pl); if (here+g.members.length>t+2) break;
+        placeGroup(g,at.x,at.z,rnd()*TAU); chooseDest(g); if (g.dest.kind==='leave') chooseDest(g); startWalk(g); total+=g.members.length; here+=g.members.length; }
+      if (now) pl.filled=true;
+      if (here>t){ const g=groups.find(g=>g.place===pl&&g.state==='walk'&&!g.board&&g.dest&&g.dest.kind!=='leave'); if (g&&pl.exits.length){ const e=pick(rnd,pl.exits); g.dest={kind:'leave',x:e.x,z:e.z}; g.wp=null; } }
     }
   }
   function clearAll(){ for (const p of people) dropPerson(p); people.length=0; groups.length=0; games.length=0; pax.length=0; }
@@ -1107,10 +1112,19 @@ export function createPeople(ctx){
     for (const list of [people,pax]) for (const p of list){ if (r>=MAXP) break; buildPose(p,simT,POSE); body.write(r++,p.look,POSE); }
     body.setCount(r); body.mesh.position.copy(O); body.mesh.visible=r>0&&!ctx.hidden();
   }
-  function setOn(v){ on=!!v; if (!on){ clearAll(); places.clear(); body.mesh.visible=false; } }
+  /* a new level takes effect at once: people are added at any spot, or the ones over the new number are let go,
+     wherever they are; at level 0 everyone goes */
+  function setLevel(n){
+    level=clamp(n|0,0,9); mult=LEVELS[level]; on=level>0;
+    if (!on){ clearAll(); places.clear(); body.mesh.visible=false; return; }
+    for (const pl of places.values()){ pl.filled=false; let here=people.filter(p=>p.place===pl).length; const t=target(pl);
+      for (const g of groups.slice()){ if (here<=t) break; if (g.place!==pl||g.board) continue; here-=g.members.length; removeGroup(g); } }
+    const cap=Math.round(6*Math.min(mult,4)); while (pax.filter(p=>p.veh.state==='sit').length>cap*2){ const i=pax.findIndex(p=>p.veh.state==='sit'); if (i<0) break; pax.splice(i,1); }
+    fillUntil=simT+6;
+  }
   // when the world repeats from north to south, or a new island is made, everyone is let go; the places fill again
   // out of view
   function reset(){ clearAll(); places.clear(); }
-  return { update, setOn, reset, get on(){ return on; }, people, pax, places, groups, inView,
+  return { update, setLevel, reset, get on(){ return on; }, get level(){ return level; }, people, pax, places, groups, inView,
     stats(){ return {people:people.length, passengers:pax.length, places:places.size}; } };
 }
