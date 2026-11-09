@@ -11171,6 +11171,15 @@ function tracksideSpot(RT){
       if (!(h>0.3 && Math.abs(h-y)<(via?3:5) && gullTopAt(px,pz)<=walkGround(px,pz,1e3)+0.5)) continue;
       const ey=via?Math.max(h+1.7,y+1.8):h+1.7+Math.random()*2.5, xm=(RT.x+x)/2;
       if (sightClear(px,ey,pz,L.x,L.y+1.8,L.z) && sightClear(px,ey,pz,xm,RT.Y(xm)+1.8,RT.Z(xm))) return {x:px,y:ey,z:pz,tx:x}; } }
+  // where there is no such place (beside a station, where the platform, its canopy and the buildings stand in the way),
+  // a higher place further from the line, looking down on the train as it comes in
+  for (let k=0;k<24;k++){ const x=RT.x+RT.dir*(15+k*5);
+    if (RT.st(x)==='tunnel' || RT.st(x+RT.dir*30)==='tunnel') continue;
+    const y=RT.Y(x), z=RT.Z(x), s=(RT.Z(x+1)-RT.Z(x-1))/2, l=Math.hypot(1,s), nx=-s/l, nz=1/l;
+    for (const sd of (Math.random()<0.5?[1,-1]:[-1,1])) for (const oo of [12,18,26,36,48]){ const o=sd*oo, px=x+nx*o, pz=z+nz*o, h=heightAt(px,pz);
+      if (!(h>0.3 && Math.abs(h-y)<12 && gullTopAt(px,pz)<=walkGround(px,pz,1e3)+0.5)) continue;
+      const ey=Math.max(h+1.7,y+6);
+      if (sightClear(px,ey,pz,L.x,L.y+1.8,L.z)) return {x:px,y:ey,z:pz,tx:x}; } }
   return null; }
 // the train the cab and chase views ride with: the passenger train, or the goods train when that is the nearer
 let rideGoods=false;
