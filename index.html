@@ -11723,7 +11723,7 @@ const PEOPLE=createPeople({ world, origin:ORIGIN, camera, C, topAt,
   ready:(cx,cz)=>{ for (let j=-1;j<=1;j++) for (let i=-1;i<=1;i++){ const ch=chunks.get(key(cx+i,cz+j)); if (!ch||(!i&&!j&&ch.lod!==0)) return false; } return true; },
   player:()=>player, hour:()=>hour, night:()=>nightU.value, hidden:()=>PHOTO.on||PHOTO.capturing,
   seatTaken:s=>(sit&&sit.s===s)||[...cats.states.values()].some(k=>Math.abs(k.x-s.x)<0.45&&Math.abs(k.z-s.z)<0.45&&Math.abs(k.y-s.y)<0.7),
-  train:{ cars:()=>train.cars, wait:()=>train.wait, doorOpen:()=>doorOpen, stationNear, railZ, CDX, CDZ, seats:COACH_SEATS, playerCar:()=>mode==='coach'?co.car:-1 },
+  train:{ cars:()=>train.cars, obj:()=>train, wait:()=>train.wait, doorOpen:()=>doorOpen, stationNear, railZ, CDX, CDZ, seats:COACH_SEATS, playerCar:()=>mode==='coach'?co.car:-1 },
   ferry:{ list:()=>ferries, quay:ferryQuay, FB, FPL, FGZ, FD0, FSZ0, seats:FERRY_SEATS, ridden:()=>ridden } });
 wrapHooks.push(()=>PEOPLE.reset());
 let paused=false, last=performance.now(), time=0, firstCam=true, eyeY=null, aboveY=null; const perf={t:0,n:0,sum:0,good:0};

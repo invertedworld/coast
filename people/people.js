@@ -512,7 +512,7 @@ function buildPose(p, t, Q){
           block(cx,cz): the block record, or null; ready(cx,cz): whether it and its neighbours are built in full,
           player(): {x,y,z,vx,vz}, hour(), night() (0 by day to 1 at night), hidden(): true while a picture is made,
           seatTaken(seat): whether the player or a cat is on one of a block's seats,
-          train: { cars(), wait(), doorOpen(), stationNear(x,r), railZ(x), CDX, CDZ, seats, playerCar() },
+          train: { cars(), wait(), doorOpen(), obj() (the train's state: x, dir, v, wait), stationNear(x,r), railZ(x), CDX, CDZ, seats, playerCar() },
           ferry: { list(), quay(R,stop), FB, FPL, FGZ, FD0, FSZ0, seats, ridden() } } */
 const VIEW_FAR=420, ACT_R=120, CAP=22, MAXP=64, SQUARE_KINDS=new Set(['piazza','church']);
 const NB=[[1,0,1],[-1,0,1],[0,1,1],[0,-1,1],[1,1,1.4142],[1,-1,1.4142],[-1,1,1.4142],[-1,-1,1.4142]];
@@ -860,7 +860,8 @@ export function createPeople(ctx){
     if (still){ p.vx*=Math.exp(-7*dt); p.vz*=Math.exp(-7*dt); }
     const sp=Math.hypot(p.vx,p.vz); if (sp>maxV){ p.vx*=maxV/sp; p.vz*=maxV/sp; }
     let nx=p.x+p.vx*dt, nz=p.z+p.vz*dt;
-    if (G.clearAt(nx,nz)<p.rad*0.6){ if (G.clearAt(nx,p.z)>=p.rad*0.6) nz=p.z; else if (G.clearAt(p.x,nz)>=p.rad*0.6) nx=p.x; else { nx=p.x; nz=p.z; } p.vx=(nx-p.x)/dt; p.vz=(nz-p.z)/dt; }
+    const c1=G.clearAt(nx,nz), lim=Math.min(p.rad*0.6,c0+0.01);
+    if (c1<p.rad*0.6&&c1<c0){ if (G.clearAt(nx,p.z)>=lim) nz=p.z; else if (G.clearAt(p.x,nz)>=lim) nx=p.x; else { nx=p.x; nz=p.z; } p.vx=(nx-p.x)/dt; p.vz=(nz-p.z)/dt; }
     p.x=nx; p.z=nz;
     { const gy=G.ground(p.x,p.z,p.y), s2=Math.hypot(p.vx,p.vz)||1; p.y+=(gy-p.y)*ease(10,dt);
       p.climb=lerp(p.climb||0,clamp((G.ground(p.x+p.vx/s2*0.5,p.z+p.vz/s2*0.5,gy)-gy)/0.5,-0.5,0.5),ease(3,dt)); }
@@ -950,16 +951,24 @@ export function createPeople(ctx){
     if (v.state==='rise'){ p.sitW=Math.max(0,p.sitW-dt/0.9); if (p.sitW<=0){ v.state='walk'; v.i=0; v.u=0; } }
     else if (v.state==='sitdown'){ p.sitW=Math.min(1,p.sitW+dt); if (p.sitW>=1) v.state='sit'; }
     let L=null;
-    if (v.state==='walk'){ const P=v.path; const a=P[v.i], b=P[v.i+1], len=Math.hypot(b[0]-a[0],b[2]-a[2])||0.01; v.u+=dt*1.05/len;
+    if (v.state==='walk'){ const P=v.path; const a=P[v.i], b=P[v.i+1], len=Math.hypot(b[0]-a[0],b[2]-a[2])||0.01; if (!v.hold) v.u+=dt*1.05/len;
       if (v.u>=1){ v.u=0; v.i++; if (v.i>=P.length-1){ v.state=v.dir>0?'out':'sitdown'; } }
-      if (v.state==='walk'){ const a2=P[v.i], b2=P[v.i+1]; L=[lerp(a2[0],b2[0],v.u),lerp(a2[1],b2[1],v.u),lerp(a2[2],b2[2],v.u)]; v.head=Math.atan2(b2[0]-a2[0],b2[2]-a2[2]); p.phase+=dt*1.05/stepLenOf(p)*Math.PI; }
-      p.speedSm=1.05; p.walkW=1; }
+      if (v.state==='walk'){ const a2=P[v.i], b2=P[v.i+1]; L=[lerp(a2[0],b2[0],v.u),lerp(a2[1],b2[1],v.u),lerp(a2[2],b2[2],v.u)]; v.head=Math.atan2(b2[0]-a2[0],b2[2]-a2[2]); if (!v.hold) p.phase+=dt*1.05/stepLenOf(p)*Math.PI; }
+      p.speedSm=v.hold?0:1.05; p.walkW=v.hold?0:1; }
     else { p.speedSm=0; p.walkW=0; }
     if (!L) L=v.state==='out'?v.path[v.path.length-1]:[s.x-s.fx*0.05,s.y-s.h,s.z-s.fz*0.05];
     const w=toWorld(m,L[0],L[1],L[2]); p.x=w.x; p.y=w.y; p.z=w.z;
     p.yaw=yawOf(m)+(v.state==='walk'||v.state==='out'?(v.head||0):Math.atan2(s.fx,s.fz)); p.vx=p.vz=0;
     gazeThink(p,dt);
   }
+  /* How long the doors (or the gangway) will stay open: the coach doors close as the train's wait falls to 2.5 s, and the
+     gangway is taken in as the ferry's falls to 1.2 s. A passenger steps through only with 1.8 s or more to spare. */
+  function openFor(v){ if (v.kind==='coach') return ctx.train.doorOpen()>0.6?ctx.train.wait()-2.5:0; return v.F.wait-1.2; }
+  function localNow(v){ const P=v.path; if (v.state!=='walk') return [v.seat.x,v.seat.y-v.seat.h,v.seat.z]; const a=P[v.i], b=P[v.i+1]; return [lerp(a[0],b[0],v.u),lerp(a[1],b[1],v.u),lerp(a[2],b[2],v.u)]; }
+  // still inside when the doors close: back to the seat
+  function turnBack(p){ const v=p.veh, P=v.path, here=localNow(v);
+    if (v.state==='rise'){ v.state='sitdown'; v.dir=-1; v.place=null; return; }
+    v.path=[here,...P.slice(0,v.i+1).reverse()]; v.dir=-1; v.i=0; v.u=0; v.place=null; }
   // the doors on the platform side of each coach, or the end of the ferry's gangway, in the world
   function doorsAt(pl){
     const out=[];
@@ -968,12 +977,25 @@ export function createPeople(ctx){
     else { const F=pl.F, w=toWorld(F.m,F.side*(ctx.ferry.FB/2+ctx.ferry.FPL+0.3),ctx.ferry.FD0,ctx.ferry.FGZ), cell=pl.G.cellOf(w.x,w.z); if (cell>=0&&pl.G.open[cell]) out.push({kind:'ferry',F,x:w.x,z:w.z}); }
     return out;
   }
+  // the door nearest a seat on the side of the platform, found in the coach's own frame before the train comes to rest
+  function doorFor(v,pl){
+    if (v.kind==='ferry') return {kind:'ferry',F:v.F};
+    const m=ctx.train.cars()[v.car].m, a=toWorld(m,0,0,0).clone(), b=toWorld(m,1,0,0);
+    return {kind:'coach',car:v.car,e:v.seat.z>=0?1:-1,sx:Math.sign((b.z-a.z)*pl.S.side)||1};
+  }
+  /* As the train slows for a station, or the ferry for a landing, about half the passengers stand, walk to the door or the
+     gangway and wait there; they step out once it is open with time to spare. Anyone who reaches it after it has begun
+     to close, or whose train does not stop after all, goes back to the seat. Each passenger is considered once a stop. */
+  function chooseAlighters(pl){
+    for (const p of pax){ const v=p.veh; if (v.state!=='sit'||v.prep) continue;
+      if (v.kind==='ferry'?v.F!==pl.F:pl.kind!=='station') continue;
+      v.prep=true; if (rnd()>0.5) continue;
+      v.path=pathOut(v,doorFor(v,pl)); v.dir=1; v.state='rise'; v.place=pl; v.delay=rnd()*2.5; v.sawOpen=false; v.holdT=0; v.hold=false; }
+  }
   // a stop: about half the passengers in the coaches or the saloon get off, and the people waiting get on
   function atStop(pl){
     const doors=doorsAt(pl); if (!doors.length) return;
-    for (const p of pax){ const v=p.veh; if (v.state!=='sit'||rnd()>0.55) continue;
-      const d=doors.filter(o=>o.kind===v.kind&&(o.kind==='ferry'?o.F===v.F:o.car===v.car)).sort((a,b)=>Math.abs((a.e||0)*ctx.train.CDZ-v.seat.z)-Math.abs((b.e||0)*ctx.train.CDZ-v.seat.z))[0];
-      if (!d) continue; v.path=pathOut(v,d); v.dir=1; v.state='rise'; v.place=pl; v.delay=0.8+rnd()*3; }
+    chooseAlighters(pl);
     for (const g of groups){ if (g.place!==pl||g.alighted||g.board||g.state==='leaving') continue;
       const m0=g.members[0], d=doors.slice().sort((a,b)=>Math.hypot(a.x-m0.x,a.z-m0.z)-Math.hypot(b.x-m0.x,b.z-m0.z))[0]; if (!d||Math.hypot(d.x-m0.x,d.z-m0.z)>30) continue;
       for (const m of g.members){ if (m.seat){ if (m.sitW>0||m.mode==='sit') m.unseat=m.seat; else freeSeat(m); m.seat=null; } m.mode=m.unseat?'unsit':'goto'; m.tx=d.x; m.tz=d.z; m.circle=null; m.face=null; leaveGame(m); }
@@ -981,14 +1003,22 @@ export function createPeople(ctx){
   }
   function vehicleTick(dt){
     const T=ctx.train, wait=T.wait(), cars=T.cars();
+    const TR=T.obj();
+    let nearStop=false;
+    if (TR.wait===0) for (const pl of places.values()) if (pl.kind==='station'&&pl.setup){ const d=(pl.S.x+TR.dir*28-TR.x)*TR.dir; if (d>0&&d<45){ nearStop=true; chooseAlighters(pl); } }
+    // clear of any stop again: the passengers may be chosen afresh at the next one
+    if (TR.wait===0&&!nearStop) for (const p of pax) if (p.veh.kind==='coach') p.veh.prep=false;
     if (wait>wasWait+5) for (const pl of places.values()) if (pl.kind==='station'&&pl.setup) atStop(pl);
     wasWait=wait;
     for (const F of ctx.ferry.list()){ if (!F.R) continue; const w=F.wait, was=ferryWas.get(F)||0;
       if (w>was+5) for (const pl of places.values()) if (pl.kind==='quay'&&pl.F===F&&pl.stop===F.at&&pl.setup) atStop(pl);
+      if (w===0){ const len=F.R.loop.len, d=((F.R.stops[F.next]-F.s)%len+len)%len;
+        if (d<25){ for (const pl of places.values()) if (pl.kind==='quay'&&pl.F===F&&pl.stop===F.next&&pl.setup) chooseAlighters(pl); }
+        else for (const p of pax) if (p.veh.F===F) p.veh.prep=false; }
       ferryWas.set(F,w); }
     // walking to the doors or the gangway: aboard on reaching them while they are open; if the train or the ferry
     // leaves first, the group stays behind
-    for (const g of groups.slice()){ if (!g.board) continue; const d=g.board, open=d.kind==='coach'?wait>2.6:d.F.wait>1.5, doorsOpen=d.kind==='coach'?T.doorOpen()>0.6:d.F.wait>1.5;
+    for (const g of groups.slice()){ if (!g.board) continue; const d=g.board, open=d.kind==='coach'?wait>2.6:d.F.wait>1.5, doorsOpen=openFor(d.kind==='coach'?{kind:'coach'}:{kind:'ferry',F:d.F})>1.2;
       for (const m of g.members) if (m.mode==='unsit'&&m.sitW<=0){ m.mode='goto'; m.tx=d.x; m.tz=d.z; }
       if (!open){ g.board=null; g.alighted=true; for (const m of g.members) if (m.mode==='goto'){ m.mode='stand'; m.tx=m.x; m.tz=m.z; } chooseDest(g); startWalk(g); continue; }
       for (const m of g.members.slice()){ if (!doorsOpen||m.mode!=='goto'||Math.hypot(m.x-d.x,m.z-d.z)>0.7) continue;
@@ -1002,8 +1032,14 @@ export function createPeople(ctx){
       if (!g.members.length) groups.splice(groups.indexOf(g),1); }
     // passengers: off at the end of the way out, where they join the place and make for its way out
     for (const p of pax.slice()){ const v=p.veh;
+      if (v.dir>0&&v.state==='walk'){ const o=openFor(v); if (o>=1.8) v.sawOpen=true;
+        // at the door: the step through it takes under a second and is begun only with 1.8 s of opening left
+        if (v.i===v.path.length-2&&v.u<0.02){ if (o>=1.8) v.hold=false; else { v.hold=true; v.holdT+=dt; if (v.sawOpen||v.holdT>30){ v.hold=false; turnBack(p); } } } }
       if (v.delay>0){ v.delay-=dt; paxStep(p,0); } else paxStep(p,dt);
       if (v.state==='out'){ pax.splice(pax.indexOf(p),1); const pl=v.place; if (!pl||!pl.setup) continue;
+        { const G=pl.G; if (G.clearAt(p.x,p.z)<0.3){ let best=null, bd=1e9; const c0=G.cellOf(p.x,p.z);
+            for (let dj=-8;dj<=8;dj++) for (let di=-8;di<=8;di++){ const c=c0<0?-1:c0+dj*G.nx+di; if (c<0||c>=G.N||G.clr[c]<0.3) continue; const d=di*di+dj*dj; if (d<bd){ bd=d; best=c; } }
+            if (best==null) continue; p.x=G.cX(best); p.z=G.cZ(best); } }
         p.veh=null; p.place=pl; p.lockFeet=true; p.mode='slot'; p.sitW=0; p.seat=null; p.pinL=p.pinR=null; p.hipW=null; p.y=pl.G.ground(p.x,p.z,p.y);
         const g=makeGroup([p],'single',pl); g.alighted=true; g.ax=p.x; g.az=p.z; g.ayaw=p.yaw; people.push(p); groups.push(g);
         const ex=pl.exits.slice().sort((a,b)=>Math.hypot(a.x-p.x,a.z-p.z)-Math.hypot(b.x-p.x,b.z-p.z)), e=ex[Math.floor(rnd()*Math.min(6,ex.length))];
