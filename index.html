@@ -11095,7 +11095,7 @@ function tracksideSpot(RT){
     // beside a viaduct the camera keeps to the level of the track: on the hillside further off, where the ground rises to
     // the rails, so that it sees the train across the deck rather than the arches from below
     const via=stx==='viaduct', y=RT.Y(x), z=RT.Z(x), s=(RT.Z(x+1)-RT.Z(x-1))/2, l=Math.hypot(1,s), nx=-s/l, nz=1/l;
-    const offs=via?[14,20,28,38,50,65]:[6+Math.random()*8];
+    const offs=via?[14,20,28,38,50,65]:[6+Math.random()*8,16,24];
     for (const sd of (Math.random()<0.5?[1,-1]:[-1,1])) for (const oo of offs){ const o=sd*oo, px=x+nx*o, pz=z+nz*o, h=heightAt(px,pz);
       if (!(h>0.3 && Math.abs(h-y)<(via?3:5) && gullTopAt(px,pz)<=walkGround(px,pz,1e3)+0.5)) continue;
       const ey=via?Math.max(h+1.7,y+1.8):h+1.7+Math.random()*2.5, xm=(RT.x+x)/2;
@@ -11937,8 +11937,12 @@ function frame(now){
       // a new place once the train is 40 m past, or as soon as the locomotive has been out of sight for half a second
       if (chase.spot){ const S=chase.spot; chase.blind=sightClear(S.x,S.y,S.z,loco.position.x,loco.position.y+1.8,loco.position.z)?0:(chase.blind||0)+dt; }
       chase.retry=(chase.retry||0)-dt;
-      if ((!chase.spot || (chase.spot.tx-RT.x)*RT.dir<-40 || chase.blind>0.5 || chase.cab) && chase.retry<=0){ chase.retry=0.4; const n=tracksideSpot(RT); if (n){ chase.spot=n; chase.fresh=true; chase.blind=0; chase.cab=false; } }
-      sideOk=!chase.cab && !!chase.spot && chase.blind<=0.5 && (chase.spot.tx-RT.x)*RT.dir>-40 && Math.hypot(chase.spot.x-loco.position.x,chase.spot.z-loco.position.z)<260;
+      const need=!chase.spot || (chase.spot.tx-RT.x)*RT.dir<-40 || chase.blind>0.5 || chase.cab;
+      if (need && chase.retry<=0){ chase.retry=0.4; const n=tracksideSpot(RT); if (n){ chase.spot=n; chase.fresh=true; chase.blind=0; chase.cab=false; } }
+      // until a new place is found (beside a station or a viaduct it may take some seconds), the camera keeps the old
+      // one and watches the train go on from there; it rides in the cab only once the locomotive has been out of
+      // sight for some time, or is far off
+      sideOk=!chase.cab && !!chase.spot && chase.blind<=3 && Math.hypot(chase.spot.x-loco.position.x,chase.spot.z-loco.position.z)<260;
       if (sideOk) chase.cab=false;
     }
     const inCab=mode==='train' || (chase.side && !sideOk);
@@ -12926,7 +12930,7 @@ window.__village={ get seed(){ return SEED_TEXT; }, share:{state:sceneState,link
   findHarbour(){ for (let d=0;d<12;d++) for (const sd of SIDES) for (const n of [Math.floor(player.x/HARB)+d,Math.floor(player.x/HARB)-d]){ const H=harbourInfo(sd,n); if (H) return {x:H.x,z:coastZ(sd,H.x)+sd*7,W:H.W,sd,qz:coastZ(sd,H.x+H.W/2-1)+sd*2.5}; } return null; },
   findBeach(){ for (let x=player.x; x<player.x+3000; x+=10) for (const sd of SIDES){ const z=coastZ(sd,x)+sd*5; if (heightAt(x,z)<0.6 && heightAt(x,z)>0.1 && !harbourAt(sd,x)) return {x,z,sd}; } return null; },
   ridge(x){ return {x,z:ridgeZ(x)}; },
-  sea,farMesh,scene,setTilt,audioState:()=>({ctx:audioCtx&&audioCtx.state,muted,ready:SND.ready,loaded:Object.keys(SND.buf)}),SND,SNDV,SNDS,shore,surfaceAt,startAudio,updateChunks:(x,z)=>updateChunks(x,z,1e9),disposeChunk,farPoint(gi,gj){ COVE_FAST++; try{ return farPoint(gi,gj); } finally{ COVE_FAST--; } },FS,findPeak(){ const i0=Math.floor(player.x/PEAK), j0=Math.floor(player.z/PEAK); for (let r=0;r<30;r++) for (let i=-r;i<=r;i++) for (let j=-r;j<=r;j++){ const P=peakInfo(i0+i,j0+j); if (P) return P; } return null; },toggleTrain,get tunnelK(){return tunnelK;},railZ,railY,railState,findStation(){ const n0=Math.floor(player.x/ST_SP); for (let k=0;k<200;k++) for (const sg of [1,-1]){ const S=stationInfo(n0+sg*k); if (S) return S; } return null; },findBridge(){ const i0=Math.round(player.x/C); for (let k=0;k<300;k++) for (const sg of [1,-1]){ const X=railCross(i0+sg*k); if (X) return X; } return null; },get view(){return VIEW;},findRail(kind){ for (let x=player.x; x<player.x+6000; x+=8){ if (railState(x)===kind) return {x,z:railZ(x),y:railY(x)}; } return null; },findCountry(kind){ for (let r=0;r<20;r++) for (let i=-r;i<=r;i++) for (let j=-r;j<=r;j++){ const cx=Math.floor(player.x/C)+i, cz=Math.floor(player.z/C)+j; if (chunkKind(cx,cz)===kind) return {x:cx*C+C/2,z:cz*C+C/2}; } return null; },train,setHour:v=>{hour=v;}, get hour(){ return hour; }, lightHour(h){ hour=h; updateDaylight(); updateShadowFrame(); },
+  sea,farMesh,scene,setTilt,audioState:()=>({ctx:audioCtx&&audioCtx.state,muted,ready:SND.ready,loaded:Object.keys(SND.buf)}),SND,SNDV,SNDS,shore,surfaceAt,startAudio,updateChunks:(x,z)=>updateChunks(x,z,1e9),disposeChunk,farPoint(gi,gj){ COVE_FAST++; try{ return farPoint(gi,gj); } finally{ COVE_FAST--; } },FS,findPeak(){ const i0=Math.floor(player.x/PEAK), j0=Math.floor(player.z/PEAK); for (let r=0;r<30;r++) for (let i=-r;i<=r;i++) for (let j=-r;j<=r;j++){ const P=peakInfo(i0+i,j0+j); if (P) return P; } return null; },toggleTrain,get tunnelK(){return tunnelK;},get chase(){return chase;},railZ,railY,railState,findStation(){ const n0=Math.floor(player.x/ST_SP); for (let k=0;k<200;k++) for (const sg of [1,-1]){ const S=stationInfo(n0+sg*k); if (S) return S; } return null; },findBridge(){ const i0=Math.round(player.x/C); for (let k=0;k<300;k++) for (const sg of [1,-1]){ const X=railCross(i0+sg*k); if (X) return X; } return null; },get view(){return VIEW;},findRail(kind){ for (let x=player.x; x<player.x+6000; x+=8){ if (railState(x)===kind) return {x,z:railZ(x),y:railY(x)}; } return null; },findCountry(kind){ for (let r=0;r<20;r++) for (let i=-r;i<=r;i++) for (let j=-r;j<=r;j++){ const cx=Math.floor(player.x/C)+i, cz=Math.floor(player.z/C)+j; if (chunkKind(cx,cz)===kind) return {x:cx*C+C/2,z:cz*C+C/2}; } return null; },train,setHour:v=>{hour=v;}, get hour(){ return hour; }, lightHour(h){ hour=h; updateDaylight(); updateShadowFrame(); },
   boatCam(){ for (const ch of chunks.values()) for (const b of ch.boats) if (b.floating) return {x:b.m.position.x,z:b.m.position.z,rot:b.m.rotation.y}; return null; },
   ferries,islandRoute,coastZ,harbourInfo,ferryLanding,ferryPortInfo,hbS,sailers,harbourAt,
   // whether a walker starting at (x0,z0,y0) can reach a point where goal(x,z) holds, under the player's own rules:
