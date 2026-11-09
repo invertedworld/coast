@@ -6194,6 +6194,7 @@ function inView(cx,cz){
 // loading (a whole island at once, as at the start or while a new one is seeded) builds every block outright,
 // without fading, in slices of budgetMs
 function updateChunks(px,pz,budgetMs,loading=budgetMs>=1e8){
+  if (window.__holdChunks && !loading) return;   // for automated checks: the blocks held as they are
   const pcx=Math.floor(px/C), pcz=Math.floor(pz/C), RR=lodRing(), st=pcx+','+pcz+','+VIEW+','+LOD0, now=performance.now();
   // the rings only change when the player crosses into another block or the draw distance changes
   if (st===chunkState && !queue.length && !loading) return;
@@ -6234,6 +6235,31 @@ function updateChunks(px,pz,budgetMs,loading=budgetMs>=1e8){
 }
 // for automated checks: the blocks waiting, each as [cx, cz, priority, detail wanted, squared distance in blocks]
 window.__chunkQueue=()=>queue;
+// for automated checks of pop-in: of the blocks wanted round the player that the camera sees within the fog, those
+// missing and those built with less detail than wanted, counted out to 400 m and to the fog; and the blocks that
+// have arrived or changed detail since the last call, each as [detail, distance from the camera in metres, seen]
+const _pv=new THREE.Frustum(), _pmx=new THREE.Matrix4(), probeSeen=new Map();
+window.__chunkProbe=()=>{
+  const pcx=Math.floor(player.x/C), pcz=Math.floor(player.z/C), RR=lodRing(), far=scene.fog.far, cx0=camera.position.x, cz0=camera.position.z;
+  _pmx.compose(camera.position,camera.quaternion,camera.scale).invert().premultiply(camera.projectionMatrix); _pv.setFromProjectionMatrix(_pmx);
+  const fw=new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion), P=camera.position;
+  const r={cam:{p:{x:P.x,y:P.y,z:P.z},t:{x:P.x+fw.x*10,y:P.y+fw.y*10,z:P.z+fw.z*10}},q:queue.length,miss:0,miss400:0,coarse:0,coarse400:0,coarse0:0,fading:0,view:0,missAll:0,coarseAll:0,arr:[]};
+  const seen=(cx,cz)=>{ const gj=Math.round((cz+0.5)*C/FS), F=farPoint(Math.round((cx+0.5)*C/FS),gj-WRAP_J*Math.round(gj/WRAP_J)), h=Math.max(F.h,0);
+    _vb.min.set(cx*C,h-25,cz*C); _vb.max.set(cx*C+C,h+40,cz*C+C); return _pv.intersectsBox(_vb); };
+  COVE_FAST++;
+  try {
+    for (let dz=-RR;dz<=RR;dz++) for (let dx=-RR;dx<=RR;dx++){ const w=wantLod(dx,dz); if (w<0) continue;
+      const cx=pcx+dx, cz=pcz+dz, d=Math.hypot(cx*C+C/2-cx0,cz*C+C/2-cz0)-C*0.7; if (d>1500) continue;
+      _vb.min.set(cx*C,-30,cz*C); _vb.max.set(cx*C+C,600,cz*C+C); if (!_pv.intersectsBox(_vb) || !seen(cx,cz)) continue;
+      const ch=chunks.get(key(cx,cz)); if (!ch) r.missAll++; else if (ch.lod>w) r.coarseAll++;
+      if (d>far) continue; r.view++;
+      if (!ch){ r.miss++; if (d<400) r.miss400++; }
+      else { if (ch.lod>w){ r.coarse++; if (d<400) r.coarse400++; if (w===0) r.coarse0++; } if (ch.fade<1) r.fading++; } }
+    for (const [k,ch] of chunks){ if (probeSeen.get(k)===ch) continue; probeSeen.set(k,ch);
+      const d=Math.max(0,Math.hypot(ch.cx*C+C/2-cx0,ch.cz*C+C/2-cz0)-C*0.7); r.arr.push([ch.lod,Math.round(d),d<far && seen(ch.cx,ch.cz)?1:0]); }
+    for (const k of probeSeen.keys()) if (!chunks.has(k)) probeSeen.delete(k);
+  } finally { COVE_FAST--; }
+  return r; };
 function resetWorld(){ chunkState=''; farCache.clear(); hgTiles.clear(); clearXMemos(); spCache.clear(); lhCache.clear(); hbCache.clear(); rxCache.clear(); farOrigin=''; for (const T of tiles.values()) disposeTile(T); tiles.clear(); tilesDirty.clear(); tilesUrgent.clear(); for (const ch of chunks.values()) disposeChunk(ch); chunks.clear(); for (const ch of dying) disposeChunk(ch); dying.length=0; pkCache.clear(); pzCache.clear(); alCache.clear(); hbCache.clear(); vgCache.clear(); vmCache.clear(); ckCache.clear(); ryCache.clear(); rzCache.clear(); rrCache.clear(); rsCache.clear(); stCache.clear(); rxCache.clear(); lhCache.clear(); rkCache.clear(); ruCache.clear(); cvCache.clear(); icvCache.clear(); cvSlots.clear(); cvMemoN=NaN; cvMemoL=[];
   // the goods lines, the offshore islands, the ferry ports and the ferries' routes all belong to the old island
   brZones.clear(); brBucket.clear(); isCache.clear(); fpCache.clear(); irCache.clear(); hgCache.clear(); sgCache.clear(); mtxCache.clear();
