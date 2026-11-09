@@ -70,6 +70,14 @@ The swimmer leaves the water by swimming to a beach and wading ashore, by climbi
 
 The clock runs continuously. **T** held speeds time forty times; **Shift** and **T** held run it backwards at the same rate. **N** changes to 22:00, or to 10:00 if it is already night, and the clock runs on from there. **P** pauses the world: trains, ferries, boats, dolphins, the sea, the lighthouse beams, cats, gulls and the time of day stand still, while the player may still move and look about. **P** again resumes.
 
+## People
+
+**K** shows or hides the townspeople. They are hidden when the game starts. When shown, a few people come to the squares of the villages, the station platforms and the ferry landings near the player. More are about in the evening, fewer in the early afternoon and few at night. They walk alone, in couples, with friends or with children, stop to talk, sit on the benches and the café chairs, and look about them; children run ahead, hold a parent's hand or play together. They step aside for one another and for the player.
+
+People arrive and leave out of the player's sight, so that no one appears or vanishes in view. Passengers sit in the coaches of the train and the saloon of the ferry. When the train stands at a station, some passengers walk out through the doors on the platform side and people waiting on the platform walk aboard; when a ferry lies at a landing, passengers come down the gangway and those waiting on the quay go up it. A seat on which a person is sitting cannot be taken with **X**.
+
+> **Example:** To watch passengers boarding, show the people with **K**, wait on a station platform and stand clear of the doors when the train comes to rest.
+
 ## The island
 
 **I** opens the island panel, which shows the seed of the present island. The seed may be any text of up to 32 characters, letters being kept in capitals; a seed of digits alone stands for the number it spells. **Random** replaces the seed with one drawn at random, and **Copy** copies it to the clipboard. **Generate**, or **Enter**, generates the island from the seed shown; it is unavailable while the seed is that of the present island. **Esc**, **Cancel** or **I** again closes the panel and leaves the island unchanged. While the panel is open, any other key is taken as part of the seed.
@@ -138,7 +146,7 @@ The arrow at the top left returns to the gallery, as does **Esc**. If the finish
 
 **Tab** sets full screen. **Page Up** and **Page Down** increase and reduce the draw distance through eleven fixed levels. **Home** returns the draw distance to automatic, in which the distance is adjusted to keep the frame rate near 60 frames per second. **O** shows or hides an overlay with the frame rate, the frame time, the draw distance, the number of blocks drawn, the draw calls, the triangles, the player's position and the seed of the island.
 
-**M** mutes or restores the sound. The sound is positional: fountains, church bells, the sea, trains, ferries, gulls and cats are heard from where they are, and the ambience changes between day and night.
+**K** shows or hides the townspeople (see People). **M** mutes or restores the sound. The sound is positional: fountains, church bells, the sea, trains, ferries, gulls and cats are heard from where they are, and the ambience changes between day and night.
 
 ## Game controllers and touch screens
 

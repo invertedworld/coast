@@ -15,7 +15,7 @@ cd "$(dirname "$0")"
 REV="${1:-HEAD}"
 SITE="${SITE_DIR:-$HOME/code/markhammond.me}"
 DEST="$SITE/play/coast"
-FILES=(index.html sounds.json sounds cat photo)
+FILES=(index.html sounds.json sounds cat photo people)
 
 SHA="$(git rev-parse --short "$REV")"
 BUILD="$(git rev-list --count "$REV") ($SHA)"

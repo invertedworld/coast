@@ -149,6 +149,7 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
     <div class="group"><h3>Other</h3>
       <div class="row"><span><kbd>Tab</kbd></span><span>Full screen</span></div>
       <div class="row"><span><kbd>M</kbd></span><span>Mute sound</span></div>
+      <div class="row"><span><kbd>K</kbd></span><span>Show or hide people</span></div>
       <div class="row"><span><kbd>P</kbd></span><span>Pause</span></div>
       <div class="row"><span><kbd>T</kbd></span><span>Advance time</span></div>
       <div class="row"><span><kbd>Shift</kbd>+<kbd>T</kbd></span><span>Reverse time</span></div>
@@ -219,6 +220,7 @@ import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.m
 import { Cat, catRimUniforms } from './cat/cat.js';
 // the camera for taking pictures (C): lens, depth of field, exposure, viewfinder and gallery; its API is window.__village.photo
 import { createPhoto } from './photo/camera.js';
+import { createPeople } from './people/people.js';
 
 /* ================= random & noise ================= */
 // The island grows from a seed, which may be any text of up to SEED_MAX characters, kept in capitals. A seed of digits
@@ -10636,6 +10638,7 @@ addEventListener('keydown',e=>{ keys[e.code]=true;
   if (code==='KeyO' && !e.repeat){ statsEl.hidden=!statsEl.hidden; statsT=0; }
   if (code==='KeyN' && !e.repeat){ hour=nightU.value>0.5?10:22; SNDS.hour=Math.floor(hour); }   // to night, or back to day, without the bells striking the jump
   if (code==='KeyM' && !e.repeat) setMuted(!muted);
+  if (code==='KeyK' && !e.repeat){ PEOPLE.setOn(!PEOPLE.on); toast('People',PEOPLE.on?'On':'Off'); }
   if (code==='Tab'){ e.preventDefault(); if (!e.repeat) try{ if (document.fullscreenElement) document.exitFullscreen(); else { const q=document.documentElement.requestFullscreen(); if (q&&q.catch) q.catch(()=>{}); } }catch(_){} }
   if ((code==='Minus'||code==='NumpadSubtract') && (mode==='street'||(mode==='ferry'&&!feChase)) && !e.repeat) toggleView();
   if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(code)) e.preventDefault(); });
@@ -10951,6 +10954,7 @@ function sitFind(){
   for (const s of list){ const dx=s.x-px, dz=s.z-pz, d=Math.hypot(dx,dz);
     if (d>SIT_REACH+(s.kind==='lounger'?0.4:0) || Math.abs(s.y-s.h-py)>0.7) continue;   // a lounger is reached from either end
     const c=d>1e-3?(dx*lx+dz*lz)/d:1; if (d>0.45 && c<0.45) continue;
+    if (fr==='world' && s.ppl) continue;
     if (fr==='world' && [...cats.states.values()].some(k=>Math.abs(k.x-s.x)<0.45 && Math.abs(k.z-s.z)<0.45 && Math.abs(k.y-s.y)<0.7)) continue;
     const sc=d-0.6*c; if (sc<bs){ bs=sc; best=s; } }
   return best?{s:best,fr,home:[px,pz,py]}:null;
@@ -11156,7 +11160,7 @@ let seeding=false;
 const seedEl=document.getElementById('seeding'), seedBar=seedEl.querySelector('i'), seedTxt=seedEl.querySelector('span');
 const nextPaint=()=>new Promise(r=>requestAnimationFrame(()=>setTimeout(r,0)));
 function seedShow(k,what){ seedEl.hidden=false; seedBar.style.width=(k*100).toFixed(1)+'%'; seedTxt.textContent=`${what} ${Math.round(k*100)}%`; }
-async function newIsland(text){ if (seeding) return; seeding=true;
+async function newIsland(text){ if (seeding) return; seeding=true; PEOPLE.reset();
   try{
     seedShow(0,'Generating a new island:'); await nextPaint();
     // the player starts the new island on foot, on land: off any boat, train or ferry first
@@ -11710,6 +11714,18 @@ function resize(){ const w=innerWidth, h=innerHeight; renderer.setSize(w,h,false
 addEventListener('resize',resize); resize();
 const camPos=new THREE.Vector3(), camTarget=new THREE.Vector3();
 let crouch=false, crouchK=0;   // Z: crouching at street level, the eye at 0.95 m instead of 1.62 m and the pace slowed
+/* ---------- people ----------
+   The townspeople (people/people.js): a few in each square, waiting on the platforms and at the ferry landings, and
+   passengers on the trains and the ferries. K turns them on and off; they are off at first. */
+const PEOPLE=createPeople({ world, origin:ORIGIN, camera, C, topAt,
+  block:(cx,cz)=>chunks.get(key(cx,cz))||null,
+  // a place comes to life once its block is built in full and the blocks round it are built
+  ready:(cx,cz)=>{ for (let j=-1;j<=1;j++) for (let i=-1;i<=1;i++){ const ch=chunks.get(key(cx+i,cz+j)); if (!ch||(!i&&!j&&ch.lod!==0)) return false; } return true; },
+  player:()=>player, hour:()=>hour, night:()=>nightU.value, hidden:()=>PHOTO.on||PHOTO.capturing,
+  seatTaken:s=>(sit&&sit.s===s)||[...cats.states.values()].some(k=>Math.abs(k.x-s.x)<0.45&&Math.abs(k.z-s.z)<0.45&&Math.abs(k.y-s.y)<0.7),
+  train:{ cars:()=>train.cars, wait:()=>train.wait, doorOpen:()=>doorOpen, stationNear, railZ, CDX, CDZ, seats:COACH_SEATS, playerCar:()=>mode==='coach'?co.car:-1 },
+  ferry:{ list:()=>ferries, quay:ferryQuay, FB, FPL, FGZ, FD0, FSZ0, seats:FERRY_SEATS, ridden:()=>ridden } });
+wrapHooks.push(()=>PEOPLE.reset());
 let paused=false, last=performance.now(), time=0, firstCam=true, eyeY=null, aboveY=null; const perf={t:0,n:0,sum:0,good:0};
 function frame(now){
   // P pauses the world (trains, ferries, boats, the sea, the lighthouses, the cats and the time of day) while the
@@ -11984,6 +12000,7 @@ function frame(now){
   updateBeams(wdt);
   updateDolphins(wdt);
   updateCats(wdt);
+  PEOPLE.update(wdt);
   updateFleet(dt);
   updateGulls(dt);
   updateShadowFrame();
@@ -12849,6 +12866,7 @@ function updateStats(){
     ['Triangles',`${(info.render.triangles/1e6).toFixed(2)} million`],
     // the script's memory in use and its limit (where the browser reports it), and what is held on the graphics card
     ['Memory',(performance.memory?`${Math.round(performance.memory.usedJSHeapSize/1048576)} of ${Math.round(performance.memory.jsHeapSizeLimit/1048576)} MB, `:'')+`${info.memory.geometries} geometries, ${info.memory.textures} textures`],
+    ['People',PEOPLE.on?(q=>`${q.people} about, ${q.passengers} travelling, in ${q.places} places`)(PEOPLE.stats()):'off'],
     ['Position',`${player.x.toFixed(0)}, ${player.z.toFixed(0)}, height ${player.y.toFixed(1)} m`],
     ['Seed',SEED_TEXT]];
   statsEl.innerHTML=rows.map(([k,v])=>`<span>${k}</span><span>${v}</span>`).join('');
@@ -12919,7 +12937,7 @@ requestAnimationFrame(()=>setTimeout(()=>{
   if (SCENE) try{ sceneRestore(SCENE); }catch(err){ console.warn('The shared scene could not be restored:',err); }
   requestAnimationFrame(frame);
 },30));
-window.__village={ get seed(){ return SEED_TEXT; }, share:{state:sceneState,link:sceneLink,qrEncode,get shared(){ return SCENE; }}, get paused(){ return paused; }, set paused(v){ if (!!v!==paused){ paused=!!v; lastClock=null; } }, goods, glZone, branchesAt, get mantle(){ return mantle; }, get colRoof(){ return colRoof; }, roofAt, roofSlope, topAt, get sit(){ return sit; }, get indoors(){ return indoors; }, roomFns:{flight,localToWorld,obbLocal,roomCeil}, sitKey, sitFind, sitStand, sitSpotOk, beachStretch, BCH_SP, COACH_SEATS, FERRY_SEATS, coachEnter, genChunk, coastRoadZ, brZ, brY, heightAt, player, chunks, rooms, doorMesh, keys, setYaw:v=>{yaw=v;}, get yaw(){return yaw;}, fe, co, lightsNear, beams, ruinIn, cats, catHome, get ridden(){ return ridden; },
+window.__village={ get seed(){ return SEED_TEXT; }, share:{state:sceneState,link:sceneLink,qrEncode,get shared(){ return SCENE; }}, get paused(){ return paused; }, set paused(v){ if (!!v!==paused){ paused=!!v; lastClock=null; } }, goods, glZone, branchesAt, get mantle(){ return mantle; }, get colRoof(){ return colRoof; }, roofAt, roofSlope, topAt, get sit(){ return sit; }, get indoors(){ return indoors; }, roomFns:{flight,localToWorld,obbLocal,roomCeil}, sitKey, sitFind, sitStand, sitSpotOk, beachStretch, BCH_SP, COACH_SEATS, FERRY_SEATS, coachEnter, genChunk, coastRoadZ, brZ, brY, heightAt, player, chunks, rooms, doorMesh, keys, setYaw:v=>{yaw=v;}, get yaw(){return yaw;}, fe, co, lightsNear, beams, ruinIn, cats, catHome, PEOPLE, get ridden(){ return ridden; },
   findHarbour(){ for (let d=0;d<12;d++) for (const sd of SIDES) for (const n of [Math.floor(player.x/HARB)+d,Math.floor(player.x/HARB)-d]){ const H=harbourInfo(sd,n); if (H) return {x:H.x,z:coastZ(sd,H.x)+sd*7,W:H.W,sd,qz:coastZ(sd,H.x+H.W/2-1)+sd*2.5}; } return null; },
   findBeach(){ for (let x=player.x; x<player.x+3000; x+=10) for (const sd of SIDES){ const z=coastZ(sd,x)+sd*5; if (heightAt(x,z)<0.6 && heightAt(x,z)>0.1 && !harbourAt(sd,x)) return {x,z,sd}; } return null; },
   ridge(x){ return {x,z:ridgeZ(x)}; },

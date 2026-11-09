@@ -8,7 +8,7 @@ The program has no build step. It is served from the root of the repository by a
 
 ## Changes
 
-- The program is contained in `index.html`, apart from the cat in `cat/`. A change should follow the style of the code round it and should not reformat unrelated code.
+- The program is contained in `index.html`, apart from the cat in `cat/`, the camera in `photo/` and the townspeople in `people/`. A change should follow the style of the code round it and should not reformat unrelated code.
 - Every visual change should be checked by rendering the scene and looking at the result, from near and from far, before it is submitted. A screenshot of the result should be attached to the pull request.
 - New trees, plants and props are developed first in a page of `testbench/` and enter the game only once they have been approved.
 - Performance is measured with the overlay shown by **O**. A change should not reduce the frame rate or lengthen the generation of blocks noticeably.

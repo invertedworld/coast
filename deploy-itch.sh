@@ -28,7 +28,7 @@ fi
 
 build="$(mktemp -d)"; trap 'rm -rf "$build"' EXIT
 chmod 755 "$build"
-git archive "$REV" -- index.html sounds.json sounds cat photo | tar -x -C "$build"
+git archive "$REV" -- index.html sounds.json sounds cat photo people | tar -x -C "$build"
 cp -R "$SITE/vendor" "$SITE/fonts" "$build/"
 
 # the same replacements as publish-site.sh: the fonts and three.js from the local copies
