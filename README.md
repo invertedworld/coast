@@ -189,7 +189,7 @@ One unit is one metre. The island runs along the x axis. The south shore is on t
 
 The world is generated in square blocks of `C = 40` m. Each block is built once and kept as one mesh for buildings (`matB`), one for the ground (`matG`), and optional meshes for water surfaces, fountain water and night glow points.
 
-Blocks are kept in three rings of detail round the player:
+Blocks are kept in three rings of detail round the player. While the player moves, the rings are centred up to `LOD0 − 1` blocks ahead, where the player will be in three seconds, so that full detail is added further ahead and shed sooner behind; the player's own block and those beside it always have full detail.
 
 | Ring | Extent | Content |
 |---|---|---|
@@ -202,6 +202,8 @@ Each block costs several draw calls, and with thousands of blocks loaded the num
 Each block reads the ground's height from a grid of samples a metre apart, at every level of detail, each sample worked out the first time it is needed, so that every choice made from the ground's height (whether a house fits, where a wall runs) comes out the same at every level and a block that changes detail keeps its houses and lamps.
 
 Beyond the rings, a coarse far terrain (`FN = 200` cells of `FS = 22` m) covers the distance, with the lights of distant villages drawn at night. Its heights, colours and lights are cached per grid point, so moving the grid computes only the new edge.
+
+Blocks waiting to be built or to change detail are built within a budget of 6 ms per frame, the few round the player first. The rest are taken in order of their distance from the place where the camera will be in four seconds, the camera's height above the player included, so that a train, a boat or a bird's-eye view on the move builds the land ahead before the land behind, and the land below a high camera before the land beyond it. Blocks the camera does not see are taken as though eight times as far off. The order is worked out again whenever the rings move, every third of a second while blocks are waiting, and as soon as the camera has turned through more than 20°.
 
 `VIEW` lies between 2 and 12 and adjusts itself to hold 60 frames per second; the overlay shown with **O** reports the current distances. New blocks fade in over 0.8 s in 16 dithered steps. A block that changes detail dissolves into its replacement, the old and new versions drawing complementary fragments so that they never overlap. Nothing fades during the first load or for blocks that appear right round the player.
 
@@ -306,7 +308,7 @@ Streets, trees, houses, field walls and boats are kept out of a cove, within 14 
 
 The railway runs the length of the island on a level bed 8 m wide. It keeps to the coastal belt, about `RAIL_IN = 190` m inland of the mean shore, for most of the way, and swings across to the other shore and back over a period of `RAIL_L = 9000` m, crossing the island at the passes in the mountains, so it visits both coasts. Its distance from the middle line follows the island's width averaged over 500 m, so its curves stay gentle where the shore bends sharply. Its level is taken from the ground without the mountains, so it passes under them in tunnel. Its height is a Catmull-Rom curve through knots 10 m apart, so the grade changes smoothly.
 
-The line is classified every 2 m as open, viaduct or tunnel: tunnel where the hill stands well above the line and viaduct where the valley falls well below it. Short tunnels become cuttings, short viaducts become embankments, and short open gaps between two long tunnels or viaducts are joined up. Over a tunnel the ground is kept level with the portal parapets, so the bore is always covered. Tunnels are lined, have portals and contain track, so they can be seen from the cab. Viaducts have arched spans between piers every 14 m.
+The line is classified every 2 m as open, viaduct or tunnel: tunnel where the hill stands well above the line and viaduct where the valley falls well below it. Short tunnels become cuttings, short viaducts become embankments, and short open gaps between two long tunnels or viaducts are joined up. Over a tunnel the ground is kept level with the portal parapets, so the bore is always covered. Tunnels are lined, have portals and contain track, so they can be seen from the cab. Inside a tunnel the light fades and dark fog closes in beyond the headlights. While the far portal lies in a straight line of sight within 600 m, the bore is left clear up to it and the land beyond is seen through fog of the daylit horizon's colour, which thins as the train approaches; the daylight returns over the last 50 m. Viaducts have arched spans between piers every 14 m.
 
 There is one station in each 900 m of line (`ST_SP`), sited on the first level open stretch in its slot and in a town where there is one. Each station has a platform with ramps no steeper than 1 in 7 at both ends, a canopy on iron posts, benches, lamps and a station building.
 
