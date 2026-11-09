@@ -32,6 +32,7 @@
   <div class="row sel"><label for="view">View</label><select id="view">
     <option value="overview">Piazza from above</option><option value="street">Street level</option>
     <option value="follow">Following a person</option><option value="bench">From a bench</option>
+    <option value="steps">Hill and steps</option><option value="stepsTop">Steps from above</option>
     <option value="lineup">Line-up</option></select></div>
   <div class="row sel off" id="poseRow"><label for="pose">Pose</label><select id="pose">
     <option value="stand">Standing</option><option value="walk">Walking</option><option value="run">Running</option>
@@ -232,12 +233,12 @@ function createPeopleMesh(parent, MAX){
     F[4].multiplyMatrices(F[3],loc(0,-0.29*aL,0,-Q.lEl,0,0,'ZXY'));
     F[5].multiplyMatrices(F[1],loc(-0.195*sx,0.405*tS,-0.005*s,-Q.rSh,Q.rTw,-Q.rAb,'ZXY'));
     F[6].multiplyMatrices(F[5],loc(0,-0.29*aL,0,-Q.rEl,0,0,'ZXY'));
-    F[7].multiplyMatrices(F[0],loc(0.088*hx/s,0,0,-Q.lHip,0,Q.lHa,'ZXY'));
+    F[7].multiplyMatrices(F[0],loc(0.088*hx,0,0,-Q.lHip,-Q.pelYaw,Q.lHa-Q.pelRoll,'YZX'));
     F[8].multiplyMatrices(F[7],loc(0,-0.43*lL,0,Q.lKn,0,0,'ZXY'));
-    F[9].multiplyMatrices(F[8],loc(0,-0.41*lL,0,Q.lAn,0,0,'ZXY'));
-    F[10].multiplyMatrices(F[0],loc(-0.088*hx/s,0,0,-Q.rHip,0,-Q.rHa,'ZXY'));
+    F[9].multiplyMatrices(F[8],loc(0,-0.41*lL,0,Q.lAn,Q.lFy,0,'YXZ'));
+    F[10].multiplyMatrices(F[0],loc(-0.088*hx,0,0,-Q.rHip,-Q.pelYaw,-Q.rHa-Q.pelRoll,'YZX'));
     F[11].multiplyMatrices(F[10],loc(0,-0.43*lL,0,Q.rKn,0,0,'ZXY'));
-    F[12].multiplyMatrices(F[11],loc(0,-0.41*lL,0,Q.rAn,0,0,'ZXY'));
+    F[12].multiplyMatrices(F[11],loc(0,-0.41*lL,0,Q.rAn,-Q.rFy,0,'YXZ'));
     F[13].multiplyMatrices(F[0],loc(0,0,0,-Q.skirt,0,0,'ZXY'));
     put(row,0,F[0],hx,s,dz); put(row,1,F[1],sx,tS,dz*b.chest); put(row,2,F[2],s*b.headK,s*b.headK,s*b.headK);
     for (const k of [3,4,5,6]) put(row,k,F[k],gl,aL,gl);
@@ -249,7 +250,7 @@ function createPeopleMesh(parent, MAX){
     for (let r=0;r<NROLE;r++){ const c=look.cols[r]; data[o+r*4]=c.r; data[o+r*4+1]=c.g; data[o+r*4+2]=c.b; }
     data[o+NROLE*4]=look.mask;
   }
-  return { mesh, write, setCount(n){ mesh.count=n; tex.needsUpdate=true; }, tris:g.attributes.position.count/3 };
+  return { mesh, write, data, setCount(n){ mesh.count=n; tex.needsUpdate=true; }, tris:g.attributes.position.count/3 };
 }
 
 /* ---------- appearance ----------
@@ -341,40 +342,154 @@ function makeLook(kind, age, R){
    body and its pitch downwards). The pelvis is set at the height at which the lower foot meets the ground, so that
    the stride, the bob and the dip at each footfall follow from the legs themselves.
    ====================================================================================================== */
+const GAIT0={stride:1,knee:0.965,lift:1,sway:0.02,roll:0.04,hips:1,width:0.02,toe:0.1,arm:1,asym:1,elbow:0.2,armOut:0.12,nod:0.02,lean:0.02,bounce:0.2,pace:0,paceF:0.2};
 const POSE0={x:0,y:0,z:0,yaw:0,hipY:0.92,pelPitch:0,pelYaw:0,pelRoll:0,lean:0,twist:0,side:0,hdPitch:0,hdYaw:0,hdRoll:0,
-  lSh:0,lAb:0.12,lTw:0,lEl:0.15,rSh:0,rAb:0.12,rTw:0,rEl:0.15,lHip:0,lHa:0.02,lKn:0.05,lAn:0,rHip:0,rHa:0.02,rKn:0.05,rAn:0,skirt:0};
+  lSh:0,lAb:0.12,lTw:0,lEl:0.15,rSh:0,rAb:0.12,rTw:0,rEl:0.15,lHip:0,lHa:0.02,lKn:0.05,lAn:0,rHip:0,rHa:0.02,rKn:0.05,rAn:0,lFy:0,rFy:0,skirt:0};
 const newPose=()=>Object.assign({},POSE0);
 const ARM_KEYS=['lSh','lAb','lTw','lEl','rSh','rAb','rTw','rEl'];
 const ARMS={
   behind:{lSh:-0.34,lAb:0.1,lTw:1.25,lEl:1.35,rSh:-0.34,rAb:0.1,rTw:1.25,rEl:1.35},
   folded:{lSh:0.32,lAb:0.04,lTw:1.35,lEl:1.8,rSh:0.36,rAb:0.04,rTw:1.35,rEl:1.7},
   hips:{lSh:-0.1,lAb:0.55,lTw:0.9,lEl:1.6,rSh:-0.1,rAb:0.55,rTw:0.9,rEl:1.6},
+  pockets:{lSh:-0.06,lAb:0.17,lTw:0.55,lEl:0.5,rSh:-0.06,rAb:0.17,rTw:0.55,rEl:0.5},
+  pocketL:{lSh:-0.06,lAb:0.17,lTw:0.55,lEl:0.5},
 };
 const _sit=newPose();
+/* The shoulder joint of one side (+1 left) in the world, and the frame of the torso it hangs from, from the last pose
+   drawn: where the pelvis was, how high, and how far the torso was turned and leaning. */
+function torsoOf(p){ return { x:p.qx??p.x, z:p.qz??p.z, y:p.hipW??(p.y+HIP_REF*p.look.body.s*p.look.body.legK), yaw:p.yaw+(p.qTurn||0), lean:p.qLean||0 }; }
+function shoulderOf(p,side){
+  const b=p.look.body, s=b.s, tS=s*b.torsoK, o=0.195*s*b.sh*b.girth*side, T=torsoOf(p), up=0.49*tS;
+  const fw=up*Math.sin(T.lean), y=T.y+up*Math.cos(T.lean), c=Math.cos(T.yaw), sn=Math.sin(T.yaw);
+  return [T.x+c*o+sn*fw, y, T.z-sn*o+c*fw];
+}
+const armLen=p=>0.59*p.look.body.s*p.look.body.armK;
+// where two held hands meet: as low as the adult's arm reaches with a little slack, the child's arm raised to it
+function holdPoint(p){
+  const q=p.holdBy||p.holdKid; if (!q||!q.alive||q.armMode!=='hold') return null;
+  const kid=p.child?p:q, ad=p.child?q:p, SK=shoulderOf(kid,kid.holdSide), SA=shoulderOf(ad,ad.holdSide);
+  const gap=Math.hypot(SK[0]-SA[0],SK[2]-SA[2]); if (gap>(armLen(kid)+armLen(ad))*0.8) return null;
+  const y=Math.min(SK[1]+0.05,SA[1]-armLen(ad)*0.9), k=0.42, fy=(p.yaw+q.yaw)/2;
+  return [lerp(SA[0],SK[0],k)+Math.sin(fy)*0.06, y, lerp(SA[2],SK[2],k)+Math.cos(fy)*0.06];
+}
+// a two-bone solution for an arm to reach a point, in the frame of the torso: the swing forward and out, and the elbow
+function armTo(p,side,H){
+  const S=shoulderOf(p,side), T=torsoOf(p), c=Math.cos(T.yaw), sn=Math.sin(T.yaw), dx=H[0]-S[0], dz=H[2]-S[2], dy=H[1]-S[1];
+  const lat=(dx*c-dz*sn)*side, fw0=dx*sn+dz*c, dn0=-dy, cl=Math.cos(T.lean), sl=Math.sin(T.lean);
+  const dn=dn0*cl+fw0*sl, fw=fw0*cl-dn0*sl, aL=p.look.body.s*p.look.body.armK, u=0.29*aL, f=0.3*aL;
+  const d=clamp(Math.hypot(lat,fw,dn),0.1,(u+f)*0.995);
+  const el=Math.PI-Math.acos(clamp((u*u+f*f-d*d)/(2*u*f),-1,1)), al=Math.acos(clamp((u*u+d*d-f*f)/(2*u*d),-1,1));
+  const ab=Math.atan2(lat,dn), sw=Math.atan2(fw,Math.hypot(dn,lat));   // ab passes a right angle when the hand is above the shoulder
+  return [sw-al, ab, el];
+}
+const stepLenOf=p=>p.onStairs?STAIR.tread:p.look.body.s*p.look.body.legK*(0.35+0.28*Math.min(p.speedSm,3.2))*(p.gait?p.gait.stride:1);
+/* Feet on the ground. For the crowd each foot is a place in the world. Planted, it does not move at all. In its swing
+   it travels from where it was to where it will next come down, worked out afresh each frame from where the hip will
+   be when it lands, so that turns, changes of pace and sidesteps are followed; on stairs that place is moved to the
+   middle of a tread, and the foot is lifted higher to clear a step up. The pelvis is set as high as the planted feet
+   allow, and each leg is solved to reach its foot, bending sideways at the hip where the foot is out to the side. A
+   person who has stopped with the feet out of place, or has turned on the spot, steps to set them under the hips. */
+function pinnedLegs(p,t,Q,G){
+  const {s,b,lL,Lt,Ls,fh,SL,beta,run,shift,m}=G, gt=p.gait||GAIT0;
+  const sy=Math.sin(p.yaw), cy=Math.cos(p.yaw), hipX=0.088*s*b.hip*b.girth, Lm=(Lt+Ls)*lerp(0.985,gt.knee,m)*(1-0.05*run);
+  const dt=clamp(t-(p.poseT??t),0,0.1); p.poseT=t;
+  const moving=p.speedSm>0.2, T=2*SL/Math.max(0.35,p.speedSm), hLift=(0.07+0.22*run)*lL/0.92*gt.lift, push=0.45+0.4*run;
+  let need=false, swing=false, hipT=Infinity; const res=[];
+  for (const side of [1,-1]){
+    const key=side>0?'pinL':'pinR', u0=p.phase/TAU+(side>0?0:0.5), u=u0-Math.floor(u0);
+    const hx=p.x+cy*(side*hipX+shift), hz=p.z-sy*(side*hipX+shift);
+    let F=p[key]; if (!F) F=p[key]={x:hx,z:hz,y:groundAt(hx,hz),swing:false};
+    let lift=0, an=0;
+    if (u<beta){
+      if (F.swing){ F.swing=false; F.x=F.tx; F.z=F.tz; F.y=F.ty; }
+      const q=u/beta, th=moving&&q>0.72?(q-0.72)/0.28*push:0; an=th; lift=0.16*s*Math.sin(th);
+    } else {
+      const q=(u-beta)/(1-beta);
+      if (!F.swing){ F.swing=true; F.fx=F.x; F.fz=F.z; F.fy=F.y; }
+      // no two steps quite alike: the length and the placing of each vary a little
+      const k=Math.floor(u0), j1=hsh(p.id*2+side,k)-0.5, j2=hsh(p.id*2+side,k+7919)-0.5;
+      const rem=(1-q)*(1-beta)*T, lead=moving?beta*SL*(1+0.12*j1):0, wd=side*(moving?gt.width+0.03*j2:0.01)-shift;
+      const [tx,tz]=snapTread(hx+(moving?p.vx*rem:0)+sy*lead+cy*wd, hz+(moving?p.vz*rem:0)+cy*lead-sy*wd);
+      F.tx=tx; F.tz=tz; F.ty=groundAt(tx,tz);
+      const e=smooth(q), ey=smooth(Math.min(1,q*1.5)), up=Math.max(0,F.ty-F.fy);
+      F.x=lerp(F.fx,tx,e); F.z=lerp(F.fz,tz,e); F.y=lerp(F.fy,F.ty,ey);
+      lift=(hLift*(moving?1:0.6)+up*0.5)*Math.sin(Math.PI*Math.pow(q,0.75));
+      an=moving?(q<0.3?push*(1-q/0.3):q>0.85?-0.18*(q-0.85)/0.15:0):0;
+      swing=true;
+    }
+    const dh=Math.hypot(F.x-hx,F.z-hz);
+    if (!F.swing){ hipT=Math.min(hipT,F.y+fh+lift+Math.sqrt(Math.max(0.01,Lm*Lm-dh*dh)));
+      if (!moving && (dh>0.16*lL || Math.abs(F.y-groundAt(hx,hz))>0.1)) need=true; }
+    res.push({F,hx,hz,lift,an,side});
+  }
+  p.needStep=need; p.inSwing=swing;
+  if (hipT===Infinity) hipT=p.hipW??(p.y+Lm+fh);
+  hipT-=(1-p.walkW)*0.012;   // standing, the knees a little soft
+  hipT+=m*gt.bounce*0.02*Math.max(0,Math.sin(2*p.phase-0.6));   // a spring in the step
+  if (p.hipW==null||Math.abs(p.hipW-hipT)>0.6) p.hipW=hipT; else p.hipW+=(hipT-p.hipW)*ease(16,dt||0.016);
+  const hy=p.hipW; Q.hipY=hy-p.y;
+  for (const r of res){
+    const F=r.F, dx=F.x-r.hx, dz=F.z-r.hz, fw=dx*sy+dz*cy, lat=(dx*cy-dz*sy)*r.side, down=Math.max(0.05,hy-(F.y+fh+r.lift));
+    const yv=Math.hypot(down,lat), d=Math.max(0.05,Math.min(Math.hypot(fw,yv),(Lt+Ls)*0.999));
+    const kn=Math.acos(clamp((d*d-Lt*Lt-Ls*Ls)/(2*Lt*Ls),-1,1)), al=Math.acos(clamp((Lt*Lt+d*d-Ls*Ls)/(2*Lt*d),-1,1));
+    const aT=Math.atan2(fw,yv)+al, ha=Math.atan2(lat,down), g=F.swing?0:slopeAt(F.x,F.z,sy,cy);
+    const hip=aT+Q.pelPitch, an=aT-kn+r.an-g;   // the foot level, or along the slope under it
+    if (r.side>0){ Q.lHip=hip; Q.lKn=kn; Q.lAn=an; Q.lHa=ha; } else { Q.rHip=hip; Q.rKn=kn; Q.rAn=an; Q.rHa=ha; }
+  }
+}
 function buildPose(p, t, Q){
   const b=p.look.body, s=b.s, lL=s*b.legK, Lt=0.43*lL, Ls=0.41*lL, fh=FOOT_H*s*b.foot, legL=Lt+Ls+fh;
   const sp=p.speedSm, w=p.walkW, run=p.canRun?smooth((sp-1.9)/0.7)*w:0;
-  const stepLen=lL*(0.35+0.28*Math.min(sp,3.2));
-  const A=w*Math.asin(Math.min(0.62,stepLen/(2*legL)))+p.turnStep*0.16;
-  const ph=p.phase, sn=Math.sin(ph), cs=Math.cos(ph), still=1-Math.min(1,w+p.turnStep);
+  const stepLen=stepLenOf(p);
+  const m=Math.min(1,w+p.turnStep), still=1-m, ph=p.phase, cs=Math.cos(ph);
   Object.assign(Q,POSE0);
   Q.x=p.x; Q.y=p.y; Q.z=p.z; Q.yaw=p.yaw;
-  // legs
-  const hipOff=0.04*w+0.22*run, kA=(0.95+0.75*run)*Math.min(1,A/0.3);
-  const knee=f=>0.05+kA*Math.pow(Math.max(0,Math.cos(f+0.35)),2)+run*0.32;
-  Q.lHip=hipOff+A*sn*(1+0.3*run); Q.rHip=hipOff-A*sn*(1+0.3*run);
-  Q.lKn=knee(ph); Q.rKn=knee(ph+Math.PI);
+  Q.pelPitch=0.03*w+0.06*run;
+  /* legs: each foot follows a planned path in the pelvis's frame and the hip and knee are solved to reach it. In
+     stance the foot stays on the ground and moves back at exactly the walking speed, so that it does not slide: the
+     phase advances by pi a step over the distance actually walked, and the stance takes the fraction beta of the cycle,
+     so the foot sweeps 2 beta stepLen. In swing it is lifted on an arc; the heel rises and the toes push off at the end
+     of stance. Turning on the spot is a few short steps. */
+  const SL=lerp(stepLen,0.14*lL,p.turnStep*(1-w)), beta=lerp(0.62,0.38,run);
+  const A=m*Math.asin(Math.min(0.6,beta*SL/legL));
+  const Lm=(Lt+Ls)*0.985*(1-0.05*run), hLift=(0.07+0.22*run)*lL/0.92, push=0.45+0.4*run;
+  const foot=u=>{ u-=Math.floor(u);
+    if (u<beta){ const q=u/beta, th=q>0.72?(q-0.72)/0.28*push:0; return {z:beta*SL*(1-2*q), lift:0.16*s*Math.sin(th), an:th, st:true, q}; }
+    const q=(u-beta)/(1-beta), e=q*q*(3-2*q), th=q<0.3?push*(1-q/0.3):q>0.85?-0.18*(q-0.85)/0.15:0;
+    return {z:-beta*SL+2*beta*SL*e, lift:Math.max(hLift*Math.sin(Math.PI*Math.pow(q,0.75)),q<0.3?0.16*s*Math.sin(th):0), an:th, st:false, q}; };
+  const fL=foot(ph/TAU), fR=foot(ph/TAU+0.5);
+  // the pelvis rides over the stance leg; in a run it dips in stance and rises in flight
+  const pend=f=>Math.sqrt(Math.max(0.01,Lm*Lm-f.z*f.z))+fh;
+  let walkY=Infinity; for (const f of [fL,fR]) if (f.st) walkY=Math.min(walkY,pend(f));
+  if (walkY===Infinity) walkY=Math.sqrt(Math.max(0.01,Lm*Lm-(beta*SL)**2))+fh;
+  const fs=[fL,fR].find(f=>f.st), uf=((ph/TAU)%0.5+0.5)%0.5, fly=clamp((uf-beta)/Math.max(0.01,0.5-beta),0,1);
+  const runY=fh+Lm*0.95+(fs?-0.04*Math.sin(Math.PI*fs.q):0.05*Math.sin(Math.PI*fly));
+  const gaitY=lerp(walkY,runY,run);
+  const ik=(z,lift,lat)=>{ const y=Math.hypot(gaitY-fh-lift,lat), d=Math.max(0.05,Math.min(Math.hypot(z,y),(Lt+Ls)*0.999));
+    const kn=Math.acos(clamp((d*d-Lt*Lt-Ls*Ls)/(2*Lt*Ls),-1,1)), al=Math.acos(clamp((Lt*Lt+d*d-Ls*Ls)/(2*Lt*d),-1,1));
+    return [Math.atan2(z,y)+al, kn]; };   // the thigh's angle forward of straight down, and the bend of the knee
+  const [aL,kL]=ik(fL.z,fL.lift,0), [aR,kR]=ik(fR.z,fR.lift,0);
   // standing: the weight on one leg and then the other, the free knee relaxed
-  const wt=Math.sin(t*0.55+p.seed);
-  Q.pelRoll=0.04*A*cs+still*0.035*wt; Q.lHa=0.02+still*0.025; Q.rHa=0.02+still*0.025;
-  Q.lKn+=still*0.09*Math.max(0,wt); Q.rKn+=still*0.09*Math.max(0,-wt);
-  Q.pelYaw=-0.12*A*sn; Q.twist=0.2*A*sn; Q.pelPitch=0.03*w+0.06*run;
-  Q.lean=0.04*w+0.22*run+b.stoop+0.01*Math.sin(t*1.7+p.seed)*still;
+  const wt=Math.sin(t*0.55+p.seed), sKL=0.04+0.09*Math.max(0,wt), sKR=0.04+0.09*Math.max(0,-wt);
+  const reach=(hip,kn)=>{ const aT=hip-Q.pelPitch, aS=aT-kn; return Lt*Math.cos(aT)+Ls*Math.cos(aS)+fh; };
+  Q.lHip=lerp(0.02,aL+Q.pelPitch,m); Q.rHip=lerp(0.02,aR+Q.pelPitch,m); Q.lKn=lerp(sKL,kL,m); Q.rKn=lerp(sKR,kR,m);
+  Q.hipY=lerp(Math.max(reach(0.02,sKL),reach(0.02,sKR)),gaitY,m);
+  Q.lAn=Q.lHip-Q.lKn-Q.pelPitch+fL.an*m; Q.rAn=Q.rHip-Q.rKn-Q.pelPitch+fR.an*m;
+  const gt=p.gait||GAIT0, wS=Math.cos(ph-Math.PI*beta);   // +1 with the weight over the left foot, -1 over the right
+  const shift=m*gt.sway*wS*(1-0.6*run)+still*0.018*wt;
+  Q.pelRoll=m*gt.roll*wS*(1-0.5*run)+still*0.035*wt; Q.side=-0.6*Q.pelRoll; Q.lHa=0.02+still*0.025; Q.rHa=0.02+still*0.025;
+  Q.pelYaw=-0.12*A*cs*gt.hips; Q.twist=0.2*A*cs*(0.6+0.4*gt.hips);
+  Q.lFy=Q.rFy=gt.toe*(1-0.5*run);
+  Q.x+=Math.cos(p.yaw)*shift; Q.z-=Math.sin(p.yaw)*shift;
+  Q.lean=(0.04+gt.lean)*w+0.22*run+b.stoop+0.01*Math.sin(t*1.7+p.seed)*still+(p.lockFeet?p.climb*0.12:0);
+  if (p.lockFeet) pinnedLegs(p,t,Q,{s,b,lL,Lt,Ls,fh,SL,beta,run,shift,m});
   // arms swing against the legs; in a run they bend and pump
-  const armA=A*(1.15+0.7*run);
-  Q.lSh=0.03-armA*sn; Q.rSh=0.03+armA*sn;
-  Q.lEl=0.16+0.3*Math.max(0,Q.lSh)+run*1.25; Q.rEl=0.16+0.3*Math.max(0,Q.rSh)+run*1.25;
-  Q.lAb=Q.rAb=0.12+0.04*run+0.03*(b.girth-1);
+  // the arms swing a little behind the legs, the forward swing bending the elbow
+  const armA=A*(1.15+0.7*run)*gt.arm, ca=Math.cos(ph-0.3);
+  Q.lSh=0.03-armA*ca*gt.asym; Q.rSh=0.03+armA*ca/gt.asym;
+  Q.lEl=gt.elbow+0.35*Math.max(0,Q.lSh)+run*1.15; Q.rEl=gt.elbow+0.35*Math.max(0,Q.rSh)+run*1.15;
+  Q.lAb=Q.rAb=gt.armOut+0.04*run+0.03*(b.girth-1);
+  Q.nod=m*gt.nod*Math.cos(2*ph);
   if (p.look.mask&PART.handBag){ Q.rAb=0.2; Q.rSh*=0.3; Q.rEl=0.08; }
   // the arms held otherwise
   if (p.armW>0.001){
@@ -384,31 +499,29 @@ function buildPose(p, t, Q){
       Q.rSh=lerp(Q.rSh,0.42+0.12*g1,k); Q.rAb=lerp(Q.rAb,0.2,k); Q.rTw=lerp(Q.rTw,-0.25,k); Q.rEl=lerp(Q.rEl,1.25+0.3*g2,k);
       if (p.gest2){ Q.lSh=lerp(Q.lSh,0.3+0.1*g2,k); Q.lAb=lerp(Q.lAb,0.18,k); Q.lEl=lerp(Q.lEl,1.1+0.25*g1,k); }
     } else if (p.armMode==='hold'){
-      // the hand towards the partner reaches out and down (holdSide +1: the partner is on the left)
-      const reach=p.child?0.42:0.16, fw=p.child?0.12:0.05;
-      if (p.holdSide>0){ Q.lAb=lerp(Q.lAb,reach,k); Q.lSh=lerp(Q.lSh,fw,k); Q.lEl=lerp(Q.lEl,0.12,k); }
-      else { Q.rAb=lerp(Q.rAb,reach,k); Q.rSh=lerp(Q.rSh,fw,k); Q.rEl=lerp(Q.rEl,0.12,k); }
-    } else { const A2=ARMS[p.armMode]; if (A2) for (const key of ARM_KEYS) Q[key]=lerp(Q[key],A2[key],k); }
+      // hand in hand: both arms are solved to one point between the two, a little in front and nearer the child's height
+      const H=holdPoint(p);
+      if (H){ const [sh,ab,el]=armTo(p,p.holdSide,H);
+        if (p.holdSide>0){ Q.lSh=lerp(Q.lSh,sh,k); Q.lAb=lerp(Q.lAb,ab,k); Q.lTw=lerp(Q.lTw,0,k); Q.lEl=lerp(Q.lEl,el,k); }
+        else { Q.rSh=lerp(Q.rSh,sh,k); Q.rAb=lerp(Q.rAb,ab,k); Q.rTw=lerp(Q.rTw,0,k); Q.rEl=lerp(Q.rEl,el,k); } }
+    } else { const A2=ARMS[p.armMode]; if (A2) for (const key in A2) Q[key]=lerp(Q[key],A2[key],k); }
   }
-  // the pelvis at the height of the lower foot, with a bounce in a run
-  const reach=(hip,kn)=>{ const aT=hip-Q.pelPitch, aS=aT-kn; return Lt*Math.cos(aT)+Ls*Math.cos(aS)+fh; };
-  Q.hipY=Math.max(reach(Q.lHip,Q.lKn),reach(Q.rHip,Q.rKn))+run*0.05*(1-Math.cos(2*ph))*0.5;
-  const toe=f=>0.22*Math.min(1,A/0.3)*Math.pow(Math.max(0,Math.cos(f+1.35)),3);
-  Q.lAn=Q.lHip-Q.lKn-Q.pelPitch+toe(ph); Q.rAn=Q.rHip-Q.rKn-Q.pelPitch+toe(ph+Math.PI);
   Q.skirt=(Q.lHip+Q.rHip)*0.35;
 
   // sitting
   const seat=p.mode==='unsit'?p.unseat:p.seat;
   if (p.sitW>0.001 && seat){
     const S=_sit; Object.assign(S,Q);
-    const seatH=seat.h, hipY=seatH+0.1*s, d=hipY-fh, pp=-0.12;
+    /* the thighs slope down from the seat just enough for the feet to rest flat on the ground, the shins leaning
+       forward as far as the seat is low; legs too short to reach, as a child's are, hang and now and then swing */
+    const seatH=seat.h, hipY=seatH+0.07*s, pp=-0.12, drop0=hipY-fh;
+    const slope=Math.min(0.35,Math.asin(clamp((drop0-Ls*0.97)/Lt,0,1))), aT=Math.PI/2-slope, drop=drop0-Lt*Math.cos(aT);
+    const dangle=drop>Ls, kn=aT-(dangle?0:Math.acos(drop/Ls));
     S.pelPitch=pp; S.pelYaw=0; S.pelRoll=0; S.twist=0;
     S.lean=-0.03+b.stoop*0.6+(p.sitLean?0.32:0);
-    S.lHip=S.rHip=Math.PI/2+pp; S.lHa=S.rHa=0.1;
-    let kn;
-    if (d<=Ls) kn=Math.PI/2-Math.acos(d/Ls)+0.05; else kn=Math.PI/2-0.12;
-    const dangle=d>Ls*1.02;
-    S.lKn=kn+(dangle?0.32*Math.sin(t*3.2+p.seed):0); S.rKn=kn+(dangle?0.32*Math.sin(t*3.2+p.seed+2.4):0);
+    S.lHip=S.rHip=aT+pp; S.lHa=S.rHa=0.1;
+    const sw=dangle&&p.child?0.32*Math.pow(Math.max(0,Math.sin(t*0.31+p.seed)),3):0;
+    S.lKn=kn+sw*Math.sin(t*3.2+p.seed); S.rKn=kn+sw*Math.sin(t*3.2+p.seed+2.4);
     if (p.sitCross && !dangle){ S.lHip+=0.25; S.lKn=1.2; S.lHa=-0.15; }
     S.lAn=S.lHip-S.lKn-pp; S.rAn=S.rHip-S.rKn-pp;
     if (p.sitLean){ S.lSh=S.rSh=0.75; S.lEl=S.rEl=0.9; S.lAb=S.rAb=0.12; }
@@ -423,7 +536,7 @@ function buildPose(p, t, Q){
   }
   // the head and the top of the body turn towards what is looked at
   const tw=clamp(p.hY*0.28,-0.32,0.32)*(1-0.6*w);
-  Q.twist+=tw; Q.hdYaw=p.hY-tw; Q.hdPitch=p.hP-Q.lean*0.85-Q.pelPitch*0.8; Q.hdRoll=0.03*Math.sin(t*0.4+p.seed);
+  Q.twist+=tw; p.qx=Q.x; p.qz=Q.z; p.qTurn=Q.pelYaw+Q.twist; p.qLean=Q.lean; Q.hdYaw=p.hY-tw; Q.hdPitch=p.hP-Q.lean*0.85-Q.pelPitch*0.8+(Q.nod||0); Q.hdRoll=0.03*Math.sin(t*0.4+p.seed);
 }
 
 /* ======================================================================================================
@@ -433,6 +546,24 @@ function buildPose(p, t, Q){
    clearance, its distance from the nearest wall or obstacle.
    ====================================================================================================== */
 const WALK=[{x0:-22,x1:22,z0:-17,z1:17},{x0:-71,x1:-21,z0:-2.2,z1:2.2},{x0:21,x1:71,z0:-3,z1:3},{x0:6,x1:10.5,z0:-63,z1:-16},{x0:-11,x1:-7,z0:16,z1:63}];
+/* the north street climbs: level to z = -24, a hill of 1 in 6 to a landing 3 m up at z = -42, then sixteen steps of
+   0.16 by 0.33 m to the top of the town, 5.56 m up */
+const STAIR={x0:5.5,x1:11,z0:-44,tread:0.33,rise:0.16,n:16,h0:3};
+function groundAt(x,z){
+  if (x<STAIR.x0||x>STAIR.x1||z>-24) return 0;
+  if (z>=-42) return (-24-z)/6;
+  if (z>=STAIR.z0) return STAIR.h0;
+  const i=Math.floor((STAIR.z0-z)/STAIR.tread); return STAIR.h0+STAIR.rise*Math.min(STAIR.n,i+1);
+}
+const onStairs=(x,z)=>x>STAIR.x0&&x<STAIR.x1&&z<STAIR.z0+0.25&&z>STAIR.z0-STAIR.n*STAIR.tread-0.25;
+function snapTread(x,z){
+  if (!(x>STAIR.x0&&x<STAIR.x1&&z<STAIR.z0+0.08&&z>STAIR.z0-STAIR.n*STAIR.tread-0.08)) return [x,z];
+  const i=clamp(Math.floor((STAIR.z0-z)/STAIR.tread),0,STAIR.n-1); return [x,STAIR.z0-STAIR.tread*(i+0.5)];
+}
+function slopeAt(x,z,sy,cy){ if (onStairs(x,z)) return 0; return Math.atan((groundAt(x+sy*0.15,z+cy*0.15)-groundAt(x-sy*0.15,z-cy*0.15))/0.3); }
+// walking is slower on a hill, and slower still on stairs
+function terrainPace(x,z,dx,dz){ if (onStairs(x,z)) return 0.6; const l=Math.hypot(dx,dz); if (l<1e-3) return 1;
+  const g=Math.abs(groundAt(x+dx/l*0.6,z+dz/l*0.6)-groundAt(x,z))/0.6; return clamp(1-1.4*g,0.6,1); }
 const inPiazza=(x,z)=>x>-21.5&&x<21.5&&z>-16.5&&z<16.5;
 const OBST=[];   // {c:1,x,z,r} circles and {x,z,hw,hd,rot} boxes
 const SEATS=[], SEATSETS=[], EXITS=[], WINDOWS=[], VIEWS=[], SPOTS=[];
@@ -458,6 +589,7 @@ for (const [tx,tz] of TABLES){
   addSeatSet('table',[0,1,2].map(k=>{ const a=a0+k*TAU/3; return {x:tx+Math.cos(a)*0.72,z:tz+Math.sin(a)*0.72,h:0.46,yaw:Math.atan2(-Math.cos(a),-Math.sin(a)),ax:tx+Math.cos(a)*1.18,az:tz+Math.sin(a)*1.18,table:[tx,tz]}; }));
 }
 // places to stand and look: round the fountain, facing it
+VIEWS.push({x:8.25,z:-56,yaw:0,lx:8.25,ly:0.5,lz:-28},{x:7.2,z:-57,yaw:0.05,lx:8,ly:1,lz:-30});
 for (let k=0;k<8;k++){ const a=k/8*TAU; VIEWS.push({x:Math.cos(a)*3.9,z:Math.sin(a)*3.9,yaw:Math.atan2(-Math.cos(a),-Math.sin(a)),lx:0,ly:1.2,lz:0}); }
 
 /* ---------- the walkable grid ---------- */
@@ -586,7 +718,15 @@ function daylight(){
   const shade=(c,a=0.05)=>c.clone().multiplyScalar(1+(R0()-0.5)*2*a);
   add(new THREE.PlaneGeometry(1,1).rotateX(-Math.PI/2),0,-0.02,0,1600,1,1600,0,C_.scrub);
   box(0,-0.1,0,44,0.12,34,0,C_.piazza);
-  for (const r of WALK.slice(1)) box((r.x0+r.x1)/2,-0.1,(r.z0+r.z1)/2,r.x1-r.x0,0.11,r.z1-r.z0,0,C_.road);
+  for (const r of WALK.slice(1)) if (r!==WALK[3]) box((r.x0+r.x1)/2,-0.1,(r.z0+r.z1)/2,r.x1-r.x0,0.11,r.z1-r.z0,0,C_.road);
+  // the north street: paving that follows the hill up to the landing, stone steps, and the level top
+  { const g=new THREE.PlaneGeometry(STAIR.x1-STAIR.x0,27,1,108).rotateX(-Math.PI/2).translate((STAIR.x0+STAIR.x1)/2,0,-30.5), P=g.attributes.position;
+    for (let i=0;i<P.count;i++) P.setY(i,groundAt(P.getX(i),Math.max(P.getZ(i),STAIR.z0+0.001))+0.012);
+    g.computeVertexNormals(); add(g,0,0,0,1,1,1,0,C_.road);
+    for (let i=0;i<STAIR.n;i++){ const z1=STAIR.z0-STAIR.tread*i, top=STAIR.h0+STAIR.rise*(i+1);
+      box(8.25,STAIR.h0-0.2,z1-STAIR.tread/2,STAIR.x1-STAIR.x0,top-STAIR.h0+0.2,STAIR.tread,0,i%2?C_.stone:C_.stone.clone().multiplyScalar(0.97));
+      box(8.25,top-0.02,z1-0.02,STAIR.x1-STAIR.x0,0.03,0.05,0,C_.stoneDark); }
+    const zt=STAIR.z0-STAIR.n*STAIR.tread, ht=STAIR.h0+STAIR.rise*STAIR.n; box(8.25,ht-0.3,(zt-63)/2,STAIR.x1-STAIR.x0,0.312,-63-zt,0,C_.road); }
   // the paving's courses
   for (let x=-20;x<=20;x+=4) box(x,-0.1,0,0.08,0.125,34,0,C_.stoneDark.clone().lerp(C_.piazza,0.55));
   for (let z=-16;z<=16;z+=4) box(0,-0.1,z,44,0.125,0.08,0,C_.stoneDark.clone().lerp(C_.piazza,0.55));
@@ -599,20 +739,21 @@ function daylight(){
     while (u<L-0.5){
       let w=5+R0()*4; if (L-u-w<3.5) w=L-u;
       const cu=u+w/2, fx=x0+ux*cu, fz=z0+uz*cu, D=9, h=5.5+Math.floor(R0()*3)*2.3+R0()*0.6, wall=pick(R0,C_.walls);
-      box(fx-nx*D/2,-0.2,fz-nz*D/2,w,h+0.2,D,ry,shade(wall,0.03));
-      add(PRISM(),fx-nx*D/2,h,fz-nz*D/2,D+0.35,1.3,w+0.35,ry+Math.PI/2,shade(pick(R0,C_.roofs),0.05));
-      box(fx-nx*D/2,h-0.18,fz-nz*D/2,w+0.3,0.18,D+0.3,ry,C_.trim);
+      const gb=Math.min(...[-0.45,0,0.45].map(k=>groundAt(fx+ux*w*k+nx*0.4,fz+uz*w*k+nz*0.4)));   // the house stands on the lowest ground before it
+      box(fx-nx*D/2,-0.2,fz-nz*D/2,w,gb+h+0.2,D,ry,shade(wall,0.03));
+      add(PRISM(),fx-nx*D/2,gb+h,fz-nz*D/2,D+0.35,1.3,w+0.35,ry+Math.PI/2,shade(pick(R0,C_.roofs),0.05));
+      box(fx-nx*D/2,gb+h-0.18,fz-nz*D/2,w+0.3,0.18,D+0.3,ry,C_.trim);
       // the door and the windows of the front
       const du=(R0()-0.5)*Math.max(0,w-2.6), dx=fx+ux*du+nx*0.04, dz=fz+uz*du+nz*0.04, sh=pick(R0,C_.shutters);
-      box(dx,0,dz,1.1,2.25,0.12,ry,C_.door); box(dx,2.25,dz,1.35,0.14,0.16,ry,C_.trim);
+      const dg=groundAt(dx+nx*0.4,dz+nz*0.4); box(dx,dg,dz,1.1,2.25,0.12,ry,C_.door); box(dx,dg+2.25,dz,1.35,0.14,0.16,ry,C_.trim);
       EXITS.push({x:fx+ux*du+nx*0.55,z:fz+uz*du+nz*0.55,yaw:Math.atan2(-nx,-nz),door:true});
       for (let fl=0; fl<Math.floor(h/2.3); fl++){
         for (const wu of [-w*0.3,w*0.3]){
           if (fl===0 && Math.abs(wu-du)<1.3) continue;
-          const wx=fx+ux*wu+nx*0.05, wz=fz+uz*wu+nz*0.05, y=fl===0?0.9:fl*2.3+1.0;
+          const wx=fx+ux*wu+nx*0.05, wz=fz+uz*wu+nz*0.05, wg=groundAt(wx+nx*0.4,wz+nz*0.4), y=Math.max(wg,gb)+(fl===0?0.9:fl*2.3+1.0);
           box(wx,y,wz,0.8,1.15,0.1,ry,C_.win); for (const s of [-1,1]) box(wx+ux*s*0.6,y,wz+uz*s*0.6,0.4,1.15,0.1,ry,sh);
           box(wx,y-0.08,wz,1.1,0.08,0.22,ry,C_.trim);
-          if (fl===0) WINDOWS.push({x:fx+ux*wu+nx*0.85,z:fz+uz*wu+nz*0.85,yaw:Math.atan2(-nx,-nz),lx:fx+ux*wu,ly:1.4,lz:fz+uz*wu,piazza});
+          if (fl===0) WINDOWS.push({x:fx+ux*wu+nx*0.85,z:fz+uz*wu+nz*0.85,yaw:Math.atan2(-nx,-nz),lx:fx+ux*wu,ly:y+0.5,lz:fz+uz*wu,piazza});
         }
       }
       u+=w;
@@ -643,6 +784,7 @@ function daylight(){
   const g=mergeGeometries(parts); const town=new THREE.Mesh(g,new THREE.MeshLambertMaterial({vertexColors:true,side:THREE.DoubleSide})); town.castShadow=true; town.receiveShadow=true; scene.add(town);
   // spots to stop in the piazza
   for (let k=0;k<400&&SPOTS.length<60;k++){ const x=-19+R0()*38, z=-14+R0()*28; if (clearAt(x,z)>1.6) SPOTS.push({x,z}); }
+  SPOTS.push({x:8.25,z:-58},{x:8.6,z:-60.5},{x:8.25,z:-33},{x:8.3,z:-43});
 }
 
 /* ======================================================================================================
@@ -661,15 +803,29 @@ const games=[];
 const MAXP=260;
 const crowdMesh=createPeopleMesh(scene,MAXP);
 
+/* Each person walks in their own way: a longer or shorter stride, softer or straighter knees, a higher or lower
+   lift of the foot, more or less sway of the hips and weight shifted over the standing foot, toes turned out, a wider
+   or narrower track, a fuller or slighter arm swing (and the two arms not quite alike), elbows more or less bent and a
+   nod of the head at each step. Older people take shorter, flatter steps on a wider track and swing their arms less;
+   children walk with a spring in their step and swing their arms more. */
+function makeGait(look){
+  const old=look.elder, kid=look.child, fem=!look.man, u=(a,b)=>a+R()*(b-a);
+  return { stride:clamp(gauss(R,old?0.86:1,0.06),0.75,1.15), knee:old?u(0.94,0.96):u(0.945,0.978), lift:old?u(0.5,0.8):kid?u(1,1.35):u(0.75,1.25),
+    sway:(fem?u(0.022,0.04):u(0.012,0.028))*(old?1.3:1), roll:fem?u(0.04,0.08):u(0.02,0.05), hips:fem?u(1,1.7):u(0.6,1.2),
+    width:old?u(0.03,0.06):u(0,0.035), toe:old?u(0.12,0.26):u(0.03,0.2), arm:old?u(0.35,0.8):kid?u(1.1,1.6):u(0.6,1.35),
+    asym:u(0.82,1.18), elbow:u(0.1,0.45), armOut:u(0.08,0.2), nod:u(0.01,0.035), lean:old?u(0.02,0.08):u(-0.02,0.06),
+    bounce:kid?u(0.4,1):u(0,0.35), pace:u(0.03,0.08), paceF:u(0.15,0.4) };
+}
+const hsh=(a,b)=>{ let h=Math.imul(a|0,0x27d4eb2d)^Math.imul(b|0,0x165667b1); h=Math.imul(h^(h>>>15),0x85ebca6b); h=Math.imul(h^(h>>>13),0xc2b2ae35); return ((h^(h>>>16))>>>0)/4294967296; };
 function makePerson(kind, age){
   const look=makeLook(kind,age,R), p={ id:NEXT++, look, kind, child:look.child, elder:look.elder, rad:look.child?0.19:0.25+0.03*(look.body.girth-1),
-    x:0,y:0.015,z:0, vx:0,vz:0, yaw:0, speedSm:0, phase:R()*TAU, walkW:0, turnStep:0, yawRate:0,
+    x:0,y:0.015,z:0, climb:0, vx:0,vz:0, yaw:0, speedSm:0, phase:R()*TAU, walkW:0, turnStep:0, yawRate:0,
     pref: look.child?gauss(R,1.25,0.12):look.elder?gauss(R,1.0,0.1):gauss(R,look.man?1.38:1.3,0.13),
-    runSpeed: look.child?2.3+R()*0.7:2.6, canRun:look.child, mode:'slot', tx:0,tz:0, face:null, group:null, order:0,
+    runSpeed: look.child?2.3+R()*0.7:2.6, canRun:look.child, lockFeet:true, mode:'slot', tx:0,tz:0, face:null, group:null, order:0,
     slotL:0, slotF:0, sitW:0, seat:null, sitDir:0, hY:0, hP:0, gaze:null, gazeT:0, armMode:'free', armW:0, armWant:'free', gest2:false, holdSide:0,
     wp:null, wpT:0, seed:R()*100, kidMode:'slot', kidT:2+R()*4, game:null, freeze:0, alive:true,
-    sitLean:look.elder&&R()<0.35, sitHands:R()<0.4, sitCross:!look.child&&R()<0.25, walkArms:look.elder&&look.man&&R()<0.45?'behind':'free' };
-  p.pref=clamp(p.pref,0.75,1.8);
+    sitLean:look.elder&&R()<0.35, sitHands:R()<0.4, sitCross:!look.child&&R()<0.25, walkArms:look.elder&&look.man&&R()<0.45?'behind':!look.child&&look.man&&R()<0.14?'pockets':!look.child&&R()<0.1?'pocketL':'free' };
+  p.pref=clamp(p.pref,0.75,1.8); p.gait=makeGait(look);
   return p;
 }
 function makeGroup(members, kind){
@@ -704,7 +860,7 @@ function composeGroup(){
 }
 function placeGroup(g,x,z,yaw){
   g.ax=x; g.az=z; g.ayaw=yaw; g.avx=g.avz=0;
-  for (const m of g.members){ m.x=x+(R()-0.5)*1.4; m.z=z+(R()-0.5)*1.4; if (clearAt(m.x,m.z)<0.3){ m.x=x; m.z=z; } m.yaw=yaw; m.vx=m.vz=0; m.mode='slot'; people.push(m); }
+  for (const m of g.members){ m.x=x+(R()-0.5)*1.4; m.z=z+(R()-0.5)*1.4; if (clearAt(m.x,m.z)<0.3){ m.x=x; m.z=z; } m.y=groundAt(m.x,m.z); m.pinL=m.pinR=null; m.hipW=null; m.yaw=yaw; m.vx=m.vz=0; m.mode='slot'; people.push(m); }
   groups.push(g);
 }
 function removeGroup(g){
@@ -751,6 +907,7 @@ function setLeave(g){
 }
 function releaseHands(g){ for (const m of g.members){ m.armWant='free'; m.holdKid=null; m.holdBy=null; if (m.child) m.kidMode='slot'; } }
 function startWalk(g){
+  if (g.kind==='family'){ const kids=g.members.filter(m=>m.child).sort((a,b)=>a.look.age-b.look.age); if (kids[0]&&R()<(kids[0].look.age<9?0.8:0.4)){ kids[0].kidMode='hold'; kids[0].kidT=8+R()*10; } }
   const ad=g.members.filter(m=>!m.child), src=ad.length?ad:g.members;
   if (g.state!=='walk'){ g.ax=src.reduce((s,m)=>s+m.x,0)/src.length; g.az=src.reduce((s,m)=>s+m.z,0)/src.length; }
   g.state='walk'; g.circle=null; g.wp=null;
@@ -826,7 +983,7 @@ function formation(g){
   const ms=g.members.filter(m=>m.mode==='slot'), n=ms.length; if (!n) return;
   ms.sort((a,b)=>a.order-b.order);
   const clrA=clearAt(g.ax,g.az), avail=Math.max(0.2,2*(clrA-0.35));
-  const gap=(a,b)=>(a.child&&b.child)?0.5:(a.child||b.child)?(a.kidMode==='hold'||b.kidMode==='hold'?0.42:0.55):0.72;
+  const gap=(a,b)=>(a.child&&b.child)?0.5:(a.child||b.child)?(a.kidMode==='hold'||b.kidMode==='hold'?0.64:0.55):0.72;
   let lat=[0]; for (let i=1;i<n;i++) lat.push(lat[i-1]+gap(ms[i-1],ms[i]));
   const width=lat[n-1], mid=width/2; lat=lat.map(l=>l-mid);
   let fwd=lat.map((l,i)=>n>=3?-0.28*(1-Math.abs(l)/(mid||1)):0);   // a shallow U, the middle a little behind, so that all can talk
@@ -849,7 +1006,7 @@ function moveAnchor(g,dt){
   for (const m of g.members) if (m.mode==='unsit') lag=Math.max(lag,3);
   g.wpT-=dt; if (!g.wp||g.wpT<=0){ g.wp=waypoint(g.ax,g.az,d.x,d.z)||[d.x,d.z]; g.wpT=0.35; }
   const dx=g.wp[0]-g.ax, dz=g.wp[1]-g.az, dl=Math.hypot(dx,dz)||1, rem=Math.hypot(d.x-g.ax,d.z-g.az);
-  const v=g.speed*clamp(1.5-lag/1.1,0,1)*clamp(rem/1.2,0.25,1);
+  const v=g.speed*(1+(g.members[0].gait?g.members[0].gait.pace:0)*Math.sin(simT*(g.members[0].gait?g.members[0].gait.paceF:0.2)+g.id))*clamp(1.5-lag/1.1,0,1)*clamp(rem/1.2,0.25,1)*terrainPace(g.ax,g.az,dx,dz);
   g.avx=lerp(g.avx,dx/dl*v,ease(4,dt)); g.avz=lerp(g.avz,dz/dl*v,ease(4,dt));
   g.ax+=g.avx*dt; g.az+=g.avz*dt;
   if (Math.hypot(g.avx,g.avz)>0.2) g.ayaw+=wrapA(Math.atan2(g.avx,g.avz)-g.ayaw)*ease(2.2,dt);
@@ -864,7 +1021,7 @@ function groupThink(g,dt){
     const rem=moveAnchor(g,dt);
     // children walking with the family run ahead now and then, or take a hand
     for (const m of g.members) if (m.child && g.kind==='family'){ m.kidT-=dt; if (m.kidT<=0){ m.kidT=4+R()*7; const young=m.look.age<8;
-      const q=R(); m.kidMode= q<(young?0.45:0.12)?'hold' : q<(young?0.7:0.45)?'ahead':'slot';
+      const q=R(); m.kidMode= q<(young?0.65:0.25)?'hold' : q<(young?0.8:0.5)?'ahead':'slot'; if (m.kidMode==='hold') m.kidT+=6;
       if (m.kidMode==='ahead'){ m.aheadF=2.5+R()*3; m.aheadL=(R()-0.5)*2.5; }
       if (m.kidMode!=='hold'){ m.armWant='free'; if (m.holdBy){ m.holdBy.armWant=m.holdBy.walkArms; m.holdBy.holdKid=null; m.holdBy=null; } } } }
     // meeting people: groups passing in the piazza now and then stop to talk
@@ -896,15 +1053,38 @@ const NEAR=[];
 function ttc(p,q,k,f){
   const rx=p.x-q.x, rz=p.z-q.z, Rr=(p.rad+q.rad)*(p.group===q.group?0.8:1), vx=p.vx-q.vx, vz=p.vz-q.vz;
   const c=rx*rx+rz*rz-Rr*Rr;
-  if (c<0){ const d=Math.sqrt(rx*rx+rz*rz)||1e-3, pen=Rr-d; f[0]+=rx/d*pen*14; f[1]+=rz/d*pen*14; return; }
+  if (c<1e-3){ const d=Math.sqrt(rx*rx+rz*rz)||1e-3, pen=Math.max(0,Rr-d); f[0]+=rx/d*pen*14; f[1]+=rz/d*pen*14; return; }
   const a=vx*vx+vz*vz, b=rx*vx+rz*vz; if (a<1e-5||b>=0) return;
   let disc=b*b-a*c; if (disc<=0) return; disc=Math.sqrt(disc);
-  const tau=c/(-b+disc); if (tau<0||tau>4) return;
+  let tau=c/(-b+disc); if (tau<0||tau>4) return; tau=Math.max(tau,0.05);   // people separated to exactly touching would otherwise meet at no time at all
   const t0=3, mag=k*Math.exp(-tau/t0)/(a*tau*tau)*(2/tau+1/t0);
   let fx=-mag*(vx-(a*rx-b*vx)/disc), fz=-mag*(vz-(a*rz-b*vz)/disc); const fl=Math.hypot(fx,fz);
   if (fl>5){ fx*=5/fl; fz*=5/fl; }
   const sp=Math.hypot(p.vx,p.vz); if (sp>0.3 && -b/Math.sqrt(a*(rx*rx+rz*rz))>0.9){ const s=Math.min(fl,5)*0.35; fx+=-p.vz/sp*s; fz+=p.vx/sp*s; }
-  f[0]+=fx; f[1]+=fz;
+  if (Number.isFinite(fx)&&Number.isFinite(fz)){ f[0]+=fx; f[1]+=fz; }
+}
+/* No one passes through anyone else. After each step, people who overlap are pushed apart along the line between
+   them, twice over. Someone sitting does not move, and takes up the room of the knees and feet in front of the seat;
+   someone standing still gives way less than someone walking; members of one group may stand a little closer; and no
+   one is pushed into a wall. */
+const NEAR2=[];
+function footprint(p,o){
+  if (p.sitW>0.5){ o.x=p.x+Math.sin(p.yaw)*0.3*p.look.body.s; o.z=p.z+Math.cos(p.yaw)*0.3*p.look.body.s; o.r=p.rad+0.06; o.w=0; }
+  else { o.x=p.x; o.z=p.z; o.r=p.rad; o.w=(p.mode==='sit'||p.mode==='unsit')?0:p.speedSm<0.2?0.35:1; }
+  return o;
+}
+const _fa={}, _fb={};
+function separate(){
+  for (let it=0;it<2;it++){
+    rebuildHash();
+    for (const p of people){ const a=footprint(p,_fa);
+      for (const q of near(a.x,a.z,1.4,NEAR2)){ if (q.id<=p.id) continue; const c=footprint(q,_fb), W=a.w+c.w; if (!W) continue;
+        let dx=c.x-a.x, dz=c.z-a.z, d=Math.hypot(dx,dz); const R=(a.r+c.r)*(p.group===q.group?0.88:1); if (d>=R) continue;
+        if (d<1e-4){ dx=Math.cos(p.id); dz=Math.sin(p.id); d=1; } else { dx/=d; dz/=d; }
+        const o=(R-Math.min(d,R)), mp=o*a.w/W, mq=o*c.w/W;
+        if (mp>0 && clearAt(p.x-dx*mp,p.z-dz*mp)>p.rad*0.6){ p.x-=dx*mp; p.z-=dz*mp; a.x-=dx*mp; a.z-=dz*mp; }
+        if (mq>0 && clearAt(q.x+dx*mq,q.z+dz*mq)>q.rad*0.6){ q.x+=dx*mq; q.z+=dz*mq; } } }
+  }
 }
 function steerTo(p,tx,tz,dt){
   const d=Math.hypot(tx-p.x,tz-p.z); if (d<0.05) return [tx,tz];
@@ -930,17 +1110,22 @@ function personThink(p,dt){
   }
   if (p.mode==='sit'||p.mode==='unsit'){ sitThink(p,dt); return; }
   // forces
+  p.onStairs=onStairs(p.x,p.z);
+  { const k=terrainPace(p.x,p.z,vdx,vdz); vdx*=k; vdz*=k; maxV*=k; }
   const f=[(vdx-p.vx)/0.42,(vdz-p.vz)/0.42];
   if (!still || p.mode==='slot'){
     for (const q of near(p.x,p.z,3.5,NEAR)) if (q!==p) ttc(p,q,q.group===g?0.35:1.4,f);
   } else for (const q of near(p.x,p.z,1.2,NEAR)) if (q!==p){ const rx=p.x-q.x, rz=p.z-q.z, d=Math.hypot(rx,rz)||1e-3, Rr=p.rad+q.rad; if (d<Rr){ f[0]+=rx/d*(Rr-d)*10; f[1]+=rz/d*(Rr-d)*10; } }
   const c0=clearAt(p.x,p.z); if (c0<p.rad+0.3){ const gx=clearAt(p.x+0.2,p.z)-clearAt(p.x-0.2,p.z), gz=clearAt(p.x,p.z+0.2)-clearAt(p.x,p.z-0.2), gl=Math.hypot(gx,gz)||1; const k=(p.rad+0.3-c0)*7; f[0]+=gx/gl*k; f[1]+=gz/gl*k; }
   p.vx+=f[0]*dt; p.vz+=f[1]*dt;
+  if (!Number.isFinite(p.vx)||!Number.isFinite(p.vz)){ p.vx=p.vz=0; }   // a fault is never passed on to others
   if (still){ p.vx*=Math.exp(-7*dt); p.vz*=Math.exp(-7*dt); }
   const sp=Math.hypot(p.vx,p.vz); if (sp>maxV){ p.vx*=maxV/sp; p.vz*=maxV/sp; }
   let nx=p.x+p.vx*dt, nz=p.z+p.vz*dt;
   if (clearAt(nx,nz)<p.rad*0.6){ if (clearAt(nx,p.z)>=p.rad*0.6) nz=p.z; else if (clearAt(p.x,nz)>=p.rad*0.6) nx=p.x; else { nx=p.x; nz=p.z; } p.vx=(nx-p.x)/dt; p.vz=(nz-p.z)/dt; }
   p.x=nx; p.z=nz;
+  { const gy=groundAt(p.x,p.z), sp=Math.hypot(p.vx,p.vz)||1; p.y+=(gy-p.y)*ease(10,dt);
+    p.climb=lerp(p.climb||0,clamp((groundAt(p.x+p.vx/sp*0.5,p.z+p.vz/sp*0.5)-gy)/0.5,-0.5,0.5),ease(3,dt)); }
   // heading
   const s2=Math.hypot(p.vx,p.vz); let want=null;
   if (s2>0.3) want=Math.atan2(p.vx,p.vz); else if (p.face!=null) want=p.face;
@@ -953,11 +1138,13 @@ function personThink(p,dt){
 }
 function locomotion(p,s2,dt){
   p.speedSm+=(s2-p.speedSm)*ease(6,dt);
-  p.walkW+=(clamp(p.speedSm/0.5,0,1)-p.walkW)*ease(6,dt);
+  p.walkW+=(clamp(p.speedSm/0.25,0,1)-p.walkW)*ease(8,dt);
   const turning=p.speedSm<0.3&&Math.abs(p.yawRate)>0.6;
   p.turnStep+=((turning?1:0)-p.turnStep)*ease(6,dt);
-  const b=p.look.body, lL=b.s*b.legK, stepLen=lL*(0.35+0.28*Math.min(p.speedSm,3.2));
-  p.phase+=(p.speedSm*dt/stepLen+p.turnStep*Math.abs(p.yawRate)*dt*0.5)*Math.PI;
+  const stepLen=stepLenOf(p);
+  if (!p.lockFeet) p.phase+=(s2*dt/stepLen+p.turnStep*Math.abs(p.yawRate)*dt*0.5)*Math.PI;
+  else if (s2>0.15) p.phase+=s2*dt/stepLen*Math.PI;
+  else if (p.needStep||p.inSwing) p.phase+=dt/0.42*Math.PI;
   p.armW+=((p.armMode===p.armWant&&p.armWant!=='free'?1:0)-p.armW)*ease(3,dt);
   if (p.armMode!==p.armWant && p.armW<0.05) p.armMode=p.armWant;
 }
@@ -966,6 +1153,7 @@ function sitThink(p,dt){
   const s=p.seat;
   if (p.mode==='sit'){
     if (!s){ p.mode='slot'; return; }
+    if (p.sitW>0.5){ p.pinL=p.pinR=null; p.hipW=null; }
     p.yaw+=wrapA(s.yaw-p.yaw)*ease(7,dt);
     if (Math.abs(wrapA(s.yaw-p.yaw))<0.5) p.sitW=Math.min(1,p.sitW+dt/1.0);
     const k=smooth(p.sitW), bx=s.x-Math.sin(s.yaw)*0.05, bz=s.z-Math.cos(s.yaw)*0.05;
@@ -1045,7 +1233,7 @@ function buildLineup(){
   const LR=rng(state.seed*31+7), kinds=[['man',30],['woman',27],['boy',6],['girl',8],['man',72],['woman',70],['man',45],['woman',40],['girl',11],['boy',12],['woman',19],['man',22],
     ['woman',34],['man',58],['boy',4],['girl',5],['woman',80],['man',84],['man',35],['woman',52],['girl',14],['boy',9],['woman',25],['man',67]];
   const saveR=R; R=LR;
-  lineup=kinds.map(([k,a],i)=>{ const p=makePerson(k,a); const row=Math.floor(i/12), col=i%12; p.x=-11+col*2; p.benchZ=row?-97.6:-101.6; p.z=p.benchZ+0.75; p.yaw=0; p.lineSeat={x:p.x,z:p.benchZ,h:0.46,yaw:0}; return p; });
+  lineup=kinds.map(([k,a],i)=>{ const p=makePerson(k,a); const row=Math.floor(i/12), col=i%12; p.lockFeet=false; p.x=-11+col*2; p.benchZ=row?-97.6:-101.6; p.z=p.benchZ+0.75; p.yaw=0; p.lineSeat={x:p.x,z:p.benchZ,h:0.46,yaw:0}; return p; });
   R=saveR;
 }
 function lineupTick(t,dt){
@@ -1085,7 +1273,7 @@ const BENCH_VIEW=SEATS.find(s=>s.set.kind==='bench'&&Math.abs(s.z-15.6)<0.5&&Mat
 function aim(){
   document.getElementById('poseRow').classList.toggle('off',state.view!=='lineup');
   const V={ overview:[[0,30,40],[0,0,0]], street:[[-5,1.65,15],[3,1.3,-3]], bench:[[BENCH_VIEW.x,1.12,BENCH_VIEW.z-0.05],[BENCH_VIEW.x,1.05,BENCH_VIEW.z-6]],
-    lineup:[[0,1.55,-88.5],[0,0.95,-100]], follow:[[0,30,40],[0,0,0]] }[state.view];
+    lineup:[[0,1.55,-88.5],[0,0.95,-100]], steps:[[9.6,2.4,-21],[8.2,3.2,-46]], stepsTop:[[10.2,9.2,-53.5],[8.2,3.4,-44.5]], follow:[[0,30,40],[0,0,0]] }[state.view];
   camera.position.set(...V[0]); controls.target.set(...V[1]); controls.update();
   if (state.view==='follow' && !state.sel) nextPerson();
 }
@@ -1130,6 +1318,7 @@ function step(dt){
   rebuildHash();
   for (const g of groups.slice()) groupThink(g,dt);
   for (const p of people){ personThink(p,dt); }
+  separate();
   rebuildHash();
   for (const p of people) gazeThink(p,dt);
 }
@@ -1163,7 +1352,7 @@ function stats(){
 }
 daylight(); buildLineup(); reset(); aim();
 requestAnimationFrame(frame);
-window.__people={state,people,groups,games,SEATS,EXITS,aim,reset,step,render,daylight,camera,controls,renderer,fns:{waypoint,field,formation,moveAnchor,groupThink,personThink,gazeThink,spawnTick,rebuildHash,clearAt,losClear},
+window.__people={state,people,groups,games,SEATS,EXITS,aim,reset,step,render,daylight,camera,controls,renderer,crowdMesh,lineMesh,fns:{separate,locomotion,waypoint,field,formation,moveAnchor,groupThink,personThink,gazeThink,spawnTick,rebuildHash,clearAt,losClear},
   set(o){ Object.assign(state,o); daylight(); aim(); }, select(i){ state.sel=people[i]||null; }, buildLineup};
 </script>
 </body>
