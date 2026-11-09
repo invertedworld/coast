@@ -9034,15 +9034,17 @@ const headSpot=new THREE.SpotLight(hex('#ffeccc'),0,240,0.5,0.75,1.2); world.add
 const coachLamps=[1,2,4].map(i=>({l:new THREE.PointLight(hex('#ffbf73'),0,26,1.5),i})); let coachLampsOn=false; for (const c of coachLamps) world.add(c.l);
 const _hv=new THREE.Vector3();
 function updateTrainLights(){
-  const loco=leadCar().m, dark=Math.max(nightU.value, mode==='train'?tunnelK:0);
+  const loco=leadCar().m, dark=Math.max(nightU.value, mode==='train'||mode==='coach'?tunnelK:0);
   for (const c of train.cars) if (c.lamps){ const front=c===leadCar(); for (const l of c.lamps) l.material=front?lampWhite:lampRed; }
   loco.updateMatrixWorld();
   headSpot.position.copy(_hv.set(0,1.3,LOCO.L/2+0.4).applyMatrix4(loco.matrix));   // the lead locomotive's nose is always its +z end
   headSpot.target.position.copy(_hv.set(0,-0.2,LOCO.L/2+60).applyMatrix4(loco.matrix));
   headSpot.intensity=12+900*dark;
-  const want=coachLampsOn?nightU.value>0.15:nightU.value>0.25;
+  // the saloon lamps are lit after dusk, and in a tunnel while the train is ridden, cab or coach alike
+  const lampK=Math.max(nightU.value, mode==='train'||mode==='coach'?0.2*tunnelK:0);
+  const want=coachLampsOn?lampK>0.04:lampK>0.06;
   if (want!==coachLampsOn){ coachLampsOn=want; for (const c of coachLamps) c.l.intensity=0; }
-  if (coachLampsOn) for (const c of coachLamps){ const m=train.cars[c.i].m; c.l.position.set(m.position.x,m.position.y+2.4,m.position.z); c.l.intensity=60*nightU.value; }
+  if (coachLampsOn) for (const c of coachLamps){ const m=train.cars[c.i].m; c.l.position.set(m.position.x,m.position.y+2.4,m.position.z); c.l.intensity=60*lampK; }
 }
 for (let i=0;i<6;i++){ const loco=i===0||i===5, spec=loco?LOCO:COACH, m=new THREE.Mesh(spec.geo,matTrain); m.castShadow=true; m.receiveShadow=true; m.rotation.order='YXZ'; world.add(m);
   const doors=[]; if (!loco) for (const sx of [-1,1]) for (const e of [-1,1]){ const d=new THREE.Mesh(CAR_DOOR,matTrain); d.castShadow=true; d.receiveShadow=true; d.userData={sx,e}; m.add(d); doors.push(d); }
