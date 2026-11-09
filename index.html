@@ -11717,7 +11717,7 @@ let crouch=false, crouchK=0;   // Z: crouching at street level, the eye at 0.95 
 /* ---------- people ----------
    The townspeople (people/people.js): a few in each square, waiting on the platforms and at the ferry landings, and
    passengers on the trains and the ferries. K turns them on and off; they are off at first. */
-const PEOPLE=createPeople({ world, origin:ORIGIN, camera, C, topAt,
+const PEOPLE=createPeople({ world, origin:ORIGIN, camera, C, topAt, heightAt,
   block:(cx,cz)=>chunks.get(key(cx,cz))||null,
   // a place comes to life once its block is built in full and the blocks round it are built
   ready:(cx,cz)=>{ for (let j=-1;j<=1;j++) for (let i=-1;i<=1;i++){ const ch=chunks.get(key(cx+i,cz+j)); if (!ch||(!i&&!j&&ch.lod!==0)) return false; } return true; },

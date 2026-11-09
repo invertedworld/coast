@@ -72,7 +72,7 @@ The clock runs continuously. **T** held speeds time forty times; **Shift** and *
 
 ## People
 
-**K** shows or hides the townspeople. They are hidden when the game starts. When shown, a few people come to the squares of the villages, the station platforms and the ferry landings near the player. More are about in the evening, fewer in the early afternoon and few at night. They walk alone, in couples, with friends or with children, stop to talk, sit on the benches and the café chairs, and look about them; children run ahead, hold a parent's hand or play together. They step aside for one another and for the player.
+**K** shows or hides the townspeople. They are hidden when the game starts. When shown, people go about the streets of the villages near the player, and gather in the squares, on the station platforms and at the ferry landings. More are about in the evening, fewer in the early afternoon and few at night. They walk alone, in couples, with friends or with children, stop to talk, sit on the benches and the café chairs, and look about them; children run ahead, hold a parent's hand or play together. They step aside for one another and for the player.
 
 People arrive and leave out of the player's sight, so that no one appears or vanishes in view. Passengers sit in the coaches of the train and the saloon of the ferry. When the train stands at a station, some passengers walk out through the doors on the platform side and people waiting on the platform walk aboard; when a ferry lies at a landing, passengers come down the gangway and those waiting on the quay go up it. A seat on which a person is sitting cannot be taken with **X**.
 

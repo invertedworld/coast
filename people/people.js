@@ -508,13 +508,13 @@ function buildPose(p, t, Q){
    about the place and tries again later; passengers join and leave a train or a ferry only while it is out of view.
 
    ctx: { world, origin, camera, C,
-          topAt(x,z,yhi): the highest surface at (x,z) no higher than yhi, or null where something higher stands,
+          heightAt(x,z): the ground, topAt(x,z,yhi): the highest surface at (x,z) no higher than yhi, or null where something higher stands,
           block(cx,cz): the block record, or null; ready(cx,cz): whether it and its neighbours are built in full,
           player(): {x,y,z,vx,vz}, hour(), night() (0 by day to 1 at night), hidden(): true while a picture is made,
           seatTaken(seat): whether the player or a cat is on one of a block's seats,
           train: { cars(), wait(), doorOpen(), obj() (the train's state: x, dir, v, wait), stationNear(x,r), railZ(x), CDX, CDZ, seats, playerCar() },
           ferry: { list(), quay(R,stop), FB, FPL, FGZ, FD0, FSZ0, seats, ridden() } } */
-const VIEW_FAR=420, ACT_R=120, CAP=22, MAXP=64, SQUARE_KINDS=new Set(['piazza','church']);
+const VIEW_FAR=420, ACT_R=120, CAP=40, MAXP=72, SQUARE_KINDS=new Set(['piazza','church']), TOWN_KINDS=new Set(['quarter','piazza','church','shore']), TOWN_W=160;
 const NB=[[1,0,1],[-1,0,1],[0,1,1],[0,-1,1],[1,1,1.4142],[1,-1,1.4142],[-1,1,1.4142],[-1,-1,1.4142]];
 
 // a place's grid: walkable cells with their heights, clearance to walls and drops, and paths by flow fields
@@ -593,16 +593,18 @@ export function createPeople(ctx){
   /* ---------- places ---------- */
   function hashS(s){ let h=0; for (let i=0;i<s.length;i++) h=Math.imul(h,31)+s.charCodeAt(i)|0; return (h>>>0)/4294967296; }
   function newPlace(key,kind,cx,cz,w,d,surf,extra){
-    return Object.assign({key,kind,x:cx,z:cz,G:makeGrid(cx-w/2,cz-d/2,w,d,surf),seen:simT,base:1+Math.floor(hashS(key)*3),seatSets:[],spots:[],exits:[],spawnT:0,setup:false},extra);
+    return Object.assign({key,kind,x:cx,z:cz,G:makeGrid(cx-w/2,cz-d/2,w,d,surf),seen:simT,base:2+Math.floor(hashS(key)*3),seatSets:[],spots:[],exits:[],spawnT:0,setup:false},extra);
   }
   // once the grid is built: the places to stop, the ways in and out, and the seats whose approach lies on the grid
   function setupPlace(pl){
     const G=pl.G; pl.setup=true;
-    for (let k=0;k<600&&pl.spots.length<24;k++){ const c=Math.floor(rnd()*G.N); if (G.clr[c]>(pl.kind==='station'?0.55:1.0)&&pl.spotOk(G.cX(c),G.cZ(c))) pl.spots.push({x:G.cX(c),z:G.cZ(c)}); }
+    const nSpots=pl.kind==='town'?320:24;
+    for (let k=0;k<(pl.kind==='town'?6000:600)&&pl.spots.length<nSpots;k++){ const c=Math.floor(rnd()*G.N); if (G.clr[c]>(pl.kind==='station'?0.55:pl.kind==='town'?0.6:1.0)&&pl.spotOk(G.cX(c),G.cZ(c))) pl.spots.push({x:G.cX(c),z:G.cZ(c)}); }
     for (let c=0;c<G.N;c++){ if (G.clr[c]<0.45) continue; const x=G.cX(c), z=G.cZ(c); if (pl.exitOk(x,z)) pl.exits.push({x,z}); }
     if (pl.exits.length>60){ const keep=[], st=Math.ceil(pl.exits.length/60); for (let i=0;i<pl.exits.length;i+=st) keep.push(pl.exits[i]); pl.exits=keep; }
     const seats=[], seen=new Set();
-    for (let j=-1;j<=1;j++) for (let i=-1;i<=1;i++){ const ch=ctx.block(Math.floor(pl.x/ctx.C)+i,Math.floor(pl.z/ctx.C)+j); if (!ch||!ch.seats) continue;
+    const br=Math.ceil(Math.max(G.nx,G.nz)*G.cs/2/ctx.C);
+    for (let j=-br;j<=br;j++) for (let i=-br;i<=br;i++){ const ch=ctx.block(Math.floor(pl.x/ctx.C)+i,Math.floor(pl.z/ctx.C)+j); if (!ch||!ch.seats) continue;
       for (const s of ch.seats){ if (seen.has(s)||s.kind==='lounger') continue; seen.add(s); const ax=s.x+s.fx*0.6, az=s.z+s.fz*0.6, y0=s.y-s.h;
         if (G.clearAt(ax,az)<0.3||Math.abs(G.ground(ax,az,-99)-y0)>0.3) continue;
         seats.push({x:s.x,z:s.z,h:s.h,y0,yaw:Math.atan2(s.fx,s.fz),ax,az,taken:null,ref:s}); } }
@@ -622,6 +624,14 @@ export function createPeople(ctx){
           {exitOk:(x,z)=>Math.hypot(x-Pz.x,z-Pz.z)>r-1.2, spotOk:(x,z)=>Math.hypot(x-Pz.x,z-Pz.z)<Pz.r});
         places.set(key,pl); }
       pl.seen=simT; }
+    /* the streets: one place 160 m across over the village blocks round the player, made afresh once the player is
+       more than 45 m from its middle; the old one empties out of view and is then forgotten */
+    let town=null; for (const pl of places.values()) if (pl.kind==='town'&&!pl.gone&&Math.hypot(pl.x-P.x,pl.z-P.z)<45) town=pl;
+    if (!town){ const tx=Math.round(P.x/40)*40, tz=Math.round(P.z/40)*40, key='town:'+tx+','+tz; town=places.get(key);
+      if (!town){ town=newPlace(key,'town',tx,tz,TOWN_W,TOWN_W,(x,z)=>{ const ch=ctx.block(Math.floor(x/C),Math.floor(z/C)); if (!ch||ch.lod!==0||!TOWN_KINDS.has(ch.kind)) return null;
+            const h=ctx.heightAt(x,z), s=ctx.topAt(x,z,h+0.6); return (s==null||s<0.3)?null:s; },
+          {exitOk:()=>false, spotOk:()=>true}); places.set(key,town); } }
+    town.seen=simT;
     const S=ctx.train.stationNear(P.x,ACT_R);
     if (S&&Math.hypot(S.x-P.x,S.z-P.z)<ACT_R&&ctx.ready(Math.floor(S.x/C),Math.floor(S.z/C))){ const key='st:'+S.n; let pl=places.get(key);
       if (!pl){ pl=newPlace(key,'station',S.x,S.z+S.side*3.4,62,18,(x,z)=>{ const u=x-S.x, v=(z-ctx.train.railZ(x))*S.side; if (Math.abs(u)>29.5||v<2.05||v>4.85) return null;
@@ -641,6 +651,7 @@ export function createPeople(ctx){
   function target(pl){
     if (pl.gone||!pl.G.ready) return 0;
     const h=ctx.hour(), n=ctx.night(), f=n>0.7?0.3:(h>13.5&&h<16)?0.5:(h>18&&h<21.5)?1.4:1;
+    if (pl.kind==='town') return Math.round(14*f);
     if (pl.kind==='square') return Math.round(pl.base*f);
     return Math.max(1,Math.round(pl.base*Math.max(0.5,f)*0.7));   // someone is nearly always waiting for the train or the ferry
   }
@@ -695,7 +706,10 @@ export function createPeople(ctx){
     const leave=(pl.gone||people.filter(p=>p.place===pl).length>target(pl))?0.8:0.06+0.08*g.visits;
     const w=[leave, elder?0.45:0.25, n>1?0.3:0.25, 0.2], opts=['leave','sit','spot','pause'];
     for (let t=0;t<5;t++){ const kind=pickW(rnd,opts,w);
+      if (kind==='leave'&&pl.kind==='town'){ const P=ctx.player(), far=pl.spots.filter(c=>Math.hypot(c.x-P.x,c.z-P.z)>50); if (far.length){ const e=pick(rnd,far); g.dest={kind:'leave',x:e.x,z:e.z}; return; } continue; }
       if (kind==='leave'&&pl.exits.length){ const e=pick(rnd,pl.exits); g.dest={kind:'leave',x:e.x,z:e.z}; return; }
+      if (pl.kind==='town'&&kind!=='sit'){ const P=ctx.player(), nearP=pl.spots.filter(c=>{ const d=Math.hypot(c.x-P.x,c.z-P.z), e=Math.hypot(c.x-g.ax,c.z-g.az); return d<70&&e>18; });
+        if (nearP.length){ const c=pick(rnd,nearP); g.dest={kind:rnd()<0.75?'walk':'pause',x:c.x,z:c.z}; return; } }
       if (kind==='sit'){ const k=Math.max(1,Math.min(3,adults.length+(g.kind==='family'?1:0)));
         for (const set of pl.seatSets.slice().sort(()=>rnd()-0.5)){ const run=freeRun(set,Math.min(k,set.seats.length)); if (!run) continue;
           const sitters=(g.kind==='family'?[...adults,...g.members.filter(m=>m.child)]:g.members).slice(0,run.length);
@@ -718,7 +732,8 @@ export function createPeople(ctx){
     const d=g.dest; releaseHands(g);
     if (d.kind==='leave'){ g.state='leaving'; for (const m of g.members){ m.mode='goto'; m.tx=d.x; m.tz=d.z; } return; }
     if (d.kind==='sit'){ g.state='sit'; g.timer=25+rnd()*70; for (const m of g.members){ if (m.seat){ m.mode='toSeat'; m.tx=m.seat.ax; m.tz=m.seat.az; } else if (m.child) joinGame(m,g); else { m.mode='stand'; m.tx=m.x; m.tz=m.z; } } return; }
-    if (g.members.length>1&&d.kind==='spot'){ g.state='talk'; g.timer=12+rnd()*30; makeCircle(g); return; }
+    if (d.kind==='walk'){ if (rnd()<0.7){ chooseDest(g); g.wp=null; return; } }
+    if (g.members.length>1&&(d.kind==='spot'||(d.kind==='walk'&&rnd()<0.35))){ g.state='talk'; g.timer=12+rnd()*30; makeCircle(g); return; }
     g.state='pause'; g.timer=3+rnd()*8; for (const m of g.members){ m.mode='stand'; m.tx=m.x; m.tz=m.z; m.face=null; }
   }
   function makeCircle(g){
@@ -825,7 +840,7 @@ export function createPeople(ctx){
   function separate(){
     for (let it=0;it<2;it++){ rebuildHash();
       for (const p of people){ const a=footprint(p,_fa), G=p.place.G, list=near(a.x,a.z,1.4,NEAR2).slice(); list.push(PL);
-        for (const q of list){ if (q===p||(q!==PL&&(q.id<=p.id||q.place!==p.place))) continue; const c=footprint(q,_fb), W=a.w+c.w; if (!W) continue;
+        for (const q of list){ if (q===p||(q!==PL&&q.id<=p.id)) continue; const c=footprint(q,_fb), W=a.w+c.w; if (!W) continue;
           let dx=c.x-a.x, dz=c.z-a.z, d=Math.hypot(dx,dz); const Rr=(a.r+c.r)*(q!==PL&&p.group===q.group?0.88:1); if (d>=Rr) continue;
           if (d<1e-4){ dx=Math.cos(p.id); dz=Math.sin(p.id); d=1; } else { dx/=d; dz/=d; }
           const o=Rr-Math.min(d,Rr), mp=o*a.w/W, mq=o*c.w/W;
@@ -854,7 +869,7 @@ export function createPeople(ctx){
     }
     if (p.mode==='sit'||p.mode==='unsit'){ sitThink(p,dt); return; }
     const f=[(vdx-p.vx)/0.42,(vdz-p.vz)/0.42];
-    if (!still||p.mode==='slot'){ for (const q of near(p.x,p.z,3.5,NEAR)) if (q!==p&&q.place===p.place) ttc(p,q,q.group===g?0.35:1.4,f); if (Math.hypot(PL.x-p.x,PL.z-p.z)<4) ttc(p,PL,1.6,f); }
+    if (!still||p.mode==='slot'){ for (const q of near(p.x,p.z,3.5,NEAR)) if (q!==p) ttc(p,q,q.group===g?0.35:1.4,f); if (Math.hypot(PL.x-p.x,PL.z-p.z)<4) ttc(p,PL,1.6,f); }
     const c0=G.clearAt(p.x,p.z); if (c0<p.rad+0.3){ const gx=G.clearAt(p.x+0.2,p.z)-G.clearAt(p.x-0.2,p.z), gz=G.clearAt(p.x,p.z+0.2)-G.clearAt(p.x,p.z-0.2), gl=Math.hypot(gx,gz)||1, k=(p.rad+0.3-c0)*7; f[0]+=gx/gl*k; f[1]+=gz/gl*k; }
     p.vx+=f[0]*dt; p.vz+=f[1]*dt; if (!Number.isFinite(p.vx)||!Number.isFinite(p.vz)) p.vx=p.vz=0;   // a fault is never passed on to others
     if (still){ p.vx*=Math.exp(-7*dt); p.vz*=Math.exp(-7*dt); }
@@ -1055,16 +1070,17 @@ export function createPeople(ctx){
 
   /* ---------- population ---------- */
   function spawnTick(dt){
-    let total=people.length;
+    let total=people.length, buildLeft=1200;
     for (const pl of places.values()){
-      if (!pl.G.ready){ pl.G.build(1500); continue; } if (!pl.setup) setupPlace(pl);
-      pl.spawnT-=dt; if (pl.spawnT>0) continue; pl.spawnT=1.2+rnd()*1.5;
+      if (!pl.G.ready){ if (buildLeft>0){ const n=Math.min(buildLeft,900); pl.G.build(n); buildLeft-=n; } continue; } if (!pl.setup) setupPlace(pl);
+      pl.spawnT-=dt; if (pl.spawnT>0) continue; pl.spawnT=pl.kind==='town'?0.6+rnd()*0.8:1.2+rnd()*1.5;
       const here=people.filter(p=>p.place===pl).length, t=target(pl);
       if (here<t&&total<CAP){
         // where no one sees: a way into the place, or a spot within it, out of view
-        const cands=[...pl.exits.slice().sort(()=>rnd()-0.5).slice(0,12),...pl.spots.slice().sort(()=>rnd()-0.5).slice(0,8)];
+        const P=ctx.player(), cands=pl.kind==='town'?pl.spots.filter(c=>{ const d=Math.hypot(c.x-P.x,c.z-P.z); return d>25&&d<80; }).sort(()=>rnd()-0.5).slice(0,20)
+          :[...pl.exits.slice().sort(()=>rnd()-0.5).slice(0,12),...pl.spots.slice().sort(()=>rnd()-0.5).slice(0,8)];
         const at=cands.find(c=>hiddenAt(c.x,pl.G.ground(c.x,c.z,0),c.z)); if (!at) continue;
-        const g=compose(pl); if (here+g.members.length>t+1) continue;
+        const g=compose(pl); if (here+g.members.length>t+2) continue;
         placeGroup(g,at.x,at.z,rnd()*TAU); chooseDest(g); if (g.dest.kind==='leave') chooseDest(g); startWalk(g); total+=g.members.length; }
       else if (here>t){ const g=groups.find(g=>g.place===pl&&g.state==='walk'&&!g.board&&g.dest&&g.dest.kind!=='leave'); if (g&&pl.exits.length){ const e=pick(rnd,pl.exits); g.dest={kind:'leave',x:e.x,z:e.z}; g.wp=null; } }
     }
