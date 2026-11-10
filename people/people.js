@@ -134,7 +134,12 @@ bool pplHidden(){ int m=int(texelFetch(uPpl,ivec2(${TW-1},gl_InstanceID),0).r+0.
 `;
 function createPeopleMesh(parent, MAX, origin=null){
   const g=personGeometry(), data=new Float32Array(TW*MAX*4);
-  const tex=new THREE.DataTexture(data,TW,MAX,THREE.RGBAFormat,THREE.FloatType); tex.minFilter=tex.magFilter=THREE.NearestFilter; tex.needsUpdate=true;
+  // the texture holds only as many rows as there are people to draw, in steps of a power of two, so that a few people
+  // do not cost the sending of all MAX rows each frame
+  let rows=Math.min(MAX,32);
+  const tex=new THREE.DataTexture(data.subarray(0,TW*rows*4),TW,rows,THREE.RGBAFormat,THREE.FloatType); tex.minFilter=tex.magFilter=THREE.NearestFilter; tex.needsUpdate=true;
+  const setRows=n=>{ let want=32; while (want<n) want*=2; want=Math.min(MAX,want); if (want===rows||(want<rows&&n*4>rows)) return;
+    rows=want; tex.dispose(); tex.image={data:data.subarray(0,TW*rows*4),width:TW,height:rows}; };
   const mat=new THREE.MeshLambertMaterial();
   mat.onBeforeCompile=sh=>{ sh.uniforms.uPpl={value:tex};
     sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\n'+PPL_HEAD+'varying vec3 vPC;')
@@ -184,7 +189,7 @@ function createPeopleMesh(parent, MAX, origin=null){
     for (let r=0;r<NROLE;r++){ const c=look.cols[r]; data[o+r*4]=c.r; data[o+r*4+1]=c.g; data[o+r*4+2]=c.b; }
     data[o+NROLE*4]=look.mask;
   }
-  return { mesh, write, data, setCount(n){ mesh.count=n; tex.needsUpdate=true; }, tris:g.attributes.position.count/3 };
+  return { mesh, write, data, setCount(n){ setRows(n); mesh.count=n; tex.needsUpdate=true; }, tris:g.attributes.position.count/3 };
 }
 
 /* ---------- appearance ----------
@@ -518,19 +523,46 @@ function buildPose(p, t, Q){
    ordinary town. */
 const LEVELS=[0,0.3,0.6,1,1.8,3.2,5.5,9,15,25];
 const VIEW_FAR=420, ACT_R=120, CAP0=40, MAXP=1600, SQUARE_KINDS=new Set(['piazza','church']), TOWN_KINDS=new Set(['quarter','piazza','church','shore']), TOWN_W=160;
-const NB=[[1,0,1],[-1,0,1],[0,1,1],[0,-1,1],[1,1,1.4142],[1,-1,1.4142],[-1,1,1.4142],[-1,-1,1.4142]];
+const ANCHOR_CLR=0.35;
+const NBI=[1,-1,0,0,1,1,-1,-1], NBJ=[0,0,1,-1,1,-1,1,-1], NBW=[1,1,1,1,1.4142,1.4142,1.4142,1.4142], WALK=0.3;
 
-// a place's grid: walkable cells with their heights, clearance to walls and drops, and paths by flow fields
-function makeGrid(x0,z0,w,d,surf){
+/* The working of ways is shared by all the grids: the number of cells that may still be examined, which is refilled
+   as time passes (WAY_RATE cells a second, with no more than WAY_MAX saved up), and the arrays of the search, which
+   are kept from one search to the next. */
+const WAY_RATE=400000, WAY_MAX=12000;
+const WAY={left:WAY_MAX,n:0,cells:0,gen:0,g:new Float64Array(0),from:new Int32Array(0),mark:new Uint32Array(0),hf:new Float64Array(4096),hg:new Float64Array(4096),hc:new Int32Array(4096),hn:0};
+function wayPush(c,f,g){
+  if (WAY.hn>=WAY.hc.length){ const n=WAY.hc.length*2, hf=new Float64Array(n), hg=new Float64Array(n), hc=new Int32Array(n); hf.set(WAY.hf); hg.set(WAY.hg); hc.set(WAY.hc); WAY.hf=hf; WAY.hg=hg; WAY.hc=hc; }
+  const hf=WAY.hf, hg=WAY.hg, hc=WAY.hc; let i=WAY.hn++;
+  while (i>0){ const p=(i-1)>>1; if (hf[p]<=f) break; hf[i]=hf[p]; hg[i]=hg[p]; hc[i]=hc[p]; i=p; }
+  hf[i]=f; hg[i]=g; hc[i]=c;
+}
+// takes the least entry off the heap; its cell and its distance are left in WAY.pc and WAY.pg
+function wayPop(){
+  const hf=WAY.hf, hg=WAY.hg, hc=WAY.hc; WAY.pc=hc[0]; WAY.pg=hg[0]; const n=--WAY.hn; if (!n) return;
+  const f=hf[n], g=hg[n], c=hc[n]; let i=0;
+  for(;;){ let m=2*i+1; if (m>=n) break; if (m+1<n&&hf[m+1]<hf[m]) m++; if (hf[m]>=f) break; hf[i]=hf[m]; hg[i]=hg[m]; hc[i]=hc[m]; i=m; }
+  hf[i]=f; hg[i]=g; hc[i]=c;
+}
+/* a place's grid: walkable cells with their heights and their clearance to walls and drops, and the ways across it.
+   `from` is an older grid of the same cells, whose answers are taken for the ground the two have in common. */
+function makeGrid(x0,z0,w,d,surf,from=null){
   const cs=0.5, nx=Math.ceil(w/cs), nz=Math.ceil(d/cs), N=nx*nz;
-  const G={x0,z0,cs,nx,nz,N,hgt:new Float32Array(N),clr:new Float32Array(N),open:new Uint8Array(N),done:0,ready:false,fields:new Map(),budget:2};
+  const G={x0,z0,cs,nx,nz,N,hgt:new Float32Array(N),clr:new Float32Array(N),open:new Uint8Array(N),unk:new Uint8Array(N),comp:null,done:0,ready:false};
+  // the older grid serves only if it is finished and its cells fall exactly on these
+  let oi=0, oj=0; if (from){ oi=Math.round((x0-from.x0)/cs); oj=Math.round((z0-from.z0)/cs); if (!from.ready||from.cs!==cs||Math.abs(from.x0+oi*cs-x0)>1e-6||Math.abs(from.z0+oj*cs-z0)>1e-6) from=null; }
   const cX=c=>x0+(c%nx+0.5)*cs, cZ=c=>z0+(Math.floor(c/nx)+0.5)*cs;
   G.cX=cX; G.cZ=cZ;
   G.cellOf=(x,z)=>{ const i=Math.floor((x-x0)/cs), j=Math.floor((z-z0)/cs); return (i<0||j<0||i>=nx||j>=nz)?-1:j*nx+i; };
   // built a few hundred cells at a time, so that no frame waits for a whole square
   G.build=n=>{
-    for (let k=0;k<n&&G.done<N;k++,G.done++){ const c=G.done, s=surf(cX(c),cZ(c)); if (s==null){ G.open[c]=0; G.hgt[c]=-99; } else { G.open[c]=1; G.hgt[c]=s; } }
+    // a cell taken from the older grid costs a fiftieth of one worked out afresh; surf answers undefined where the
+    // ground is not yet built, and such a cell is never taken from an older grid
+    for (let k=0;k<n&&G.done<N;G.done++){ const c=G.done;
+      if (from){ const i=c%nx+oi, j=Math.floor(c/nx)+oj; if (i>=0&&j>=0&&i<from.nx&&j<from.nz){ const o=j*from.nx+i; if (!from.unk[o]){ G.open[c]=from.open[o]; G.hgt[c]=from.hgt[o]; k+=0.02; continue; } } }
+      const s=surf(cX(c),cZ(c)); k++; if (s===undefined) G.unk[c]=1; if (s==null){ G.open[c]=0; G.hgt[c]=-99; } else { G.open[c]=1; G.hgt[c]=s; } }
     if (G.done<N||G.ready) return;
+    from=null;
     // the edge of a drop, or of a step too high to take, is a wall
     const blocked=new Uint8Array(N);
     for (let c=0;c<N;c++){ if (!G.open[c]){ blocked[c]=1; continue; } const i=c%nx;
@@ -543,6 +575,10 @@ function makeGrid(x0,z0,w,d,surf){
     for (let j=nz-1;j>=0;j--) for (let i=nx-1;i>=0;i--){ const c=j*nx+i; let v=cl[c]; if (!v) continue;
       v=i<nx-1?Math.min(v,cl[c+1]+D):Math.min(v,D); if (j<nz-1){ v=Math.min(v,cl[c+nx]+D); if (i<nx-1) v=Math.min(v,cl[c+nx+1]+D2); if (i>0) v=Math.min(v,cl[c+nx-1]+D2); } else v=Math.min(v,D); cl[c]=v; }
     for (let c=0;c<N;c++) cl[c]=cl[c]>0?Math.max(0,cl[c]-cs*0.5):-0.3;
+    // the walkable cells that can be reached from one another bear the same number, so that a destination with no
+    // way to it is known at once
+    // (once for each clearance asked for: a person's, and the wider one a group's anchor keeps)
+    G.comp=new Map();
     G.ready=true;
   };
   G.clearAt=(x,z)=>{ const fx=(x-x0)/cs-0.5, fz=(z-z0)/cs-0.5, i=Math.floor(fx), j=Math.floor(fz), u=fx-i, v=fz-j;
@@ -550,30 +586,64 @@ function makeGrid(x0,z0,w,d,surf){
     return (k[c]*(1-u)+k[c+1]*u)*(1-v)+(k[c+nx]*(1-u)+k[c+nx+1]*u)*v; };
   G.ground=(x,z,y)=>{ const c=G.cellOf(x,z); if (c<0||!G.open[c]) return y; return G.hgt[c]; };
   G.los=(xa,za,xb,zb,need=0.27)=>{ const d=Math.hypot(xb-xa,zb-za), n=Math.ceil(d/0.25); for (let k=1;k<=n;k++){ const t=k/n; if (G.clearAt(xa+(xb-xa)*t,za+(zb-za)*t)<need) return false; } return true; };
-  const WALK=0.3;
-  G.field=(x,z)=>{
-    let t=G.cellOf(x,z); if (t<0) return null; const key0=t;
-    { const F=G.fields.get(key0); if (F){ G.fields.delete(key0); G.fields.set(key0,F); return F; } }   // the least recently used goes first
-    if (G.budget<=0) return null; G.budget--;
-    if (G.clr[t]<WALK){ let best=-1, bd=1e9; for (let dj=-6;dj<=6;dj++) for (let di=-6;di<=6;di++){ const c=t+dj*nx+di; if (c>=0&&c<N&&G.clr[c]>=WALK){ const q=di*di+dj*dj; if (q<bd){ bd=q; best=c; } } } if (best<0) return null; t=best; }
-    // in double precision, so that no rounding up can reopen a settled cell
-    const Dd=new Float64Array(N).fill(Infinity), H=[], push=(c,v)=>{ H.push([v,c]); let i=H.length-1; while (i>0){ const p=(i-1)>>1; if (H[p][0]<=H[i][0]) break; [H[p],H[i]]=[H[i],H[p]]; i=p; } },
-      pop=()=>{ const top=H[0], last=H.pop(); if (H.length){ H[0]=last; let i=0; for(;;){ const l=2*i+1, r=l+1; let m=i; if (l<H.length&&H[l][0]<H[m][0]) m=l; if (r<H.length&&H[r][0]<H[m][0]) m=r; if (m===i) break; [H[m],H[i]]=[H[i],H[m]]; i=m; } } return top; };
-    Dd[t]=0; push(t,0);
-    while (H.length){ const [dv,c]=pop(); if (dv>Dd[c]) continue; const i=c%nx;
-      for (const [di,dj,w] of NB){ if (i+di<0||i+di>=nx) continue; const n2=c+dj*nx+di; if (n2<0||n2>=N||G.clr[n2]<WALK) continue;
-        if (di&&dj&&(G.clr[c+di]<WALK||G.clr[c+dj*nx]<WALK)) continue;
-        const nd=dv+w*(1+0.6*Math.max(0,0.9-G.clr[n2])); if (nd<Dd[n2]){ Dd[n2]=nd; push(n2,nd); } } }
-    const F=Float32Array.from(Dd); G.fields.set(key0,F); if (G.fields.size>Math.max(40,Math.floor(6e6/N))) G.fields.delete(G.fields.keys().next().value); return F;
-  };
-  G.waypoint=(x,z,tx,tz)=>{
-    if (G.los(x,z,tx,tz)) return [tx,tz];
-    const F=G.field(tx,tz); if (!F) return null; const c=G.cellOf(x,z); if (c<0) return null;
-    if (!(F[c]<Infinity)){ let b=-1, bv=Infinity; for (let dj=-3;dj<=3;dj++) for (let di=-3;di<=3;di++){ const n2=c+dj*nx+di; if (n2>=0&&n2<N&&F[n2]<bv){ bv=F[n2]; b=n2; } } return b<0?null:[cX(b),cZ(b)]; }
-    let wx=cX(c), wz=cZ(c), cur=c, miss=0;
-    for (let k=0;k<40;k++){ let nb=-1, nv=F[cur]; const i=cur%nx;
-      for (const [di,dj] of NB){ if (i+di<0||i+di>=nx) continue; const n2=cur+dj*nx+di; if (n2>=0&&n2<N&&F[n2]<nv){ nv=F[n2]; nb=n2; } }
-      if (nb<0) break; cur=nb; if (G.los(x,z,cX(cur),cZ(cur))){ wx=cX(cur); wz=cZ(cur); miss=0; } else if (++miss>4) break; }
+  /* The way from cell c to cell t, as the cells passed in order, by A*: a step costs its length, and more where the
+     cell left has less than 0.9 m of clearance, so that the way keeps to the middle of a street. Null where there is
+     none. An asker standing where no one may walk starts from whichever cell within 1.5 m, with no wall between, lies
+     nearest the destination by the way. The cells examined are taken from the shared allowance. */
+  function compOf(need){
+    let comp=G.comp.get(need); if (comp) return comp; comp=new Int32Array(N); G.comp.set(need,comp);
+    const cl=G.clr, st=new Int32Array(N); let nc=0;
+    for (let c0=0;c0<N;c0++){ if (comp[c0]||cl[c0]<need) continue; comp[c0]=++nc; let sn=0; st[sn++]=c0;
+      while (sn){ const c=st[--sn], i=c%nx;
+        for (let q=0;q<8;q++){ const di=NBI[q], dj=NBJ[q]; if (i+di<0||i+di>=nx) continue; const n2=c+dj*nx+di; if (n2<0||n2>=N||comp[n2]||cl[n2]<need) continue;
+          if (di&&dj&&(cl[c+di]<need||cl[c+dj*nx]<need)) continue; comp[n2]=nc; st[sn++]=n2; } } }
+    return comp; }
+  // whether the straight line between two cells close together passes through no wall: a cell on the far side of a
+  // wall is no place to start from
+  const open2=(a,b)=>{ const xa=cX(a), za=cZ(a), xb=cX(b), zb=cZ(b), n=Math.ceil(Math.hypot(xb-xa,zb-za)/0.2); for (let k=1;k<n;k++){ const u=k/n; if (G.clearAt(xa+(xb-xa)*u,za+(zb-za)*u)<0.05) return false; } return true; };
+  function plan(c,t,need){
+    const cl=G.clr, comp=compOf(need), ct=comp[t]; if (!ct) return null;
+    if (WAY.mark.length<N){ WAY.g=new Float64Array(N); WAY.from=new Int32Array(N); WAY.mark=new Uint32Array(N); WAY.gen=0; }
+    if (WAY.gen>4e9){ WAY.mark.fill(0); WAY.gen=0; }
+    const gen=++WAY.gen, g=WAY.g, fr=WAY.from, mark=WAY.mark, ti=t%nx, tj=(t-ti)/nx;
+    const h=q=>{ const di=Math.abs(q%nx-ti), dj=Math.abs(Math.floor(q/nx)-tj); return di>dj?di+0.41421356*dj:dj+0.41421356*di; };
+    WAY.hn=0;
+    if (comp[c]===ct){ mark[c]=gen; g[c]=0; fr[c]=-1; wayPush(c,h(c),0); }
+    else { const i0=c%nx; for (let dj=-3;dj<=3;dj++) for (let di=-3;di<=3;di++){ if (i0+di<0||i0+di>=nx) continue; const q=c+dj*nx+di; if (q<0||q>=N||comp[q]!==ct||!open2(c,q)) continue; mark[q]=gen; g[q]=0; fr[q]=-1; wayPush(q,h(q),0); } }
+    let found=false, n=0;
+    while (WAY.hn){ wayPop(); const u=WAY.pc, gu=WAY.pg; if (gu>g[u]) continue; if (u===t){ found=true; break; } n++;
+      const i=u%nx, k=1+0.6*Math.max(0,0.9-cl[u]);
+      for (let q=0;q<8;q++){ const di=NBI[q], dj=NBJ[q]; if (i+di<0||i+di>=nx) continue; const v=u+dj*nx+di; if (v<0||v>=N||cl[v]<need) continue;
+        if (di&&dj&&(cl[u+di]<need||cl[u+dj*nx]<need)) continue;
+        const nd=gu+NBW[q]*k; if (mark[v]!==gen||nd<g[v]){ mark[v]=gen; g[v]=nd; fr[v]=u; wayPush(v,nd+h(v),nd); } } }
+    WAY.left-=n; WAY.n++; WAY.cells+=n;
+    if (!found) return null;
+    let len=0; for (let q=t;q>=0;q=fr[q]) len++;
+    const P=new Int32Array(len); for (let q=t,k=len-1;q>=0;q=fr[q]) P[k--]=q;
+    return P;
+  }
+  const cheb=(a,b)=>Math.max(Math.abs(a%nx-b%nx),Math.abs(Math.floor(a/nx)-Math.floor(b/nx)));
+  /* The point to make for on the way from (x,z) to (tx,tz): the destination itself where it lies in a straight clear
+     line, otherwise the furthest cell of the way that does. H is the asker (a group or a person), which keeps its way
+     (H.way, with H.wi the cell of it reached) for as long as it leads to the destination and the asker is on it; a
+     destination that has moved a little, as a moving person does, keeps the way until the asker nears its end.
+     Null is answered only when a new way is wanted and the allowance is spent: the asker asks again shortly.
+     Where there is no way at all the destination itself is answered, as it is where it can be seen. `need` is the
+     clearance the asker keeps: a person's 0.3 m, or the 0.4 m of a group's anchor, which takes no step that brings it
+     within ANCHOR_CLR of a wall and would otherwise be led where it cannot follow. */
+  G.waypoint=(x,z,tx,tz,H,need=WALK)=>{
+    const see=need>WALK?need:0.27;   // the clearance to be kept along a straight line
+    if (G.los(x,z,tx,tz,see)) return [tx,tz];
+    const none=()=>{ const w=[tx,tz]; w.none=true; return w; };   // marked, so that the asker may choose to go elsewhere
+    const c=G.cellOf(x,z); let t=G.cellOf(tx,tz); if (c<0||t<0) return none();
+    if (G.clr[t]<need){ const i0=t%nx; let best=-1, bd=1e9; for (let dj=-6;dj<=6;dj++) for (let di=-6;di<=6;di++){ if (i0+di<0||i0+di>=nx) continue; const q=t+dj*nx+di; if (q>=0&&q<N&&G.clr[q]>=need){ const e=di*di+dj*dj; if (e<bd){ bd=e; best=q; } } } if (best<0) return none(); t=best; }
+    let P=H.wayG===G?H.way:null;
+    if (P){ const e=P[P.length-1]; if (!(e===t||cheb(e,t)<=(H.wi<P.length-8?4:1))) P=null; }
+    if (P){ let bi=-1, bd=3; for (let k=Math.max(0,H.wi-2), k1=Math.min(P.length-1,H.wi+12);k<=k1;k++){ const e=cheb(P[k],c); if (e<=bd&&(e<bd||k>bi)){ bd=e; bi=k; } } if (bi<0) P=null; else H.wi=bi; }
+    if (!P){ if (WAY.left<=0) return null; P=plan(c,t,need); H.way=P; H.wayG=G; H.wi=0; if (!P) return none(); }
+    // from a cell where no one may walk, or off the way, the nearest cell of the way is made for until more of it is seen
+    let q=P[H.wi], wx=cX(q), wz=cZ(q), miss=0;
+    for (let k=H.wi+1, k1=Math.min(P.length,H.wi+41);k<k1;k++){ q=P[k]; if (G.los(x,z,cX(q),cZ(q),see)){ wx=cX(q); wz=cZ(q); miss=0; } else if (++miss>4) break; }
     return [wx,wz];
   };
   return G;
@@ -583,7 +653,7 @@ export function createPeople(ctx){
   const O=ctx.origin, cam=ctx.camera;
   const body=createPeopleMesh(ctx.world, MAXP, O); body.mesh.visible=false;
   const people=[], groups=[], places=new Map(), games=[], pax=[];
-  let FRAME=0, on=false, level=0, mult=0, fillUntil=-1, simT=0, NEXT=1, scanT=0, wasWait=0; const ferryWas=new Map();
+  let on=false, level=0, mult=0, fillUntil=-1, simT=0, NEXT=1, scanT=0, wasWait=0; const ferryWas=new Map();
   const POSE=newPose(), rnd=Math.random, rand=(a,b)=>a+rnd()*(b-a);
 
   /* ---------- what the camera sees ---------- */
@@ -595,15 +665,15 @@ export function createPeople(ctx){
 
   /* ---------- places ---------- */
   function hashS(s){ let h=0; for (let i=0;i<s.length;i++) h=Math.imul(h,31)+s.charCodeAt(i)|0; return (h>>>0)/4294967296; }
-  function newPlace(key,kind,cx,cz,w,d,surf,extra){
-    return Object.assign({key,kind,x:cx,z:cz,G:makeGrid(cx-w/2,cz-d/2,w,d,surf),seen:simT,base:2+Math.floor(hashS(key)*3),seatSets:[],spots:[],exits:[],spawnT:0,setup:false,filled:simT>fillUntil},extra);
+  function newPlace(key,kind,cx,cz,w,d,surf,extra,from=null){
+    return Object.assign({key,kind,x:cx,z:cz,n:0,G:makeGrid(cx-w/2,cz-d/2,w,d,surf,from),seen:simT,base:2+Math.floor(hashS(key)*3),seatSets:[],spots:[],exits:[],spawnT:0,setup:false,filled:simT>fillUntil},extra);
   }
   // once the grid is built: the places to stop, the ways in and out, and the seats whose approach lies on the grid
   function setupPlace(pl){
     const G=pl.G; pl.setup=true;
     const nSpots=pl.kind==='town'?320:24;
     for (let k=0;k<(pl.kind==='town'?6000:600)&&pl.spots.length<nSpots;k++){ const c=Math.floor(rnd()*G.N); if (G.clr[c]>(pl.kind==='station'?0.55:pl.kind==='town'?0.6:1.0)&&pl.spotOk(G.cX(c),G.cZ(c))) pl.spots.push({x:G.cX(c),z:G.cZ(c)}); }
-    for (let c=0;c<G.N;c++){ if (G.clr[c]<0.45) continue; const x=G.cX(c), z=G.cZ(c); if (pl.exitOk(x,z)) pl.exits.push({x,z}); }
+    if (pl.kind!=='town') for (let c=0;c<G.N;c++){ if (G.clr[c]<0.45) continue; const x=G.cX(c), z=G.cZ(c); if (pl.exitOk(x,z)) pl.exits.push({x,z}); }   // the streets have no ways out
     if (pl.exits.length>60){ const keep=[], st=Math.ceil(pl.exits.length/60); for (let i=0;i<pl.exits.length;i+=st) keep.push(pl.exits[i]); pl.exits=keep; }
     const seats=[], seen=new Set();
     const br=Math.ceil(Math.max(G.nx,G.nz)*G.cs/2/ctx.C);
@@ -631,9 +701,13 @@ export function createPeople(ctx){
        more than 45 m from its middle; the old one empties out of view and is then forgotten */
     let town=null; for (const pl of places.values()) if (pl.kind==='town'&&!pl.gone&&Math.hypot(pl.x-P.x,pl.z-P.z)<45) town=pl;
     if (!town){ const tx=Math.round(P.x/40)*40, tz=Math.round(P.z/40)*40, key='town:'+tx+','+tz; town=places.get(key);
-      if (!town){ town=newPlace(key,'town',tx,tz,TOWN_W,TOWN_W,(x,z)=>{ const ch=ctx.block(Math.floor(x/C),Math.floor(z/C)); if (!ch||ch.lod!==0||!TOWN_KINDS.has(ch.kind)) return null;
+      if (!town){
+        // the new grid takes from the nearest finished one the ground the two have in common, three quarters of it
+        // after a move along a street, and works out only the rest
+        let old=null, od=1e9; for (const pl of places.values()) if (pl.kind==='town'&&pl.G.ready){ const e=Math.hypot(pl.x-tx,pl.z-tz); if (e<od){ od=e; old=pl; } }
+        town=newPlace(key,'town',tx,tz,TOWN_W,TOWN_W,(x,z)=>{ const ch=ctx.block(Math.floor(x/C),Math.floor(z/C)); if (!ch||ch.lod!==0) return undefined; if (!TOWN_KINDS.has(ch.kind)) return null;
             const h=ctx.heightAt(x,z), s=ctx.topAt(x,z,h+0.6); return (s==null||s<0.3)?null:s; },
-          {exitOk:()=>false, spotOk:()=>true}); places.set(key,town); } }
+          {exitOk:()=>false, spotOk:()=>true},old&&old.G); places.set(key,town); } }
     town.seen=simT;
     const S=ctx.train.stationNear(P.x,ACT_R);
     if (S&&Math.hypot(S.x-P.x,S.z-P.z)<ACT_R&&ctx.ready(Math.floor(S.x/C),Math.floor(S.z/C))){ const key='st:'+S.n; let pl=places.get(key);
@@ -648,7 +722,7 @@ export function createPeople(ctx){
         if (!pl){ pl=newPlace(key,'quay',qx,qz,24,24,(x,z)=>{ const s=ctx.topAt(x,z,2.6); return (s==null||s<0.9)?null:s; },
             {exitOk:(x,z)=>Math.hypot(x-qx,z-qz)>9, spotOk:(x,z)=>Math.hypot(x-qx,z-qz)<7}); places.set(key,pl); }
         pl.F=F; pl.stop=stop; pl.seen=simT; } }
-    for (const [k,pl] of places){ pl.gone=simT-pl.seen>3; if (pl.gone&&!people.some(p=>p.place===pl)&&!pax.some(p=>p.veh.place===pl)) places.delete(k); }
+    for (const [k,pl] of places){ pl.gone=simT-pl.seen>3; if (pl.gone&&!pl.n&&!pax.some(p=>p.veh.place===pl)) places.delete(k); }
   }
   // how many people a place holds: few at night and in the hours after lunch, most in the evening
   function target(pl){
@@ -695,26 +769,33 @@ export function createPeople(ctx){
   function placeGroup(g,x,z,yaw){
     g.ax=x; g.az=z; g.ayaw=yaw; g.avx=g.avz=0; const G=g.place.G;
     for (const m of g.members){ m.x=x+(rnd()-0.5)*1.0; m.z=z+(rnd()-0.5)*1.0; if (G.clearAt(m.x,m.z)<0.3){ m.x=x; m.z=z; }
-      m.y=G.ground(m.x,m.z,0); m.yaw=yaw; m.vx=m.vz=0; m.mode='slot'; m.pinL=m.pinR=null; m.hipW=null; people.push(m); }
+      m.y=G.ground(m.x,m.z,0); m.yaw=yaw; m.vx=m.vz=0; m.mode='slot'; m.pinL=m.pinR=null; m.hipW=null; people.push(m); g.place.n++; }
     groups.push(g);
   }
   function freeSeat(m){ for (const s of [m.seat,m.unseat]) if (s){ s.taken=null; if (s.ref&&s.ref.ppl===m) s.ref.ppl=null; } }
   function dropPerson(m){ m.alive=false; freeSeat(m); leaveGame(m); }
-  function removeGroup(g){ for (const m of g.members) dropPerson(m); for (let i=people.length-1;i>=0;i--) if (!people[i].alive) people.splice(i,1); const i=groups.indexOf(g); if (i>=0) groups.splice(i,1); }
+  function removeGroup(g){ for (const m of g.members){ if (m.alive&&m.place) m.place.n--; dropPerson(m); } for (let i=people.length-1;i>=0;i--) if (!people[i].alive) people.splice(i,1); const i=groups.indexOf(g); if (i>=0) groups.splice(i,1); }
   const seatFreeAt=s=>!s.taken&&!(s.ref&&(s.ref.ppl||ctx.seatTaken(s.ref)));
   function freeRun(set,k){ const f=set.seats.filter(seatFreeAt); if (set.kind==='table') return set.seats.every(seatFreeAt)&&f.length>=k?f.slice(0,k):null; return f.length>=k?f.slice(0,k):null; }
+  // one of a place's spots that passes a test, any of them equally likely: drawn at random first, which nearly always
+  // finds one at once, and from the list of all that pass only when that fails
+  const _sets=[];
+  function someSpot(pl,ok){ const S=pl.spots; if (!S.length) return null; for (let k=0;k<12;k++){ const c=S[Math.floor(rnd()*S.length)]; if (ok(c)) return c; }
+    const L=S.filter(ok); return L.length?pick(rnd,L):null; }
   function chooseDest(g){
     const pl=g.place, adults=g.members.filter(m=>!m.child), n=g.members.length, elder=adults.length&&adults.every(m=>m.elder);
     g.visits++;
-    const leave=(pl.gone||people.filter(p=>p.place===pl).length>target(pl))?0.8:0.06+0.08*g.visits;
+    const leave=(pl.gone||pl.n>target(pl))?0.8:0.06+0.08*g.visits;
     const w=[leave, elder?0.45:0.25, n>1?0.3:0.25, 0.2], opts=['leave','sit','spot','pause'];
     for (let t=0;t<5;t++){ const kind=pickW(rnd,opts,w);
-      if (kind==='leave'&&pl.kind==='town'){ const P=ctx.player(), far=pl.spots.filter(c=>Math.hypot(c.x-P.x,c.z-P.z)>50); if (far.length){ const e=pick(rnd,far); g.dest={kind:'leave',x:e.x,z:e.z}; return; } continue; }
+      if (kind==='leave'&&pl.kind==='town'){ const P=ctx.player(), e=someSpot(pl,c=>Math.hypot(c.x-P.x,c.z-P.z)>50); if (e){ g.dest={kind:'leave',x:e.x,z:e.z}; return; } continue; }
       if (kind==='leave'&&pl.exits.length){ const e=pick(rnd,pl.exits); g.dest={kind:'leave',x:e.x,z:e.z}; return; }
-      if (pl.kind==='town'&&kind!=='sit'){ const P=ctx.player(), nearP=pl.spots.filter(c=>{ const d=Math.hypot(c.x-P.x,c.z-P.z), e=Math.hypot(c.x-g.ax,c.z-g.az); return d<70&&e>18; });
-        if (nearP.length){ const c=pick(rnd,nearP); g.dest={kind:rnd()<0.75?'walk':'pause',x:c.x,z:c.z}; return; } }
+      if (pl.kind==='town'&&kind!=='sit'){ const P=ctx.player(), c=someSpot(pl,c=>{ const d=Math.hypot(c.x-P.x,c.z-P.z), e=Math.hypot(c.x-g.ax,c.z-g.az); return d<70&&e>18; });
+        if (c){ g.dest={kind:rnd()<0.75?'walk':'pause',x:c.x,z:c.z}; return; } }
       if (kind==='sit'){ const k=Math.max(1,Math.min(3,adults.length+(g.kind==='family'?1:0)));
-        for (const set of pl.seatSets.slice().sort(()=>rnd()-0.5)){ const run=freeRun(set,Math.min(k,set.seats.length)); if (!run) continue;
+        _sets.length=0; for (const set of pl.seatSets) _sets.push(set);
+        for (let si=0;si<_sets.length;si++){ const sj=si+Math.floor(rnd()*(_sets.length-si)), set=_sets[sj]; _sets[sj]=_sets[si];   // in a random order, drawn as it goes
+          const run=freeRun(set,Math.min(k,set.seats.length)); if (!run) continue;
           const sitters=(g.kind==='family'?[...adults,...g.members.filter(m=>m.child)]:g.members).slice(0,run.length);
           sitters.forEach((m,i)=>{ run[i].taken=m; if (run[i].ref) run[i].ref.ppl=m; m.seat=run[i]; });
           g.dest={kind:'sit',x:run.reduce((s,a)=>s+a.ax,0)/run.length,z:run.reduce((s,a)=>s+a.az,0)/run.length}; return; }
@@ -780,20 +861,26 @@ export function createPeople(ctx){
     for (let i=0;i<n;i++){ const m=ms[i]; if (!(m.child&&m.kidMode==='hold')) continue; const nb=[ms[i-1],ms[i+1]].filter(o=>o&&!o.child)[0]; if (!nb){ m.kidMode='slot'; continue; }
       const side=Math.sign(nb.slotL-m.slotL)||1; m.armWant='hold'; m.holdSide=side; nb.armWant='hold'; nb.holdSide=-side; nb.holdKid=m; m.holdBy=nb; }
   }
-  const slotPos=(g,m)=>{ const c=Math.cos(g.ayaw), s=Math.sin(g.ayaw); return [g.ax+c*m.slotL+s*m.slotF, g.az-s*m.slotL+c*m.slotF]; };
+  // (the answer is one array used again each time: it is read at once and not kept)
+  const _sp=[0,0], slotPos=(g,m)=>{ const c=Math.cos(g.ayaw), s=Math.sin(g.ayaw); _sp[0]=g.ax+c*m.slotL+s*m.slotF; _sp[1]=g.az-s*m.slotL+c*m.slotF; return _sp; };
   function moveAnchor(g,dt){
     const d=g.dest, G=g.place.G; let lag=0;
     for (const m of g.members) if (m.mode==='slot'&&!(m.child&&m.kidMode==='ahead')){ const [sx,sz]=slotPos(g,m); lag=Math.max(lag,Math.hypot(sx-m.x,sz-m.z)); }
     for (const m of g.members) if (m.mode==='unsit') lag=Math.max(lag,3);
-    g.wpT-=dt; if (!g.wp||g.wpT<=0){ const w=G.waypoint(g.ax,g.az,d.x,d.z); g.wp=w||g.wp||[d.x,d.z]; g.wpT=w?0.35:0.1; }   // with no way yet, keeps to the last and asks again soon
+    g.wpT-=dt; if (!g.wp||g.wpT<=0){ const w=G.waypoint(g.ax,g.az,d.x,d.z,g,ANCHOR_CLR+0.05); g.wp=w||g.wp||[d.x,d.z]; g.wpT=w?0.35:0.1;   // with no way yet, keeps to the last and asks again soon
+      // a destination to which there is no way at all is given up after a second, for another
+      if (w&&w.none){ if ((g.noWay=(g.noWay||0)+1)>=3){ g.noWay=0; chooseDest(g); startWalk(g); return Math.hypot(g.dest.x-g.ax,g.dest.z-g.az); } } else if (w) g.noWay=0; }
     const dx=g.wp[0]-g.ax, dz=g.wp[1]-g.az, dl=Math.hypot(dx,dz)||1, rem=Math.hypot(d.x-g.ax,d.z-g.az);
     const gt=g.members[0].gait, v=g.speed*(1+gt.pace*Math.sin(simT*gt.paceF+g.id))*clamp(1.5-lag/1.1,0,1)*clamp(rem/1.2,0.25,1);
     g.avx=lerp(g.avx,dx/dl*v,ease(4,dt)); g.avz=lerp(g.avz,dz/dl*v,ease(4,dt));
     // the anchor keeps off walls, where its members could not follow it: a step that brings it closer to one is taken only along the wall
+    // (nearer than ANCHOR_CLR already, it may step anywhere that is no nearer still)
+    // (ANCHOR_CLR is 0.35 m: at 0.45 m the anchor could not pass the gaps in a square's balustrade, about 0.9 m wide,
+    // through which its way out led, and stood before them)
     { const c0=G.clearAt(g.ax,g.az), nx=g.ax+g.avx*dt, nz=g.az+g.avz*dt;
-      if (G.clearAt(nx,nz)>=Math.min(0.45,c0+0.005)){ g.ax=nx; g.az=nz; }
-      else if (G.clearAt(nx,g.az)>=Math.min(0.45,c0+0.005)){ g.ax=nx; g.avz*=0.5; }
-      else if (G.clearAt(g.ax,nz)>=Math.min(0.45,c0+0.005)){ g.az=nz; g.avx*=0.5; }
+      if (G.clearAt(nx,nz)>=Math.min(ANCHOR_CLR,c0-0.001)){ g.ax=nx; g.az=nz; }
+      else if (G.clearAt(nx,g.az)>=Math.min(ANCHOR_CLR,c0-0.001)){ g.ax=nx; g.avz*=0.5; }
+      else if (G.clearAt(g.ax,nz)>=Math.min(ANCHOR_CLR,c0-0.001)){ g.az=nz; g.avx*=0.5; }
       else { g.avx*=0.5; g.avz*=0.5; g.wp=null; } }
     if (Math.hypot(g.avx,g.avz)>0.2) g.ayaw+=wrapA(Math.atan2(g.avx,g.avz)-g.ayaw)*ease(2.2,dt);
     // members who cannot reach their places for 2 s bring the anchor back among them
@@ -828,7 +915,10 @@ export function createPeople(ctx){
   /* ---------- moving each person ---------- */
   const HASH=new Map(), HC=2, NEAR=[], NEAR2=[];
   const hkey=(x,z)=>(Math.floor(x/HC)+100000)*262144+(Math.floor(z/HC)+100000);
-  function rebuildHash(){ HASH.clear(); for (const p of people){ const k=hkey(p.x,p.z); let a=HASH.get(k); if (!a) HASH.set(k,a=[]); a.push(p); } }
+  // the cells' lists are kept and emptied rather than made anew; the cells no longer used are dropped now and then
+  let hashN=0;
+  function rebuildHash(){ if (++hashN>600||HASH.size>people.length+256){ HASH.clear(); hashN=0; } else for (const a of HASH.values()) a.length=0;
+    for (const p of people){ const k=hkey(p.x,p.z); let a=HASH.get(k); if (!a) HASH.set(k,a=[]); a.push(p); } }
   function near(x,z,r,out){ out.length=0; const i0=Math.floor((x-r)/HC), i1=Math.floor((x+r)/HC), j0=Math.floor((z-r)/HC), j1=Math.floor((z+r)/HC);
     if (!(i1-i0<20&&j1-j0<20)) return out;
     for (let i=i0;i<=i1;i++) for (let j=j0;j<=j1;j++){ const a=HASH.get((i+100000)*262144+(j+100000)); if (a) for (const p of a) out.push(p); } return out; }
@@ -845,14 +935,17 @@ export function createPeople(ctx){
     const sp=Math.hypot(p.vx,p.vz); if (sp>0.3&&-b/Math.sqrt(a*(rx*rx+rz*rz))>0.9){ const s=Math.min(fl,5)*0.35; fx+=-p.vz/sp*s; fz+=p.vx/sp*s; }
     if (Number.isFinite(fx)&&Number.isFinite(fz)){ f[0]+=fx; f[1]+=fz; }
   }
-  const _fa={}, _fb={};
+  const _fa={}, _fb={}, _f=[0,0];
   function footprint(p,o){ if (p===PL){ o.x=PL.x; o.z=PL.z; o.r=PL.rad; o.w=0; return o; }
     if (p.sitW>0.5){ o.x=p.x+Math.sin(p.yaw)*0.3*p.look.body.s; o.z=p.z+Math.cos(p.yaw)*0.3*p.look.body.s; o.r=p.rad+0.06; o.w=0; }
     else { o.x=p.x; o.z=p.z; o.r=p.rad; o.w=(p.mode==='sit'||p.mode==='unsit')?0:p.speedSm<0.2?0.35:1; } return o; }
   // no one passes through anyone else, nor through the player
   function separate(){
-    for (let it=0;it<2;it++){ rebuildHash();
-      for (const p of people){ const a=footprint(p,_fa), G=p.place.G, list=near(a.x,a.z,1.4,NEAR2).slice(); list.push(PL);
+    // the cells are filled once, after everyone has moved: the second pass moves people by a few centimetres, far
+    // less than the 1.4 m searched, and the looks that follow search further still
+    rebuildHash();
+    for (let it=0;it<2;it++){
+      for (const p of people){ const a=footprint(p,_fa), G=p.place.G, list=near(a.x,a.z,1.4,NEAR2); list.push(PL);
         for (const q of list){ if (q===p||(q!==PL&&q.id<=p.id)) continue; const c=footprint(q,_fb), W=a.w+c.w; if (!W) continue;
           let dx=c.x-a.x, dz=c.z-a.z, d=Math.hypot(dx,dz); const Rr=(a.r+c.r)*(q!==PL&&p.group===q.group?0.88:1); if (d>=Rr) continue;
           if (d<1e-4){ dx=Math.cos(p.id); dz=Math.sin(p.id); d=1; } else { dx/=d; dz/=d; }
@@ -862,7 +955,7 @@ export function createPeople(ctx){
   }
   function steerTo(p,tx,tz,dt){
     const d=Math.hypot(tx-p.x,tz-p.z); if (d<0.05) return [tx,tz];
-    p.wpT-=dt; if (!p.wp||p.wpT<=0||p.wpFor!==tx+tz*1e4){ p.wp=d>1.5?(p.place.G.waypoint(p.x,p.z,tx,tz)||[tx,tz]):[tx,tz]; p.wpT=0.3+rnd()*0.1; p.wpFor=tx+tz*1e4; }
+    p.wpT-=dt; if (!p.wp||p.wpT<=0||p.wpFor!==tx+tz*1e4){ p.wp=d>1.5?(p.place.G.waypoint(p.x,p.z,tx,tz,p)||[tx,tz]):[tx,tz]; p.wpT=0.3+rnd()*0.1; p.wpFor=tx+tz*1e4; }
     return p.wp;
   }
   function personThink(p,dt){
@@ -881,7 +974,7 @@ export function createPeople(ctx){
       else { const w=steerTo(p,p.tx,p.tz,dt), wl=Math.hypot(w[0]-p.x,w[1]-p.z)||1; v*=clamp(d/0.9,0.3,1); vdx=(w[0]-p.x)/wl*v; vdz=(w[1]-p.z)/wl*v; }
     }
     if (p.mode==='sit'||p.mode==='unsit'){ sitThink(p,dt); return; }
-    const f=[(vdx-p.vx)/0.42,(vdz-p.vz)/0.42];
+    const f=_f; f[0]=(vdx-p.vx)/0.42; f[1]=(vdz-p.vz)/0.42;
     if (!still||p.mode==='slot'){ for (const q of near(p.x,p.z,3.5,NEAR)) if (q!==p) ttc(p,q,q.group===g?0.35:1.4,f); if (Math.hypot(PL.x-p.x,PL.z-p.z)<4) ttc(p,PL,1.6,f); }
     const c0=G.clearAt(p.x,p.z); if (c0<p.rad+0.3){ const gx=G.clearAt(p.x+0.2,p.z)-G.clearAt(p.x-0.2,p.z), gz=G.clearAt(p.x,p.z+0.2)-G.clearAt(p.x,p.z-0.2), gl=Math.hypot(gx,gz)||1, k=(p.rad+0.3-c0)*7; f[0]+=gx/gl*k; f[1]+=gz/gl*k; }
     p.vx+=f[0]*dt; p.vz+=f[1]*dt; if (!Number.isFinite(p.vx)||!Number.isFinite(p.vz)) p.vx=p.vz=0;   // a fault is never passed on to others
@@ -1055,7 +1148,7 @@ export function createPeople(ctx){
         const seats=seatsOf(v).filter(s=>seatFree(v,s)); if (!seats.length) continue;
         seats.sort((a,b)=>Math.abs(a.z-(d.e||0)*(T.CDZ||0))-Math.abs(b.z-(d.e||0)*(T.CDZ||0)));
         v.seat=seats[Math.floor(rnd()*Math.min(3,seats.length))]; v.path=pathOut(v,d).reverse(); v.dir=-1; v.state='walk'; v.i=0; v.u=0;
-        leaveGame(m); m.veh=v; m.place=null; m.lockFeet=false; m.mode='vsit'; m.seat={h:v.seat.h}; m.sitW=0; m.armWant='free'; m.armMode='free'; m.armW=0; m.holdBy=m.holdKid=null; m.group=null;
+        leaveGame(m); m.veh=v; m.place.n--; m.place=null; m.lockFeet=false; m.mode='vsit'; m.seat={h:v.seat.h}; m.sitW=0; m.armWant='free'; m.armMode='free'; m.armW=0; m.holdBy=m.holdKid=null; m.group=null;
         people.splice(people.indexOf(m),1); pax.push(m); g.members.splice(g.members.indexOf(m),1); }
       if (!g.members.length) groups.splice(groups.indexOf(g),1); }
     // passengers: off at the end of the way out, where they join the place and make for its way out
@@ -1069,7 +1162,7 @@ export function createPeople(ctx){
             for (let dj=-8;dj<=8;dj++) for (let di=-8;di<=8;di++){ const c=c0<0?-1:c0+dj*G.nx+di; if (c<0||c>=G.N||G.clr[c]<0.3) continue; const d=di*di+dj*dj; if (d<bd){ bd=d; best=c; } }
             if (best==null) continue; p.x=G.cX(best); p.z=G.cZ(best); } }
         p.veh=null; p.place=pl; p.lockFeet=true; p.mode='slot'; p.sitW=0; p.seat=null; p.pinL=p.pinR=null; p.hipW=null; p.y=pl.G.ground(p.x,p.z,p.y);
-        const g=makeGroup([p],'single',pl); g.alighted=true; g.ax=p.x; g.az=p.z; g.ayaw=p.yaw; people.push(p); groups.push(g);
+        const g=makeGroup([p],'single',pl); g.alighted=true; g.ax=p.x; g.az=p.z; g.ayaw=p.yaw; people.push(p); pl.n++; groups.push(g);
         const ex=pl.exits.slice().sort((a,b)=>Math.hypot(a.x-p.x,a.z-p.z)-Math.hypot(b.x-p.x,b.z-p.z)), e=ex[Math.floor(rnd()*Math.min(6,ex.length))];
         g.dest=e?{kind:'leave',x:e.x,z:e.z}:{kind:'spot',x:p.x,z:p.z}; continue; }
       if (Math.hypot(p.x-cam.position.x,p.z-cam.position.z)>600&&hiddenAt(p.x,p.y,p.z)) pax.splice(pax.indexOf(p),1); }
@@ -1091,20 +1184,23 @@ export function createPeople(ctx){
     for (const pl of places.values()){
       if (!pl.G.ready){ if (buildLeft>0){ const n=Math.min(buildLeft,900); pl.G.build(n); buildLeft-=n; } continue; } if (!pl.setup) setupPlace(pl);
       const now=!pl.filled; pl.spawnT-=dt; if (pl.spawnT>0&&!now) continue; pl.spawnT=(pl.kind==='town'?0.6+rnd()*0.8:1.2+rnd()*1.5)/Math.max(1,mult/2);
-      let here=people.filter(p=>p.place===pl).length; const t=target(pl);
+      let here=pl.n; const t=target(pl);
       for (let k=0;k<(now?60:Math.ceil(Math.max(1,mult/2)));k++){ if (!(here<t&&total<CAP0*mult)) break;
         // where no one sees: a way into the place, or a spot within it, out of view
-        const P=ctx.player(), cands=pl.kind==='town'?pl.spots.filter(c=>{ const d=Math.hypot(c.x-P.x,c.z-P.z); return d>25&&d<80; }).sort(()=>rnd()-0.5).slice(0,20)
-          :[...pl.exits.slice().sort(()=>rnd()-0.5).slice(0,12),...pl.spots.slice().sort(()=>rnd()-0.5).slice(0,8)];
-        const any=now?(pl.kind==='town'?pl.spots.filter(c=>Math.hypot(c.x-P.x,c.z-P.z)<80):pl.spots):null;
-        const at=now?(any.length?pick(rnd,any):null):cands.find(c=>hiddenAt(c.x,pl.G.ground(c.x,c.z,0),c.z)); if (!at) break;
+        // (up to twenty candidates are drawn at random and the first out of view is taken: in the streets, spots 25 to
+        // 80 m from the player; elsewhere twelve ways in and then eight spots)
+        const P=ctx.player(), hid=c=>hiddenAt(c.x,pl.G.ground(c.x,c.z,0),c.z); let at=null;
+        if (now) at=pl.kind==='town'?someSpot(pl,c=>Math.hypot(c.x-P.x,c.z-P.z)<80):(pl.spots.length?pick(rnd,pl.spots):null);
+        else if (pl.kind==='town'){ const S=pl.spots; for (let k=0,n=0;k<80&&n<20&&S.length&&!at;k++){ const c=S[Math.floor(rnd()*S.length)], d=Math.hypot(c.x-P.x,c.z-P.z); if (d>25&&d<80){ n++; if (hid(c)) at=c; } } }
+        else { for (let k=0;k<12&&pl.exits.length&&!at;k++){ const c=pick(rnd,pl.exits); if (hid(c)) at=c; } for (let k=0;k<8&&pl.spots.length&&!at;k++){ const c=pick(rnd,pl.spots); if (hid(c)) at=c; } }
+        if (!at) break;
         const g=compose(pl); if (here+g.members.length>t+2) break;
         placeGroup(g,at.x,at.z,rnd()*TAU); chooseDest(g); if (g.dest.kind==='leave') chooseDest(g); startWalk(g); total+=g.members.length; here+=g.members.length; }
       if (now) pl.filled=true;
       if (here>t){ const g=groups.find(g=>g.place===pl&&g.state==='walk'&&!g.board&&g.dest&&g.dest.kind!=='leave'); if (g&&pl.exits.length){ const e=pick(rnd,pl.exits); g.dest={kind:'leave',x:e.x,z:e.z}; g.wp=null; } }
     }
   }
-  function clearAll(){ for (const p of people) dropPerson(p); people.length=0; groups.length=0; games.length=0; pax.length=0; }
+  function clearAll(){ for (const p of people) dropPerson(p); for (const pl of places.values()) pl.n=0; people.length=0; groups.length=0; games.length=0; pax.length=0; }
 
   /* ---------- each frame ---------- */
   function update(dt){
@@ -1113,18 +1209,25 @@ export function createPeople(ctx){
     const P=ctx.player(); PL.x=P.x; PL.z=P.z; PL.vx=P.vx||0; PL.vz=P.vz||0;
     if (dt>0){
       simT+=dt; scanT-=dt; if (scanT<=0){ scanT=1; scan(); }
-      // at most two new ways are worked out in a frame, given to the places in turn; anyone left without one walks on as before
-      { const L=[...places.values()]; for (const pl of L) pl.G.budget=0; if (L.length){ FRAME++; L[FRAME%L.length].G.budget=1; L[(FRAME+1)%L.length].G.budget++; } }
+      // new ways are worked out within an allowance of cells examined, shared by all the places and refilled by the
+      // clock, so that the cost is the same at any frame rate; anyone left without a way walks on as before
+      WAY.left=Math.min(WAY_MAX,WAY.left+dt*WAY_RATE);
       spawnTick(dt);
       rebuildHash();
       for (const g of groups.slice()) groupThink(g,dt);
       for (const p of people) personThink(p,dt);
-      separate(); rebuildHash();
+      separate();
       for (const p of people) gazeThink(p,dt);
       vehicleTick(dt);
     }
-    let r=0;
-    for (const list of [people,pax]) for (const p of list){ if (r>=MAXP) break; buildPose(p,simT,POSE); body.write(r++,p.look,POSE); }
+    /* Only the people who can be seen, or whose shadows can, are posed and drawn: those within the camera's view
+       widened by the length of a shadow. Someone who comes back into it starts with the feet under the hips. */
+    let r=0; const reach=1.4+(ctx.shadowReach?ctx.shadowReach():14);
+    for (const list of [people,pax]) for (const p of list){ if (r>=MAXP) break;
+      _sph.center.set(p.x,p.y+0.9,p.z); _sph.radius=reach;
+      if (!frustum.intersectsSphere(_sph)||_sph.center.distanceTo(cam.position)>2500){ p.unposed=true; p.needStep=p.inSwing=false; continue; }
+      if (p.unposed){ p.unposed=false; if (p.lockFeet){ p.pinL=p.pinR=null; p.hipW=null; } }
+      buildPose(p,simT,POSE); body.write(r++,p.look,POSE); }
     body.setCount(r); body.mesh.position.copy(O); body.mesh.visible=r>0&&!ctx.hidden();
   }
   /* a new level takes effect at once: people are added at any spot, or the ones over the new number are let go,
@@ -1132,7 +1235,7 @@ export function createPeople(ctx){
   function setLevel(n){
     level=clamp(n|0,0,9); mult=LEVELS[level]; on=level>0;
     if (!on){ clearAll(); places.clear(); body.mesh.visible=false; return; }
-    for (const pl of places.values()){ pl.filled=false; let here=people.filter(p=>p.place===pl).length; const t=target(pl);
+    for (const pl of places.values()){ pl.filled=false; let here=pl.n; const t=target(pl);
       for (const g of groups.slice()){ if (here<=t) break; if (g.place!==pl||g.board) continue; here-=g.members.length; removeGroup(g); } }
     const cap=Math.round(6*Math.min(mult,8)); while (pax.filter(p=>p.veh.state==='sit').length>cap*2){ const i=pax.findIndex(p=>p.veh.state==='sit'); if (i<0) break; pax.splice(i,1); }
     fillUntil=simT+6;
@@ -1141,5 +1244,5 @@ export function createPeople(ctx){
   // out of view
   function reset(){ clearAll(); places.clear(); }
   return { update, setLevel, reset, get on(){ return on; }, get level(){ return level; }, people, pax, places, groups, inView,
-    stats(){ return {people:people.length, passengers:pax.length, places:places.size}; } };
+    stats(){ return {people:people.length, passengers:pax.length, places:places.size, ways:WAY.n, wayCells:WAY.cells, drawn:body.mesh.count}; } };
 }

@@ -2218,7 +2218,13 @@ const FEATURE_INFO={
 };
 
 /* ================= collision helpers ================= */
-function obbAxes(o){ const c=Math.cos(o.rot), s=Math.sin(o.rot); return [c,-s,s,c]; }
+// the cosine and sine of a box's turn are worked out once and kept on it (again if the box is turned)
+function obbCS(o){ o._r=o.rot; o._c=Math.cos(o.rot); o._s=Math.sin(o.rot); }
+function obbAxes(o){ if (o._r!==o.rot) obbCS(o); const c=o._c, s=o._s; return [c,-s,s,c]; }
+// a point in a box's own frame with nothing allocated, for the searches made many times a frame: the first
+// coordinate is returned and the second is left in obbV
+let obbV=0;
+function obbU(o,x,z){ if (o._r!==o.rot) obbCS(o); const dx=x-o.x, dz=z-o.z; obbV=dx*o._s+dz*o._c; return dx*o._c-dz*o._s; }
 function obbSamples(o){ const [ax,az,bx,bz]=obbAxes(o), pts=[];
   for (const u of [-1,0,1]) for (const v of [-1,0,1]) pts.push([o.x+ax*u*o.hw+bx*v*o.hd, o.z+az*u*o.hw+bz*v*o.hd]); return pts; }
 function obbOverlap(a,b,pad){
@@ -2231,7 +2237,7 @@ function obbOverlap(a,b,pad){
   }
   return true;
 }
-function obbLocal(o,x,z){ const [ax,az,bx,bz]=obbAxes(o), dx=x-o.x, dz=z-o.z; return [dx*ax+dz*az, dx*bx+dz*bz]; }
+function obbLocal(o,x,z){ if (o._r!==o.rot) obbCS(o); const dx=x-o.x, dz=z-o.z; return [dx*o._c-dz*o._s, dx*o._s+dz*o._c]; }
 function obbCircleDist(o,x,z){ const [lu,lv]=obbLocal(o,x,z); return Math.hypot(lu-clamp(lu,-o.hw,o.hw), lv-clamp(lv,-o.hd,o.hd)); }
 const localToWorld=(o,lu,lv)=>{ const [ax,az,bx,bz]=obbAxes(o); return [o.x+ax*lu+bx*lv, o.z+az*lu+bz*lv]; };
 
@@ -4882,6 +4888,20 @@ function updateShadowFrame(){
   const D=SHADOW_BIG?200:140; sun.target.position.set(tx,ty,tz); sun.position.set(tx+LIGHT_DIR.x*D,ty+LIGHT_DIR.y*D,tz+LIGHT_DIR.z*D);
 }
 sun.shadow.bias=-0.0004; sun.shadow.normalBias=0.04;
+/* The shadow map is drawn afresh each frame in ordinary play. It is drawn less often where the difference cannot be
+   seen: from the bird's-eye view above 1,000 m, where the 240 m it covers is a small part of the picture, once in 2 to
+   8 frames according to the height; and while the world is paused and the player stands still, once in 4 frames. The
+   map and its matrix are kept together, so the shadows in between stay where they were drawn. */
+renderer.shadowMap.autoUpdate=false;
+const shadowTick={n:0,x:NaN,y:NaN,z:NaN};
+function shadowDue(){
+  const T=shadowTick, still=player.x===T.x && player.y===T.y && player.z===T.z; T.x=player.x; T.y=player.y; T.z=player.z;
+  let every=1;
+  if (!(PHOTO.on||PHOTO.capturing)){
+    if (mode==='above' && dist>1000) every=Math.min(8,Math.floor(dist/500));
+    else if (paused && still) every=4; }
+  if (++T.n>=every){ T.n=0; renderer.shadowMap.needsUpdate=true; }
+}
 world.add(sun,sun.target);
 
 /* ---------- surface textures, generated in the shader from world position ---------- */
@@ -5751,20 +5771,34 @@ const CAT_POOL=12, CAT_ACTIVE=6, CAT_SHOW=150, CAT_KINDS=new Set(['quarter','pia
 const cats={list:[], states:new Map(), t:0};
 // the surfaces a cat can stand on at a point: the ground and the tops of walls, steps, terraces, moles and the like.
 // Anything with no top (a house, a tree) makes the point a wall the cat cannot pass
-function catTops(x,z){
-  const out=[heightAt(x,z)], cx=Math.floor(x/C), cz=Math.floor(z/C); let wall=false;
-  for (let j=-1;j<=1;j++) for (let i=-1;i<=1;i++){ const ch=chunks.get(key(cx+i,cz+j)); if (!ch) continue;
-    // a wall is kept a hand's breadth off, since plinths and sills stand a little proud of the footprint
-    for (const o of ch.obbs){ if (Math.abs(o.x-x)>o.hw+o.hd+0.5||Math.abs(o.z-z)>o.hw+o.hd+0.5) continue;
-      const [lu,lv]=obbLocal(o,x,z), m=o.top===Infinity?0.25:0.04; if (Math.abs(lu)<=o.hw+m&&Math.abs(lv)<=o.hd+m){ if (o.top===Infinity) wall=true; else out.push(o.top); } }
-    for (const c of ch.circles){ if (Math.hypot(x-c.x,z-c.z)<=c.r+(c.top===Infinity?0.25:0.04)){ if (c.top===Infinity) wall=true; else out.push(c.top); } } }
+// L, where given, is the short list of the boxes and circles near a route (catNear), searched in place of every one in
+// the nine blocks round the point
+function catTops(x,z,L){
+  const out=[heightAt(x,z)]; let wall=false;
+  // a wall is kept a hand's breadth off, since plinths and sills stand a little proud of the footprint
+  const box=o=>{ if (Math.abs(o.x-x)>o.hw+o.hd+0.5||Math.abs(o.z-z)>o.hw+o.hd+0.5) return;
+    const lu=obbU(o,x,z), m=o.top===Infinity?0.25:0.04; if (Math.abs(lu)<=o.hw+m&&Math.abs(obbV)<=o.hd+m){ if (o.top===Infinity) wall=true; else out.push(o.top); } };
+  const circ=c=>{ if (Math.hypot(x-c.x,z-c.z)<=c.r+(c.top===Infinity?0.25:0.04)){ if (c.top===Infinity) wall=true; else out.push(c.top); } };
+  if (L){ for (const o of L.obbs) box(o); for (const c of L.circles) circ(c); }
+  else { const cx=Math.floor(x/C), cz=Math.floor(z/C);
+    for (let j=-1;j<=1;j++) for (let i=-1;i<=1;i++){ const ch=chunks.get(key(cx+i,cz+j)); if (!ch) continue;
+      for (const o of ch.obbs) box(o); for (const c of ch.circles) circ(c); } }
   return wall?null:out; }
+// the boxes and circles that can touch a cat anywhere on the straight route from one point to another, in the order
+// in which the blocks hold them, so that a search of the list answers as a search of the blocks does
+function catNear(x0,z0,x1,z1){
+  const L={obbs:[],circles:[]}, xa=Math.min(x0,x1)-0.4, xb=Math.max(x0,x1)+0.4, za=Math.min(z0,z1)-0.4, zb=Math.max(z0,z1)+0.4;
+  for (let j=Math.floor(za/C)-1;j<=Math.floor(zb/C)+1;j++) for (let i=Math.floor(xa/C)-1;i<=Math.floor(xb/C)+1;i++){ const ch=chunks.get(key(i,j)); if (!ch) continue;
+    for (const o of ch.obbs){ const r=o.hw+o.hd+0.5; if (o.x+r>=xa&&o.x-r<=xb&&o.z+r>=za&&o.z-r<=zb) L.obbs.push(o); }
+    for (const c of ch.circles){ const r=c.r+0.25; if (c.x+r>=xa&&c.x-r<=xb&&c.z+r>=za&&c.z-r<=zb) L.circles.push(c); } }
+  return L; }
 // whether the cat's whole body fits at a point facing (fx,fz): nose, tail end and both flanks. A corner of the body may
 // hang over a lower edge or meet a ledge it is about to leap on to, but none may run into a building, a tree or a wall
 // too high to climb
-function catFits(x,z,fx,fz,y){
-  for (const [a,b] of [[0.3,0],[-0.3,0],[0,0.12],[0,-0.12],[0.18,0.1],[0.18,-0.1],[-0.18,0.1],[-0.18,-0.1]]){
-    const T=catTops(x+fx*a-fz*b,z+fz*a+fx*b); if (!T) return false;
+const CAT_BODY=[[0.3,0],[-0.3,0],[0,0.12],[0,-0.12],[0.18,0.1],[0.18,-0.1],[-0.18,0.1],[-0.18,-0.1]];
+function catFits(x,z,fx,fz,y,L){
+  for (const [a,b] of CAT_BODY){
+    const T=catTops(x+fx*a-fz*b,z+fz*a+fx*b,L); if (!T) return false;
     for (const t of T) if (t>y+1.9) return false; }
   return true; }
 const catSurf=(T,lim)=>{ let b=-1e9; for (const t of T) if (t<=lim && t>b) b=t; return b; };
@@ -5775,8 +5809,8 @@ const CAT_RAIL=2.3, catOffRail=(x,z)=>railPerp(x,z)>=CAT_RAIL;
 // the railway
 function catPlan(s,tx,tz){
   const d=Math.hypot(tx-s.x,tz-s.z), n=Math.max(1,Math.ceil(d/0.35)), pts=[]; let y=s.y;
-  const fx=(tx-s.x)/(d||1), fz=(tz-s.z)/(d||1);
-  for (let i=1;i<=n;i++){ const x=lerp(s.x,tx,i/n), z=lerp(s.z,tz,i/n), T=catTops(x,z); if (!T) return null;
+  const fx=(tx-s.x)/(d||1), fz=(tz-s.z)/(d||1), L=catNear(s.x,s.z,tx,tz);
+  for (let i=1;i<=n;i++){ const x=lerp(s.x,tx,i/n), z=lerp(s.z,tz,i/n), T=catTops(x,z,L); if (!T) return null;
     const hi=catSurf(T,y+1.9); if (hi<-1e8) return null;
     let ny=catSurf(T,y+0.45), jump=false;
     if (hi>y+0.45 && Math.max(...T)<=y+1.9){ ny=hi; jump=true; }        // a ledge within reach: leap up on to it
@@ -5784,9 +5818,11 @@ function catPlan(s,tx,tz){
     if (ny<y-0.45){ if (y-ny>3) return null; jump=true; }               // an edge: jump down
     if (ny<0.3) return null;                                            // water
     if (!catOffRail(x,z)) return null;                                  // the railway
-    if (!catFits(x,z,fx,fz,ny)) return null;
+    if (!catFits(x,z,fx,fz,ny,L)) return null;
     pts.push({x,z,y:ny,jump}); y=ny; }
   return pts; }
+// whether a cat is on a seat
+function catOnSeat(s){ for (const k of cats.states.values()) if (Math.abs(k.x-s.x)<0.45 && Math.abs(k.z-s.z)<0.45 && Math.abs(k.y-s.y)<0.7) return true; return false; }
 function catHome(ch){
   if (ch.catHome!==undefined) return ch.catHome;
   // walls of the blocks around are needed to keep the cat clear of them, so it waits until they are built
@@ -5833,7 +5869,9 @@ function catStep(s,dt){
     if (!s.path.length){ s.path=null; s.wait=2+Math.random()*7; }
     return; }
   s.wait-=dt;
-  if (s.wait<=0){ for (let t=0;t<4 && !s.path;t++){ const [x,z]=catPickTarget(s); s.path=catPlan(s,x,z); } if (!s.path) s.wait=1+Math.random()*2; }
+  // up to four routes are tried before the cat waits again, one in a frame, and only one cat plans in any frame
+  if (s.wait<=0 && !cats.planned){ cats.planned=true; const [x,z]=catPickTarget(s); s.path=catPlan(s,x,z);
+    if (s.path) s.tries=0; else if ((s.tries=(s.tries||0)+1)>=4){ s.tries=0; s.wait=1+Math.random()*2; } }
 }
 function updateCats(dt){
   const night=nightU.value;
@@ -5846,8 +5884,10 @@ function updateCats(dt){
     for (let j=-CAT_ACTIVE;j<=CAT_ACTIVE;j++) for (let i=-CAT_ACTIVE;i<=CAT_ACTIVE;i++){ const ch=chunks.get(key(pcx+i,pcz+j)); if (!ch) continue; const H=catHome(ch);
       if (H && !cats.states.has(H.id)) cats.states.set(H.id,{id:H.id,home:H,coat:H.coat,owl:H.owl,x:H.x,y:H.y,z:H.z,yaw:Math.random()*6.283,yawT:undefined,path:null,jump:null,wait:Math.random()*5,inst:null}); }
     // the nearest cats in view are drawn; the pool's models are handed between them
-    const near=[...cats.states.values()].filter(s=>Math.abs(s.x-player.x)<CAT_ACTIVE*C && Math.abs(s.z-player.z)<CAT_ACTIVE*C)
-      .sort((a,b)=>Math.hypot(a.x-camera.position.x,a.z-camera.position.z)-Math.hypot(b.x-camera.position.x,b.z-camera.position.z));
+    // a cat more than 40 blocks away is forgotten, and is found at home again if the player returns
+    const near=[]; for (const [id,s] of cats.states){ const dx=Math.abs(s.x-player.x), dz=Math.abs(s.z-player.z);
+      if (dx<CAT_ACTIVE*C && dz<CAT_ACTIVE*C) near.push(s); else if (dx>40*C || dz>40*C) cats.states.delete(id); }
+    near.sort((a,b)=>Math.hypot(a.x-camera.position.x,a.z-camera.position.z)-Math.hypot(b.x-camera.position.x,b.z-camera.position.z));
     const drawn=new Set(show?near.slice(0,CAT_POOL):[]);
     for (const k of cats.list) if (k.s && !drawn.has(k.s)){ k.s.inst=null; k.s=null; }
     for (const s of drawn){ if (s.inst) continue;
@@ -5857,6 +5897,7 @@ function updateCats(dt){
       k.s=s; s.inst=k; k.cat.group.rotation.y=s.yaw; }
     cats.near=near; }
   // the cats round the player go about their business whether or not they are drawn
+  cats.planned=false;
   for (const s of cats.near||[]){
     const asleep=night>0.75 && !s.owl;
     if (asleep && !s.jump){ s.path=null; }
@@ -5866,8 +5907,11 @@ function updateCats(dt){
   for (const k of cats.list){ const g=k.cat.group, s=k.s; g.visible=!!s; if (!s) continue;
     g.position.set(s.x,s.y,s.z); g.rotation.y=s.yaw;
     // the body tilts with the slope or the flight of steps under it
-    if (!s.air){ const fx=Math.sin(s.yaw), fz=Math.cos(s.yaw), Tf=catTops(s.x+fx*0.22,s.z+fz*0.22), Tb=catTops(s.x-fx*0.22,s.z-fz*0.22);
-      const hf=Tf?catSurf(Tf,s.y+0.3):s.y, hb=Tb?catSurf(Tb,s.y+0.3):s.y, want=-Math.atan2(clamp(hf-hb,-0.25,0.25),0.44);
+    // (the slope is looked for again only when the cat has moved or turned, or the blocks have changed)
+    if (!s.air){ if (s.tx!==s.x || s.tz!==s.z || s.ty!==s.y || s.tyaw!==s.yaw || s.tv!==chunkVer){ s.tx=s.x; s.tz=s.z; s.ty=s.y; s.tyaw=s.yaw; s.tv=chunkVer;
+        const fx=Math.sin(s.yaw), fz=Math.cos(s.yaw), Tf=catTops(s.x+fx*0.22,s.z+fz*0.22), Tb=catTops(s.x-fx*0.22,s.z-fz*0.22);
+        const hf=Tf?catSurf(Tf,s.y+0.3):s.y, hb=Tb?catSurf(Tb,s.y+0.3):s.y; s.tilt=-Math.atan2(clamp(hf-hb,-0.25,0.25),0.44); }
+      const want=s.tilt;
       s.pitch=(s.pitch||0)+(want-(s.pitch||0))*Math.min(1,dt*8); }
     else s.pitch=(s.pitch||0)*(1-Math.min(1,dt*6));
     g.rotation.x=s.pitch;
@@ -6233,7 +6277,7 @@ function updateChunks(px,pz,budgetMs,loading=budgetMs>=1e8){
     // where the camera will be in four seconds, and its height above the player, in blocks
     let ax=0, az=0; if (lead){ const L=Math.hypot(mot.vx,mot.vz)*4, Lm=Math.max(1,VIEW/2)*C, k=L>Lm?Lm/L:1; ax=mot.vx*4*k/C; az=mot.vz*4*k/C; }
     const cam=!loading && time>2.5, qx=(cam?camera.position.x:px)/C+ax-0.5, qz=(cam?camera.position.z:pz)/C+az-0.5, qy=cam?Math.max(0,camera.position.y-player.y)/C:0, qy2=qy*qy;
-    for (const [k,ch] of chunks) if (wantLod(ch.cx-pcx,ch.cz-pcz)<0){ chunks.delete(k); farDirty=true; maskDirty=true; untile(ch);
+    for (const [k,ch] of chunks) if (wantLod(ch.cx-pcx,ch.cz-pcz)<0){ chunks.delete(k); chunkVer++; farDirty=true; maskDirty=true; untile(ch);
       if (!loading){ if (ch.prev){ disposeChunk(ch.prev); ch.prev=null; } dying.push(ch); } else disposeChunk(ch); }
       else if (ch.tiled && !tileable(ch,pcx,pcz)) untile(ch);   // come near enough to cast its own shadow again
     // the camera's frustum, in the same coordinates as the blocks (the camera's own position, before the floating origin)
@@ -6262,7 +6306,7 @@ function updateChunks(px,pz,budgetMs,loading=budgetMs>=1e8){
     const ch=genChunk(cx,cz,w), fadeIn=!loading && time>2.5 && (old || d2>2);
     if (old) untile(old);
     if (old){ if (fadeIn){ if (old.prev){ disposeChunk(old.prev); old.prev=null; } ch.prev=old; } else disposeChunk(old); }
-    chunks.set(k,ch); addChunkToScene(ch); ch.fade=fadeIn?0:1; setChunkFade(ch); farDirty=true; maskDirty=true;
+    chunks.set(k,ch); chunkVer++; addChunkToScene(ch); ch.fade=fadeIn?0:1; setChunkFade(ch); farDirty=true; maskDirty=true;
     if (ch.fade>=1) tilesDirty.add(tileKey(ch));
   }
 }
@@ -6294,7 +6338,7 @@ window.__chunkProbe=()=>{
     for (const k of probeSeen.keys()) if (!chunks.has(k)) probeSeen.delete(k);
   } finally { COVE_FAST--; }
   return r; };
-function resetWorld(){ chunkState=''; farCache.clear(); hgTiles.clear(); clearXMemos(); spCache.clear(); lhCache.clear(); hbCache.clear(); rxCache.clear(); farOrigin=''; for (const T of tiles.values()) disposeTile(T); tiles.clear(); tilesDirty.clear(); tilesUrgent.clear(); for (const ch of chunks.values()) disposeChunk(ch); chunks.clear(); for (const ch of dying) disposeChunk(ch); dying.length=0; pkCache.clear(); pzCache.clear(); alCache.clear(); hbCache.clear(); vgCache.clear(); vmCache.clear(); ckCache.clear(); ryCache.clear(); rzCache.clear(); rrCache.clear(); rsCache.clear(); stCache.clear(); rxCache.clear(); lhCache.clear(); rkCache.clear(); ruCache.clear(); cvCache.clear(); icvCache.clear(); cvSlots.clear(); cvMemoN=NaN; cvMemoL=[];
+function resetWorld(){ chunkState=''; farCache.clear(); hgTiles.clear(); clearXMemos(); spCache.clear(); lhCache.clear(); hbCache.clear(); rxCache.clear(); farOrigin=''; for (const T of tiles.values()) disposeTile(T); tiles.clear(); tilesDirty.clear(); tilesUrgent.clear(); for (const ch of chunks.values()) disposeChunk(ch); chunks.clear(); chunkVer++; cats.states.clear(); cats.near=[]; for (const k of cats.list){ if (k.s) k.s.inst=null; k.s=null; } for (const ch of dying) disposeChunk(ch); dying.length=0; pkCache.clear(); pzCache.clear(); alCache.clear(); hbCache.clear(); vgCache.clear(); vmCache.clear(); ckCache.clear(); ryCache.clear(); rzCache.clear(); rrCache.clear(); rsCache.clear(); stCache.clear(); rxCache.clear(); lhCache.clear(); rkCache.clear(); ruCache.clear(); cvCache.clear(); icvCache.clear(); cvSlots.clear(); cvMemoN=NaN; cvMemoL=[];
   // the goods lines, the offshore islands, the ferry ports and the ferries' routes all belong to the old island
   brZones.clear(); brBucket.clear(); isCache.clear(); fpCache.clear(); irCache.clear(); hgCache.clear(); sgCache.clear(); mtxCache.clear();
   goods.R=null; goods.check=0; for (const c of goods.cars) c.m.visible=false;
@@ -9093,8 +9137,12 @@ const headSpot=new THREE.SpotLight(hex('#ffeccc'),0,240,0.5,0.75,1.2); world.add
 // the lamps stay in the scene, dark by day: adding or removing a light would recompile every lit material
 const coachLamps=[1,2,4].map(i=>({l:new THREE.PointLight(hex('#ffbf73'),0,26,1.5),i})); let coachLampsOn=false; for (const c of coachLamps) world.add(c.l);
 const _hv=new THREE.Vector3();
+let headTun=0;   // how far the lead locomotive is into a tunnel's darkness, eased
 function updateTrainLights(){
-  const loco=leadCar().m, dark=Math.max(nightU.value, mode==='train'||mode==='coach'?tunnelK:0);
+  // seen from outside (the trackside view, the chase view, the street), the headlight is at full strength while the
+  // locomotive itself is in a tunnel, wherever the eye stands
+  const loco=leadCar().m; headTun+=((railState(loco.position.x)==='tunnel'?1:0)-headTun)*0.15;
+  const dark=Math.max(nightU.value, mode==='train'||mode==='coach'?tunnelK:0, headTun);
   for (const c of train.cars) if (c.lamps){ const front=c===leadCar(); for (const l of c.lamps) l.material=front?lampWhite:lampRed; }
   loco.updateMatrixWorld();
   headSpot.position.copy(_hv.set(0,1.3,LOCO.L/2+0.4).applyMatrix4(loco.matrix));   // the lead locomotive's nose is always its +z end
@@ -9649,7 +9697,7 @@ const SPAWN_DETOUR=1.45, SPAWN_SEA=100;
 // a block at full detail, built now if it is not yet loaded at that level
 function spawnBlock(cx,cz){ const k=key(cx,cz); let ch=chunks.get(k); if (ch && ch.lod===0) return ch;
   if (ch) disposeChunk(ch);
-  ch=genChunk(cx,cz,0); chunks.set(k,ch); addChunkToScene(ch); ch.fade=1; setChunkFade(ch); farDirty=true; maskDirty=true; return ch; }
+  ch=genChunk(cx,cz,0); chunks.set(k,ch); chunkVer++; addChunkToScene(ch); ch.fade=1; setChunkFade(ch); farDirty=true; maskDirty=true; return ch; }
 // The shortest walk from (x0,z0), standing at y0, to the water's edge on side sd (shoreGoal), under the player's own rules (steps
 // up of at most STEP, drops of at most 1.4 m, the cove's paths and no deep water), keeping 0.35 m clear either side of
 // the body, so that the way is comfortably wide: an A*
@@ -9753,9 +9801,15 @@ function spawnPlayer(){
   player.x=vRoadX(0,80); player.z=80; player.y=heightAt(player.x,player.z); yaw=0;
 }
 // the blocks round the player, and any further out whose colliders reach to within a block of the player
-function nearbyChunks(){ const pcx=Math.floor(player.x/C), pcz=Math.floor(player.z/C), out=[];
+// (the list is kept until the player enters another block or a block is built, replaced or removed, since it is asked
+// for many times in a frame; those who ask only read it)
+let chunkVer=0; const nearMemo={x:NaN,z:NaN,v:-1,out:[]};
+function nearbyChunks(){ const pcx=Math.floor(player.x/C), pcz=Math.floor(player.z/C);
+  if (nearMemo.x===pcx && nearMemo.z===pcz && nearMemo.v===chunkVer) return nearMemo.out;
+  const out=[];
   for (let dz=-3;dz<=3;dz++) for (let dx=-3;dx<=3;dx++){ const ch=chunks.get(key(pcx+dx,pcz+dz)); if (!ch) continue;
     const ring=Math.max(Math.abs(dx),Math.abs(dz)); if (ring<=1 || ch.reach>(ring-1)*C-2) out.push(ch); }
+  nearMemo.x=pcx; nearMemo.z=pcz; nearMemo.v=chunkVer; nearMemo.out=out;
   return out; }
 /* ---------- climbing: mantling, and sliding on steep roofs ----------
    A jump lifts the feet about 0.9 m (JUMP_V). In the air, running is held to AIR_SP, so that a running jump clears
@@ -9770,7 +9824,7 @@ let mantle=null;
 function topAt(x,z,yhi){
   let g=walkGround(x,z,yhi), blocked=false; const cx=Math.floor(x/C), cz=Math.floor(z/C);
   for (let j=-1;j<=1;j++) for (let i=-1;i<=1;i++){ const ch=chunks.get(key(cx+i,cz+j)); if (!ch) continue;
-    for (const o of ch.obbs){ if (Math.abs(o.x-x)>o.hw+o.hd+1||Math.abs(o.z-z)>o.hw+o.hd+1) continue; const [lu,lv]=obbLocal(o,x,z);
+    for (const o of ch.obbs){ if (Math.abs(o.x-x)>o.hw+o.hd+1||Math.abs(o.z-z)>o.hw+o.hd+1) continue; const lu=obbU(o,x,z), lv=obbV;
       if (o.roof){ const s=roofAt(o.roof,lu,lv); if (s!==null){ if (s<=yhi) g=Math.max(g,s); else blocked=true; } continue; }
       if (Math.abs(lu)>o.hw||Math.abs(lv)>o.hd) continue;
       if (o.top<=yhi) g=Math.max(g,o.top); else if (!(o.bot!==undefined && o.bot>yhi+1.75)) blocked=true; }
@@ -11016,7 +11070,7 @@ function sitFind(){
     if (d>SIT_REACH+(s.kind==='lounger'?0.4:0) || Math.abs(s.y-s.h-py)>0.7) continue;   // a lounger is reached from either end
     const c=d>1e-3?(dx*lx+dz*lz)/d:1; if (d>0.45 && c<0.45) continue;
     if (fr==='world' && s.ppl) continue;
-    if (fr==='world' && [...cats.states.values()].some(k=>Math.abs(k.x-s.x)<0.45 && Math.abs(k.z-s.z)<0.45 && Math.abs(k.y-s.y)<0.7)) continue;
+    if (fr==='world' && catOnSeat(s)) continue;
     const sc=d-0.6*c; if (sc<bs){ bs=sc; best=s; } }
   return best?{s:best,fr,home:[px,pz,py]}:null;
 }
@@ -11807,7 +11861,9 @@ const PEOPLE=createPeople({ world, origin:ORIGIN, camera, C, topAt, heightAt,
   // a place comes to life once its block is built in full and the blocks round it are built
   ready:(cx,cz)=>{ for (let j=-1;j<=1;j++) for (let i=-1;i<=1;i++){ const ch=chunks.get(key(cx+i,cz+j)); if (!ch||(!i&&!j&&ch.lod!==0)) return false; } return true; },
   player:()=>player, hour:()=>hour, night:()=>nightU.value, hidden:()=>PHOTO.on||PHOTO.capturing,
-  seatTaken:s=>(sit&&sit.s===s)||[...cats.states.values()].some(k=>Math.abs(k.x-s.x)<0.45&&Math.abs(k.z-s.z)<0.45&&Math.abs(k.y-s.y)<0.7),
+  seatTaken:s=>(sit&&sit.s===s)||catOnSeat(s),
+  // how far a standing person's shadow reaches along the ground, for the people drawn just out of view
+  shadowReach:()=>Math.min(40,1.9*Math.hypot(LIGHT_DIR.x,LIGHT_DIR.z)/Math.max(0.05,LIGHT_DIR.y)),
   train:{ cars:()=>train.cars, obj:()=>train, wait:()=>train.wait, doorOpen:()=>doorOpen, stationNear, railZ, CDX, CDZ, seats:COACH_SEATS, playerCar:()=>mode==='coach'?co.car:-1 },
   ferry:{ list:()=>ferries, quay:ferryQuay, FB, FPL, FGZ, FD0, FSZ0, seats:FERRY_SEATS, ridden:()=>ridden } });
 wrapHooks.push(()=>PEOPLE.reset());
@@ -12092,7 +12148,7 @@ function frame(now){
   PEOPLE.update(wdt);
   updateFleet(dt);
   updateGulls(dt);
-  updateShadowFrame();
+  updateShadowFrame(); shadowDue();
   updateHUD();
   updateStats();
   PHOTO.frame(dt,render);
@@ -12741,8 +12797,9 @@ function gullBoats(){
 // what a gull must clear: the ground, and the walls and roofs of the buildings, with a margin of 2 m round each
 function gullTopAt(x,z){ let g=walkGround(x,z,1e3); const cx=Math.floor(x/C), cz=Math.floor(z/C);
   for (let j=-1;j<=1;j++) for (let i=-1;i<=1;i++){ const ch=chunks.get(key(cx+i,cz+j)); if (!ch) continue;
-    for (const o of ch.obbs){ const top=o.roof?o.roof.y0+(o.roof.rise||0)+(o.roof.kind==='spire'?Math.max(o.roof.w,o.roof.d)*1.6:0):o.top; if (top===Infinity||top<=g) continue;
-      const [lu,lv]=obbLocal(o,x,z); if (Math.abs(lu)<=o.hw+2&&Math.abs(lv)<=o.hd+2) g=top; } }
+    for (const o of ch.obbs){ if (Math.abs(o.x-x)>o.hw+o.hd+3||Math.abs(o.z-z)>o.hw+o.hd+3) continue;   // too far off for its margin to reach, however it is turned
+      const top=o.roof?o.roof.y0+(o.roof.rise||0)+(o.roof.kind==='spire'?Math.max(o.roof.w,o.roof.d)*1.6:0):o.top; if (top===Infinity||top<=g) continue;
+      const lu=obbU(o,x,z); if (Math.abs(lu)<=o.hw+2&&Math.abs(obbV)<=o.hd+2) g=top; } }
   return g; }
 const gullCtx={player,daylight:1,wind:undefined,groundHeight:gullTopAt,seaLevel:0,seaAt:(x,z)=>swellH(x,z),shoreDist:seaDist,boats:gullBoatList,perches:[],paused:false,origin:ORIGIN};
 let gullSeed=SEED;
