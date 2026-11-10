@@ -66,6 +66,8 @@ export const ICON = {
   woodcut: svg('<path d="M3.5 20.5l7-7"/><path d="M9 12l3 3 2.5-2.5L20.5 6.5 17.5 3.5 11.5 9.5z"/><path d="M14 20.5h6.5M16 17.5h4.5"/>'),
   render3d: svg('<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/>'),
   stop: svg('<rect x="7" y="7" width="10" height="10" rx="1.2"/>'),
+  copy: svg('<rect x="8.5" y="8.5" width="11" height="11" rx="1.5"/><path d="M15.5 8.5V6a1.5 1.5 0 0 0-1.5-1.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5"/>'),
+  check: svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>'),
 };
 
 // zooming and panning a picture in its frame: a pinch on a trackpad or a touch screen, or the mouse wheel, zooms about
@@ -145,6 +147,12 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
 .gal .set{display:flex;align-items:stretch;gap:12px;padding:10px;background:var(--g-raise);border-radius:5px}
 .gal .works{flex:1;display:flex;flex-wrap:wrap;align-content:flex-start;gap:6px;padding-left:12px;border-left:1px solid var(--g-line);min-width:0}
 .gal .works:empty{display:none}
+.gal .cw{position:relative;align-self:flex-start;display:flex;flex:none}
+.gal .cw button.cp{position:absolute;top:8px;right:8px;width:30px;height:30px;padding:0;display:grid;place-items:center;border-radius:4px;background:rgba(20,30,40,.72);color:var(--plaster,#f5e9d7);border:1px solid rgba(245,233,215,.25);opacity:0;transition:opacity .12s}
+.gal .cw button.cp svg{width:17px;height:17px}
+.gal .cw:hover button.cp,.gal .cw button.cp:focus-visible,.gal .cw button.cp.done{opacity:1}
+.gal .cw button.cp:hover{background:rgba(20,30,40,.92)}
+.gal .cw button.cp.done{color:var(--verdigris,#7cc3ad)}
 .gal .card{align-self:flex-start;display:flex;flex-direction:column;align-items:stretch;gap:6px;height:auto;padding:4px;background:transparent;border:1.5px solid transparent;border-radius:4px;flex:none}
 .gal .card:hover:not(.sel){background:rgba(245,233,215,.08)!important}
 .gal .card img{display:block;align-self:flex-start;height:84px;width:auto;min-width:104px;max-width:180px;object-fit:cover;border-radius:2px;box-shadow:0 2px 8px rgba(0,0,0,.4)}
@@ -270,7 +278,19 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
     else lab.innerHTML = `Photo ${p.n}<em>${hhmm(p.time)}</em>`;
     b.append(im, lab);
     b.addEventListener('click', e => select(p, w || null, e.shiftKey ? 'range' : (e.metaKey || e.ctrlKey) ? 'toggle' : null));
-    return b;
+    // the copy button over the thumbnail puts the picture, at its full size, on the clipboard as a PNG
+    const cp = document.createElement('button'); cp.type = 'button'; cp.className = 'cp'; cp.title = 'Copy'; cp.setAttribute('aria-label', 'Copy'); cp.innerHTML = ICON.copy;
+    cp.addEventListener('click', e => { e.stopPropagation(); copy(item, cp); });
+    const wrap = document.createElement('div'); wrap.className = 'cw'; wrap.append(b, cp);
+    return wrap;
+  }
+  function copy(item, btn) {
+    // the PNG is given to the clipboard as a promise, so that the write starts within the click (Safari requires it)
+    const blob = item.blob ? Promise.resolve(item.blob) : new Promise((ok, no) => item.canvas.toBlob(b => b ? ok(b) : no(new Error('PNG')), 'image/png'));
+    const mark = ok => { btn.innerHTML = ok ? ICON.check : ICON.close; btn.classList.add('done'); btn.title = ok ? 'Copied' : 'Copy failed';
+      clearTimeout(btn._t); btn._t = setTimeout(() => { btn.innerHTML = ICON.copy; btn.classList.remove('done'); btn.title = 'Copy'; }, 1400); };
+    try { navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]).then(() => mark(true), () => mark(false)); }
+    catch (e) { mark(false); }
   }
   function buildSheet() {
     sheet.textContent = '';
