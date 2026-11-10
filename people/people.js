@@ -516,8 +516,8 @@ function buildPose(p, t, Q){
           ferry: { list(), quay(R,stop), FB, FPL, FGZ, FD0, FSZ0, seats, ridden() } } */
 /* The population level, 0 (no one) to 9, scales every place's numbers, the cap and the passengers; level 3 is the
    ordinary town. */
-const LEVELS=[0,0.3,0.6,1,1.5,2.2,3.2,4.6,6.6,10];
-const VIEW_FAR=420, ACT_R=120, CAP0=40, MAXP=520, SQUARE_KINDS=new Set(['piazza','church']), TOWN_KINDS=new Set(['quarter','piazza','church','shore']), TOWN_W=160;
+const LEVELS=[0,0.3,0.6,1,1.8,3.2,5.5,9,15,25];
+const VIEW_FAR=420, ACT_R=120, CAP0=40, MAXP=1600, SQUARE_KINDS=new Set(['piazza','church']), TOWN_KINDS=new Set(['quarter','piazza','church','shore']), TOWN_W=160;
 const NB=[[1,0,1],[-1,0,1],[0,1,1],[0,-1,1],[1,1,1.4142],[1,-1,1.4142],[-1,1,1.4142],[-1,-1,1.4142]];
 
 // a place's grid: walkable cells with their heights, clearance to walls and drops, and paths by flow fields
@@ -1064,9 +1064,9 @@ export function createPeople(ctx){
         g.dest=e?{kind:'leave',x:e.x,z:e.z}:{kind:'spot',x:p.x,z:p.z}; continue; }
       if (Math.hypot(p.x-cam.position.x,p.z-cam.position.z)>600&&hiddenAt(p.x,p.y,p.z)) pax.splice(pax.indexOf(p),1); }
     // a few passengers take their seats while the train or the ferry is out of sight
-    if (wait<=0&&cars.length&&pax.filter(p=>p.veh.kind==='coach').length<Math.round(6*Math.min(mult,4))){ const ci=1+Math.floor(rnd()*(cars.length-2)), c=cars[ci], w=toWorld(c.m,0,1.5,0);
+    if (wait<=0&&cars.length&&pax.filter(p=>p.veh.kind==='coach').length<Math.round(6*Math.min(mult,8))){ const ci=1+Math.floor(rnd()*(cars.length-2)), c=cars[ci], w=toWorld(c.m,0,1.5,0);
       if (c&&!c.loco&&hiddenAt(w.x,w.y,w.z)&&T.playerCar()!==ci&&Math.hypot(w.x-cam.position.x,w.z-cam.position.z)<500){ const s=pick(rnd,ctx.train.seats), v={kind:'coach',car:ci,seat:s,state:'sit'}; if (seatFree(v,s)){ const p=makePax(v); pax.push(p); paxStep(p,0); } } }
-    for (const F of ctx.ferry.list()){ if (!F.R||F.wait>0||!F.m.visible||ctx.ferry.ridden()===F) continue; if (pax.filter(p=>p.veh.F===F).length>=Math.round(5*Math.min(mult,4))) continue;
+    for (const F of ctx.ferry.list()){ if (!F.R||F.wait>0||!F.m.visible||ctx.ferry.ridden()===F) continue; if (pax.filter(p=>p.veh.F===F).length>=Math.round(5*Math.min(mult,8))) continue;
       const w=toWorld(F.m,0,2,0); if (!hiddenAt(w.x,w.y,w.z)||Math.hypot(w.x-cam.position.x,w.z-cam.position.z)>500) continue;
       const s=pick(rnd,ctx.ferry.seats), v={kind:'ferry',F,seat:s,state:'sit'}; if (seatFree(v,s)){ const p=makePax(v); pax.push(p); paxStep(p,0); } }
   }
@@ -1119,7 +1119,7 @@ export function createPeople(ctx){
     if (!on){ clearAll(); places.clear(); body.mesh.visible=false; return; }
     for (const pl of places.values()){ pl.filled=false; let here=people.filter(p=>p.place===pl).length; const t=target(pl);
       for (const g of groups.slice()){ if (here<=t) break; if (g.place!==pl||g.board) continue; here-=g.members.length; removeGroup(g); } }
-    const cap=Math.round(6*Math.min(mult,4)); while (pax.filter(p=>p.veh.state==='sit').length>cap*2){ const i=pax.findIndex(p=>p.veh.state==='sit'); if (i<0) break; pax.splice(i,1); }
+    const cap=Math.round(6*Math.min(mult,8)); while (pax.filter(p=>p.veh.state==='sit').length>cap*2){ const i=pax.findIndex(p=>p.veh.state==='sit'); if (i<0) break; pax.splice(i,1); }
     fillUntil=simT+6;
   }
   // when the world repeats from north to south, or a new island is made, everyone is let go; the places fill again
