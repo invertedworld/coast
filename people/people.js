@@ -728,7 +728,7 @@ export function createPeople(ctx){
     if (g.kind==='family'){ const kids=g.members.filter(m=>m.child).sort((a,b)=>a.look.age-b.look.age); if (kids[0]&&rnd()<(kids[0].look.age<9?0.8:0.4)){ kids[0].kidMode='hold'; kids[0].kidT=8+rnd()*10; } }
     const ad=g.members.filter(m=>!m.child), src=ad.length?ad:g.members;
     if (g.state!=='walk'){ g.ax=src.reduce((s,m)=>s+m.x,0)/src.length; g.az=src.reduce((s,m)=>s+m.z,0)/src.length; }
-    g.state='walk'; g.circle=null; g.wp=null;
+    g.state='walk'; g.circle=null; g.wp=null; g.bestRem=Infinity; g.bestT=simT; g.lagT=0;
     for (const m of g.members){ m.mode=m.unseat?'unsit':'slot'; m.face=null; m.circle=null; leaveGame(m); m.armWant=m.walkArms; }
   }
   function arrive(g){
@@ -788,8 +788,18 @@ export function createPeople(ctx){
     g.wpT-=dt; if (!g.wp||g.wpT<=0){ g.wp=G.waypoint(g.ax,g.az,d.x,d.z)||[d.x,d.z]; g.wpT=0.35; }
     const dx=g.wp[0]-g.ax, dz=g.wp[1]-g.az, dl=Math.hypot(dx,dz)||1, rem=Math.hypot(d.x-g.ax,d.z-g.az);
     const gt=g.members[0].gait, v=g.speed*(1+gt.pace*Math.sin(simT*gt.paceF+g.id))*clamp(1.5-lag/1.1,0,1)*clamp(rem/1.2,0.25,1);
-    g.avx=lerp(g.avx,dx/dl*v,ease(4,dt)); g.avz=lerp(g.avz,dz/dl*v,ease(4,dt)); g.ax+=g.avx*dt; g.az+=g.avz*dt;
+    g.avx=lerp(g.avx,dx/dl*v,ease(4,dt)); g.avz=lerp(g.avz,dz/dl*v,ease(4,dt));
+    // the anchor keeps off walls, where its members could not follow it: a step that brings it closer to one is taken only along the wall
+    { const c0=G.clearAt(g.ax,g.az), nx=g.ax+g.avx*dt, nz=g.az+g.avz*dt;
+      if (G.clearAt(nx,nz)>=Math.min(0.45,c0+0.005)){ g.ax=nx; g.az=nz; }
+      else if (G.clearAt(nx,g.az)>=Math.min(0.45,c0+0.005)){ g.ax=nx; g.avz*=0.5; }
+      else if (G.clearAt(g.ax,nz)>=Math.min(0.45,c0+0.005)){ g.az=nz; g.avx*=0.5; }
+      else { g.avx*=0.5; g.avz*=0.5; g.wp=null; } }
     if (Math.hypot(g.avx,g.avz)>0.2) g.ayaw+=wrapA(Math.atan2(g.avx,g.avz)-g.ayaw)*ease(2.2,dt);
+    // members who cannot reach their places for 2 s bring the anchor back among them
+    if (lag>1.3){ g.lagT=(g.lagT||0)+dt; if (g.lagT>2){ g.lagT=0; const s=g.members.filter(m=>m.mode==='slot'); if (s.length){ g.ax=s.reduce((a,m)=>a+m.x,0)/s.length; g.az=s.reduce((a,m)=>a+m.z,0)/s.length; g.avx=g.avz=0; g.wp=null; } } } else g.lagT=0;
+    // a group that has come no nearer its destination in 15 s chooses another
+    if (!(rem>(g.bestRem??Infinity)-0.5)){ g.bestRem=rem; g.bestT=simT; } else if (simT-g.bestT>15){ g.bestRem=Infinity; g.bestT=simT; chooseDest(g); startWalk(g); }
     return rem;
   }
   function groupThink(g,dt){
@@ -1063,12 +1073,16 @@ export function createPeople(ctx){
         const ex=pl.exits.slice().sort((a,b)=>Math.hypot(a.x-p.x,a.z-p.z)-Math.hypot(b.x-p.x,b.z-p.z)), e=ex[Math.floor(rnd()*Math.min(6,ex.length))];
         g.dest=e?{kind:'leave',x:e.x,z:e.z}:{kind:'spot',x:p.x,z:p.z}; continue; }
       if (Math.hypot(p.x-cam.position.x,p.z-cam.position.z)>600&&hiddenAt(p.x,p.y,p.z)) pax.splice(pax.indexOf(p),1); }
-    // a few passengers take their seats while the train or the ferry is out of sight
-    if (wait<=0&&cars.length&&pax.filter(p=>p.veh.kind==='coach').length<Math.round(6*Math.min(mult,8))){ const ci=1+Math.floor(rnd()*(cars.length-2)), c=cars[ci], w=toWorld(c.m,0,1.5,0);
-      if (c&&!c.loco&&hiddenAt(w.x,w.y,w.z)&&T.playerCar()!==ci&&Math.hypot(w.x-cam.position.x,w.z-cam.position.z)<500){ const s=pick(rnd,ctx.train.seats), v={kind:'coach',car:ci,seat:s,state:'sit'}; if (seatFree(v,s)){ const p=makePax(v); pax.push(p); paxStep(p,0); } } }
-    for (const F of ctx.ferry.list()){ if (!F.R||F.wait>0||!F.m.visible||ctx.ferry.ridden()===F) continue; if (pax.filter(p=>p.veh.F===F).length>=Math.round(5*Math.min(mult,8))) continue;
-      const w=toWorld(F.m,0,2,0); if (!hiddenAt(w.x,w.y,w.z)||Math.hypot(w.x-cam.position.x,w.z-cam.position.z)>500) continue;
-      const s=pick(rnd,ctx.ferry.seats), v={kind:'ferry',F,seat:s,state:'sit'}; if (seatFree(v,s)){ const p=makePax(v); pax.push(p); paxStep(p,0); } }
+    // passengers take their seats where no one sees them appear: each seat is tested on its own, so a coach or a ferry
+    // being ridden fills behind the player's back; just after a change of level they appear at once
+    const anyw=simT<fillUntil, tries=anyw?40:3;
+    const trySeat=v=>{ if (!seatFree(v,v.seat)) return 0; const p=makePax(v); paxStep(p,0); if (!(anyw||hiddenAt(p.x,p.y,p.z))) return 0; pax.push(p); return 1; };
+    if (wait<=0&&cars.length>2){ let n=pax.filter(p=>p.veh.kind==='coach').length; const cap=Math.round(6*Math.min(mult,8));
+      for (let k=0;k<tries&&n<cap;k++){ const ci=1+Math.floor(rnd()*(cars.length-2)), c=cars[ci]; if (!c||c.loco) continue; const w=toWorld(c.m,0,1.5,0);
+        if (Math.hypot(w.x-cam.position.x,w.z-cam.position.z)<500) n+=trySeat({kind:'coach',car:ci,seat:pick(rnd,ctx.train.seats),state:'sit'}); } }
+    for (const F of ctx.ferry.list()){ if (!F.R||F.wait>0||!F.m.visible) continue; const w=toWorld(F.m,0,2,0); if (Math.hypot(w.x-cam.position.x,w.z-cam.position.z)>500) continue;
+      let n=pax.filter(p=>p.veh.F===F).length; const cap=Math.round(5*Math.min(mult,8));
+      for (let k=0;k<tries&&n<cap;k++) n+=trySeat({kind:'ferry',F,seat:pick(rnd,ctx.ferry.seats),state:'sit'}); }
   }
 
   /* ---------- population ---------- */
