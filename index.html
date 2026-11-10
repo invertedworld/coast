@@ -3110,7 +3110,13 @@ function addHouse(gb,ch,R,o){
   let base=o.base;
   if (base===undefined){
     base=heightAt(o.x+Math.sin(o.rot)*d/2, o.z+Math.cos(o.rot)*d/2);
-    let hmin=1e9; for (const p of obbSamples({x:o.x,z:o.z,hw:w/2,hd:d/2,rot:o.rot})) hmin=Math.min(hmin,heightAt(p[0],p[1]));
+    // the lowest ground under the walls, sampled every half metre along them and at the middle: ground that dips
+    // between the corners would otherwise leave a gap under the wall with no footing to fill it
+    let hmin=1e9; const c=Math.cos(o.rot), sn=Math.sin(o.rot), nu=Math.max(2,Math.ceil(w/0.5)), nv=Math.max(2,Math.ceil(d/0.5));
+    const at=(u,v)=>{ hmin=Math.min(hmin,heightAt(o.x+c*u+sn*v, o.z-sn*u+c*v)); };
+    for (let i=0;i<=nu;i++){ const u=(i/nu-0.5)*w; at(u,-d/2); at(u,d/2); }
+    for (let j=1;j<nv;j++){ const v=(j/nv-0.5)*d; at(-w/2,v); at(w/2,v); }
+    at(0,0);
     if (base-hmin>0.05){ const fb=hmin-0.8-gb.oy;
       gb.add(T.box, mat(o.x,fb,o.z,w+0.16,base-hmin+0.8,d+0.16,o.rot), shade(C_.stone,R,0.05), fb, SS);
       gb.add(T.box, mat(o.x,base-gb.oy-0.08,o.z,w+0.24,0.16,d+0.24,o.rot), C_.trim, null); }
