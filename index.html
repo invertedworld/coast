@@ -82,6 +82,33 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
 .seeding b{display:block;width:260px;height:4px;border-radius:2px;background:rgba(255,255,255,0.18);overflow:hidden}
 .seeding i{display:block;height:100%;width:0;background:var(--plaster)}
 .loading{position:fixed;left:50%;bottom:40%;transform:translateX(-50%);font-family:var(--font-display);font-size:1.2rem;color:var(--plaster)}
+/* touch screens: a menu button, buttons for the actions of the moment, and the menu itself */
+.tbtn{position:fixed;z-index:6;width:52px;height:52px;border-radius:50%;display:grid;place-items:center;padding:0;background:var(--panel);border:1px solid var(--line);
+  color:var(--plaster);backdrop-filter:blur(8px);-webkit-tap-highlight-color:transparent;touch-action:manipulation;user-select:none;-webkit-user-select:none}
+.tbtn svg{width:24px;height:24px}
+.tbtn.on{background:var(--plaster);color:var(--ink)}
+.tmenu-btn{top:calc(14px + env(safe-area-inset-top));right:calc(14px + env(safe-area-inset-right))}
+.tacts{position:fixed;z-index:6;right:calc(14px + env(safe-area-inset-right));bottom:calc(16px + env(safe-area-inset-bottom));display:flex;flex-direction:row-reverse;flex-wrap:wrap-reverse;gap:12px;max-width:calc(55vw - 14px)}
+.tacts .tbtn{position:static}
+.tacts .lab{display:flex;align-items:center;gap:8px}
+.tmenu{position:fixed;z-index:7;top:0;right:0;bottom:0;width:min(380px,100vw);box-sizing:border-box;overflow-y:auto;overscroll-behavior:contain;
+  background:var(--panel);border-left:1px solid var(--line);backdrop-filter:blur(10px);color:var(--plaster);font-family:var(--font-body);
+  padding:calc(12px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right)) calc(20px + env(safe-area-inset-bottom)) 16px}
+.tmenu header{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+.tmenu header h2{margin:0;font:400 1.35rem/1 var(--font-display)}
+.tmenu header button{width:44px;height:44px;border:0;border-radius:50%;background:transparent;color:var(--plaster);display:grid;place-items:center}
+.tmenu header svg{width:24px;height:24px}
+.tmenu h3{margin:16px 0 8px;font-size:.72rem;font-weight:500;letter-spacing:.16em;text-transform:uppercase;color:var(--verdigris)}
+.tmenu .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:8px}
+.tmenu .grid button{min-height:46px;padding:6px 8px;border-radius:4px;border:1px solid var(--line);background:rgba(245,233,215,.08);color:var(--plaster);
+  font:500 .95rem/1.15 var(--font-body);-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+.tmenu .grid button[aria-pressed=true]{background:var(--plaster);color:var(--ink)}
+.tmenu .grid button:active{background:rgba(245,233,215,.2)}
+.tmenu .sl{display:grid;grid-template-columns:7em 1fr 4.2em;align-items:center;gap:10px;min-height:44px}
+.tmenu .sl label{color:var(--plaster-dim)}
+.tmenu .sl output{text-align:right;font-variant-numeric:lining-nums tabular-nums}
+.tmenu input[type=range]{width:100%;accent-color:var(--verdigris);height:32px}
+@media (max-width:520px){ .tmenu{width:100vw;border-left:0} }
 [hidden]{display:none!important}
 </style>
 
@@ -4783,8 +4810,13 @@ function genChunk(cx,cz,lod=0){
 const CV_TRODDEN=hex('#8e7356'), DIRT=hex('#c4a57c'), GRAVEL=hex('#8f8577'), FIELD_A=hex('#7f9145'), FIELD_B=hex('#8a6a4a'), LIMESTONE=hex('#cfc7b6'), DRYGRASS=hex('#a8a465');
 /* ================= renderer & scene ================= */
 const canvas=document.getElementById('scene');
-const renderer=new THREE.WebGLRenderer({canvas,antialias:true,stencil:true,powerPreference:'high-performance'});
-renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+/* A phone or a tablet (a touch screen) draws with a lighter hand: no multisampling, a smaller shadow map, no ambient
+   occlusion unless it is asked for, and a resolution that follows the frame rate (MOBILE_PR, from 0.75 to 2 pixels
+   to the point), so that its GPU keeps up at 60 frames a second. */
+const MOBILE=matchMedia('(pointer: coarse)').matches || /[?&]touch\b/.test(location.search);
+const renderer=new THREE.WebGLRenderer({canvas,antialias:!MOBILE,stencil:true,powerPreference:'high-performance'});
+const MOBILE_PR_MAX=Math.min(window.devicePixelRatio,2); let MOBILE_PR=Math.min(1.25,MOBILE_PR_MAX);
+renderer.setPixelRatio(MOBILE?MOBILE_PR:Math.min(window.devicePixelRatio,2));
 renderer.outputColorSpace=THREE.SRGBColorSpace;
 renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.toneMappingExposure=1.0;
 renderer.shadowMap.enabled=true; renderer.shadowMap.type=THREE.PCFSoftShadowMap;
@@ -4900,8 +4932,8 @@ function updateDaylight(){
 }
 
 // where the GPU allows, a map twice as wide covers twice the distance at the same texel size (2.9 cm)
-const SHADOW_BIG=renderer.capabilities.maxTextureSize>=8192;
-sun.castShadow=true; sun.shadow.mapSize.set(SHADOW_BIG?8192:4096,SHADOW_BIG?8192:4096);
+const SHADOW_BIG=!MOBILE && renderer.capabilities.maxTextureSize>=8192;
+sun.castShadow=true; { const n=MOBILE?2048:SHADOW_BIG?8192:4096; sun.shadow.mapSize.set(n,n); }
 const SH=SHADOW_BIG?120:60; Object.assign(sun.shadow.camera,{left:-SH,right:SH,top:SH,bottom:-SH,near:1,far:SHADOW_BIG?420:320});
 // the shadow map is a square centred on the player, moved in 2 m steps
 function updateShadowFrame(){
@@ -6186,7 +6218,7 @@ function updateIsland0(){
 }
 
 /* ================= chunk manager ================= */
-let VIEW=4; const VIEW_MIN=2, VIEW_MAX=12;
+let VIEW=MOBILE?3:4; const VIEW_MIN=2, VIEW_MAX=MOBILE?6:12;
 // draw distances the player may fix with Page Up and Page Down, as [full-detail ring, simplified ring] in blocks;
 // drawLvl -1 leaves the simplified ring to the automatic adjustment, with full detail to the second ring
 const DRAW_LVLS=[[1,3],[2,5],[2,8],[3,12],[3,16],[4,20],[4,26],[5,30],[6,34],[6,38],[7,42]];
@@ -6287,7 +6319,8 @@ function updateTiles(budgetMs=2){
 }
 // rings of detail: full detail close by, simplified in the middle distance, outlines further out to the fog
 let LOD0=2;
-const lodRing=()=>Math.max(VIEW+2,Math.min(36,VIEW*4));
+// on a phone the ring of outlines reaches half as far, which halves the blocks built and held
+const lodRing=()=>MOBILE?Math.max(VIEW+2,Math.min(14,VIEW*2+2)):Math.max(VIEW+2,Math.min(36,VIEW*4));
 // Page Up and Page Down step to the next fixed draw distance beyond or within the present one; Home restores the automatic one
 // a short note at the top of the screen, which fades after a moment
 let toastT=0;
@@ -9571,6 +9604,8 @@ function dinghyHome(){
   dgyTravel(e.H,B); }
 // to the quay beside the dinghy of the nearest harbour, which is built first, as are the blocks round it
 function dinghyGo(){
+  // following a whale or a dolphin, the view is left first (back to where the player stood), as from any other scene
+  if (mode==='follow') followLeave(); if (mode==='swim') swimLeaveHere();
   if (mode==='coach') mode='street'; if (riding()) leaveTrain('street'); if (mode==='ferry'||ridden) leaveFerry('street');
   if (mode==='above') toggleView();
   const H=dgyHarbourNear(player.x,player.z); if (!H) return;
@@ -12503,7 +12538,7 @@ const postQuad=new THREE.Mesh(new THREE.PlaneGeometry(2,2),postMat); postScene.a
    or on distant ground, and the bird's-eye view from high up is drawn directly, as it is with the effect off
    (Shift+B). At night the brightest pixels, which are lamps and lit windows, are left alone. The camera's lens
    and the views in and under the water have their own passes and are drawn without it. */
-let aoOn=true;
+let aoOn=!MOBILE;
 try{ const v=localStorage.getItem('borgo-ao'); if (v!==null) aoOn=v==='1'; }catch(_){}
 function setAO(on){ aoOn=!!on; try{ localStorage.setItem('borgo-ao',aoOn?'1':'0'); }catch(_){} }
 const AO={radius:1.1,strength:2.4,depth:0.5,minPx:2,
@@ -12874,6 +12909,7 @@ const PEOPLE=createPeople({ world, origin:ORIGIN, camera, C, topAt, heightAt,
   train:{ cars:()=>train.cars, obj:()=>train, wait:()=>train.wait, doorOpen:()=>doorOpen, stationNear, railZ, CDX, CDZ, seats:COACH_SEATS, playerCar:()=>mode==='coach'?co.car:-1 },
   ferry:{ list:()=>ferries, quay:ferryQuay, FB, FPL, FGZ, FD0, FSZ0, seats:FERRY_SEATS, ridden:()=>ridden } });
 wrapHooks.push(()=>PEOPLE.reset());
+const mobPerf={t:0,n:0,sum:0,good:0};
 let paused=false, last=performance.now(), time=0, firstCam=true, eyeY=null, aboveY=null; const perf={t:0,n:0,sum:0,good:0};
 function frame(now){
   // P pauses the world (trains, ferries, boats, the sea, the lighthouses, the cats and the time of day) while the
@@ -12956,6 +12992,15 @@ function frame(now){
   // a draw distance fixed with Page Up or Page Down is left as it is
   // (with the eye in the water the draw distance is left as it was: under the water the land beyond reach is not drawn,
   // and the frame rate there says nothing of the land's)
+  // on a phone the resolution follows the frame rate first: down a quarter of a pixel to the point after two seconds
+  // slower than 48 frames a second, up again after six seconds faster than 57
+  if (MOBILE && !queue.length){ const M=mobPerf; M.t+=dt; M.n++; M.sum+=dt;
+    if (M.t>2){ const avg=M.sum/M.n, pr0=MOBILE_PR;
+      if (avg>1/48 && MOBILE_PR>0.75){ MOBILE_PR-=0.25; M.good=0; }
+      else if (avg<1/57){ M.good+=M.t; if (M.good>6 && MOBILE_PR<MOBILE_PR_MAX){ MOBILE_PR=Math.min(MOBILE_PR_MAX,MOBILE_PR+0.25); M.good=0; } }
+      else M.good=0;
+      if (MOBILE_PR!==pr0){ renderer.setPixelRatio(MOBILE_PR); resize(); }
+      M.t=M.n=M.sum=0; } }
   if (!queue.length && drawLvl<0 && !(mode==='swim' && UW.lens!=='above')){ perf.t+=dt; perf.n++; perf.sum+=dt;
     if (perf.t>2){ const avg=perf.sum/perf.n;
       if (avg>1/52 && VIEW>VIEW_MIN){ VIEW--; perf.good=0; }
@@ -14080,16 +14125,28 @@ if (new URLSearchParams(location.search).has('perf')){
 }
 
 /* ================= boot ================= */
-requestAnimationFrame(()=>setTimeout(()=>{
+// The world is built in steps, each followed by a paint, so that a bar shows how far it has come: the first blocks
+// round the player (for 400 ms, as before), the tiles, the distant land and the water. The bar then stays, filling,
+// while the rest of the blocks round the player are built in the first frames, and goes when they are done.
+requestAnimationFrame(()=>setTimeout(async ()=>{
+  const W='Building the world:', ld=document.getElementById('loading'); if (ld) ld.remove();
+  seedShow(0.03,W); await nextPaint();
   spawnPlayer();
   // a shared scene (L) puts the player where it was before the first blocks are built round them
   if (SCENE) try{ scenePlace(SCENE); }catch(err){ console.warn('The shared scene could not be placed:',err); }
-  updateChunks(player.x,player.z,400); updateTiles(1e9);
-  rebuildFar(player.x,player.z); farDirty=true;
+  const t0=performance.now();
+  do { updateChunks(player.x,player.z,50); seedShow(0.03+0.5*Math.min(1,(performance.now()-t0)/400),W); await nextPaint(); } while (queue.length && performance.now()-t0<400);
+  seedShow(0.58,W); await nextPaint(); updateTiles(1e9);
+  seedShow(0.68,W); await nextPaint(); rebuildFar(player.x,player.z); farDirty=true;
+  seedShow(0.78,W); await nextPaint();
   try { divePrewarm(); } catch(err){ console.warn('The water could not be prepared:',err); }
-  document.getElementById('loading').remove();
+  seedShow(0.88,W); await nextPaint();
   if (SCENE) try{ sceneRestore(SCENE); }catch(err){ console.warn('The shared scene could not be restored:',err); }
-  requestAnimationFrame(frame);
+  last=performance.now(); requestAnimationFrame(frame);
+  const q0=Math.max(1,queue.length), tb=performance.now();
+  const tick=()=>{ if (seeding) return; if (!queue.length || performance.now()-tb>20000){ seedEl.hidden=true; return; }
+    seedShow(0.88+0.12*(1-queue.length/q0),W); requestAnimationFrame(tick); };
+  tick();
 },30));
 window.__village={ get seed(){ return SEED_TEXT; }, share:{state:sceneState,link:sceneLink,qrEncode,get shared(){ return SCENE; }}, get paused(){ return paused; }, set paused(v){ if (!!v!==paused){ paused=!!v; lastClock=null; } }, goods, glZone, branchesAt, get mantle(){ return mantle; }, get colRoof(){ return colRoof; }, roofAt, roofSlope, topAt, get sit(){ return sit; }, get indoors(){ return indoors; }, roomFns:{flight,localToWorld,obbLocal,roomCeil}, sitKey, sitFind, sitStand, sitSpotOk, beachStretch, BCH_SP, COACH_SEATS, FERRY_SEATS, coachEnter, genChunk, coastRoadZ, brZ, brY, heightAt, player, chunks, rooms, doorMesh, keys, setYaw:v=>{yaw=v;}, get yaw(){return yaw;}, fe, co, lightsNear, beams, ruinIn, cats, catHome, PEOPLE, get ridden(){ return ridden; },
   findHarbour(){ for (let d=0;d<12;d++) for (const sd of SIDES) for (const n of [Math.floor(player.x/HARB)+d,Math.floor(player.x/HARB)-d]){ const H=harbourInfo(sd,n); if (H) return {x:H.x,z:coastZ(sd,H.x)+sd*7,W:H.W,sd,qz:coastZ(sd,H.x+H.W/2-1)+sd*2.5}; } return null; },
@@ -14133,6 +14190,95 @@ window.__village={ get seed(){ return SEED_TEXT; }, share:{state:sceneState,link
     player.x=x; player.z=z; mode='swim'; swimmer.enter({x,y:y??0.2,z,yaw,pitch:fpPitch}); const S=swimmer.state; if (under){ S.mode='under'; S.under=true; S.underT=2; } },
   photo:PHOTO.api,
   get swimDebug(){ const S=swimmer.state; return {mode,swim:S.mode,under:S.under,lens:UW.lens,wet:UW.wet,x:S.x,y:S.y,z:S.z,water:S.water,air:S.air,surface:SEA.heightAt(S.x,S.z)}; }};
+
+/* ================= touch screens: the menu and the buttons for the actions of the moment =================
+   On a touch screen (or with ?touch in the address) a menu button stands at the top right. Its menu takes the player to
+   each of the scenes the number keys reach, raises the camera, takes a snapshot and opens the gallery (and from it the
+   artist mode), sets the time of day, pauses, and sets the view, the sound and the number of people. Beside the left
+   thumb's stick, buttons at the bottom right do what the moment calls for: jump, crouch and sit on foot; rise, dive and
+   the torch in the water; nearer and further when following or watching from afar. Each button acts as its key does,
+   by pressing that key or holding it while it is held. Everything is hidden while the camera, the gallery or a panel
+   is open, since those have controls of their own. */
+const TOUCH=MOBILE;
+if (TOUCH){
+  const svg=d=>`<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+  const IC={menu:svg('<path d="M4 7h16M4 12h16M4 17h16"/>'),close:svg('<path d="M6 6l12 12M18 6L6 18"/>'),
+    up:svg('<path d="M12 19V5M6 11l6-6 6 6"/>'),down:svg('<path d="M12 5v14M6 13l6 6 6-6"/>'),crouch:svg('<path d="M5 15h14M8 19h8"/><path d="M12 4v8M9 9l3 3 3-3"/>'),
+    sit:svg('<path d="M7 4v9h9l1 7M7 13l-1 7M16 13V8"/>'),torch:svg('<path d="M9 3h6l-1 6h-4zM10 9h4v12h-4z"/><path d="M12 13v2"/>'),
+    plus:svg('<path d="M12 5v14M5 12h14"/>'),minus:svg('<path d="M5 12h14"/>'),cam:svg('<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>'),
+    swim:svg('<path d="M3 17c2 1.5 4 1.5 6 0s4-1.5 6 0 4 1.5 6 0"/><path d="M8 13l4-6 4 2"/><circle cx="17" cy="5" r="1.6"/>'),view:svg('<path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z"/><circle cx="12" cy="12" r="2.6"/>')};
+  const el=(tag,cls,html)=>{ const e=document.createElement(tag); if (cls) e.className=cls; if (html!=null) e.innerHTML=html; return e; };
+  // a key pressed for an instant, or held while a button is held
+  const press=(code,shift=false)=>{ dispatchEvent(new KeyboardEvent('keydown',{code,key:'',shiftKey:shift,bubbles:true})); dispatchEvent(new KeyboardEvent('keyup',{code,key:'',bubbles:true})); };
+  const holdBtn=(b,code)=>{ const on=e=>{ e.preventDefault(); keys[code]=true; b.classList.add('on'); }, off=e=>{ keys[code]=false; b.classList.remove('on'); };
+    b.addEventListener('pointerdown',on); for (const t of ['pointerup','pointercancel','pointerleave']) b.addEventListener(t,off); };
+  const tapBtn=(b,f)=>b.addEventListener('click',e=>{ e.preventDefault(); f(); });
+  const round=(icon,label)=>{ const b=el('button','tbtn',IC[icon]); b.type='button'; b.setAttribute('aria-label',label); b.title=label; return b; };
+
+  const menuBtn=round('menu','Menu'); menuBtn.classList.add('tmenu-btn'); document.body.appendChild(menuBtn);
+  const acts=el('div','tacts'); document.body.appendChild(acts);
+  const menu=el('aside','tmenu'); menu.hidden=true; menu.setAttribute('aria-label','Menu'); document.body.appendChild(menu);
+  // the menu: its sections, each a grid of buttons or a row of sliders
+  menu.innerHTML=`<header><h2>Coast</h2><button type="button" data-a="close" aria-label="Close">${IC.close}</button></header>`;
+  const sec=(title)=>{ menu.appendChild(el('h3',null,title)); const g=el('div','grid'); menu.appendChild(g); return g; };
+  const item=(g,label,f,{toggle=null,stay=false}={})=>{ const b=el('button',null,label); b.type='button'; g.appendChild(b);
+    if (toggle) b.dataset.t='1', b._t=toggle;
+    tapBtn(b,()=>{ f(); refresh(); if (!stay && !toggle) closeMenu(); }); return b; };
+  const slider=(label,min,max,step,get,set,fmt)=>{ const r=el('div','sl'), id='ts'+Math.random().toString(36).slice(2,7);
+    r.innerHTML=`<label for="${id}">${label}</label><input type="range" id="${id}" min="${min}" max="${max}" step="${step}"><output></output>`; menu.appendChild(r);
+    const inp=r.querySelector('input'), out=r.querySelector('output'); inp.addEventListener('input',()=>{ set(+inp.value); out.textContent=fmt(+inp.value); });
+    return {sync(){ const v=get(); inp.value=v; out.textContent=fmt(v); }}; };
+
+  const places=sec('Places');
+  item(places,'Start',()=>press('Digit1')); item(places,'Aerial',()=>press('Digit2')); item(places,'Passenger train',()=>press('Digit3'));
+  item(places,'Freight train',()=>press('Digit4')); item(places,'Ferry',()=>press('Digit5')); item(places,'Sailing dinghy',()=>press('Digit6'));
+  item(places,'Whale',()=>press('Digit7')); item(places,'Dolphin',()=>press('Digit8')); item(places,'Shipwreck',()=>press('Digit9'));
+  item(places,'Next view',()=>press('Digit0')); item(places,'Jump in the sea',()=>press('KeyJ'));
+  const pics=sec('Pictures');
+  item(pics,'Camera',()=>PHOTO.api.toggle()); item(pics,'Snapshot',()=>{ closeMenu(); setTimeout(()=>PHOTO.api.quick(),250); },{stay:true}); item(pics,'Gallery and artist mode',()=>PHOTO.api.openGallery());
+  const timeG=sec('Time');
+  const hm=v=>{ const h=Math.floor(v)%24, m=Math.floor((v-Math.floor(v))*60); return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0'); };
+  const tSl=slider('Time of day',0,23.95,0.05,()=>hour,v=>{ hour=v; SNDS.hour=Math.floor(hour); updateDaylight(); updateClocks(); },hm);
+  item(timeG,'Pause',()=>{ paused=!paused; lastClock=null; },{toggle:()=>paused});
+  item(timeG,'Day or night',()=>press('KeyN'),{stay:true});
+  const viewG=sec('View');
+  item(viewG,'Tilt-shift',()=>setTilt(!tiltShift),{toggle:()=>tiltShift});
+  item(viewG,'Ambient occlusion',()=>setAO(!aoOn),{toggle:()=>aoOn});
+  item(viewG,'Full screen',()=>{ try{ if (document.fullscreenElement) document.exitFullscreen(); else { const q=document.documentElement.requestFullscreen(); if (q&&q.catch) q.catch(()=>{}); } }catch(_){} },{toggle:()=>!!document.fullscreenElement});
+  item(viewG,'Draw nearer',()=>setDrawLvl(-1),{stay:true}); item(viewG,'Draw further',()=>setDrawLvl(1),{stay:true}); item(viewG,'Automatic distance',()=>setDrawLvl(0),{stay:true});
+  item(viewG,'Performance',()=>{ statsEl.hidden=!statsEl.hidden; statsT=0; },{toggle:()=>!statsEl.hidden});
+  const fovIn=document.getElementById('fovIn');
+  const fSl=slider('Field of view',fovIn?+fovIn.min:50,fovIn?+fovIn.max:100,1,()=>fovIn?+fovIn.value:FOV,v=>{ if (fovIn){ fovIn.value=v; fovIn.dispatchEvent(new Event('input')); } },v=>Math.round(v)+'°');
+  const sndG=sec('Sound and people');
+  item(sndG,'Sound',()=>setMuted(!muted),{toggle:()=>!muted});
+  item(sndG,'Fewer people',()=>{ PEOPLE.setLevel(PEOPLE.level-1); toast('Population level',`${PEOPLE.level}`); },{stay:true});
+  item(sndG,'More people',()=>{ PEOPLE.setLevel(PEOPLE.level+1); toast('Population level',`${PEOPLE.level}`); },{stay:true});
+  const worldG=sec('World');
+  item(worldG,'New island',()=>openIsland()); item(worldG,'Share',()=>openShare()); item(worldG,'Help',()=>press('KeyH')); item(worldG,'About',()=>{ aboutEl.hidden=false; });
+  function refresh(){ for (const b of menu.querySelectorAll('button[data-t]')) b.setAttribute('aria-pressed',b._t()?'true':'false'); tSl.sync(); fSl.sync(); }
+  function openMenu(){ refresh(); menu.hidden=false; }
+  function closeMenu(){ menu.hidden=true; }
+  tapBtn(menuBtn,()=>{ if (menu.hidden) openMenu(); else closeMenu(); });
+  menu.querySelector('[data-a=close]').addEventListener('click',closeMenu);
+
+  // the buttons of the moment, rebuilt only when the moment changes
+  let ctxKey='';
+  function actionsFor(){
+    const B=[];
+    if (mode==='swim') B.push(['up','Rise','hold','Space'],['down','Dive','hold','KeyC'],['torch','Torch','tap',()=>press('KeyF')]);
+    else if (mode==='street') B.push(['up','Jump','hold','Space'],['crouch','Crouch','tap',()=>press('KeyZ')],['sit','Sit','tap',()=>press('KeyX')],['swim','Jump in the sea','tap',()=>press('KeyJ')]);
+    else if (mode==='dinghy') B.push(['view','Next view','tap',()=>press('Digit0')],['swim','Jump in the sea','tap',()=>press('KeyJ')]);
+    if (mode==='follow'||mode==='above'||mode==='chase'||(mode==='ferry'&&feChase)||(mode==='dinghy'&&dgyChase)) B.push(['plus','Nearer','hold','Equal'],['minus','Further','hold','Minus']);
+    B.push(['cam','Camera','tap',()=>PHOTO.api.toggle()]);
+    return B; }
+  function rebuild(B){ acts.textContent=''; for (const [icon,label,kind,a] of B){ const b=round(icon,label); if (kind==='hold') holdBtn(b,a); else tapBtn(b,a); acts.appendChild(b); } }
+  setInterval(()=>{
+    const G=PHOTO.api.studio, busy=PHOTO.api.state.on || (G && (G.isOpen||G.artOpen)) || islandShown() || shareShown() || !helpEl.hidden || !aboutEl.hidden || !started;
+    menuBtn.hidden=busy; acts.hidden=busy||!menu.hidden; if (busy && !menu.hidden) closeMenu();
+    const B=actionsFor(), k=B.map(b=>b[1]).join('|'); if (k!==ctxKey){ ctxKey=k; for (const c of ['Space','KeyC','Equal','Minus']) keys[c]=false; rebuild(B); }
+    if (!menu.hidden) tSl.sync();
+  },250);
+}
 // the shape of the land, for tests: the mountains, the islands and how each block is used
 window.__village.terrain={baseH,mtnH,mtLevel,mtSpine,mtCrest,halfW,ridgeZ,coastZ,highGround,isVillage,chunkKind,villageOf,islandInfo,islandRoute,islandLight,ISL,WRAP_Z,railZ,railY,railState,stationInfo,ST_SP};
 // the boats' footprints, for tests: no two moored or anchored boats may overlap, nor lie off a beach with sunbeds

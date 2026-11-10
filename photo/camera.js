@@ -402,6 +402,28 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
   .cam .shut{width:62px;height:62px} .cam .shut i{width:48px;height:48px}
   .cam .fr{inset:72px 3.5% calc(var(--deck) + 20px) 3.5%}
 }
+.cam .knobs{display:none;width:44px;height:44px;padding:11px;border-radius:50%;background:rgba(245,233,215,.12)}
+.cam .knobs.on{background:var(--plaster,#f5e9d7);color:var(--ink,#26232b)}
+/* a short screen (a phone held sideways): the dials sit in one compact row of three columns, without their rails, and
+   can be put away to leave the whole frame clear */
+@media (max-height:520px){
+  .cam{--deck:112px}
+  .cam .deck{left:8px;right:96px;bottom:6px;transform:none;display:grid;grid-template-columns:repeat(3,1fr);gap:6px 0;padding:6px 2px;border-radius:10px}
+  .cam .dial{min-width:0;padding:0 6px;gap:3px}
+  .cam .dial:nth-child(3){border-left:1px solid rgba(245,233,215,.14)}
+  .cam .dial:nth-child(4){border-left:0}
+  .cam .dial s{display:none}
+  .cam .dial small{height:16px;font-size:.6rem}
+  .cam .dial b{min-width:52px;font-size:.92rem}
+  .cam .step{width:30px;height:30px;padding:7px}
+  .cam .rail{right:8px;top:8px;bottom:8px;transform:none;justify-content:center;gap:12px;padding:8px 6px}
+  .cam .shut{width:58px;height:58px} .cam .shut i{width:44px;height:44px}
+  .cam .roll{width:44px;height:44px}
+  .cam .exit{top:10px;right:84px}
+  .cam .knobs{display:block}
+  .cam.nodeck{--deck:0px}
+  .cam.nodeck .deck{display:none}
+}
 .shutter{position:fixed;inset:0;z-index:5;pointer-events:none;background:#fff;opacity:0}
 .shutter.go{animation:shutterflash .32s ease-out}
 @keyframes shutterflash{0%{opacity:.85}100%{opacity:0}}
@@ -415,6 +437,7 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
   hud.innerHTML = `<div class="fr"><i></i><i></i><i></i><i></i></div><div class="af"></div>
     <button class="exit" data-c="exit" title="Leave the camera (C)" aria-label="Leave the camera">${ic('<path d="M6 6l12 12M18 6L6 18"/>')}</button>
     <div class="rail"><button class="shut" data-c="shoot" title="Take a picture (Enter)" aria-label="Take a picture"><i></i></button>
+      <button class="knobs on" data-c="knobs" title="Show or hide the dials" aria-label="Dials" aria-pressed="true">${ic('<path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/>')}</button>
       <button class="roll" data-c="gallery" title="Gallery (G)" aria-label="Gallery">${ic('<rect x="3.5" y="5.5" width="17" height="13" rx="1.5"/><path d="M3.5 15.5l5-4.5 4 3.5 3-2.5 5 4"/>')}<b></b></button></div>
     <div class="deck">${dial('focal', 'Zoom', 'zoom-', 'zoom+', 'Wider (−)', 'Longer (+)')}
       ${dial('focus', 'Focus', 'near', 'far', 'Nearer (9)', 'Further (0)', '<button class="mode" data-c="af" title="Autofocus or manual focus (U)">AF</button>')}
@@ -462,8 +485,11 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
   const frEl = hud.querySelector('.fr');
   function layoutFrame() {
     hud.style.setProperty('--deck', deckEl.offsetHeight + 'px');
-    const W = innerWidth, H = innerHeight, narrow = W <= 860;
-    const side = Math.round(W * 0.035), v = Math.min(Math.round(H * 0.3), Math.max(narrow ? 72 : 76, deckEl.offsetHeight + (narrow ? 20 : 28)));
+    const W = innerWidth, H = innerHeight, narrow = W <= 860, short = H <= 520;
+    // on a short screen the frame clears the rail of buttons on the right, and the dials below when they are shown;
+    // its margins are kept equal on opposite sides, so that it stays centred on the lens's axis
+    const side = short ? 96 : Math.round(W * 0.035), dk = deckEl.offsetHeight;
+    const v = short ? Math.max(12, dk ? dk + 12 : 12) : Math.min(Math.round(H * 0.3), Math.max(narrow ? 72 : 76, dk + (narrow ? 20 : 28)));
     let fw = W - 2 * side, fh = H - 2 * v; const r = RATIOS[S.ratio][1];
     if (r) { if (fw / fh > r) fw = fh * r; else fh = fw / r; }
     frEl.style.inset = `${(H - fh) / 2}px ${(W - fw) / 2}px`;
@@ -529,6 +555,7 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
     else if (c === 'exit') exit();
     else if (c === 'gallery') openGallery();
     else if (c === 'af') { setFocus(S.autofocus ? S.focus : null); updateViewfinder(); }
+    else if (c === 'knobs') { const off = hud.classList.toggle('nodeck'), k = hud.querySelector('.knobs'); k.classList.toggle('on', !off); k.setAttribute('aria-pressed', String(!off)); layoutFrame(); }
   });
 
   const stop = e => { e.preventDefault(); e.stopImmediatePropagation(); };
