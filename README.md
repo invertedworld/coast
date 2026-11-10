@@ -71,6 +71,7 @@ The panel opened with **H** lists the controls. They are reproduced here for ref
 | Two-finger drag | Pans across the island in the bird's-eye view. |
 | Arrow keys | Turn and tilt the bird's-eye view. |
 | B | Turns tilt-shift on or off in the bird's-eye and chase views. |
+| Shift + B | Turns ambient occlusion on or off. It is on at first, and a notice shows the new setting. See [Ambient occlusion](#ambient-occlusion). |
 | T | Speeds up time while held, forty times. |
 | Shift + T | Runs time backwards at the same rate while held. The clock, the sun, the stars and everything timed by the clock, such as the fishing boats, go back; the church bells do not strike the hours passed backwards. |
 | P | Pauses the world: the trains, ferries, boats, dolphins, sea, lighthouse beams, cats, gulls and time of day stand still while the player walks, flies and looks about as usual. P again resumes. |
@@ -149,7 +150,7 @@ The program is a single ES module. Its main sections appear in the following ord
 8. Moving things: the dolphins, sailing boats, the train and the ferries.
 9. Collision and the walkable surface.
 10. Sound.
-11. Input, the riding modes, the camera, tilt-shift and the frame loop.
+11. Input, the riding modes, the camera, tilt-shift, ambient occlusion and the frame loop.
 
 ### Shared scenes
 
@@ -579,6 +580,16 @@ The building and ground shaders add procedural surface patterns according to the
 
 **Tilt-shift.** The scene is rendered off-screen and blurred horizontally and vertically, with a radius that grows away from a horizontal band of sharp focus through the player, so that the view resembles a miniature model.
 
+### Ambient occlusion
+
+Creases, the foot of walls, doorways, the undersides of eaves and the ground under benches, tables and people are darkened a little, in addition to the darkening by height that the geometry builder gives each vertex. The effect is computed from the depth of the picture (`aoPasses`) and is turned on or off with **Shift+B** (`setAO`); the setting is kept in the browser.
+
+- **The scene's target.** With the effect on, the scene is drawn into an off-screen target with four samples per pixel and its depth as a texture (`AO.scene`) instead of directly to the canvas. three.js is told to treat this target as it treats the canvas (`isXRRenderTarget`), so the materials map the tones and encode the colours themselves, and the fog's and the background's colours are encoded for that render as three.js encodes them for the canvas. The picture in the target is therefore the one the canvas would have held, and with the strength at zero the frame is the same with the effect on as with it off. Under tilt-shift the scene is drawn into that effect's own linear target, which carries its depth as a texture too.
+- **The occlusion pass** runs at half the resolution, or less where the canvas has more than 2.4 million pixels. For each pixel it rebuilds the position before the camera from the depth, takes the facet's normal from the nearer neighbour on each axis, and weighs nine points on a spiral within 1.1 m in the world (`AO.radius`) by how far each rises above the facet, passing over what rises at a slope of less than one in four so that the shallow creases between the facets of the ground are not drawn, after the estimator of McGuire, Mara and Luebke's "Scalable Ambient Obscurance". The spiral is turned by a different angle at each pixel. The darkening approaches a limit of one half (`AO.depth`) gradually with the strength (`AO.strength`), so that the deepest corner is never black.
+- **Two smoothing passes** follow at the same resolution, of nine samples each, from side to side and then from top to bottom, and both weigh a sample by how near its depth is to the pixel's, so that the darkening does not spread across a silhouette. The last pass enlarges the result to the size of the picture from the four pixels round each point, weighed by depth in the same way, multiplies the picture by it and puts it on the screen, or into a second target when tilt-shift follows.
+- **Where it is left out.** The darkening fades out with the fog and where 1.1 m covers fewer than about six pixels of the occlusion pass (`AO.minPx`), and there is none on the sky. In the bird's-eye view from high up (above about 440 m in a window 900 pixels high) nothing would be darkened (`aoDue`), and the frame is drawn directly to the canvas as it is with the effect off. At night the brightest pixels, which are lamps and lit windows, are left as they are. The camera's lens (**C**), the 3D render and the views in and under the water have their own passes and are drawn without the effect.
+- **Things that do not write depth**, such as smoke, glows and spray, take the darkening of what lies behind them, and the falling sheets of a fountain, which do write depth, hide the darkening behind them.
+
 ### Photographs, the gallery and artist mode
 
 **C** raises the camera. The frame is then drawn through a lens model (`photo/camera.js`): a focal length of 16 to 300 mm in the equivalent of a 35 mm frame, depth of field from a thin lens, autofocus on the AF point at the centre or manual focus, and exposure compensation. Its controls are laid out on the screen as a camera's are. A panel at the foot of the frame holds the zoom, the focus, the aperture and the exposure, each with its value, a scale showing where the value lies in its range, and − and + buttons that step it, at once and then repeatedly while held; the focus also carries an AF/MF switch. A rail on the right holds the shutter and, beneath it, the latest photo with the number of photos taken, which opens the gallery. A button at the top right lowers the camera. The mouse is not captured while the camera is raised, so that the controls can be clicked, and clicking the scene takes no picture; a drag turns the view, and the player walks, swims and turns with the usual keys. The camera stays raised until it is lowered with that button, K or Esc. When it is lowered none of this runs and the frame is drawn exactly as before.
@@ -741,6 +752,7 @@ node --check /tmp/m.mjs
 | `findHarbour`, `findBeach`, `findStation`, `findRail`, `harbourAt`, `harbourInfo`, `hbS` | Locating features. |
 | `islandRoute`, `ferryLanding`, `ferryPortInfo` | Ferry routes and landing points. |
 | `toggleTrain`, `toggleView`, `setHour`, `setYaw`, `setPitch`, `setDist`, `setFpPitch`, `updateChunks` | Driving the scene. |
+| `setAO(on)`, `aoOn`, `AO`, `render()` | Ambient occlusion on or off, its present setting, and its values (`radius`, `strength`, `depth`, `minPx`) and targets; and the drawing of one frame, for timing. |
 | `paused` | Whether the world stands still, as **P** toggles; it may be set. The 3D render sets it while a picture is made. |
 | `SND`, `SNDV`, `SNDS`, `startAudio`, `audioState`, `shore`, `surfaceAt` | The sound engine and its inputs. |
 | `findCove()`, `findIsleCove(k)`, `coveInfo(sd,n)`, `isleCoves(sd,m)`, `coveLanding(cove)` | The nearest mainland cove, with its beach, landing, cave mouth, a point inside the cave and the top and foot of its path; the same for the k-th nearest island cove; the cove in slot `n` of a coast; the coves of island `m`; and where a boat lands in a cove. |

@@ -26,6 +26,8 @@ A double click on land in the bird's-eye view brings the camera down to street l
 
 **B** sets tilt-shift on or off in the bird's-eye and chase views. Tilt-shift blurs the top and bottom of the picture so that the island resembles a model.
 
+**Shift+B** sets ambient occlusion on or off. Ambient occlusion darkens creases, the foot of walls, doorways, the undersides of eaves and the ground beneath benches and people slightly. It is on when the game starts, and the new setting is shown briefly at the top of the screen.
+
 ## Walking
 
 **W A S D** walk, the up and down arrow keys also walk forward and back, and **Shift** held with them runs. **Q** and **E** turn the view. **Space** jumps; a jump towards a wall, a ledge or the eaves of a roof whose top is within reach climbs onto it, so that roofs may be walked upon. **Z** crouches, lowering the eye to 0.95 m and reducing the speed to 45 per cent, and **Z** again stands up.
