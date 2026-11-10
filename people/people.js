@@ -553,7 +553,7 @@ function makeGrid(x0,z0,w,d,surf){
   const WALK=0.3;
   G.field=(x,z)=>{
     let t=G.cellOf(x,z); if (t<0) return null; const key0=t;
-    if (G.fields.has(key0)) return G.fields.get(key0);
+    { const F=G.fields.get(key0); if (F){ G.fields.delete(key0); G.fields.set(key0,F); return F; } }   // the least recently used goes first
     if (G.budget<=0) return null; G.budget--;
     if (G.clr[t]<WALK){ let best=-1, bd=1e9; for (let dj=-6;dj<=6;dj++) for (let di=-6;di<=6;di++){ const c=t+dj*nx+di; if (c>=0&&c<N&&G.clr[c]>=WALK){ const q=di*di+dj*dj; if (q<bd){ bd=q; best=c; } } } if (best<0) return null; t=best; }
     // in double precision, so that no rounding up can reopen a settled cell
@@ -564,7 +564,7 @@ function makeGrid(x0,z0,w,d,surf){
       for (const [di,dj,w] of NB){ if (i+di<0||i+di>=nx) continue; const n2=c+dj*nx+di; if (n2<0||n2>=N||G.clr[n2]<WALK) continue;
         if (di&&dj&&(G.clr[c+di]<WALK||G.clr[c+dj*nx]<WALK)) continue;
         const nd=dv+w*(1+0.6*Math.max(0,0.9-G.clr[n2])); if (nd<Dd[n2]){ Dd[n2]=nd; push(n2,nd); } } }
-    const F=Float32Array.from(Dd); G.fields.set(key0,F); if (G.fields.size>40) G.fields.delete(G.fields.keys().next().value); return F;
+    const F=Float32Array.from(Dd); G.fields.set(key0,F); if (G.fields.size>Math.max(40,Math.floor(6e6/N))) G.fields.delete(G.fields.keys().next().value); return F;
   };
   G.waypoint=(x,z,tx,tz)=>{
     if (G.los(x,z,tx,tz)) return [tx,tz];
@@ -583,7 +583,7 @@ export function createPeople(ctx){
   const O=ctx.origin, cam=ctx.camera;
   const body=createPeopleMesh(ctx.world, MAXP, O); body.mesh.visible=false;
   const people=[], groups=[], places=new Map(), games=[], pax=[];
-  let on=false, level=0, mult=0, fillUntil=-1, simT=0, NEXT=1, scanT=0, wasWait=0; const ferryWas=new Map();
+  let FRAME=0, on=false, level=0, mult=0, fillUntil=-1, simT=0, NEXT=1, scanT=0, wasWait=0; const ferryWas=new Map();
   const POSE=newPose(), rnd=Math.random, rand=(a,b)=>a+rnd()*(b-a);
 
   /* ---------- what the camera sees ---------- */
@@ -785,7 +785,7 @@ export function createPeople(ctx){
     const d=g.dest, G=g.place.G; let lag=0;
     for (const m of g.members) if (m.mode==='slot'&&!(m.child&&m.kidMode==='ahead')){ const [sx,sz]=slotPos(g,m); lag=Math.max(lag,Math.hypot(sx-m.x,sz-m.z)); }
     for (const m of g.members) if (m.mode==='unsit') lag=Math.max(lag,3);
-    g.wpT-=dt; if (!g.wp||g.wpT<=0){ g.wp=G.waypoint(g.ax,g.az,d.x,d.z)||[d.x,d.z]; g.wpT=0.35; }
+    g.wpT-=dt; if (!g.wp||g.wpT<=0){ const w=G.waypoint(g.ax,g.az,d.x,d.z); g.wp=w||g.wp||[d.x,d.z]; g.wpT=w?0.35:0.1; }   // with no way yet, keeps to the last and asks again soon
     const dx=g.wp[0]-g.ax, dz=g.wp[1]-g.az, dl=Math.hypot(dx,dz)||1, rem=Math.hypot(d.x-g.ax,d.z-g.az);
     const gt=g.members[0].gait, v=g.speed*(1+gt.pace*Math.sin(simT*gt.paceF+g.id))*clamp(1.5-lag/1.1,0,1)*clamp(rem/1.2,0.25,1);
     g.avx=lerp(g.avx,dx/dl*v,ease(4,dt)); g.avz=lerp(g.avz,dz/dl*v,ease(4,dt));
@@ -1113,7 +1113,8 @@ export function createPeople(ctx){
     const P=ctx.player(); PL.x=P.x; PL.z=P.z; PL.vx=P.vx||0; PL.vz=P.vz||0;
     if (dt>0){
       simT+=dt; scanT-=dt; if (scanT<=0){ scanT=1; scan(); }
-      for (const pl of places.values()) pl.G.budget=1;
+      // at most two new ways are worked out in a frame, given to the places in turn; anyone left without one walks on as before
+      { const L=[...places.values()]; for (const pl of L) pl.G.budget=0; if (L.length){ FRAME++; L[FRAME%L.length].G.budget=1; L[(FRAME+1)%L.length].G.budget++; } }
       spawnTick(dt);
       rebuildHash();
       for (const g of groups.slice()) groupThink(g,dt);
