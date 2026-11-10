@@ -132,6 +132,7 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
     <div class="group"><h3>Camera</h3>
       <div class="row"><span><kbd>+</kbd><kbd>−</kbd></span><span>Zoom in and out</span></div>
       <div class="row"><span><kbd>B</kbd></span><span>Tilt-shift effect</span></div>
+      <div class="row"><span><kbd>Shift</kbd>+<kbd>B</kbd></span><span>Ambient occlusion</span></div>
     </div>
     <div class="group"><h3>Pictures</h3>
       <div class="row"><span><kbd>Enter</kbd></span><span>Take snapshot</span></div>
@@ -10737,7 +10738,8 @@ addEventListener('keydown',e=>{ keys[e.code]=true;
   if (code==='Gull' && !e.repeat) followKey('gull');
   if (code==='Dolphin' && !e.repeat) followKey('dolphin');
   if (code==='ToStart' && !e.repeat) homeKey();
-  if (code==='KeyB') setTilt(!tiltShift);
+  if (code==='KeyB' && e.shiftKey){ if (!e.repeat){ setAO(!aoOn); toast('Ambient occlusion',aoOn?'on':'off'); } }
+  else if (code==='KeyB') setTilt(!tiltShift);
   if (code==='KeyP' && !e.repeat){ paused=!paused; lastClock=null; }
   // the help panel frees the mouse, so that its tabs can be clicked
   if (code==='KeyH' && !e.repeat){ helpEl.hidden=!helpEl.hidden; aboutEl.hidden=true; lastCell=null; if (!helpEl.hidden && document.pointerLockElement) document.exitPointerLock(); }
@@ -11609,7 +11611,9 @@ let tiltShift=false;
 try{ tiltShift=localStorage.getItem('borgo-tilt')==='1'; }catch(_){}
 function setTilt(on){ tiltShift=on;  try{ localStorage.setItem('borgo-tilt',on?'1':'0'); }catch(_){} }
 setTilt(tiltShift);
-const rtScene=new THREE.WebGLRenderTarget(1,1,{type:THREE.HalfFloatType,samples:4});
+// the scene's target carries its depth as a texture, which the ambient occlusion reads, and a stencil as the canvas does
+const sceneDepthTex=()=>new THREE.DepthTexture(1,1,THREE.UnsignedInt248Type,undefined,undefined,undefined,THREE.NearestFilter,THREE.NearestFilter,undefined,THREE.DepthStencilFormat);
+const rtScene=new THREE.WebGLRenderTarget(1,1,{type:THREE.HalfFloatType,samples:4,stencilBuffer:true,depthTexture:sceneDepthTex()});
 const rtBlur=new THREE.WebGLRenderTarget(1,1,{type:THREE.HalfFloatType,depthBuffer:false});
 const postU={tDiffuse:{value:null},uDir:{value:new THREE.Vector2(1,0)},uRes:{value:new THREE.Vector2(1,1)},uFocus:{value:0.5},uBand:{value:0.09},uMax:{value:16},uFinal:{value:0}};
 const postMat=new THREE.ShaderMaterial({uniforms:postU,depthTest:false,depthWrite:false,
@@ -11626,7 +11630,126 @@ const postMat=new THREE.ShaderMaterial({uniforms:postU,depthTest:false,depthWrit
       #include <colorspace_fragment>
     }`});
 const postScene=new THREE.Scene(), postCam=new THREE.OrthographicCamera(-1,1,1,-1,0,1);
-postScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2,2),postMat));
+const postQuad=new THREE.Mesh(new THREE.PlaneGeometry(2,2),postMat); postScene.add(postQuad);
+
+/* ================= ambient occlusion =================
+   Creases, the foot of walls, doorways, the undersides of eaves and the ground under benches and people are darkened
+   a little, from the depth of the picture alone. The scene is drawn into an off-screen target with its depth as a
+   texture: AO.scene, which three.js is told to treat as it treats the canvas (isXRRenderTarget), so that the materials
+   map the tones and encode the colours themselves and the picture is the one the canvas would have held; or, under
+   tilt-shift, that effect's own target. A first pass, at half the resolution or less, rebuilds the position seen at
+   each pixel and its facet's normal from the depth, and weighs nine points round it, within 1.1 m in the world, by
+   how far they rise above the facet, passing over what rises only a little, so that the shallow creases of the ground
+   are not drawn (the estimator of McGuire's "Scalable Ambient Obscurance"). Two passes smooth the result, from
+   side to side and from top to bottom, both keeping to pixels of a like depth, and the last pass enlarges it to the
+   size of the picture and multiplies the picture by it as it is put on the screen, or into a second target when
+   tilt-shift follows.
+   The darkening fades out with the fog and where the 1.1 m would cover only a few pixels, so there is none on the sky
+   or on distant ground, and the bird's-eye view from high up is drawn directly, as it is with the effect off
+   (Shift+B). At night the brightest pixels, which are lamps and lit windows, are left alone. The camera's lens
+   and the views in and under the water have their own passes and are drawn without it. */
+let aoOn=true;
+try{ const v=localStorage.getItem('borgo-ao'); if (v!==null) aoOn=v==='1'; }catch(_){}
+function setAO(on){ aoOn=!!on; try{ localStorage.setItem('borgo-ao',aoOn?'1':'0'); }catch(_){} }
+const AO={radius:1.1,strength:2.4,depth:0.5,minPx:2,
+  scene:new THREE.WebGLRenderTarget(1,1,{samples:4,stencilBuffer:true,depthTexture:sceneDepthTex()}),
+  a:new THREE.WebGLRenderTarget(1,1,{type:THREE.HalfFloatType,format:THREE.RGFormat,depthBuffer:false}),
+  b:new THREE.WebGLRenderTarget(1,1,{type:THREE.HalfFloatType,format:THREE.RGFormat,depthBuffer:false}),
+  lit:null};
+// the texture holds the encoded bytes as they are, as the canvas does, so its storage is named outright
+AO.scene.isXRRenderTarget=true; AO.scene.texture.colorSpace=THREE.SRGBColorSpace; AO.scene.texture.internalFormat='RGBA8';
+// what the passes share: the depth and how to turn it into a distance along the view and a position before the camera
+const aoU={tDepth:{value:rtScene.depthTexture},uAB:{value:new THREE.Vector2()},uInvP:{value:new THREE.Vector2()},uRes:{value:new THREE.Vector2(1,1)},uFull:{value:new THREE.Vector2(1,1)}};
+const AO_VS=`varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position.xy,0.0,1.0); }`;
+const AO_LIN=`uniform sampler2D tDepth; uniform vec2 uAB, uInvP, uRes, uFull; varying vec2 vUv;
+  float lin(float d){ return uAB.y/(uAB.x+d*2.0-1.0); }`;
+const aoMat=new THREE.ShaderMaterial({depthTest:false,depthWrite:false,toneMapped:false,
+  uniforms:{...aoU,uRad:{value:AO.radius},uPx:{value:1},uMinPx:{value:AO.minPx},uFog:{value:new THREE.Vector2(90,1500)},uStr:{value:AO.strength},uDeep:{value:AO.depth}},
+  vertexShader:AO_VS,
+  fragmentShader:AO_LIN+`uniform float uRad, uPx, uMinPx, uStr, uDeep; uniform vec2 uFog;
+    vec3 vp(vec2 uv,float L){ return vec3((uv*2.0-1.0)*uInvP*L,-L); }
+    // the position seen at the pixel of the full picture that holds uv, taken at that pixel's centre
+    vec3 at(vec2 uv){ uv=(floor(uv*uFull)+0.5)/uFull; return vp(uv,lin(texture2D(tDepth,uv).x)); }
+    void main(){
+      vec2 uv0=(floor(vUv*uFull)+0.5)/uFull;
+      float d=texture2D(tDepth,uv0).x, L=lin(d);
+      gl_FragColor=vec4(1.0,L,0.0,1.0);
+      if (d>=1.0) return;
+      // the radius in pixels of this pass; the effect fades out where it is small and with the fog
+      float rPx=uRad*uPx/L, k=smoothstep(uMinPx,uMinPx*3.0,rPx)*(1.0-smoothstep(uFog.x,uFog.y,L));
+      if (k<=0.0) return;
+      vec3 P=vp(uv0,L); vec2 e=1.0/uRes;
+      // the facet's normal, from the nearer neighbour on each axis, so that an edge does not bend it
+      vec3 xa=at(vUv+vec2(e.x,0.0))-P, xb=P-at(vUv-vec2(e.x,0.0)), ya=at(vUv+vec2(0.0,e.y))-P, yb=P-at(vUv-vec2(0.0,e.y));
+      vec3 N=normalize(cross(abs(xa.z)<abs(xb.z)?xa:xb, abs(ya.z)<abs(yb.z)?ya:yb));
+      rPx=min(rPx,uRes.y*0.14);
+      float ang=6.2831853*fract(52.9829189*fract(dot(gl_FragCoord.xy,vec2(0.06711056,0.00583715))));
+      float R2=uRad*uRad, bias=0.01+0.001*L, sum=0.0;
+      for (int i=0;i<9;i++){
+        float t=(float(i)+0.5)/9.0, a=ang+t*43.982297;
+        vec3 v=at(vUv+vec2(cos(a),sin(a))*(t*rPx)*e)-P;
+        float vv=dot(v,v), f=max(R2-vv,0.0);
+        // what rises at a slope of less than one in four above the facet is passed over, so that the shallow creases
+        // between the facets of the ground are not drawn
+        sum+=f*f*f*max((dot(v,N)-bias-0.25*sqrt(vv))/(vv+0.04),0.0); }
+      // the darkening approaches its limit (uDeep) gradually, so that the deepest corner is never black
+      float A=1.0-uDeep*(1.0-exp(-uStr*sum*5.0/(R2*R2*R2*9.0)));
+      gl_FragColor.r=mix(1.0,A,k);
+    }`});
+// the smoothing: nine samples along one axis, each weighed by how near its depth is to the pixel's
+const aoBlurMat=new THREE.ShaderMaterial({depthTest:false,depthWrite:false,toneMapped:false,
+  uniforms:{tAO:{value:null},uStep:{value:new THREE.Vector2()}},
+  vertexShader:AO_VS,
+  fragmentShader:`uniform sampler2D tAO; uniform vec2 uStep; varying vec2 vUv;
+    void main(){
+      float L=texture2D(tAO,vUv).g, s=0.0, ws=0.0;
+      for (int i=-4;i<=4;i++){ float t=float(i); vec2 c=texture2D(tAO,vUv+uStep*t).rg;
+        float w=exp(-t*t*0.11)*max(0.0,1.0-abs(c.g-L)/(0.02*L+0.03))+1e-4; s+=c.r*w; ws+=w; }
+      gl_FragColor=vec4(s/ws,L,0.0,1.0);
+    }`});
+// the last pass enlarges the smoothed occlusion to the size of the picture, from the four pixels round each point,
+// weighed again by depth so that it keeps to the silhouettes of the full picture, and multiplies the picture by it
+const aoCompMat=new THREE.ShaderMaterial({depthTest:false,depthWrite:false,
+  uniforms:{...aoU,tDiffuse:{value:null},tAO:{value:AO.a.texture},uFinal:{value:1},uNight:nightU},
+  vertexShader:AO_VS,toneMapped:false,
+  // uFinal is 1 where the picture is already encoded for the screen and goes to it, and 0 where it is still linear
+  // and goes on to tilt-shift
+  fragmentShader:AO_LIN+`uniform sampler2D tDiffuse, tAO; uniform float uFinal, uNight;
+    void main(){
+      vec4 c=texture2D(tDiffuse,vUv); float d=texture2D(tDepth,vUv).x;
+      if (d<1.0){
+        float L=lin(d), tol=0.02*L+0.03, s=0.0, ws=0.0;
+        vec2 q=vUv*uRes-0.5, b=floor(q), f=q-b;
+        for (int i=0;i<4;i++){ vec2 o=vec2(mod(float(i),2.0),floor(float(i)/2.0)); vec2 a=texture2D(tAO,(b+o+0.5)/uRes).rg;
+          vec2 k=mix(1.0-f,f,o); float w=k.x*k.y*max(0.0,1.0-abs(a.g-L)/tol)+1e-4; s+=a.r*w; ws+=w; }
+        float ao=s/ws, l=dot(c.rgb,vec3(0.2126,0.7152,0.0722));
+        // at night the brightest pixels are lamps and lit windows, which give light and are left as they are
+        if (uFinal>0.5) c.rgb*=pow(mix(ao,1.0,uNight*smoothstep(0.75,1.0,l)),0.4545);
+        else c.rgb*=mix(ao,1.0,uNight*smoothstep(1.0,2.5,l)); }
+      // a little noise, on the screen only, so that the soft gradients do not band in eight bits
+      if (uFinal>0.5) c.rgb+=(fract(52.9829189*fract(dot(gl_FragCoord.xy,vec2(0.06711056,0.00583715))))-0.5)/255.0;
+      gl_FragColor=vec4(c.rgb,1.0);
+    }`});
+// whether the effect would show: in the bird's-eye view from high up the radius covers too few pixels anywhere
+function aoDue(){
+  if (!aoOn) return false;
+  if (mode!=='above') return true;
+  renderer.getDrawingBufferSize(_sz); const s=Math.min(0.5,Math.sqrt(6e5/(_sz.x*_sz.y)));
+  return AO.radius*camera.projectionMatrix.elements[5]*0.5*_sz.y*s/Math.max(1,dist*0.8)>AO.minPx*1.27;
+}
+// the passes that turn the depth of the scene's target into the smoothed occlusion in AO.a
+function aoPasses(src){
+  aoU.tDepth.value=src.depthTexture; aoCompMat.uniforms.tDiffuse.value=src.texture;
+  const s=Math.min(0.5,Math.sqrt(6e5/(_sz.x*_sz.y))), w=Math.max(1,Math.round(_sz.x*s)), h=Math.max(1,Math.round(_sz.y*s));
+  if (AO.a.width!==w||AO.a.height!==h){ AO.a.setSize(w,h); AO.b.setSize(w,h); }
+  const e=camera.projectionMatrix.elements;
+  aoU.uAB.value.set(e[10],e[14]); aoU.uInvP.value.set(1/e[0],1/e[5]); aoU.uRes.value.set(w,h); aoU.uFull.value.copy(_sz);
+  const U=aoMat.uniforms; U.uRad.value=AO.radius; U.uStr.value=AO.strength; U.uDeep.value=AO.depth; U.uMinPx.value=AO.minPx; U.uPx.value=e[5]*0.5*h; U.uFog.value.set(scene.fog.near,scene.fog.far);
+  postQuad.material=aoMat; renderer.setRenderTarget(AO.a); renderer.render(postScene,postCam);
+  postQuad.material=aoBlurMat;
+  aoBlurMat.uniforms.tAO.value=AO.a.texture; aoBlurMat.uniforms.uStep.value.set(1/w,0); renderer.setRenderTarget(AO.b); renderer.render(postScene,postCam);
+  aoBlurMat.uniforms.tAO.value=AO.b.texture; aoBlurMat.uniforms.uStep.value.set(0,1/h); renderer.setRenderTarget(AO.a); renderer.render(postScene,postCam);
+}
 const _sz=new THREE.Vector2(), _fv=new THREE.Vector3();
 /* ---------- the sea's depth pass ----------
    To show what lies beneath the water, the things that can be under it (the ground and the blocks' buildings, the
@@ -11678,7 +11801,33 @@ function diveRender(){
 const PHOTO=createPhoto({renderer,scene,camera,canvas,origin:ORIGIN,onFov:()=>glowScale(),allowed:()=>started,onShutter:()=>sndPlay('camera_shutter','player',null),quickOk:()=>!islandShown(),cameraKeyOk:()=>mode!=='swim'});
 function renderMain(){
   if (PHOTO.on && PHOTO.renderLens()) return;
-  if (!(tiltShift && (mode==='above'||mode==='chase'))){ renderer.setRenderTarget(null); renderer.render(scene,camera); return; }
+  const tilt=tiltShift && (mode==='above'||mode==='chase'), ao=aoDue();
+  if (!tilt && !ao){ renderer.setRenderTarget(null); renderer.render(scene,camera); return; }
+  renderer.getDrawingBufferSize(_sz);
+  let src=tilt?rtScene:AO.scene;
+  if (src.width!==_sz.x||src.height!==_sz.y) src.setSize(_sz.x,_sz.y);
+  renderer.setRenderTarget(src);
+  if (tilt) renderer.render(scene,camera);
+  else {
+    // three.js hands the fog's and the background's colours to the canvas already encoded, and to any other target
+    // linear; AO.scene is encoded as the canvas is, so for this render the two colours are encoded here
+    const fog=scene.fog.color, bg=scene.background;
+    scene.fog.color=_aoFog.copy(fog).convertLinearToSRGB(); if (bg&&bg.isColor) scene.background=_aoBg.copy(bg).convertLinearToSRGB();
+    try { renderer.render(scene,camera); } finally { scene.fog.color=fog; scene.background=bg; } }
+  // the overlay (O) reports the scene's draw calls and triangles and leaves out the passes that follow
+  const inf=renderer.info.render, calls=inf.calls, tris=inf.triangles;
+  try { renderPost(src,tilt,ao); } finally { postQuad.material=postMat; inf.calls=calls; inf.triangles=tris; }
+}
+const _aoFog=new THREE.Color(), _aoBg=new THREE.Color();
+function renderPost(src,tilt,ao){
+  if (ao){
+    aoPasses(src); postQuad.material=aoCompMat; aoCompMat.uniforms.uFinal.value=tilt?0:1;
+    if (!tilt){ renderer.setRenderTarget(null); renderer.render(postScene,postCam); return; }
+    // tilt-shift blurs the picture after the occlusion has been multiplied into it
+    if (!AO.lit) AO.lit=new THREE.WebGLRenderTarget(1,1,{type:THREE.HalfFloatType,depthBuffer:false});
+    if (AO.lit.width!==_sz.x||AO.lit.height!==_sz.y) AO.lit.setSize(_sz.x,_sz.y);
+    renderer.setRenderTarget(AO.lit); renderer.render(postScene,postCam); src=AO.lit; }
+  postQuad.material=postMat;
   // the band of sharp focus runs through the player from above, and through the middle of the train when chasing it
   if (mode==='chase'){
     // fit the band to the part of the train on screen: sample along each car and keep the points in view
@@ -11688,11 +11837,9 @@ function renderMain(){
       if (_fv.z<1 && _fv.x>-1.1 && _fv.x<1.1){ const y=(_fv.y+1)/2; if (y>-0.05 && y<1.05){ lo=Math.min(lo,y); hi=Math.max(hi,y); } } } }
     if (hi>=lo){ lo=clamp(lo,0,1); hi=clamp(hi,0,1); postU.uFocus.value=(lo+hi)/2; postU.uBand.value=clamp((hi-lo)/2,0.06,0.3); }
   } else { postU.uFocus.value=0.5; postU.uBand.value=0.09; }
-  renderer.getDrawingBufferSize(_sz);
-  if (rtScene.width!==_sz.x||rtScene.height!==_sz.y){ rtScene.setSize(_sz.x,_sz.y); rtBlur.setSize(_sz.x,_sz.y); }
+  if (rtBlur.width!==_sz.x||rtBlur.height!==_sz.y) rtBlur.setSize(_sz.x,_sz.y);
   postU.uRes.value.copy(_sz); postU.uMax.value=9*renderer.getPixelRatio();
-  renderer.setRenderTarget(rtScene); renderer.render(scene,camera);
-  postU.tDiffuse.value=rtScene.texture; postU.uDir.value.set(1,0); postU.uFinal.value=0;
+  postU.tDiffuse.value=src.texture; postU.uDir.value.set(1,0); postU.uFinal.value=0;
   renderer.setRenderTarget(rtBlur); renderer.render(postScene,postCam);
   postU.tDiffuse.value=rtBlur.texture; postU.uDir.value.set(0,1); postU.uFinal.value=1;
   renderer.setRenderTarget(null); renderer.render(postScene,postCam);
@@ -13087,7 +13234,7 @@ window.__village={ get seed(){ return SEED_TEXT; }, share:{state:sceneState,link
   findHarbour(){ for (let d=0;d<12;d++) for (const sd of SIDES) for (const n of [Math.floor(player.x/HARB)+d,Math.floor(player.x/HARB)-d]){ const H=harbourInfo(sd,n); if (H) return {x:H.x,z:coastZ(sd,H.x)+sd*7,W:H.W,sd,qz:coastZ(sd,H.x+H.W/2-1)+sd*2.5}; } return null; },
   findBeach(){ for (let x=player.x; x<player.x+3000; x+=10) for (const sd of SIDES){ const z=coastZ(sd,x)+sd*5; if (heightAt(x,z)<0.6 && heightAt(x,z)>0.1 && !harbourAt(sd,x)) return {x,z,sd}; } return null; },
   ridge(x){ return {x,z:ridgeZ(x)}; },
-  sea,farMesh,scene,setTilt,audioState:()=>({ctx:audioCtx&&audioCtx.state,muted,ready:SND.ready,loaded:Object.keys(SND.buf)}),SND,SNDV,SNDS,shore,surfaceAt,startAudio,updateChunks:(x,z)=>updateChunks(x,z,1e9),disposeChunk,farPoint(gi,gj){ COVE_FAST++; try{ return farPoint(gi,gj); } finally{ COVE_FAST--; } },FS,findPeak(){ const i0=Math.floor(player.x/PEAK), j0=Math.floor(player.z/PEAK); for (let r=0;r<30;r++) for (let i=-r;i<=r;i++) for (let j=-r;j<=r;j++){ const P=peakInfo(i0+i,j0+j); if (P) return P; } return null; },toggleTrain,get tunnelK(){return tunnelK;},get chase(){return chase;},cats,railPerp,railZ,railY,railState,findStation(){ const n0=Math.floor(player.x/ST_SP); for (let k=0;k<200;k++) for (const sg of [1,-1]){ const S=stationInfo(n0+sg*k); if (S) return S; } return null; },findBridge(){ const i0=Math.round(player.x/C); for (let k=0;k<300;k++) for (const sg of [1,-1]){ const X=railCross(i0+sg*k); if (X) return X; } return null; },get view(){return VIEW;},findRail(kind){ for (let x=player.x; x<player.x+6000; x+=8){ if (railState(x)===kind) return {x,z:railZ(x),y:railY(x)}; } return null; },findCountry(kind){ for (let r=0;r<20;r++) for (let i=-r;i<=r;i++) for (let j=-r;j<=r;j++){ const cx=Math.floor(player.x/C)+i, cz=Math.floor(player.z/C)+j; if (chunkKind(cx,cz)===kind) return {x:cx*C+C/2,z:cz*C+C/2}; } return null; },train,setHour:v=>{hour=v;}, get hour(){ return hour; }, lightHour(h){ hour=h; updateDaylight(); updateShadowFrame(); },
+  sea,farMesh,scene,setTilt,setAO,AO,get aoOn(){ return aoOn; },render,audioState:()=>({ctx:audioCtx&&audioCtx.state,muted,ready:SND.ready,loaded:Object.keys(SND.buf)}),SND,SNDV,SNDS,shore,surfaceAt,startAudio,updateChunks:(x,z)=>updateChunks(x,z,1e9),disposeChunk,farPoint(gi,gj){ COVE_FAST++; try{ return farPoint(gi,gj); } finally{ COVE_FAST--; } },FS,findPeak(){ const i0=Math.floor(player.x/PEAK), j0=Math.floor(player.z/PEAK); for (let r=0;r<30;r++) for (let i=-r;i<=r;i++) for (let j=-r;j<=r;j++){ const P=peakInfo(i0+i,j0+j); if (P) return P; } return null; },toggleTrain,get tunnelK(){return tunnelK;},get chase(){return chase;},cats,railPerp,railZ,railY,railState,findStation(){ const n0=Math.floor(player.x/ST_SP); for (let k=0;k<200;k++) for (const sg of [1,-1]){ const S=stationInfo(n0+sg*k); if (S) return S; } return null; },findBridge(){ const i0=Math.round(player.x/C); for (let k=0;k<300;k++) for (const sg of [1,-1]){ const X=railCross(i0+sg*k); if (X) return X; } return null; },get view(){return VIEW;},findRail(kind){ for (let x=player.x; x<player.x+6000; x+=8){ if (railState(x)===kind) return {x,z:railZ(x),y:railY(x)}; } return null; },findCountry(kind){ for (let r=0;r<20;r++) for (let i=-r;i<=r;i++) for (let j=-r;j<=r;j++){ const cx=Math.floor(player.x/C)+i, cz=Math.floor(player.z/C)+j; if (chunkKind(cx,cz)===kind) return {x:cx*C+C/2,z:cz*C+C/2}; } return null; },train,setHour:v=>{hour=v;}, get hour(){ return hour; }, lightHour(h){ hour=h; updateDaylight(); updateShadowFrame(); },
   boatCam(){ for (const ch of chunks.values()) for (const b of ch.boats) if (b.floating) return {x:b.m.position.x,z:b.m.position.z,rot:b.m.rotation.y}; return null; },
   ferries,islandRoute,coastZ,harbourInfo,ferryLanding,ferryPortInfo,hbS,sailers,harbourAt,
   // whether a walker starting at (x0,z0,y0) can reach a point where goal(x,z) holds, under the player's own rules:
