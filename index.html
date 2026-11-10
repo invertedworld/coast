@@ -147,7 +147,7 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
       <div class="row"><span><kbd>G</kbd></span><span>Gallery</span></div>
     </div>
     <div class="group"><h3>Other</h3>
-      <div class="row"><span><kbd>Tab</kbd></span><span>Full screen</span></div>
+      <div class="row"><span><kbd>F</kbd></span><span>Full screen</span></div>
       <div class="row"><span><kbd>M</kbd></span><span>Mute sound</span></div>
       <div class="row"><span><kbd>K</kbd></span><span>More people</span></div>
       <div class="row"><span><kbd>Shift</kbd>+<kbd>K</kbd></span><span>Fewer people</span></div>
@@ -5104,12 +5104,21 @@ const ROOM_MAX=16, roomClip={uRoomN:{value:0},uRoomA:{value:Array.from({length:R
 // p is in metres across the light (x, from -0.3 to 0.3) and up from its sill (y); seed picks four of six colours
 const SG_GLSL=`
 vec3 sgPal(float k){ k=mod(k,6.); return k<1.?vec3(0.1,0.22,0.78):k<2.?vec3(0.8,0.08,0.1):k<3.?vec3(0.98,0.7,0.1):k<4.?vec3(0.1,0.58,0.25):k<5.?vec3(0.5,0.14,0.68):vec3(0.12,0.62,0.78); }
-vec3 sgCol(vec2 p, float seed){ vec2 q=p*6.5+seed*13.1, i=floor(q), f=fract(q), id=vec2(0.); float F1=8., F2=8.;
+vec3 sgColL(vec2 p, float seed, float lead){ vec2 q=p*6.5+seed*13.1, i=floor(q), f=fract(q), id=vec2(0.); float F1=8., F2=8.;
   for (int y=-1;y<=1;y++) for (int x=-1;x<=1;x++){ vec2 g=vec2(float(x),float(y)), o=vec2(h21(i+g),h21(i+g+17.3))*0.8+0.1; float dd=length(g+o-f);
     if (dd<F1){ F2=F1; F1=dd; id=i+g; } else if (dd<F2) F2=dd; }
   vec3 c=sgPal(floor(h21(id+seed)*4.)+floor(seed*6.))*(0.8+0.35*h21(id+5.7));
   float bd=min(min(p.x+0.3,0.3-p.x),p.y); if (bd<0.06) c=sgPal(floor(seed*6.)+2.)*0.9;
-  return c*mix(0.05,1.,smoothstep(0.03,0.08,F2-F1)*smoothstep(0.,0.012,bd)*smoothstep(0.,0.012,abs(bd-0.06))); }`;
+  return c*mix(lead,1.,smoothstep(0.03,0.08,F2-F1)*smoothstep(0.,0.012,bd)*smoothstep(0.,0.012,abs(bd-0.06))); }
+vec3 sgCol(vec2 p, float seed){ return sgColL(p,seed,0.05); }
+/* the light a window casts, softened as it would be by the breadth of the sky behind the glass: the colours are
+   averaged over a disc whose radius grows with the distance t from the glass, the cames thin to faint lines, and
+   the edge of the patch fades over the same width */
+vec3 sgCast(vec2 p, float seed, float t){ float r=clamp(0.012+0.008*t,0.012,0.05); vec3 c=vec3(0.);
+  for (int k=0;k<6;k++){ float a=float(k)*1.0472+0.4; c+=sgColL(p+vec2(cos(a),sin(a))*r,seed,0.55); }
+  c=(c+sgColL(p,seed,0.55))/7.;
+  float top=p.y>1.6?0.3-length(vec2(p.x,p.y-1.6)):0.3-abs(p.x), e=min(top,p.y);
+  return c*smoothstep(-r,r,e); }`;
 const churchU={uCh:{value:new THREE.Vector4()},uChB:{value:new THREE.Vector4()},uChW:{value:new Array(8).fill(0)},uChN:{value:0},uChSeed:{value:0},
   uSunL:{value:new THREE.Vector3(0,1,0)},uSunK:{value:0},uGlass:{value:1}};
 /* ---------- the light inside a room ----------
@@ -5144,8 +5153,8 @@ function makeRoomMaterial(church,local=false){
         vec2 d=_wp.xz-uCh.xy; vec3 p=vec3(d.x*uCh.z-d.y*uCh.w, _wp.y-uChB.x, d.x*uCh.w+d.y*uCh.z);
         vec3 sd=vec3(uSunL.x*uCh.z-uSunL.z*uCh.w, uSunL.y, uSunL.x*uCh.w+uSunL.z*uCh.z);
         if (uChN>0 && uSunK>0.01 && sd.y>0.02 && abs(sd.x)>0.02 && abs(p.x)<uChB.y){ float t=(sign(sd.x)*uChB.y-p.x)/sd.x; vec3 hh=p+sd*t;
-          if (abs(hh.z)<uChB.z) for (int i=0;i<8;i++){ if (i>=uChN) break; float u=hh.z-uChW[i], v=hh.y-uChB.w;
-            if (abs(u)<0.3 && v>0. && (v<1.6 || u*u+(v-1.6)*(v-1.6)<0.09)) outgoingLight+=sgCol(vec2(u*sign(sd.x),v),uChSeed)*uSunK*max(0.,dot(n,uSunL))*1.2; } }`:'')+` }
+          if (abs(hh.z)<uChB.z+0.2) for (int i=0;i<8;i++){ if (i>=uChN) break; float u=hh.z-uChW[i], v=hh.y-uChB.w, rr=clamp(0.012+0.008*t,0.012,0.05);
+            if (abs(u)<0.3+rr && v>-rr && v<1.9+rr) outgoingLight+=sgCast(vec2(u*sign(sd.x),v),uChSeed,t)*uSunK*max(0.,dot(n,uSunL))*1.2; } }`:'')+` }
 #include <opaque_fragment>`); };
   m.customProgramCacheKey=()=>church?'church-lit':local?'rooms-lit-local':'rooms-lit'; m.userData.U=U; return m;
 }
@@ -5165,6 +5174,17 @@ function roomLightAt(D,kind,lx,ly,lz,nrm,a,y0,y1,k=1){
   const [x,z]=localToWorld(D,lx,lz), c=Math.cos(D.rot), sn=Math.sin(D.rot);
   const n=nrm?[nrm[0]*c+nrm[2]*sn,nrm[1],-nrm[0]*sn+nrm[2]*c]:null;
   (D.lights||(D.lights=[])).push({kind,p:[x,D.base+ly,z],n,a,y0:D.base+y0,y1:D.base+y1,k,k0:k});
+}
+// a candle flame: unlit, warm white at the core and orange at the tip, brighter than anything it lights
+const matFlame=new THREE.MeshBasicMaterial({color:hex('#ffd890'),toneMapped:false}); matFlame.color.multiplyScalar(1.6);
+// the candles flicker: each flame's height, width and lean, and the light they shed on the altar, follow a sum of
+// waves of its own, with now and then a deeper dip as though a draught had passed
+function candleFlicker(D,U){
+  if (!D.flames) return; let sum=0;
+  for (const m of D.flames){ const s=m.userData.seed, t=time;
+    const f=1+0.09*Math.sin(t*9.1+s)+0.06*Math.sin(t*17.3+s*1.7)+0.04*Math.sin(t*31.7+s*2.3)-0.18*Math.pow(Math.max(0,Math.sin(t*0.83+s*0.37)),24);
+    m.scale.set(0.028*(2-f)*0.5+0.014,0.09*f,0.028*(2-f)*0.5+0.014); m.rotation.set(0.07*Math.sin(t*3.3+s),0,0.07*Math.sin(t*2.7+s*1.3)); sum+=f; }
+  const l=D.candleL; if (U && l && l.idx!==undefined) U.uLs.value[l.idx].z=l.k0*(0.35+0.65*sum/D.flames.length);
 }
 // the glass itself, bright by day with the light behind it and dark at night
 const matSG=new THREE.ShaderMaterial({uniforms:churchU,
@@ -10003,11 +10023,12 @@ function playerRadius(dt){
 /* ---------- rooms ---------- */
 // built for the nearest enterable houses, a few at a time, and taken down again as the player moves away
 const rooms=new Set(); let roomScan=0;
-function disposeRoom(D){ if (!D.room) return; world.remove(D.room); D.room.geometry.dispose(); if (D.room.material!==matR) D.room.material.dispose(); for (const c of D.room.children) c.geometry.dispose(); D.room=null; rooms.delete(D); }
+function disposeRoom(D){ if (!D.room) return; world.remove(D.room); D.room.geometry.dispose(); if (D.room.material!==matR) D.room.material.dispose(); for (const c of D.room.children) c.geometry.dispose(); D.room=null; D.flames=null; rooms.delete(D); }
 function roomsUpdate(dt){
   if (doorsDirty) doorsRebuild();
   for (const D of rooms){ const U=D.room.material.userData.U; if (!U || !D.lights) continue;
-    for (const l of D.lights) if (l.kind===1 && l.idx!==undefined){ let a=0; for (const q of (D.leaves||[D])) a=Math.max(a,Math.abs(q.a||0)); U.uLs.value[l.idx].z=l.k0*Math.min(1,a/1.2); } }
+    for (const l of D.lights) if (l.kind===1 && l.idx!==undefined){ let a=0; for (const q of (D.leaves||[D])) a=Math.max(a,Math.abs(q.a||0)); U.uLs.value[l.idx].z=l.k0*Math.min(1,a/1.2); }
+    candleFlicker(D,U); }
   roomScan-=dt; if (roomScan>0) return; roomScan=0.2;
   const cand=[], live=new Set();
   for (const ch of chunks.values()) if (ch.lod===0 && ch.rooms) for (const D of ch.rooms){ live.add(D);
@@ -10268,7 +10289,7 @@ function buildChurch(C){
   B(0,F,-hl-r*0.45,2*r*0.92,0.15,r*0.9,stone,SS); solid.push([0,-hl-r*0.45,r*0.92,r*0.45,0.15]);
   B(0,F+0.15,-hl-r*0.55,1.8,0.9,0.75,hex('#efe9dc'),SS); B(0,F+1.05,-hl-r*0.55,1.9,0.03,0.85,hex('#f7f3ec')); solid.push([0,-hl-r*0.55,0.9,0.38,2]);
   for (const sx of [-0.7,0.7]){ gb.add(T.cyl8, mm(H,mat(sx,F+1.08,-hl-r*0.55,0.08,0.35,0.08)), gold, null); gb.add(T.cyl8, mm(H,mat(sx,F+1.43,-hl-r*0.55,0.04,0.18,0.04)), hex('#f4efe2'), null);
-    gb.add(T.sphLo, mm(H,mat(sx,F+1.64,-hl-r*0.55,0.035,0.06,0.035)), hex('#ffd27a'), null); }
+    }   // the flames are separate meshes, which flicker (candleFlicker)
   B(0,F+1.6,-hl-r+0.08,0.14,1.8,0.08,gold); B(0,F+2.8,-hl-r+0.08,0.9,0.14,0.08,gold);
   // pews either side of the aisle, from the font by the door to the step of the sanctuary
   const aisle=0.75, pl=iw-aisle-0.25;
@@ -10289,7 +10310,7 @@ function buildChurch(C){
   roomLightAt(C,1,0,1.6,zf,[0,0,-1],4.5,yl,yh);
   for (const sx of [-1,1]) for (const z of C.wz) roomLightAt(C,0,sx*iw,h-2.0,z,[-sx,0,0],1.1,yl,yh,0.85);
   for (let z=zf-2.5; z>zb+1; z-=4.2) roomLightAt(C,2,0,h-1.6,z,null,5.5,yl,yh);
-  roomLightAt(C,2,0,F+1.65,-hl-r*0.55,null,2.2,yl,yh,0.7);
+  roomLightAt(C,2,0,F+1.65,-hl-r*0.55,null,2.2,yl,yh,0.7); C.candleL=C.lights[C.lights.length-1];
   if (!C.furn){ C.furn=true; for (const [x,z,w2,d2,tp] of solid){ const [wx,wz]=localToWorld(C,x,z); C.walls.push({x:wx,z:wz,hw:w2,hd:d2,rot:C.rot,top:C.base+F+tp}); } }
   const mesh=new THREE.Mesh(gb.geometry(C.x,C.z),makeRoomMaterial(true));
   // the glass, set in the middle of the wall's thickness
@@ -10299,6 +10320,10 @@ function buildChurch(C){
     for (const k of [0,1,2,0,2,3]){ P.push(v[k][0]-C.x,v[k][1],v[k][2]-C.z); S.push(...g[k]); } }
   const gg=new THREE.BufferGeometry(); gg.setAttribute('position',new THREE.Float32BufferAttribute(P,3)); gg.setAttribute('sg',new THREE.Float32BufferAttribute(S,3));
   const glass=new THREE.Mesh(gg,matSG); glass.material.side=THREE.DoubleSide; mesh.add(glass);
+  // the altar candles' flames: a teardrop of light standing on each wick, the base of the flame at its origin
+  const fg=new THREE.SphereGeometry(1,10,8); { const a=fg.attributes.position; for (let i=0;i<a.count;i++){ const y=a.getY(i), k=y>0?1-0.55*y:1; a.setXYZ(i,a.getX(i)*k,(y+1)/2,a.getZ(i)*k); } fg.computeVertexNormals(); }
+  C.flames=[-0.7,0.7].map((sx,i)=>{ const [x,z]=localToWorld(C,sx,-hl-r*0.55), m=new THREE.Mesh(fg,matFlame);
+    m.position.set(x-C.x,C.base+F+1.61,z-C.z); m.userData.seed=C.seed*97+i*5.3; mesh.add(m); return m; });
   // the coloured light is worked out for one church at a time, the one last built
   churchLit=C; setChurchU();
   const u=churchU; u.uChB.value.set(C.base,hw-0.12,zf,h-3.0);
@@ -10760,7 +10785,8 @@ addEventListener('keydown',e=>{ keys[e.code]=true;
   if (code==='KeyN' && !e.repeat){ hour=nightU.value>0.5?10:22; SNDS.hour=Math.floor(hour); }   // to night, or back to day, without the bells striking the jump
   if (code==='KeyM' && !e.repeat) setMuted(!muted);
   if (code==='KeyK' && !e.repeat){ PEOPLE.setLevel(PEOPLE.level+(e.shiftKey?-1:1)); toast('Population level',`${PEOPLE.level}`); }   // 0, no one, to 9
-  if (code==='Tab'){ e.preventDefault(); if (!e.repeat) try{ if (document.fullscreenElement) document.exitFullscreen(); else { const q=document.documentElement.requestFullscreen(); if (q&&q.catch) q.catch(()=>{}); } }catch(_){} }
+  // F sets full screen, except in the water, where it turns the diver's torch on or off
+  if (e.code==='KeyF' && mode!=='swim'){ e.preventDefault(); if (!e.repeat) try{ if (document.fullscreenElement) document.exitFullscreen(); else { const q=document.documentElement.requestFullscreen(); if (q&&q.catch) q.catch(()=>{}); } }catch(_){} }
   if ((code==='Minus'||code==='NumpadSubtract') && (mode==='street'||(mode==='ferry'&&!feChase)) && !e.repeat) toggleView();
   if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(code)) e.preventDefault(); });
 addEventListener('keyup',e=>{ keys[e.code]=false; });

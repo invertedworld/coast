@@ -101,7 +101,7 @@ The panel opened with **H** lists the controls. They are reproduced here for ref
 | Shift+K | Lowers the population level. |
 | M | Mutes or unmutes the sound. |
 | Double click | In the bird's-eye view, the camera flies down over 1.5 s to street level at the point clicked, facing the same way. A click on open water does nothing. |
-| Tab | Full screen |
+| F | Full screen (under the water F turns the torch on or off) |
 | Page Up, Page Down | Increase or reduce the draw distance through eleven fixed levels, from simplified blocks to about 140 m with full detail to about 60 m, up to simplified blocks to about 1,700 m with full detail to about 300 m. A fixed draw distance is kept whatever the frame rate. |
 | Home | Returns the draw distance to automatic, in which the simplified blocks reach between about 100 m and 500 m, as far as the frame rate stays near 60 frames per second, and full detail reaches about 100 m. |
 | O | Shows or hides an overlay with the frame rate, the frame time and the slowest frame of the last half second, the draw distance, the number of blocks at each level of detail, the draw calls, the triangles, the player's position and the seed. |
