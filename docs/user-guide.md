@@ -2,7 +2,7 @@
 
 Thank you for playing Coast.
 
-Coast is a procedurally generated Mediterranean island which is explored on foot, by train, by ferry, under sail and in the water. The island extends without end to the east and to the west. Hill towns, olive groves, harbours, coves and a coastal railway are laid out along it, and smaller islands lie offshore. The larger offshore islands have coves of the same kind as those of the main island, each with its beach, its path down from the clifftop and a cave that may be walked or swum into. The day passes from dawn to night in twelve minutes of real time. Every island is generated from a seed, so that the same seed always produces the same island and a new seed produces a different one.
+Coast is a procedurally generated Mediterranean island which is explored on foot, by train, by ferry, under sail and in the water. The island extends without end to the east and to the west. Hill towns, olive groves, harbours, coves and a coastal railway are laid out along it, and smaller islands lie offshore. The larger offshore islands have coves of the same kind as those of the main island, each with its beach, its path down from the clifftop and a cave that may be walked or swum into. A whole day passes in thirty minutes of real time, beginning just before sunrise. Every island is generated from a seed, so that the same seed always produces the same island and a new seed produces a different one.
 
 This guide describes how the island is explored and how each control behaves. The technical design of the program is described in the `README.md` file of the repository.
 
@@ -26,7 +26,7 @@ A double click on land in the bird's-eye view brings the camera down to street l
 
 **B** sets tilt-shift on or off in the bird's-eye and chase views. Tilt-shift blurs the top and bottom of the picture so that the island resembles a model.
 
-**Shift+B** sets ambient occlusion on or off. Ambient occlusion darkens creases, the foot of walls, doorways, the undersides of eaves and the ground beneath benches and people slightly. It is on when the game starts, and the new setting is shown briefly at the top of the screen.
+**Shift+B** sets ambient occlusion on or off. Ambient occlusion darkens creases, the foot of walls, doorways, the undersides of eaves and the ground beneath benches and people slightly. It is on when the game starts, except on a touch screen, where it is off until it is set on; the new setting is shown briefly at the top of the screen.
 
 ## Walking
 
@@ -38,7 +38,7 @@ Doors open when they are walked into. A door swings away from the side from whic
 
 ## Travelling by train
 
-A passenger railway runs along the coast, with stations in the villages and tunnels through the headlands. Goods lines branch from it.
+A passenger railway runs the length of the island, weaving between its two coasts, with stations in the villages and cuttings and tunnels through the hills. Goods lines are railways of their own, quite separate from the main line: each joins two harbours 2 km to 6 km apart on the same shore, runs along the shore between them, and ends in a siding along each quay. A goods train of twelve wagons, with a shunter at each end, works each line, waiting at each quay while it is unloaded and loaded and reversing there.
 
 **3** rides in the cab of the passenger train, and **4** in the cab of the goods train working the nearest goods line, which sets one to work there if none is near. **0** then steps through the views of the train: the cab; in the passenger train, a window seat in the first coach, looking out; a view from behind the train, which the mouse moves round it and **+** and **−** bring nearer or further; and a view from beside the line, which turns to watch the train pass and moves on to a new place ahead, riding in the cab while the train is in a tunnel. **0** after the last view returns to the cab. **3** or **4** again, or **2**, steps off beside the track. Away from a train, **0** follows the nearer train from behind.
 
@@ -60,7 +60,7 @@ At the helm, **A** turns the bow to port and **D** turns it to starboard; the ti
 
 The player wades into the sea from any shore that shelves, and swims once the water reaches the chest. **J** jumps into the sea from the edge of a quay, a mole or a moored boat, over the side of the dinghy, or from the rail of a ferry.
 
-**7** follows the nearest gull in flight, which is then led along the coast, over the shore, the harbours and the edge of the village. **8** follows the nearest dolphin, under the water while it swims beneath the surface and above it as it surfaces or leaps. In each case the mouse moves the camera round the animal, **+** and **−** set its distance, and the same key, or **2**, returns the player to where they were before. **1** returns the player to the place where they first stood on the island.
+**7** follows the nearest whale and **8** the nearest dolphin. In each case the camera follows the animal under the water while it swims beneath the surface and above it as it surfaces or leaps; the mouse moves the camera round the animal, **+** and **−** set its distance, and the same key, or **2**, returns the player to where they were before. While an animal is followed under the water, the water is clearer than it is for a swimmer, the sounds of the air give way to those of the water, and no fish are shown. **1** returns the player to the place where they first stood on the island.
 
 **9** takes the player under the water, beside the nearest wreck on the seabed offshore, or where no wreck lies within reach, to the nearest open water between 4.5 m and 9 m deep, facing the shore. **9** again returns the player to where they were before.
 
@@ -68,9 +68,17 @@ In the water, **W A S D** swim in the direction of the view. At the surface the 
 
 The swimmer leaves the water by swimming to a beach and wading ashore, by climbing a quay's ladder, or by climbing onto any ledge less than about 1 m above the water.
 
+Close to the shore the sea bed falls steeply to about 20 m. Beyond it lies the shelf, about 90 m deep at 1 km from the shore and 140 m at 1.5 km, and beyond the shelf the sea bed falls steeply to 800 m.
+
+## Whales
+
+Two humpback whales, each 12.5 m to 15 m long, live far out at sea, at least 350 m from any shore and clear of the offshore islands and rocks, and within about 700 m of the player. A whale swims at depth for some minutes, then rises to the surface and blows several times, its back rolling over as it breathes, and dives again with its flukes raised. Now and then, about six times an hour, a whale breaches: it rises steeply from depth, leaves the water for about half its length, turns over and falls on its back, lies a moment at the surface and slowly sinks. The fall is heard, and it sends a ring of waves across the sea, oval at first in the shape of the whale and rounding out as it spreads; boats ride the waves as they pass. Under the water the whales are heard singing.
+
+When **7** follows a whale that is about to breach, the camera comes up above the surface about a second before the whale breaks it and stands off to its side, so that the whole leap is seen.
+
 ## Time
 
-The clock runs continuously. **T** held speeds time forty times; **Shift** and **T** held run it backwards at the same rate. **N** changes to 22:00, or to 10:00 if it is already night, and the clock runs on from there. **P** pauses the world: trains, ferries, boats, dolphins, the sea, the lighthouse beams, cats, gulls and the time of day stand still, while the player may still move and look about. **P** again resumes.
+The clock runs continuously. **T** held speeds time forty times; **Shift** and **T** held run it backwards at the same rate. **N** changes to 22:00, or to 10:00 if it is already night, and the clock runs on from there. **P** pauses the world: trains, ferries, boats, whales, dolphins, the sea, the lighthouse beams, cats, gulls and the time of day stand still, while the player may still move and look about. **P** again resumes.
 
 ## People
 
@@ -90,13 +98,13 @@ The new island replaces the present one entirely, and the player begins it on fo
 
 ## Sharing a scene
 
-**L** shows a QR code of a link to the scene as it is at that moment, with the link written beneath it. The link records the island's seed, the time of day, the player's position, the view, and the activity: walking or sitting, the bird's-eye view, swimming or diving, riding in a train's cab or coach or watching it from behind or from the trackside, standing or sitting aboard a ferry, sailing a dinghy, or following a gull or a dolphin. A train, ferry or dinghy that is being ridden is recorded where it is, with its speed. A raised camera is recorded with its lens settings. If the world is paused, the scene opens paused.
+**L** shows a QR code of a link to the scene as it is at that moment, with the link written beneath it. The link records the island's seed, the time of day, the player's position, the view, and the activity: walking or sitting, the bird's-eye view, swimming or diving, riding in a train's cab or coach or watching it from behind or from the trackside, standing or sitting aboard a ferry, sailing a dinghy, or following a whale or a dolphin. A train, ferry or dinghy that is being ridden is recorded where it is, with its speed. A raised camera is recorded with its lens settings. If the world is paused, the scene opens paused.
 
 **Copy QR code** copies the code to the clipboard as an image, and **Copy URL** copies the link. **L** again, **Esc** or **Close** hides the panel.
 
-Opening the link, on a telephone or in another browser, generates the same island and places the viewer in the same scene, aboard the same vehicle at the same place. The gulls, the dolphins, the other boats and the gusts of the wind are not recorded, since each is simulated afresh; a gull or a dolphin that was being followed is replaced by the one nearest to where it was, so that view is approximate.
+Opening the link, on a telephone or in another browser, generates the same island and places the viewer in the same scene, aboard the same vehicle at the same place. The gulls, the whales, the dolphins, the other boats and the gusts of the wind are not recorded, since each is simulated afresh; a whale or a dolphin that was being followed is replaced by the one nearest to where it was, so that view is approximate.
 
-> **Example:** To show a friend the view from the ferry's saloon, board the ferry with **3**, press **0** twice to sit at a window seat, press **P** to hold the moment, press **L**, and scan the code with the friend's telephone.
+> **Example:** To show a friend the view from the ferry's saloon, board the ferry with **5**, press **0** twice to sit at a window seat, press **P** to hold the moment, press **L**, and scan the code with the friend's telephone.
 
 ## The camera and the gallery
 
@@ -122,7 +130,7 @@ The large round button on the right is the shutter, which sounds as it is presse
 
 > **Example:** To photograph a bell tower against the sea, raise the camera with **C**, walk until the tower stands against the water, set the zoom to about 85 mm, close the aperture to f/8 so that both are sharp, and press the shutter.
 
-The gallery is opened with **G**, from anywhere and without raising the camera, or from the camera. Each row holds one photograph, with its number and the time it was taken, followed by the artworks made from it, each labelled with its style. A click on an item selects it and shows it enlarged with its details. The enlarged picture, and the picture in artist mode, may be zoomed up to eight times with a pinch or the mouse wheel and moved with a drag while zoomed; a double click shows the whole picture again. **Download PNG** saves the selected item as a PNG file, and the bin deletes it; deleting a photograph also deletes its artworks. Neither is available while nothing is selected. A click with **Cmd** (or **Ctrl**) held adds an item to the selection or removes it, and a click with **Shift** held selects every item between it and the last one chosen; several items selected are shown in a loose pile, the last chosen on top. **Download** then saves each of them, and the bin deletes them all once the question that follows is answered **Delete**; the question names what is to be deleted, counting the artworks that go with a photograph. Up to 24 photographs are kept, with their artworks, in the browser's own storage, so that they remain when the browser is closed and opened again. The divider between the pictures and the preview may be dragged to resize them; its place is remembered, and a double click on it restores the default.
+The gallery is opened with **G**, from anywhere and without raising the camera, or from the camera. Each row holds one photograph, with its number and the time it was taken, followed by the artworks made from it, each labelled with its style. A click on an item selects it and shows it enlarged with its details. The enlarged picture, and the picture in artist mode, may be zoomed up to eight times with a pinch or the mouse wheel and moved with a drag while zoomed; a double click shows the whole picture again. The copy button, which appears over a thumbnail when the pointer rests on it, copies that picture to the clipboard at its full size. **Download PNG** saves the selected item as a PNG file, and the bin deletes it; deleting a photograph also deletes its artworks. Neither is available while nothing is selected. A click with **Cmd** (or **Ctrl**) held adds an item to the selection or removes it, and a click with **Shift** held selects every item between it and the last one chosen; several items selected are shown in a loose pile, the last chosen on top. **Download** then saves each of them, and the bin deletes them all once the question that follows is answered **Delete**; the question names what is to be deleted, counting the artworks that go with a photograph. Up to 24 photographs are kept, with their artworks, in the browser's own storage, so that they remain when the browser is closed and opened again. The divider between the pictures and the preview may be dragged to resize them; its place is remembered, and a double click on it restores the default.
 
 ### Artist mode
 
@@ -146,20 +154,22 @@ The arrow at the top left returns to the gallery, as does **Esc**. If the finish
 
 ## Display and sound
 
-**F** sets full screen, except in the water, where it turns the diver's torch on or off. **Page Up** and **Page Down** increase and reduce the draw distance through eleven fixed levels. **Home** returns the draw distance to automatic, in which the distance is adjusted to keep the frame rate near 60 frames per second. **O** shows or hides an overlay with the frame rate, the frame time, the draw distance, the number of blocks drawn, the draw calls, the triangles, the player's position and the seed of the island.
+**Tab** sets full screen. **Page Up** and **Page Down** increase and reduce the draw distance through eleven fixed levels. **Home** returns the draw distance to automatic, in which the distance is adjusted to keep the frame rate near 60 frames per second. **O** shows or hides an overlay with the frame rate, the frame time, the draw distance, the number of blocks drawn, the draw calls, the triangles, the player's position and the seed of the island.
 
-**K** and **Shift+K** raise and lower the population level (see People). **M** mutes or restores the sound. The sound is positional: fountains, church bells, the sea, trains, ferries, gulls and cats are heard from where they are, and the ambience changes between day and night.
+**K** and **Shift+K** raise and lower the population level (see People). **M** mutes or restores the sound. The sound is positional: fountains, church bells, the sea, trains, ferries, gulls, cats and breaching whales are heard from where they are, and the ambience changes between day and night. With the camera under the water, the sounds of the air are muffled and all but silenced, and the water and the songs of the whales are heard instead.
 
 ## Game controllers and touch screens
 
 A game controller is supported. The left stick walks, swims and steers, and the right stick looks. **A** jumps, and rises in the water; **B** crouches, and dives while held in the water. **X** steps through the views, as **0** does, and **Y** changes to the bird's-eye view, as **2** does; the bumpers bring the view nearer or further. The right trigger takes a quick picture. With the camera raised, the right trigger takes a picture through the lens, **B** lowers the camera, **Y** opens the gallery, the bumpers zoom, the D-pad's up and down set the focus further and nearer, and its left and right set the exposure. At the helm the triggers trim the sail. A press of the left stick changes between running and walking, and **Menu** shows the help panel. On the controller's tab of the help panel, **Invert vertical look** reverses the right stick's up and down, and **Sensitivity** sets how fast it turns the view, from 25 % to 300 %; both are remembered.
 
-On a touch screen, a touch on the left part of the screen places a joystick there for walking, and a drag elsewhere turns the view.
+On a touch screen, a touch on the left part of the screen places a joystick there for walking, and a drag elsewhere turns the view. The button at the top right opens the menu, which takes the player to each of the places reached by the number keys and into the sea; raises the camera, takes a snapshot and opens the gallery, from which artist mode is reached; sets the time of day, pauses the world and changes between day and night; sets tilt-shift, ambient occlusion, full screen, the draw distance, the field of view and the performance overlay; sets the sound and the population level; and opens the island panel, the sharing panel, the help panel and the about panel. Round buttons at the bottom right do what the moment calls for: on foot they jump, crouch, sit and jump into the sea; in the water they rise, dive and set the torch on or off; while following an animal or in a distant view they bring the view nearer or further; and one always raises the camera. With the camera raised on a screen held sideways, its controls lie in a compact panel, which the button beneath the shutter puts away and brings back.
+
+On a touch screen the picture is drawn with a lighter load: its resolution follows the frame rate, between 0.75 and 2 pixels to each point of the screen, the shadows are less finely drawn, and the draw distance is shorter.
 
 ## Principle of operation
 
 The island is not stored; it is calculated. The world is divided into square blocks, and each block is generated from the island's seed when the player comes near it and discarded when the player moves away. The height of the ground at any point is a function of position alone, built from the line of the coast, the ridge of the hills and several layers of noise, so that neighbouring blocks always agree at their edges. Villages are laid out from the rules of medieval hill towns. Each village has one parish church, and a large town has one church to each of its districts, the churches standing at least 300 m apart; a church stands on the summit where the town climbs a hill, and the smallest hamlets have none. Their streets, alleys, archways and stepped streets are decided block by block from the seed, and their squares are levelled into the hillside as part of the height of the ground.
 
-Blocks near the player are drawn in full detail, and blocks further away are drawn in simplified form; beyond them, a coarse model of the whole island is drawn for views from high above. The world repeats every 8.8 km from north to south, so that travel far enough out to sea in one direction arrives at the opposite shore. The camera's position is kept near the origin of the coordinate system, and the world is moved beneath it, so that precision is not lost far from the starting point.
+Blocks near the player are drawn in full detail, and blocks further away are drawn in simplified form; beyond them, a coarse model of the whole island is drawn for views from high above. The world repeats every 15.8 km from north to south, so that travel far enough out to sea in one direction arrives at the opposite shore. The camera's position is kept near the origin of the coordinate system, and the world is moved beneath it, so that precision is not lost far from the starting point.
 
-The sea is a sum of wave trains whose lengths follow the dispersion of waves in deep water, raised by the wind and by the swell of the day and calmed in the lee of the land. The sun, sky, fog and lighting follow the clock, and the shadows follow the sun.
+The sea is a sum of wave trains whose lengths follow the dispersion of waves in deep water, raised by the wind and by the swell of the day and calmed in the lee of the land. The ring of waves from a breaching whale is a packet that spreads outwards at the group speed of its waves, half their own speed, so that each crest rises at its back, runs through it and dies at its front; its height falls as it spreads round a longer ring. The sun, sky, fog and lighting follow the clock, and the shadows follow the sun.
