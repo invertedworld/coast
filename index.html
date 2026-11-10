@@ -112,7 +112,7 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
       <div class="row"><span><kbd>4</kbd></span><span>Freight train</span></div>
       <div class="row"><span><kbd>5</kbd></span><span>Ferry</span></div>
       <div class="row"><span><kbd>6</kbd></span><span>Sailing dinghy (press again to sail)</span></div>
-      <div class="row"><span><kbd>7</kbd></span><span>Seagull</span></div>
+      <div class="row"><span><kbd>7</kbd></span><span>Whale</span></div>
       <div class="row"><span><kbd>8</kbd></span><span>Dolphin</span></div>
       <div class="row"><span><kbd>9</kbd></span><span>Shipwreck</span></div>
       <div class="row"><span><kbd>0</kbd></span><span>Cycle view</span></div>
@@ -148,7 +148,7 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
       <div class="row"><span><kbd>G</kbd></span><span>Gallery</span></div>
     </div>
     <div class="group"><h3>Other</h3>
-      <div class="row"><span><kbd>F</kbd></span><span>Full screen</span></div>
+      <div class="row"><span><kbd>Tab</kbd></span><span>Full screen</span></div>
       <div class="row"><span><kbd>M</kbd></span><span>Mute sound</span></div>
       <div class="row"><span><kbd>K</kbd></span><span>More people</span></div>
       <div class="row"><span><kbd>Shift</kbd>+<kbd>K</kbd></span><span>Fewer people</span></div>
@@ -348,7 +348,8 @@ class GB{
     if (this.lod>0){ // drop pieces too small to read at this distance; simplify round shapes
       const e=m.elements, sx=Math.hypot(e[0],e[1],e[2]), sy=Math.hypot(e[4],e[5],e[6]), sz=Math.hypot(e[8],e[9],e[10]);
       const med=sx+sy+sz-Math.max(sx,sy,sz)-Math.min(sx,sy,sz);
-      if (this.lod===1 && med<0.55 && surf!==5) return;
+      // at the middle distance the windows keep their panes (glazed, 5, or dark, 10) and their shutters
+      if (this.lod===1 && med<0.55 && surf!==5 && surf!==10 && !(surf===SW && med>=0.25)) return;
       if (this.lod>=2 && med<1.4){
         if (surf===5 && this.glow && hash(Math.round(e[12]*3),Math.round(e[14]*3),77)<0.5) this.glow.push(e[12],e[13]+this.oy,e[14],1.4,1,0.62,0.3);
         return; }
@@ -424,10 +425,19 @@ function clearXMemos(){ for (const X of X_MEMOS) X.fill(NaN); }
 var czS, czN;
 function coastZ(sd,x){ if (!czS){ czS=xMemo(x=>coastZ0(1,x)); czN=xMemo(x=>coastZ0(-1,x)); } return sd>0?czS(x):czN(x); }
 function coastOff(x){ return coastZ(1,x); }
+/* The sea bed off the shore, by the distance o out from the shoreline: the steep inshore slope down to 20 m within
+   about 60 m, then the shelf, falling 7 m in every 100 m to about 120 m some 1.5 km out, and from its edge the
+   slope, falling 30 m in every 100 m, to the deep floor at 800 m. Broad, low undulations of up to a tenth of the
+   depth keep it from lying perfectly flat. */
+function seaFloorH(o,x,z){
+  const u=Math.max(0,o-62), d=20+0.07*u+0.23*150*Math.log1p(Math.exp((u-1440)/150))-0.23*150*Math.log1p(Math.exp(-1440/150));
+  return -Math.min(800,d*(1+0.2*(fbm(x*0.0025,z*0.0025,470,3)-0.5)*Math.min(1,u/200))); }
+// the inshore slope continued below 20 m at 0.5 in 1, until it meets the sea bed
+const inshoreH=(o,k)=>{ const h=0.06-o*k; if (h>=-20) return h; return -20-(o-20.06/k)*0.5; };
 function landProfile(s,x,z,sd){
   // the whole shore profile sits 6 cm up, so sea level falls on the steep underwater slope rather than the
   // gentle beach, where sea and sand would fight for the same depth
-  if (s<0) return Math.max(-20,0.06+s*0.32);
+  if (s<0) return Math.max(seaFloorH(-s,x,z),0.06+s*0.32);
   const bw=22*clamp(vnoise(x*0.008,sd>0?5.5:9.1,440)*2.2-0.9,0,1);
   if (s<bw) return 0.06+s*0.05;
   const t=s-bw, b0=0.06+bw*0.05;
@@ -596,14 +606,15 @@ function islandInfo(sd,m){
 function islandH(sd,x,z){
   const m=Math.floor(x/ISL); let best=-1e9;
   for (let k=m-1;k<=m+1;k++){ const I=islandInfo(sd,k); if (!I) continue;
-    const dx=x-I.x, dz=z-I.z; if (Math.abs(dx)>I.ext+70 || Math.abs(dz)>I.ext+70) continue;
+    const dx=x-I.x, dz=z-I.z; if (Math.abs(dx)>I.ext+320 || Math.abs(dz)>I.ext+320) continue;
     const u=dx*I.c+dz*I.s, v=-dx*I.s+dz*I.c, d=Math.hypot(u*I.R/I.A,v*I.R/I.B);
-    if (d>I.R*1.3+70) continue;
+    if (d>I.R*1.3+320) continue;
     const e=I.R*(0.74+0.34*vnoise(x*0.009,z*0.009,I.seed)+0.16*vnoise(x*0.03,z*0.03,I.seed+1))-d;
     // how squarely this stretch of shore faces the cliff side
     const ca=Math.cos(Math.atan2(dz,dx)-I.cliffA), cf=I.cliffH>0?smooth((ca-0.1)/0.5)*(I.kind==='mesa'?1:smooth(vnoise(x*0.02,z*0.02,I.seed+2)*1.6-0.2)):0;
     let h;
-    if (e<0) h=Math.max(-20,0.06+e*(0.32+cf*1.2));
+    // the slope runs on down until it meets the sea bed, and gives way to it before the edge of the island's reach
+    if (e<0) h=lerp(Math.max(-800,inshoreH(-e,0.32+cf*1.2)),-800,smooth((d-I.R*1.3-120)/180));
     else {
       const beach=I.beach*(1-cf), b=Math.min(e,beach); h=0.06+b*0.05;
       if (e>beach){ const t=e-beach, rise=smooth(t/(I.R*0.45));
@@ -647,9 +658,9 @@ function seaRockInfo(sd,n){
 }
 // an irregular round rock with steep sides and a rough, roughly level top
 function seaRockH(sd,x,z){ const n=Math.floor(x/RK_SP); let best=-1e9;
-  for (let q=n-1;q<=n+1;q++){ const K=seaRockInfo(sd,q); if (!K) continue; const dx=x-K.x, dz=z-K.z; if (Math.abs(dx)>K.r*2||Math.abs(dz)>K.r*2) continue;
+  for (let q=n-1;q<=n+1;q++){ const K=seaRockInfo(sd,q); if (!K) continue; const dx=x-K.x, dz=z-K.z; if (Math.abs(dx)>K.r*2+30||Math.abs(dz)>K.r*2+30) continue;
     const e=K.r*(0.82+0.36*vnoise(x*0.11,z*0.11,K.seed))-Math.hypot(dx,dz);
-    best=Math.max(best, e<0?Math.max(-20,0.06+e*1.6):0.06+Math.min(K.h,e*1.4)+(fbm(x*0.3,z*0.3,K.seed+1,2)-0.5)*1.4*Math.min(1,e/3)); }
+    best=Math.max(best, e<0?Math.max(-800,0.06+e*1.6):0.06+Math.min(K.h,e*1.4)+(fbm(x*0.3,z*0.3,K.seed+1,2)-0.5)*1.4*Math.min(1,e/3)); }
   return best; }
 function lhMake(id,sd,x,z,ix,iz,kind,R){
   // the keeper's cottage stands beside the tower on whichever side the ground is higher
@@ -3167,9 +3178,12 @@ function addHouse(gb,ch,R,o){
   for (let f=1; f<floors; f++){
     if (o.tower && f%2===1 && f<floors-1) continue;
     const y=f*floorH+0.95, n=w>4.8&&R()<0.6?2:1;
-    for (let k=0;k<n;k++){ if (R()<0.12) continue; const xx=n===1?(R()-0.5)*(w-1.9):(k?1:-1)*(w*0.24); addWin(gb,H,xx,y,fz,0,0.5,0.78,shut,room); }
-    for (const s of [1,-1]) if (R()<0.42) addWin(gb,H,s*(w/2+0.01),y,(R()-0.5)*(d-1.8),Math.PI/2*s,0.5,0.78,shut,room);
-    if (R()<0.3) addWin(gb,H,(R()-0.5)*(w-1.6),y,-fz,Math.PI,0.5,0.78,shut,room);
+    // a tower's top-floor window that would run into the openings of its belfry is left out; the random draws are
+    // made all the same, so that the rest of the town is unchanged
+    const aw=o.tower&&o.belfry&&y+0.39>h-1.5-0.65-0.25?()=>{}:addWin;
+    for (let k=0;k<n;k++){ if (R()<0.12) continue; const xx=n===1?(R()-0.5)*(w-1.9):(k?1:-1)*(w*0.24); aw(gb,H,xx,y,fz,0,0.5,0.78,shut,room); }
+    for (const s of [1,-1]) if (R()<0.42) aw(gb,H,s*(w/2+0.01),y,(R()-0.5)*(d-1.8),Math.PI/2*s,0.5,0.78,shut,room);
+    if (R()<0.3) aw(gb,H,(R()-0.5)*(w-1.6),y,-fz,Math.PI,0.5,0.78,shut,room);
   }
   addBody();
   if (o.tower && o.belfry){ const y=h-1.5;
@@ -5035,13 +5049,15 @@ float plazaPat(vec2 q, float R, float id, out float tint){
   vec2 r=mat2(0.7071,0.7071,-0.7071,0.7071)*q/1.25, c=floor(r), f=fract(r);
   tint=mod(c.x+c.y,2.)>0.5?0.75:0.; float m=min(min(f.x,1.-f.x),min(f.y,1.-f.y))*1.25; return pzSlab(m,h21(c)); }
 `;
+const bedViewU={value:0};   // 1 while the water is hidden: the seabed is drawn as it is seen under the water
 function patchGround(mat){
   mat.onBeforeCompile=(sh)=>{
     addRoomClip(sh,true);
     sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nattribute vec2 pave; attribute vec4 plaza; varying vec2 vPave; varying vec4 vPlz; varying vec3 vWP; varying vec3 vWN;')
       .replace('#include <project_vertex>','#include <project_vertex>\nvPave=pave; vPlz=plaza; vWP=(modelMatrix*vec4(transformed,1.0)).xyz; vWN=objectNormal;');
     sh.uniforms.uOrig=origU;
-    sh.fragmentShader=sh.fragmentShader.replace('#include <common>','#include <common>\nvarying vec2 vPave; varying vec4 vPlz; uniform vec3 uOrig;'+GLSL_LIB+PLAZA_GLSL).replace('void main() {','void main() {\n  vec3 _wp=vWP+uOrig, _cp=cameraPosition+uOrig;')
+    sh.uniforms.uBedView=bedViewU;
+    sh.fragmentShader=sh.fragmentShader.replace('#include <common>','#include <common>\nvarying vec2 vPave; varying vec4 vPlz; uniform vec3 uOrig; uniform float uBedView;'+GLSL_LIB+PLAZA_GLSL).replace('void main() {','void main() {\n  vec3 _wp=vWP+uOrig, _cp=cameraPosition+uOrig;')
       .replace('#include <color_fragment>',`#include <color_fragment>
       { float dist=length(_wp-_cp); float amp=1.-smoothstep(30.,85.,dist);
         float k=0.94+0.1*fb(_wp.xz*1.6)+0.04*vn(_wp.xz*9.);
@@ -5060,10 +5076,11 @@ function patchGround(mat){
           c*=0.97+0.06*vn(_wp.xz*3.); k=mix(k,c,smoothstep(0.,0.6,vPave.y)); ptint*=smoothstep(0.,0.6,vPave.y); }
         diffuseColor.rgb=mix(diffuseColor.rgb,pstone,ptint);
         diffuseColor.rgb*=mix(0.97,k,amp); }
-      // under the water, and only while the view is under it, the seabed: sand, meadow and rock by habitat (sbHab, as
-      // the seabed's life is planted), with its fine relief; from above, the sea shows only the depth of the ground
+      // under the water, and only while the view is under it or the water is hidden (the key left of 1), the seabed: sand, meadow
+      // and rock by habitat (sbHab, as the seabed's life is planted), with its fine relief; from above, the sea shows
+      // only the depth of the ground
       float uwK=0.0, bedGrass=0.0; vec2 bedG=vec2(0.0); vec3 bedN=normalize(vWN);
-      if (uUnderOn>0.5){ uwK=smoothstep(-0.15,-0.7,vWP.y);
+      if (uUnderOn>0.5 || uBedView>0.5){ uwK=smoothstep(-0.15,-0.7,vWP.y);
         if (uwK>0.0){ vec3 hab=sbHab(_wp.xz,length(bedN.xz)/max(bedN.y,0.2),-vWP.y); vec3 bc=seabed(_wp,bedN,hab,bedG,bedGrass); diffuseColor.rgb=mix(diffuseColor.rgb,bc,uwK); } }`)
       .replace('#include <packing>','#include <packing>\n'+UW.glsl+'\n'+SEABED_GLSL)
       .replace('#include <normal_fragment_begin>','#include <normal_fragment_begin>\n      normal=normalize(normal+(viewMatrix*vec4(-bedG.x,0.0,-bedG.y,0.0)).xyz*uwK);')
@@ -5284,6 +5301,10 @@ surfMat.uniforms.uTime=seaUniforms.uTime; fountMat.uniforms.uTime=seaUniforms.uT
    S.sample(x,z,out) -> out {h, nx, ny, nz}   the height of the surface over (x,z) and its normal, exactly as drawn
    S.heightAt(x,z)   S.normalAt(x,z,out)       S.info() -> {hs, lp, tp, u}
    S.glsl, S.uniforms: the surface in GLSL (seaSurf(p0) -> displacement and normal), for other materials that ride it
+   S.addRing(x, z, height, length, decay, dir, half)   a ring of waves spreading from (x,z), as from a whale falling
+                           back after a breach: height (m) of its first crest near the start, length (m) of its waves,
+                           decay (s) of its height; dir and half, the heading and half length of the line it spreads
+                           from (0: a point); at most eight at once, the oldest giving way
    S.mesh   S.dispose()
 
    The surface is a sum of Gerstner (trochoidal) waves: each point moves round a circle, so that the crests come
@@ -5295,7 +5316,12 @@ surfMat.uniforms.uTime=seaUniforms.uTime; fountMat.uniforms.uTime=seaUniforms.uT
    three long components. Each component is drawn only where the mesh is fine enough to carry it (four or more
    vertices to a wavelength), so the distant sea keeps its long waves and does not shimmer. Near the shore the
    waves grow and steepen as the water shoals, and break into surf; behind the mole and in the lee of the land
-   they are smaller. */
+   they are smaller.
+
+   A ring of waves is a packet that runs outwards at the group speed of its waves, half their own speed in deep
+   water, so that each crest rises at the back of the packet, runs through it and dies at its front. The packet
+   widens as it goes, and its height falls with the square root of its radius, as its energy spreads round a longer
+   ring, and with time. */
 function createSea(parent, opts={}){
   const O=Object.assign({radius:3000,rings:520,segs:480,steep:1,whitecaps:true,seed:7,field:null,gust:null,outside:[1,1,20],wrapZ:0,ease:12,clarity:12},opts);
   const G=9.81, TAU=Math.PI*2, NW=12, NS=3, NT=NW*2+NS;
@@ -5316,6 +5342,7 @@ function createSea(parent, opts={}){
     uFoam:{value:new THREE.Color('#f4f1e8')},uTime:{value:0},uWind:{value:0},uWindDir:{value:new THREE.Vector2(0,1)},uWhite:{value:1},uBright:{value:1},uSwellA:{value:0.3},
     uGustTex:{value:null},uGust:{value:new THREE.Vector4(0,1,0,36)},uGustAmt:{value:0},
     uOff:{value:new THREE.Vector3()},uGustC:{value:0},uScale:{value:1},uOutside:{value:new THREE.Vector3(...O.outside)},
+    uRing:{value:[...Array(8)].map(()=>new THREE.Vector4())},uRingK:{value:[...Array(8)].map(()=>new THREE.Vector4())},uRingD:{value:[...Array(8)].map(()=>new THREE.Vector4())},uRingN:{value:0},
     uScene:{value:null},uSceneDepth:{value:null},uRes:{value:new THREE.Vector2(1,1)},uProjInv:{value:new THREE.Matrix4()},uCamWorld:{value:new THREE.Matrix4()},uClarity:{value:12},uHasScene:{value:0},uPassFar:{value:1e6},uDetail:{value:1}};
   const st={U:5,Ut:5,dirT:0,swellH:0.6,swellDir:0,swLens:[82,108,64],time:0,hs:0,lp:0,tp:0,Q:1,cx:0,cz:0,scale:1,qx:0,qz:0,detail:1};
 
@@ -5348,6 +5375,7 @@ function createSea(parent, opts={}){
   const GLSL=`
     uniform vec4 uW[${NT}]; uniform float uPh[${NT}]; uniform int uN; uniform vec2 uCentre; uniform float uSpc, uScale;
     uniform sampler2D uField; uniform vec4 uFieldR; uniform vec3 uOff, uOutside;
+    uniform vec4 uRing[8]; uniform vec4 uRingK[8]; uniform vec4 uRingD[8]; uniform int uRingN;
     // positions here are the world's less a fixed offset (uOff carries the rest), so that phases stay precise
     vec3 seaField(vec2 p){ vec2 f=(p-uFieldR.xy)/uFieldR.z; if (f.x<0.0||f.y<0.0||f.x>uFieldR.w-1.0||f.y>uFieldR.w-1.0) return uOutside;
       vec3 v=texture2D(uField,(f+0.5)/uFieldR.w).rgb; return vec3(v.x*1.5,v.y*1.5,v.z*20.0); }
@@ -5366,7 +5394,20 @@ function createSea(parent, opts={}){
         float ph=dot(w.xy,p0)+uPh[i], C=cos(ph), S=sin(ph);
         disp.xz+=Q*A*D*C; disp.y+=A*S; if (i<${NS}) swl+=A*S;
         n.xz-=D*k*A*C; n.y-=Q*k*A*S; }
+      // rings of waves: uRing (x, z, age, height), uRingK (k, group speed, starting radius, decay), uRingD (the
+      // direction of the line they spread from, and its half length): the distance is measured from that line, so
+      // that the waves begin in the shape of what fell and round out as they spread
+      for (int j=0;j<8;j++){ if (j>=uRingN) break; vec4 rg=uRing[j], rk=uRingK[j], rd=uRingD[j];
+        float ta=clamp(dot(p0-rg.xy,rd.xy),-rd.z,rd.z); vec2 d=p0-rg.xy-rd.xy*ta; float r=length(d)+1e-3, t=rg.z, k=rk.x, R=rk.z+rk.y*t, Wd=rk.z*0.7+0.35*rk.y*t;
+        float x=(r-R)/Wd, A=rg.w*sqrt(rk.z/R)*exp(-t/rk.w)*exp(-x*x)*smoothstep(0.0,rk.z*0.8,r)*smoothstep(4.0,6.0,6.2832/k/spc);
+        vec2 D=d/r; float ph=k*(r-2.0*rk.y*t), C=cos(ph), S=sin(ph);
+        disp.xz+=0.5*A*D*C; disp.y+=A*S; swl+=A*S; n.xz-=D*k*A*C; n.y-=0.5*k*A*S; }
       fold=n.y; nrm=normalize(n); }`;
+  const RINGS=[], RING_MAX=8;
+  function addRing(x,z,height,length,decay,dir=0,half=0){ if (RINGS.length>=RING_MAX) RINGS.shift();
+    const k=TAU/Math.max(2,length); RINGS.push({x,z,t:0,a:height,k,cg:0.5*Math.sqrt(G/k),r0:Math.max(3,length*0.6),tau:decay||40,ax:Math.sin(dir),az:Math.cos(dir),hl:half}); }
+  function writeRings(){ U.uRingN.value=RINGS.length;
+    RINGS.forEach((g,i)=>{ U.uRing.value[i].set(g.x-st.qx,g.z-st.qz,g.t,g.a); U.uRingK.value[i].set(g.k,g.cg,g.r0,g.tau); U.uRingD.value[i].set(g.ax,g.az,g.hl,0); }); }
   const _d={x:0,y:0,z:0,nx:0,ny:1,nz:0,fold:1};
   function surfJS(px,pz,out=_d){
     const fa=fieldAt(px,pz), fs=fa[0], fw=fa[1], dep=fa[2], r=Math.hypot(px-st.cx,pz-st.cz), spc=U.uSpc.value*st.scale*Math.pow(Math.max(r/st.scale,1),0.6667);
@@ -5377,6 +5418,10 @@ function createSea(parent, opts={}){
     for (let i=0;i<NT;i++){ const kx=W[i*4], kz=W[i*4+1], k=Math.hypot(kx,kz); if (k<1e-5) continue;
       const lam=TAU/k, A=W[i*4+2]*sm(4,6,lam/spc)*(i<NS?fs:fw), Q=W[i*4+3]*qb*qs*sm(5,9,lam/spc), Dx=kx/k, Dz=kz/k, ph=kx*px+kz*pz+PH[i], C=Math.cos(ph), S=Math.sin(ph);
       dx+=Q*A*Dx*C; dz+=Q*A*Dz*C; dy+=A*S; nx-=Dx*k*A*C; nz-=Dz*k*A*C; ny-=Q*k*A*S; }
+    for (const g of RINGS){ const ta=Math.max(-g.hl,Math.min(g.hl,(px-g.x)*g.ax+(pz-g.z)*g.az)), ex=px-g.x-g.ax*ta, ez=pz-g.z-g.az*ta, r=Math.hypot(ex,ez)+1e-3, R=g.r0+g.cg*g.t, Wd=g.r0*0.7+0.35*g.cg*g.t, x=(r-R)/Wd;
+      if (Math.abs(x)>4) continue;
+      const A=g.a*Math.sqrt(g.r0/R)*Math.exp(-g.t/g.tau)*Math.exp(-x*x)*sm(0,g.r0*0.8,r)*sm(4,6,TAU/g.k/spc), Dx=ex/r, Dz=ez/r, ph=g.k*(r-2*g.cg*g.t), C=Math.cos(ph), S=Math.sin(ph);
+      dx+=0.5*A*Dx*C; dz+=0.5*A*Dz*C; dy+=A*S; nx-=Dx*g.k*A*C; nz-=Dz*g.k*A*C; ny-=0.5*g.k*A*S; }
     out.x=dx; out.y=dy; out.z=dz; out.fold=ny; const l=Math.hypot(nx,ny,nz); out.nx=nx/l; out.ny=ny/l; out.nz=nz/l; return out; }
   // the surface over (x,z): the resting point whose displaced position lies there, found in a few steps
   function sample(x,z,out={h:0,nx:0,ny:1,nz:0},iter=4){
@@ -5555,7 +5600,8 @@ function createSea(parent, opts={}){
     const run=!ctx.paused && dt>0;
     if (run){ st.time+=dt; U.uTime.value=st.time;
       st.U+=(st.Ut-st.U)*(1-Math.exp(-dt/O.ease));
-      turnSets(); sets[0].w=Math.min(1,sets[0].w+dt/10); sets[1].w=Math.max(0,sets[1].w-dt/10); }
+      turnSets(); sets[0].w=Math.min(1,sets[0].w+dt/10); sets[1].w=Math.max(0,sets[1].w-dt/10);
+      for (let i=RINGS.length-1;i>=0;i--){ RINGS[i].t+=dt; if (RINGS[i].t>RINGS[i].tau*5) RINGS.splice(i,1); } }
     // ctx.qorigin {x,z}: the part of the world's position not carried in the shader's positions; ctx.offset: a
     // Vector3 added to them (Coast's floating origin); ctx.scale: the mesh's scale, for a distant view
     const qo=ctx.qorigin; st.qx=qo?qo.x:0; st.qz=qo?qo.z:0; if (ctx.offset) U.uOff.value=ctx.offset;
@@ -5574,14 +5620,14 @@ function createSea(parent, opts={}){
     const dT=ctx.detail??1; st.detail=dt>0?st.detail+cl(dT-st.detail,-dt,dt):dT; if (ctx.paused && dt===0) st.detail=dT;
     U.uDetail.value=st.detail; U.uSpc.value=spcC+(spcF-spcC)*st.detail; mesh.geometry=st.detail>0?geo:geoC;
     if (O.gust && !ctx.gustU){ U.uGust.value.copy(O.gust.uniforms.uGust.value); U.uGustAmt.value=O.gust.uniforms.uGustAmt.value; }
-    writeComponents();
+    writeComponents(); writeRings();
   }
   function setOptions(o){ Object.assign(O,o); if (o.outside) U.uOutside.value.set(...o.outside); }
   function info(){ return {hs:st.hs,lp:st.lp,tp:st.tp,u:st.U,Q:st.Q}; }
   function setWireframe(on){ mat.wireframe=!!on; }
   function dispose(){ parent.remove(mesh); geo.dispose(); if (geoC!==geo) geoC.dispose(); mat.dispose(); if (F) F.tex.dispose(); }
   rebuildField(); writeComponents();
-  return {mesh,update,setWind,setSwell,setOptions,rebuildField,setFieldData,moveField,fieldAt,setWireframe,sample,heightAt,normalAt,info,glsl:GLSL,uniforms:U,dispose};
+  return {mesh,update,addRing,get rings(){ return RINGS; },setWind,setSwell,setOptions,rebuildField,setFieldData,moveField,fieldAt,setWireframe,sample,heightAt,normalAt,info,glsl:GLSL,uniforms:U,dispose};
 }
 /* ================= end of sea ================= */
 
@@ -6868,6 +6914,7 @@ const dolphins=createDolphins(world,{pods:2,podSize:[3,7],leapsPerMinute:2,range
   // a dolphin falling back into the sea after a leap is heard where it lands
   onSound:(kind,x,y,z,st)=>{ if (kind==='splash') sndPlay('splash','world',[x,0,z],{gain:0.5+0.5*Math.min(1,st||1),rate:0.95+Math.random()*0.1}); },seed:(SEED*7919+13)>>>0});
 dolphins.meshes.body.layers.enable(1);   // seen under the water through the sea's depth pass
+let seaHidden=false;   // the water hidden, for looking at the sea bed; no key sets it at present
 const dlBoats=new Map(), dlFocus={x:0,z:0};
 const dlBoat=(o,len,beam)=>{ let b=dlBoats.get(o); if (!b){ b={x:0,z:0,head:0,v:0,len,beam}; dlBoats.set(o,b); } return b; };
 // how far a point lies out to sea from the shore of side sd (negative inland)
@@ -6902,7 +6949,7 @@ function updateDolphins(wdt){
     if (-heightAt(S.x,S.z)>=6 && !dlKeepOut(S.x,S.z)) dlCtx.seek=b; }
   // the full sea shows the bodies themselves under the water through its depth pass, so the ghost is kept for the
   // coarse sea, which has none
-  dolphins.options.ghost=0.28*(1-SEA.uniforms.uDetail.value);
+  dolphins.options.ghost=seaHidden?0:0.28*(1-SEA.uniforms.uDetail.value);
   dolphins.update(wdt,dlCtx);
   // window.__village is made once the main loop has started, so the helper is added to it when it first exists
   if (window.__village && !window.__village.findDolphins){ window.__village.findDolphins=findDolphins; window.__village.dolphins=dolphins; }
@@ -6913,6 +6960,768 @@ function findDolphins(){ let best=null;
     const x=p.members.reduce((s,d)=>s+d.x,0)/n, z=p.members.reduce((s,d)=>s+d.z,0)/n, dist=Math.hypot(x-player.x,z-player.z);
     if (!best || dist<best.dist) best={x,z,dist,head:p.head,mode:p.mode,size:n,states:p.members.map(d=>d.state)}; }
   return best; }
+
+/* ================= whales =================
+   Blue, fin, humpback and sperm whales for Coast, swimming at depth, surfacing to breathe, diving and breaching.
+   Everything below this line and above the matching closing line is self-contained and may be pasted into
+   index.html as it stands; it needs only THREE.
+
+   const W=createWhales(parent, opts)     parent: the group the meshes join (in Coast, `world`)
+     opts: species ('blue', 'fin', 'humpback' or 'sperm'), count (2), diveSeconds (mean time down between surfacings, 90),
+           breaths (per surfacing, 5), breachesPerHour (per whale, 8), range (m from the focus within which the whales
+           keep, 300), maxWhales (8), layer (a camera layer the bodies are also put on, for a depth pass), seed, ghost (0..1, 0.55), wind ([x, z] m/s, which carries the blows),
+           onSound(kind, x, y, z, strength), kind being 'blow', 'splash' or 'breach' (sent breachLead seconds, 1.25,
+           before a breaching whale lands, for a sound whose crash comes that far in); onSplash(x, z, strength, length, heading):
+           a whale has fallen back after a breach, its body centred on (x,z) and lying along heading, with the
+           strength of its fall (about 1) and its length in metres
+   W.update(dt, ctx)                      ctx: camera, focus {x,z} (defaults to the camera), range, depthAt(x,z) (depth
+                                           of water in metres, negative on land), seaLevel (0), seaAt(x,z) (the swell's
+                                           height there, optional), bright (0..1, the light on blows and foam), paused,
+                                           keepOut(x,z) (true where whales must not go), wind ([x, z])
+   W.setOptions(o)   W.trigger(kind, i)   ('surface', 'breach' or 'dive')   W.reset()   W.shift(dz)
+   W.whales   W.dispose()   W.status(i) -> [state, value]
+
+   Positions are world metres with y up and the sea at y = seaLevel. Each whale is one mesh whose vertices are
+   placed every frame along a bending spine: while it swims the spine follows the path its head has taken, so that
+   the back rolls over the same arc as the head when it surfaces; when it raises its flukes to dive, or breaches,
+   the body turns as a rigid one. Under water the whale is drawn a second time as a faint shape projected on to the
+   surface along the line of sight, dark for its back and pale green for white flippers and flukes. */
+function createWhales(parent, opts={}){
+  const O=Object.assign({species:'humpback',count:2,diveSeconds:90,breaths:5,breachesPerHour:8,range:300,maxWhales:8,seed:20261110,onSplash:null,layer:null,breachLead:1.25,ghost:0.55,wind:[1.4,0.5],onSound:null},opts);
+  let sd=(O.seed>>>0)||1;
+  const R=()=>{ sd=(sd+0x6D2B79F5)>>>0; let t=sd; t=Math.imul(t^t>>>15,t|1); t^=t+Math.imul(t^t>>>7,t|61); return ((t^t>>>14)>>>0)/4294967296; };
+  const rr=(a,b)=>a+(b-a)*R();
+  const cl=(v,a,b)=>Math.max(a,Math.min(b,v));
+  const sm=t=>{ t=cl(t,0,1); return t*t*(3-2*t); };
+  const angTo=(a,b)=>Math.atan2(Math.sin(b-a),Math.cos(b-a));
+  const G=9.81, GB=G*0.55, GS=G*0.7, TAU=Math.PI*2, C=h=>new THREE.Color(h);
+  let SEA=0, seaAt=null;
+
+  /* ---------- the species ----------
+     body: rows of [s, half width, half height, height of the axis, superellipse exponent, width of the lower half,
+     keel], all but the exponents in lengths of the body from the tip of the snout; the outlines of the dorsal fin,
+     flippers and flukes are in the same units. Local x is the whale's left, y its back, and s runs back from the
+     snout. size is the range of lengths of grown animals, snout to the notch of the flukes, in metres: blue 22-27,
+     fin 17-21, humpback 12.5-15 and sperm whales 10.5-16 (females about 11, bulls about 16). Times are seconds,
+     speeds m/s and depths metres. */
+  const SPECIES={
+    fin:{ name:'Fin whale', L:19, size:[17,21], cruise:3.6, surf:2.4, deep:-45, shallow:-3.4, show:0.4, archShow:0.95, terminal:'arch',
+      interval:[11,18], breachK:0.25, beat:0.3, amp:0.04, wrinkle:0.004, blowS:0.15,
+      blow:{v:15, k:2.4, lat:0.11, spread:0.5, n:700, size:[0.16,0.34], grow:0.3, life:[2.2,3.4], a:0.15, dir:[0,1,0]},
+      body:[[0,0.004,0.003,-0.004,2,1,0],[0.025,0.026,0.012,-0.006,2.6,1,0],[0.07,0.043,0.022,-0.008,2.6,1.02,0],[0.13,0.054,0.034,-0.01,2.4,1.04,0],
+        [0.2,0.062,0.047,-0.012,2.2,1.05,0],[0.28,0.066,0.057,-0.012,2.1,1.02,0],[0.37,0.066,0.06,-0.008,2,1,0],[0.46,0.061,0.058,-0.004,2,1,0],
+        [0.56,0.051,0.052,0,2,1,0],[0.66,0.039,0.045,0.003,2,1,0],[0.75,0.027,0.038,0.005,2,1,0.05],[0.83,0.017,0.03,0.005,2,1,0.3],
+        [0.89,0.01,0.021,0.004,2,1,0.4],[0.935,0.007,0.011,0.002,2,1,0.2],[0.965,0.005,0.006,0,2,1,0]],
+      dorsal:{pts:[[0.712,-0.008],[0.735,0.004],[0.756,0.015],[0.775,0.026],[0.795,0.034],[0.79,0.026],[0.787,0.014],[0.793,0.003],[0.805,-0.008]],th:0.012},
+      flipper:{s:0.255, len:0.11, chord:0.035, out:[0.7,-0.5,-0.5], pts:[[0,0],[0.4,0.05],[0.75,0.2],[1,0.45],[0.9,0.7],[0.6,0.85],[0.3,0.95],[0,1]], th:0.008},
+      fluke:{s0:0.928, b:0.115, th:0.016, le:[[0,0],[0.3,0.1],[0.6,0.3],[0.85,0.55],[1,0.78]], te:[[0.93,0.86],[0.7,0.8],[0.4,0.74],[0.12,0.72],[0,0.62]]},
+      eye:[0.205,-0.12], knobs:0,
+      col:{back:'#4b5259', flank:'#6f777e', belly:'#e3e1d9', fin:'#454c53', finUnder:'#d6d4cc', flipTop:'#4a5158', flipUnder:'#d8d6ce'},
+      colour(sa,s,left,c){ const k=c.belly.clone().lerp(c.flank,sm((sa+0.5)/0.45)).lerp(c.back,sm((sa-0.0)/0.55));
+        // the right side of the lower jaw is white, the left dark: the fin whale's asymmetry
+        if (!left && s<0.24 && sa<0.15) k.lerp(c.belly,0.9*sm((0.24-s)/0.04));
+        if (s>0.2 && s<0.32 && sa>0.3) k.lerp(c.flank,0.25);   // the pale chevron behind the head
+        return k; } },
+    blue:{ name:'Blue whale', L:25, size:[22,27], cruise:3.4, surf:2.2, deep:-50, shallow:-3.6, show:0.45, archShow:1.0, terminal:'arch',
+      interval:[12,20], breachK:0.08, beat:0.24, amp:0.038, wrinkle:0.003, blowS:0.15,
+      blow:{v:20, k:2.2, lat:0.1, spread:0.55, n:1300, size:[0.22,0.42], grow:0.32, life:[3.0,4.4], a:0.17, dir:[0,1,0]},
+      // a broad, flat, U-shaped head, the body long and even, and a tiny dorsal fin far back
+      body:[[0,0.012,0.004,-0.004,2.2,1,0],[0.025,0.04,0.012,-0.006,3,1,0],[0.07,0.056,0.022,-0.008,3,1.02,0],[0.13,0.062,0.032,-0.01,2.7,1.04,0],
+        [0.2,0.064,0.043,-0.012,2.3,1.05,0],[0.28,0.065,0.052,-0.012,2.1,1.02,0],[0.37,0.064,0.056,-0.008,2,1,0],[0.47,0.06,0.055,-0.004,2,1,0],
+        [0.57,0.051,0.05,0,2,1,0],[0.67,0.04,0.044,0.003,2,1,0],[0.76,0.028,0.037,0.005,2,1,0.05],[0.84,0.018,0.029,0.005,2,1,0.3],
+        [0.9,0.011,0.02,0.004,2,1,0.4],[0.94,0.007,0.011,0.002,2,1,0.2],[0.968,0.005,0.006,0,2,1,0]],
+      dorsal:{pts:[[0.762,-0.006],[0.78,0.002],[0.795,0.008],[0.808,0.013],[0.806,0.008],[0.81,0.002],[0.818,-0.006]],th:0.008},
+      flipper:{s:0.25, len:0.12, chord:0.032, out:[0.72,-0.5,-0.48], pts:[[0,0],[0.4,0.05],[0.75,0.2],[1,0.45],[0.9,0.7],[0.6,0.85],[0.3,0.95],[0,1]], th:0.006},
+      fluke:{s0:0.93, b:0.12, th:0.014, le:[[0,0],[0.3,0.1],[0.6,0.3],[0.85,0.55],[1,0.76]], te:[[0.93,0.84],[0.7,0.78],[0.4,0.72],[0.12,0.7],[0,0.6]]},
+      eye:[0.2,-0.12], knobs:0,
+      col:{back:'#4c6377', flank:'#5a7389', belly:'#9eabb2', mottle:'#7a93a7', fin:'#566b7d', finUnder:'#c2c8cb', flipTop:'#60778a', flipUnder:'#d4d8d8'},
+      colour(sa,s,left,c,n){ const k=c.belly.clone().lerp(c.flank,sm((sa+0.6)/0.5)).lerp(c.back,sm((sa-0.1)/0.6));
+        // the blue whale's mottling: pale grey-blue blotches over the darker back and flanks
+        k.lerp(c.mottle,0.5*sm((n-0.45)/0.2)*sm((sa+0.4)/0.4));
+        return k; } },
+    humpback:{ name:'Humpback whale', L:14, size:[12.5,15], cruise:2.2, surf:1.7, deep:-40, shallow:-3.6, show:0.38, archShow:0.85, terminal:'fluke',
+      interval:[14,26], breachK:1, beat:0.34, amp:0.045, wrinkle:0.006, blowS:0.165, flukePitch:-1.2,
+      blow:{v:10, k:2.6, lat:0.36, spread:0.9, n:700, size:[0.18,0.38], grow:0.4, life:[2.0,3.0], a:0.14, dir:[0,1,0]},
+      body:[[0,0.01,0.005,-0.004,2,1,0],[0.04,0.04,0.02,-0.008,2.5,1.08,0],[0.1,0.062,0.04,-0.012,2.4,1.12,0],[0.17,0.077,0.062,-0.018,2.2,1.12,0],
+        [0.25,0.088,0.08,-0.02,2.1,1.08,0],[0.33,0.093,0.088,-0.014,2,1.02,0],[0.42,0.091,0.087,-0.007,2,1,0],[0.52,0.082,0.079,0,2,1,0],
+        [0.62,0.062,0.064,0.004,2,1,0],[0.7,0.045,0.052,0.006,2,1,0.1],[0.78,0.03,0.04,0.006,2,1,0.3],[0.85,0.019,0.028,0.004,2,1,0.4],
+        [0.91,0.012,0.016,0.002,2,1,0.2],[0.95,0.008,0.009,0,2,1,0]],
+      dorsal:{pts:[[0.595,-0.01],[0.63,0.004],[0.652,0.011],[0.668,0.019],[0.684,0.024],[0.683,0.015],[0.69,0.004],[0.705,-0.01]],th:0.02},
+      flipper:{s:0.255, len:0.31, chord:0.075, out:[0.86,-0.32,-0.42], th:0.014, white:true,
+        pts:[[0,0],[0.1,-0.03],[0.17,0.02],[0.27,-0.02],[0.37,0.05],[0.46,0.02],[0.56,0.1],[0.65,0.08],[0.74,0.17],[0.83,0.18],[0.92,0.3],[1,0.45],
+          [0.97,0.6],[0.85,0.62],[0.65,0.7],[0.45,0.78],[0.25,0.9],[0.08,1],[0,1]]},
+      fluke:{s0:0.918, b:0.165, th:0.016, le:[[0,0],[0.3,0.12],[0.6,0.34],[0.85,0.6],[1,0.86]],
+        te:[[0.95,0.93],[0.84,0.88],[0.76,0.94],[0.64,0.86],[0.56,0.91],[0.44,0.84],[0.34,0.88],[0.22,0.8],[0.11,0.83],[0,0.7]]},
+      eye:[0.2,-0.18], knobs:28,
+      col:{back:'#2c3137', flank:'#383e45', belly:'#dcdbd4', fin:'#2a2e34', finUnder:'#dad9d2', flipTop:'#c9cbc7', flipUnder:'#e3e3dd'},
+      colour(sa,s,left,c,n){ const k=c.belly.clone().lerp(c.flank,sm((sa+0.72)/0.4)).lerp(c.back,sm((sa+0.1)/0.5));
+        // white blotches on the throat and belly
+        if (s>0.04 && s<0.66) k.lerp(c.belly,0.9*sm((n-0.48)/0.1)*sm((-sa-0.3)/0.3));
+        return k; } },
+    sperm:{ name:'Sperm whale', L:14, size:[10.5,16], cruise:1.8, surf:0.9, deep:-50, shallow:-3, show:0.55, archShow:0.95, terminal:'fluke', log:true,
+      interval:[9,15], breachK:0.6, beat:0.28, amp:0.04, wrinkle:0.022, blowS:0.012, flukePitch:-1.35,
+      blow:{v:9, k:2.4, lat:0.24, spread:0.7, n:600, size:[0.18,0.36], grow:0.35, life:[1.9,2.8], a:0.14, dir:[0.42,0.62,0.66]},
+      body:[[0,0.055,0.072,0.016,3.6,0.62,0],[0.02,0.068,0.088,0.01,4,0.55,0],[0.1,0.075,0.095,0.005,4,0.5,0],[0.2,0.078,0.098,0,3.5,0.55,0],
+        [0.3,0.077,0.096,-0.002,3,0.75,0],[0.36,0.071,0.089,-0.004,2.5,0.95,0],[0.45,0.07,0.088,-0.004,2.2,1,0],[0.55,0.064,0.08,-0.002,2,1,0],
+        [0.65,0.052,0.068,0.004,2,1,0],[0.73,0.04,0.055,0.006,2,1,0.1],[0.8,0.028,0.045,0.006,2,1,0.25],[0.87,0.018,0.032,0.004,2,1,0.35],
+        [0.92,0.011,0.018,0,2,1,0.2],[0.96,0.007,0.009,0,2,1,0]],
+      dorsal:{pts:[[0.6,-0.012],[0.632,0.005],[0.655,0.014],[0.672,0.016],[0.69,0.008],[0.705,-0.012]],th:0.03},
+      knuckles:[0.75,0.785,0.82,0.855],
+      flipper:{s:0.37, len:0.085, chord:0.05, out:[0.72,-0.55,-0.42], pts:[[0,0],[0.4,-0.05],[0.8,0.08],[1,0.4],[0.9,0.78],[0.5,0.95],[0,1]], th:0.012},
+      fluke:{s0:0.925, b:0.14, th:0.02, le:[[0,0],[0.35,0.1],[0.7,0.28],[1,0.5]], te:[[0.92,0.58],[0.6,0.6],[0.3,0.63],[0.08,0.62],[0,0.55]]},
+      eye:[0.31,-0.42], knobs:0, blowX:0.42,
+      col:{back:'#46484a', flank:'#525354', belly:'#646462', fin:'#424446', finUnder:'#4c4d4e', flipTop:'#424446', flipUnder:'#4c4d4e', lip:'#d6d2ca'},
+      colour(sa,s,left,c,n){ const k=c.belly.clone().lerp(c.flank,sm((sa+0.6)/0.5)).lerp(c.back,sm(sa/0.6));
+        k.multiplyScalar(0.92+0.16*n);
+        // the white lips of the narrow lower jaw
+        if (s<0.3 && sa<-0.8) k.lerp(c.lip,0.85*sm((0.3-s)/0.05));
+        return k; } },
+  };
+
+  /* ---------- the geometry of a species: triangles in local coordinates (x left, y up, z = -s), with each vertex's
+     place along the body kept to bend it ---------- */
+  const NA=16, geoCache={};
+  const profileAt=(T,s)=>{ if (s<=T[0][0]) return T[0]; for (let i=1;i<T.length;i++) if (s<=T[i][0]){ const a=T[i-1], b=T[i], t=(s-a[0])/(b[0]-a[0]); return a.map((v,k)=>v+(b[k]-v)*t); } return T[T.length-1]; };
+  const hash=(a,b)=>{ const x=Math.sin(a*127.1+b*311.7)*43758.5453; return x-Math.floor(x); };
+  const vnoise=(x,y)=>{ const i=Math.floor(x), j=Math.floor(y), f=x-i, g=y-j, u=f*f*(3-2*f), v=g*g*(3-2*g);
+    return (hash(i,j)*(1-u)+hash(i+1,j)*u)*(1-v)+(hash(i,j+1)*(1-u)+hash(i+1,j+1)*u)*v; };
+  function buildSpecies(key){
+    if (geoCache[key]) return geoCache[key];
+    const S=SPECIES[key], L=S.L, T=S.body, c={}; for (const k in S.col) c[k]=C(S.col[k]);
+    const P=[], Cc=[];
+    const tri=(a,b,d,dir,ca,cb,cd)=>{
+      const ux=b[0]-a[0],uy=b[1]-a[1],uz=b[2]-a[2],vx=d[0]-a[0],vy=d[1]-a[1],vz=d[2]-a[2];
+      const nx=uy*vz-uz*vy, ny=uz*vx-ux*vz, nz=ux*vy-uy*vx;
+      if (nx*dir[0]+ny*dir[1]+nz*dir[2]<0){ const t=b; b=d; d=t; const q=cb; cb=cd; cd=q; }
+      P.push(a[0],a[1],a[2],b[0],b[1],b[2],d[0],d[1],d[2]); Cc.push(ca.r,ca.g,ca.b,cb.r,cb.g,cb.b,cd.r,cd.g,cd.b); };
+    const ringPt=(row,a)=>{ const ex=2/row[4], co=Math.cos(a), si=Math.sin(a);
+      const x=row[1]*Math.sign(co)*Math.pow(Math.abs(co),ex)*(si<0?row[5]:1);
+      let y=row[3]+row[2]*Math.sign(si)*Math.pow(Math.abs(si),ex); y+=row[2]*row[6]*Math.sign(si)*Math.pow(Math.abs(si),12);
+      return [x,y]; };
+    const topAt=s=>{ const r=profileAt(T,s); return r[3]+r[2]*(1+r[6]); };
+    const sEnd=T[T.length-1][0], NR=44, rings=[];
+    for (let i=0;i<NR;i++){ const u=i/(NR-1), s=sEnd*(0.62*(0.5-0.5*Math.cos(Math.PI*u))+0.38*u), row=profileAt(T,s), ring=[];
+      for (let k=0;k<NA;k++){ const a=Math.PI/2+k*TAU/NA, [x,y]=ringPt(row,a), j=1+S.wrinkle*(hash(i,k)*2-1)*sm(s/0.08);
+        const sa=Math.sin(a), n=vnoise(s*14,Math.cos(a)*2.2+7)*0.65+vnoise(s*31+3,Math.cos(a)*5)*0.35;
+        ring.push({p:[x*j*L,(row[3]+(y-row[3])*j)*L,-s*L],c:S.colour(sa,s,x>1e-6,c,n)}); }
+      rings.push({ring,yc:row[3]*L,s}); }
+    for (let i=0;i<NR-1;i++){ const A=rings[i], B=rings[i+1];
+      for (let k=0;k<NA;k++){ const j=(k+1)%NA, a=A.ring[k], b=A.ring[j], d=B.ring[j], e=B.ring[k];
+        const m=[(a.p[0]+d.p[0])/2,(a.p[1]+d.p[1])/2-(A.yc+B.yc)/2,0];
+        tri(a.p,e.p,d.p,m,a.c,e.c,d.c); tri(a.p,d.p,b.p,m,a.c,d.c,b.c); } }
+    { const A=rings[0], F=[0,A.yc,0.004*L]; for (let k=0;k<NA;k++){ const a=A.ring[k], b=A.ring[(k+1)%NA]; tri(a.p,b.p,F,[a.p[0]+b.p[0],a.p[1]+b.p[1]-2*A.yc,0.5],a.c,b.c,a.c); } }
+    { const A=rings[NR-1], E=[0,A.yc,-(sEnd+0.008)*L]; for (let k=0;k<NA;k++){ const a=A.ring[k], b=A.ring[(k+1)%NA]; tri(a.p,b.p,E,[a.p[0]+b.p[0],a.p[1]+b.p[1]-2*A.yc,-0.5],a.c,b.c,a.c); } }
+
+    // a plate from an outline in its own plane: map(u,v) gives the local point, nrm the side that is its top,
+    // th(u,v) the thickness at each point of the outline
+    const plate=(pts,map,nrm,th,cTop,cBot,cEdge)=>{
+      const n=pts.length, tris=THREE.ShapeUtils.triangulateShape(pts.map(p=>new THREE.Vector2(p[0],p[1])),[]);
+      const base=pts.map(p=>map(p[0],p[1])), ths=pts.map(p=>th(p[0],p[1]));
+      const top=base.map((p,i)=>[p[0]+nrm[0]*ths[i]/2,p[1]+nrm[1]*ths[i]/2,p[2]+nrm[2]*ths[i]/2]);
+      const bot=base.map((p,i)=>[p[0]-nrm[0]*ths[i]/2,p[1]-nrm[1]*ths[i]/2,p[2]-nrm[2]*ths[i]/2]);
+      const neg=[-nrm[0],-nrm[1],-nrm[2]];
+      for (const [a,b,d] of tris){ tri(top[a],top[b],top[d],nrm,cTop,cTop,cTop); tri(bot[a],bot[b],bot[d],neg,cBot,cBot,cBot); }
+      let area=0; for (let i=0;i<n;i++){ const p=pts[i], q=pts[(i+1)%n]; area+=p[0]*q[1]-q[0]*p[1]; }
+      const sg=area>0?1:-1;
+      for (let i=0;i<n;i++){ const j=(i+1)%n, p=pts[i], q=pts[j], mu=(p[0]+q[0])/2, mv=(p[1]+q[1])/2;
+        let ou=(q[1]-p[1])*sg, ov=-(q[0]-p[0])*sg; const l=Math.hypot(ou,ov)||1; ou/=l; ov/=l;
+        const m0=map(mu,mv), m1=map(mu+ou*0.01,mv+ov*0.01), dir=[m1[0]-m0[0],m1[1]-m0[1],m1[2]-m0[2]];
+        tri(top[i],bot[i],bot[j],dir,cEdge,cEdge,cEdge); tri(top[i],bot[j],top[j],dir,cEdge,cEdge,cEdge); } };
+    // the dorsal fin (and the sperm whale's hump), standing on the line of the back
+    { const D=S.dorsal, vmax=Math.max(...D.pts.map(p=>p[1]));
+      plate(D.pts,(s,v)=>[0,(topAt(s)+v)*L,-s*L],[1,0,0],(s,v)=>L*D.th*(1-0.75*cl(v/vmax,0,1)),c.fin,c.fin,c.fin); }
+    for (const s0 of S.knuckles||[])
+      plate([[s0-0.016,-0.007],[s0-0.006,0.003],[s0+0.004,0.0035],[s0+0.012,-0.007]],(s,v)=>[0,(topAt(s)+v)*L,-s*L],[1,0,0],(s,v)=>L*0.02*(1-0.5*cl(v/0.0035,0,1)),c.fin,c.fin,c.fin);
+    // the flippers, held out and down from the lower flank
+    for (const side of [-1,1]){ const F=S.flipper, row=profileAt(T,F.s);
+      const R0=[side*row[1]*0.82*L,(row[3]-row[2]*0.42)*L,-F.s*L];
+      const Do=new THREE.Vector3(side*F.out[0],F.out[1],F.out[2]).normalize(), Dc=new THREE.Vector3(0,0,-1);
+      Dc.addScaledVector(Do,-Dc.dot(Do)).normalize();
+      const N=new THREE.Vector3().crossVectors(Do,Dc).normalize(); if (N.y<0) N.negate();
+      plate(F.pts,(u,v)=>[R0[0]+(Do.x*u*F.len+Dc.x*v*F.chord)*L,R0[1]+(Do.y*u*F.len+Dc.y*v*F.chord)*L,R0[2]+(Do.z*u*F.len+Dc.z*v*F.chord)*L],
+        [N.x,N.y,N.z],(u,v)=>L*F.th*(1-0.7*u)*(1-0.6*Math.abs(v-0.3)),c.flipTop,c.flipUnder,c.flipTop); }
+    // the flukes: leading edges swept back to the tips, trailing edges meeting at the notch
+    const F=S.fluke, fl=[];
+    { const b=F.b; for (const [u,v] of F.le) fl.push([u*b,F.s0+v*b]); for (const [u,v] of F.te) if (u>0) fl.push([u*b,F.s0+v*b]);
+      const te0=F.te[F.te.length-1]; fl.push([0,F.s0+te0[1]*b]);
+      for (const [u,v] of F.te.slice().reverse()) if (u>0) fl.push([-u*b,F.s0+v*b]); for (const [u,v] of F.le.slice().reverse()) if (u>0) fl.push([-u*b,F.s0+v*b]);
+      const yc=profileAt(T,F.s0)[3];
+      plate(fl,(x,s)=>[x*L,yc*L,-s*L],[0,1,0],(x,s)=>L*F.th*(1-0.8*Math.abs(x)/b)*(1-0.5*cl((s-F.s0)/(0.8*b),0,1)),c.fin,c.finUnder,c.fin); }
+    // the eyes, small and dark, low on the side of the head
+    for (const side of [-1,1]){ const row=profileAt(T,S.eye[0]), a=Math.asin(S.eye[1]), co=Math.cos(a)*side;
+      const [x,y]=ringPt(row,side>0?a:Math.PI-a), p=[x*L*1.01,y*L,-S.eye[0]*L], e=0.0045*L, k=C('#121416');
+      tri([p[0],p[1]+e,p[2]],[p[0],p[1]-e*0.6,p[2]+e*1.1],[p[0],p[1]-e*0.6,p[2]-e*1.1],[side,0,0],k,k,k); }
+    // the humpback's tubercles: knobs over the snout and along the lower jaw
+    for (let i=0;i<S.knobs;i++){ const top=i<S.knobs*0.6, s=top?rr(0.015,0.15):rr(0.02,0.2), row=profileAt(T,s);
+      const a=top?Math.PI/2+rr(-0.55,0.55):(i%2?1:-1)*0+Math.PI/2+(i%2?1:-1)*rr(2.1,2.4);
+      const [x,y]=ringPt(row,a), nx=x, ny=y-row[3], nl=Math.hypot(nx,ny)||1, o=[nx/nl,ny/nl,0], r=0.005*L, hgt=0.0035*L, p=[x*L,y*L,-s*L];
+      const t1=[-o[1],o[0],0], t2=[0,0,1], k=S.colour(Math.sin(a),s,x>0,c,0.2).multiplyScalar(0.9);
+      const v=[0,1,2].map(q=>{ const an=q*TAU/3; return [p[0]+(t1[0]*Math.cos(an)+t2[0]*Math.sin(an))*r-o[0]*r*0.3,p[1]+(t1[1]*Math.cos(an)+t2[1]*Math.sin(an))*r-o[1]*r*0.3,p[2]+(t1[2]*Math.cos(an)+t2[2]*Math.sin(an))*r]; });
+      const apex=[p[0]+o[0]*hgt,p[1]+o[1]*hgt,p[2]];
+      for (let q=0;q<3;q++){ const A=v[q], B=v[(q+1)%3], m=[(A[0]+B[0])/2-p[0]+o[0]*0.3*r,(A[1]+B[1])/2-p[1]+o[1]*0.3*r,(A[2]+B[2])/2-p[2]]; tri(A,B,apex,m,k,k,k); } }
+
+    const n=P.length/3, bs=new Float32Array(n), bx=new Float32Array(n), by=new Float32Array(n);
+    for (let i=0;i<n;i++){ bx[i]=P[i*3]; by[i]=P[i*3+1]; bs[i]=-P[i*3+2]; }
+    const colour=new THREE.Float32BufferAttribute(Cc,3);
+    // points watched where they cross the surface: the line of the back, the fluke tips and notch, the blowhole,
+    // and the trailing edges of the flukes, which stream with water when they are raised
+    const tops=[]; for (let j=0;j<16;j++){ const s=0.03+j*0.058; tops.push([s*L,0,topAt(s)*L]); }
+    const b=F.b, ycF=profileAt(T,F.s0)[3]*L, tail=[];
+    for (const [u,v] of F.te) for (const sg of u>0?[-1,1]:[1]) tail.push([(F.s0+v*b)*L,sg*u*b*L,ycF]);
+    const tips=[[(F.s0+F.le[F.le.length-1][1]*b)*L,b*L,ycF],[(F.s0+F.le[F.le.length-1][1]*b)*L,-b*L,ycF]];
+    const brow=profileAt(T,S.blowS), blow=[S.blowS*L,(S.blowX||0)*brow[1]*L,(brow[3]+brow[2]*(S.log?0.82:1))*L];
+    let hmax=0; for (const r of T) hmax=Math.max(hmax,(r[3]+r[2])*L);
+    const halfW=s=>profileAt(T,s/L)[1]*L;
+    return geoCache[key]={n,bs,bx,by,colour,tops,tail,tips,blow,hmax,halfW,sEnd:(F.s0+Math.max(...F.le.map(p=>p[1]),...F.te.map(p=>p[1]))*b+0.01)*L};
+  }
+
+  /* ---------- materials ---------- */
+  const bodyMat=new THREE.MeshPhongMaterial({vertexColors:true,flatShading:true,shininess:42,specular:C('#1e2328')});
+  function ghostFor(){
+    const U={uSeaY:{value:0},uDark:{value:C('#0d2c4f')},uPale:{value:C('#6fc2c9')}};
+    const g=new THREE.MeshBasicMaterial({color:C('#ffffff'),vertexColors:true,transparent:true,opacity:O.ghost,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-4});
+    g.onBeforeCompile=sh=>{ sh.uniforms.uSeaY=U.uSeaY; sh.uniforms.uDark=U.uDark; sh.uniforms.uPale=U.uPale;
+      sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nvarying float vDepth; varying float vLook; uniform float uSeaY;')
+        .replace('#include <project_vertex>',`vec4 wp=modelMatrix*vec4(transformed,1.0); float sy=uSeaY; vDepth=sy-wp.y;
+          vec3 sp=wp.xyz; if (wp.y<sy && cameraPosition.y>sy){ sp=cameraPosition+(wp.xyz-cameraPosition)*((cameraPosition.y-sy)/(cameraPosition.y-wp.y)); }
+          vLook=normalize(cameraPosition-sp).y; vec4 mvPosition=viewMatrix*vec4(sp,1.0); gl_Position=projectionMatrix*mvPosition;`);
+      // seen at a low angle the surface reflects the sky and hides what is under it; looking down into the water
+      // the whale shows, fading with depth over about four metres
+      sh.fragmentShader=sh.fragmentShader.replace('#include <common>','#include <common>\nvarying float vDepth; varying float vLook; uniform vec3 uDark; uniform vec3 uPale;')
+        .replace('vec4 diffuseColor = vec4( diffuse, opacity );','if (vDepth<0.0) discard; float lk=smoothstep(0.25,0.75,vLook); if (lk<0.01) discard; vec4 diffuseColor=vec4(diffuse,opacity*lk*exp(-vDepth/4.0)*smoothstep(0.0,0.3,vDepth));')
+        // a dark skin reads darker than the water over it, a white one as pale green
+        .replace('#include <color_fragment>','float lum=dot(vColor,vec3(0.3,0.59,0.11)); float pl=smoothstep(0.35,0.75,lum); diffuseColor.rgb=mix(uDark,uPale,pl)*diffuse; diffuseColor.a*=mix(1.0,1.25,pl);'); };
+    g.customProgramCacheKey=()=>'whale-ghost';
+    g.stencilWrite=true; g.stencilRef=1; g.stencilFunc=THREE.NotEqualStencilFunc; g.stencilFail=g.stencilZFail=g.stencilZPass=THREE.KeepStencilOp;
+    // the parts above the water mark the stencil, so that the shape under water is never drawn over them
+    const m=new THREE.MeshBasicMaterial({colorWrite:false,depthWrite:false,stencilWrite:true,stencilRef:1,stencilFunc:THREE.AlwaysStencilFunc,stencilZPass:THREE.ReplaceStencilOp});
+    m.onBeforeCompile=sh=>{ sh.uniforms.uSeaY=U.uSeaY;
+      sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nvarying float vAbove; uniform float uSeaY;')
+        .replace('#include <project_vertex>','#include <project_vertex>\nvAbove=(modelMatrix*vec4(transformed,1.0)).y-uSeaY;');
+      sh.fragmentShader=sh.fragmentShader.replace('#include <common>','#include <common>\nvarying float vAbove;')
+        .replace('vec4 diffuseColor = vec4( diffuse, opacity );','if (vAbove<0.0) discard; vec4 diffuseColor=vec4(diffuse,opacity);'); };
+    m.customProgramCacheKey=()=>'whale-mask';
+    return {ghost:g,mask:m,U}; }
+
+  /* ---------- foam, slicks and spray ---------- */
+  const MAXR=300, foamCol=C('#f4f1e8'), slickCol=C('#7fb4d0');
+  const ringGeo=new THREE.CircleGeometry(1,24).rotateX(-Math.PI/2);
+  const ringA=new THREE.InstancedBufferAttribute(new Float32Array(MAXR*3),3); ringA.setUsage(THREE.DynamicDrawUsage); ringGeo.setAttribute('aRing',ringA);
+  const fxU=THREE.UniformsUtils.merge([THREE.UniformsLib.fog,{uCol:{value:foamCol.clone()},uSlick:{value:slickCol.clone()},uBright:{value:1},uScale:{value:800}}]);
+  const ringMat=new THREE.ShaderMaterial({uniforms:fxU,transparent:true,depthWrite:false,fog:true,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-6,
+    vertexShader:`attribute vec3 aRing; varying vec3 vR; varying vec2 vP;
+      #include <fog_pars_vertex>
+      void main(){ vP=position.xz; vR=aRing; vec4 mvPosition=modelViewMatrix*instanceMatrix*vec4(position,1.0); gl_Position=projectionMatrix*mvPosition;
+        #include <fog_vertex>
+      }`,
+    fragmentShader:`uniform vec3 uCol; uniform vec3 uSlick; uniform float uBright; varying vec3 vR; varying vec2 vP;
+      #include <common>
+      #include <fog_pars_fragment>
+      float h2(vec2 p){ return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453); }
+      float n2(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
+        return mix(mix(h2(i),h2(i+vec2(1.0,0.0)),f.x),mix(h2(i+vec2(0.0,1.0)),h2(i+vec2(1.0,1.0)),f.x),f.y); }
+      void main(){
+        float r=length(vP); if (r>1.0) discard;
+        float age=vR.x, pt=step(1.5,vR.y)*(1.0-step(3.5,vR.y)), sl=step(3.5,vR.y);
+        float n=n2(vP*4.0+vR.y*31.0)*0.6+n2(vP*9.0-vR.y*17.0)*0.4, m=n2(vP*13.0+vR.y*7.0);
+        vec3 col=uCol; float a;
+        if (sl>0.5){
+          // a fluke print: a smooth, glassy oval where the water has been calmed, with a faint rim of bubbles
+          float e=1.0-smoothstep(0.2+0.3*n,1.0,r), rim=(1.0-smoothstep(0.0,0.1,abs(r-0.75-0.12*n)))*smoothstep(0.5,0.7,m);
+          a=(e*0.2+rim*0.3)*vR.z*(1.0-age)*min(1.0,age*12.0); col=mix(uSlick,uCol,rim); if (a<0.004) discard;
+        } else {
+          float ring=(1.0-pt)*(1.0-smoothstep(0.0,0.07+0.22*age,abs(r-0.82)))*(0.55+0.45*m);
+          float core=(1.0-smoothstep(0.1,0.85,r))*mix(1.0-smoothstep(0.0,0.5,age),1.0,pt);
+          float f=smoothstep(0.3,0.62,max(ring*0.85,core*0.95)*(0.35+0.95*n));
+          a=f*vR.z*(1.0-age)*(1.0-0.4*age); if (a<0.01) discard;
+        }
+        gl_FragColor=vec4(col*uBright,a);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+        #include <fog_fragment>
+      }`});
+  const rings=new THREE.InstancedMesh(ringGeo,ringMat,MAXR); rings.instanceMatrix.setUsage(THREE.DynamicDrawUsage); rings.frustumCulled=false; rings.count=0; rings.renderOrder=3;
+  const RG=[];   // live rings, patches and slicks: {x,z,r0,r1,age,life,str,seed,ex,yaw}
+
+  const MAXP=6000, pPos=new Float32Array(MAXP*3), pSize=new Float32Array(MAXP), pAlpha=new Float32Array(MAXP), pSoft=new Float32Array(MAXP);
+  const pGeo=new THREE.BufferGeometry();
+  pGeo.setAttribute('position',new THREE.BufferAttribute(pPos,3).setUsage(THREE.DynamicDrawUsage));
+  pGeo.setAttribute('aSize',new THREE.BufferAttribute(pSize,1).setUsage(THREE.DynamicDrawUsage));
+  pGeo.setAttribute('aAlpha',new THREE.BufferAttribute(pAlpha,1).setUsage(THREE.DynamicDrawUsage));
+  pGeo.setAttribute('aSoft',new THREE.BufferAttribute(pSoft,1).setUsage(THREE.DynamicDrawUsage));
+  const sprayMat=new THREE.ShaderMaterial({uniforms:fxU,transparent:true,depthWrite:false,fog:true,
+    vertexShader:`attribute float aSize; attribute float aAlpha; attribute float aSoft; uniform float uScale; varying float vA; varying float vS;
+      #include <fog_pars_vertex>
+      void main(){ vA=aAlpha; vS=aSoft; vec4 mvPosition=modelViewMatrix*vec4(position,1.0); gl_PointSize=clamp(aSize*uScale/max(0.2,-mvPosition.z),1.5,512.0); gl_Position=projectionMatrix*mvPosition;
+        #include <fog_vertex>
+      }`,
+    fragmentShader:`uniform vec3 uCol; uniform float uBright; varying float vA; varying float vS;
+      #include <common>
+      #include <fog_pars_fragment>
+      void main(){ vec2 c=gl_PointCoord-0.5; float d=length(c); if (d>0.5) discard;
+        // drops are small hard discs, the mist of a blow a soft round puff
+        float a=mix(1.0-smoothstep(0.3,0.5,d),exp(-d*d*18.0),vS);
+        gl_FragColor=vec4(uCol*uBright,vA*a);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+        #include <fog_fragment>
+      }`});
+  const spray=new THREE.Points(pGeo,sprayMat); spray.frustumCulled=false; spray.renderOrder=4;
+  const _sz=new THREE.Vector2();
+  spray.onBeforeRender=(renderer,scene,camera)=>{ renderer.getDrawingBufferSize(_sz); fxU.uScale.value=_sz.y/(2*Math.tan(THREE.MathUtils.degToRad((camera.fov||50)/2))); };
+  const PT=[];   // live particles: {x,y,z,vx,vy,vz,age,life,size,grow,a,soft,drag,ex,ez,sp,sy}
+  pGeo.setDrawRange(0,0);
+  parent.add(rings,spray);
+
+  const sound=(k,x,y,z,s)=>{ if (O.onSound) try { O.onSound(k,x,y,z,s); } catch(e){} };
+  const addRG=g=>{ if (RG.length>=MAXR) RG.shift(); RG.push(g); };
+  const ring=(x,z,r0,r1,life,str)=>addRG({x,z,r0,r1,age:0,life,str,seed:R(),ex:1,yaw:0});
+  const patch=(x,z,r0,r1,life,str)=>addRG({x,z,r0,r1,age:0,life,str,seed:2+R(),ex:1,yaw:R()*TAU});
+  const slick=(x,z,r,ex,yaw,life)=>addRG({x,z,r0:r*0.75,r1:r,age:0,life,str:1,seed:4+R(),ex,yaw});
+  const addP=p=>{ if (PT.length>=MAXP) PT.shift(); PT.push(p); };
+  // fine spray: many small drops thrown up in a cone, high and fast from a heavy fall, falling back under gravity
+  function sprayCrown(x,y,z,n,av,hw){ for (let i=0;i<n;i++){ const a=R()*TAU, th=rr(0,0.55), v=av*(0.35+1.05*Math.pow(R(),1.4)), r=hw*Math.sqrt(R());
+    addP({sy:y,x:x+Math.cos(a)*r,y,z:z+Math.sin(a)*r,vx:Math.cos(a)*Math.sin(th)*v,vy:Math.cos(th)*v,vz:Math.sin(a)*Math.sin(th)*v,
+      age:0,life:rr(2.4,4.2),size:R()<0.35?rr(0.25,0.7):rr(0.05,0.18),grow:0,a:rr(0.6,0.95),soft:0,drag:rr(0.25,0.7),g:GS}); } }
+  function drops(x,y,z,n,up,out,dirx,dirz,carry,big=1){ for (let i=0;i<n;i++){ const a=R()*TAU, o=out*(0.3+0.7*R());
+    addP({sy:y,x:x+(R()-0.5)*0.8*big,y,z:z+(R()-0.5)*0.8*big,vx:Math.cos(a)*o+dirx*carry*R(),vy:up*(0.45+0.55*R()),vz:Math.sin(a)*o+dirz*carry*R(),
+      age:0,life:rr(0.8,1.8),size:rr(0.06,0.16)*big,grow:0,a:rr(0.6,0.95),soft:0,drag:0.4}); } }
+  // the mist of a blow, or of a great splash: soft puffs thrown out along dir that slow, spread and drift downwind
+  // Each puff leaves along a ray inside a cone round dir and comes to rest where the drag stops it, so that the blow
+  // widens with height; most go nearly the whole way, so that it is fullest at the top.
+  function puff(x,y,z,B,dir,str,n){ for (let i=0;i<n;i++){ const v=B.v*str*(1.05-0.7*Math.pow(R(),2)), a=R()*TAU, l=B.lat*Math.sqrt(R());
+    let e1=[dir[1],-dir[0],0]; if (Math.abs(dir[2])<0.9 && Math.abs(dir[0])+Math.abs(dir[1])<1e-3) e1=[1,0,0]; { const q=Math.hypot(...e1)||1; e1=e1.map(c=>c/q); if (!(Math.hypot(...e1)>0)) e1=[1,0,0]; }
+    const e2=[dir[1]*e1[2]-dir[2]*e1[1],dir[2]*e1[0]-dir[0]*e1[2],dir[0]*e1[1]-dir[1]*e1[0]];
+    const ca=Math.cos(a)*l, sa=Math.sin(a)*l, rx=dir[0]+e1[0]*ca+e2[0]*sa, ry=dir[1]+e1[1]*ca+e2[1]*sa, rz=dir[2]+e1[2]*ca+e2[2]*sa, rn=Math.hypot(rx,ry,rz);
+    addP({sy:-1e9,x:x+(R()-0.5)*0.2,y:y+0.05,z:z+(R()-0.5)*0.2,vx:rx/rn*v,vy:ry/rn*v,vz:rz/rn*v,
+      ...(R()<0.22?{age:0,life:rr(1.2,2.2),size:rr(0.03,0.07),grow:0,a:rr(0.5,0.85),soft:0,drag:B.k*rr(0.25,0.45),sy:y-0.3}:
+      {age:0,life:rr(B.life[0],B.life[1]),size:rr(B.size[0],B.size[1]),grow:B.grow*rr(0.7,1.3),a:B.a*rr(0.6,1),soft:1,drag:B.k*rr(0.85,1.15),fall:B.fall||1.1}),
+      ex:Math.cos(a),ez:Math.sin(a),sp:B.spread*rr(0.3,1)}); } }
+
+  /* ---------- whales ---------- */
+  const NS=52, whales=[];
+  let FX=0, FZ=0, depthAt=()=>3000, keepOut=()=>false, RNG=O.range, WIND=O.wind, bright=1;
+  const depth=(x,z)=>{ const d=depthAt(x,z); return Number.isFinite(d)?d:3000; };
+
+  function newWhale(i, group){
+    // each whale's length from the snout to the notch of the flukes is drawn from the range of grown animals of its kind
+    const key=O.species, S=SPECIES[key], g=buildSpecies(key), notch=S.fluke.s0+S.fluke.te[S.fluke.te.length-1][1]*S.fluke.b, k=rr(S.size[0],S.size[1])/(notch*S.L), L=S.L*k;
+    const geo=new THREE.BufferGeometry(), pos=new Float32Array(g.n*3);
+    geo.setAttribute('position',new THREE.BufferAttribute(pos,3).setUsage(THREE.DynamicDrawUsage)); geo.setAttribute('color',g.colour);
+    const body=new THREE.Mesh(geo,bodyMat); body.castShadow=true; body.receiveShadow=false; body.frustumCulled=false;
+    const gm=ghostFor(), ghost=new THREE.Mesh(geo,gm.ghost), mask=new THREE.Mesh(geo,gm.mask);
+    ghost.frustumCulled=mask.frustumCulled=false; ghost.renderOrder=2; mask.renderOrder=1;
+    if (O.layer!=null) body.layers.enable(O.layer);
+    parent.add(body,mask,ghost);
+    const w={i,key,S,g,k,L,geo,pos,body,ghost,mask,gm,group,
+      x:0,y:0,z:0,yaw:0,spd:S.cruise,vy:0,trail:[],ds:L/160,
+      rigid:false,r:0,C:[0,0,0],V:[0,0,0],pitch:0,pv:0,sp:0,roll:0,rollT:0,rv:0,
+      phase:'deep',timer:0,man:null,breathsLeft:0,breathN:0,sound:0,resume:null,t:0,
+      flex:R()*TAU,amp:S.amp,beat:S.beat,lift:0,liftT:0,blowCool:0,blowing:null,
+      P:new Float32Array(NS*3),B:new Float32Array(NS*3),dl:new Float32Array(NS*3),X:new Float32Array(NS*3),U:new Float32Array(NS*3),
+      prevTop:null,prevTail:null,prevTips:null,prevBlow:null,cool:new Float32Array(32),washT:0,dripT:0,slickCool:0,ty:S.deep,dormant:false};
+    return w; }
+
+  function place(w, atSurface){
+    const gr=w.group, a=R()*TAU, r=w.i===0?0:rr(25,60);
+    w.x=gr.x+Math.sin(a)*r; w.z=gr.z+Math.cos(a)*r; w.yaw=gr.head+rr(-0.3,0.3); w.rigid=false; w.r=0; w.roll=0; w.rollT=0;
+    w.man=null; w.blowing=null; w.prevTop=w.prevTail=w.prevTips=w.prevBlow=null; w.lift=w.liftT=0;
+    if (atSurface){ w.y=w.S.shallow; w.vy=0; startSurface(w); w.breathsLeft=Math.max(1,Math.round(rr(0.3,1)*O.breaths)); }
+    else { w.y=Math.max(w.S.deep*rr(0.5,1),-(depth(w.x,w.z)-5)); w.vy=0; w.phase='deep'; w.timer=O.diveSeconds*rr(0.1,0.9); w.ty=w.S.deep; }
+    rebuildTrail(w,0); }
+  // the trail behind the head: straight back along the heading, or along the rigid body
+  function rebuildTrail(w,pitch){
+    const n=Math.ceil(w.g.sEnd*w.k/w.ds)+6, fx=Math.sin(w.yaw)*Math.cos(pitch), fy=Math.sin(pitch), fz=Math.cos(w.yaw)*Math.cos(pitch);
+    w.trail.length=0; for (let i=1;i<=n;i++){ const s=i*w.ds; w.trail.push([w.x-fx*s,w.y-fy*s,w.z-fz*s]); } }
+
+  // vertical paths as functions of the horizontal distance run: Hermite pieces from the present height and slope
+  const H=(y1,m1,L,lift,lo)=>({y1,m1,L,x:0,y0:null,m0:0,lift:lift||0,lo:lo||0});
+  function evalH(s){ const u=cl(s.x/s.L,0,1), L=s.L, u2=u*u, u3=u2*u;
+    const y=(2*u3-3*u2+1)*s.y0+(u3-2*u2+u)*L*s.m0+(-2*u3+3*u2)*s.y1+(u3-u2)*L*s.m1;
+    const dy=((6*u2-6*u)*s.y0+(3*u2-4*u+1)*L*s.m0+(-6*u2+6*u)*s.y1+(3*u2-2*u)*L*s.m1)/L;
+    return [y,dy,u>=1,u]; }
+
+  // the height of the axis at which the back shows by `show` metres, and the lift of the head needed for the
+  // blowhole to clear the water at that height
+  const axisFor=(w,show)=>-w.g.hmax*w.k+show;
+  const headLift=(w,peak)=>Math.min(w.L*0.06,Math.max(0,0.32-(peak+w.g.blow[2]*w.k))/Math.pow(Math.max(0.2,1-w.g.blow[0]*w.k/(0.4*w.L)),2));
+
+  function startSurface(w){ w.phase='surface'; w.breathsLeft=Math.max(1,Math.round(O.breaths*rr(0.8,1.2))); w.breathN=0; nextBreath(w); }
+  function nextBreath(w){
+    const S=w.S, L=w.L; w.breathN++;
+    if (S.log){
+      // a sperm whale lies at the surface between dives, its head bobbing so that the blowhole dips and rises again
+      const top=axisFor(w,S.show), gap=rr(S.interval[0],S.interval[1]), v=S.surf;
+      w.man={segs:w.breathN===1?[H(top,0,L*0.6)]:[H(top-0.6,0,gap*v*0.35),H(top,0,gap*v*0.65)],i:0}; return; }
+    const peak=axisFor(w,S.show*rr(0.85,1.15)), sh=S.shallow*rr(0.85,1.15), gap=rr(S.interval[0],S.interval[1]), Ua=L*0.7, Ub=L*0.8;
+    const lf=headLift(w,peak);
+    w.man={segs:[H(peak,0,Ua,lf),H(sh,-0.08,Ub,0,lf),H(sh,0,Math.max(L*0.3,gap*S.surf-Ua-Ub))],i:0}; }
+  function terminal(w){
+    const S=w.S, L=w.L, peak=axisFor(w,S.archShow); w.phase='terminal';
+    const lf=headLift(w,peak);
+    if (S.terminal==='arch') w.man={segs:[H(peak,0,L*0.85,lf),H(S.deep*0.45,-0.24,L*5,0,lf)],i:0,arch:true};
+    else w.man={segs:[H(peak,0,L*0.9,lf),H(peak-L*0.09,-0.4,L*0.4,0,lf)],i:0,fluke:true}; }
+  function goDeep(w){ w.phase='deep'; w.ty=w.S.deep; w.timer=O.diveSeconds*rr(0.7,1.3); w.man=null; }
+
+  /* ---------- the rigid body: raising the flukes, and the breach ---------- */
+  const fwd=(yaw,p)=>[Math.sin(yaw)*Math.cos(p),Math.sin(p),Math.cos(yaw)*Math.cos(p)];
+  // the frame of the rigid body: forward, up and left
+  function rigidFrame(w){ const D=fwd(w.yaw,w.pitch), Lf=[Math.cos(w.yaw),0,-Math.sin(w.yaw)];
+    return [D,[D[1]*Lf[2]-D[2]*Lf[1],D[2]*Lf[0]-D[0]*Lf[2],D[0]*Lf[1]-D[1]*Lf[0]],Lf]; }
+  function toRigid(w, sp){
+    // the pose taken from the spine as it is: the point sp metres back, and the line from there to the snout, so
+    // that the head stays where it is. The bend of the spine away from that line is kept in the body's own frame
+    // and dies away over the next moments, so that the body straightens as it moves rather than jumping.
+    const i=Math.round(sp/stationLen(w)), P=w.B, j=cl(i,1,NS-2), dS=stationLen(w);
+    const dx=P[0]-P[j*3], dy=P[1]-P[j*3+1], dz=P[2]-P[j*3+2];
+    w.rigid=true; w.sp=j*dS; w.C=[P[j*3],P[j*3+1],P[j*3+2]]; w.pitch=Math.atan2(dy,Math.hypot(dx,dz)); w.r=0; w.pv=0;
+    const [D,Up,Lf]=rigidFrame(w);
+    for (let n=0;n<NS;n++){ const o=w.sp-n*dS, ex=P[n*3]-(w.C[0]+D[0]*o), ey=P[n*3+1]-(w.C[1]+D[1]*o), ez=P[n*3+2]-(w.C[2]+D[2]*o);
+      w.dl[n*3]=ex*D[0]+ey*D[1]+ez*D[2]; w.dl[n*3+1]=ex*Up[0]+ey*Up[1]+ez*Up[2]; w.dl[n*3+2]=ex*Lf[0]+ey*Lf[1]+ez*Lf[2]; } }
+  function fromRigid(w){
+    const D=fwd(w.yaw,w.pitch); w.x=w.C[0]+D[0]*w.sp; w.y=w.C[1]+D[1]*w.sp; w.z=w.C[2]+D[2]*w.sp;
+    rebuildTrail(w,w.pitch); w.rigid=false; w.r=0; w.vy=w.spd*Math.sin(w.pitch); }
+  function startFluke(w){ toRigid(w,0.74*w.L); w.phase='fluke'; w.t=0; w.p0=w.pitch; w.man=null; w.slideV=0; }
+  function startBreach(w, now){
+    if (w.rigid || w.phase==='flight' || w.phase==='sink' || w.phase==='charge' || depth(w.x,w.z)<16) return;
+    w.resume=w.phase==='surface'||w.phase==='terminal'?'surface':'deep'; w.man=null; w.phase='prebreach'; w.ty=-Math.min(Math.max(13,w.L*0.95),depth(w.x,w.z)-3); w.sound=8; }
+  function startCharge(w){ w.phase='charge'; const top=w.L*0.6, m=2.4; w.man={segs:[H(top,m,(top-w.y)/m*1.35)],i:0}; }
+  function startFlight(w){ toRigid(w,0.42*w.L); w.phase='flight'; w.t=0; const D=fwd(w.yaw,w.pitch), v=w.spd;
+    w.V=[D[0]*v,D[1]*v,D[2]*v]; w.breachSnd=false; const tf=2*w.V[1]/GB+0.3; w.pRate=(w.pitch-rr(0.08,0.25))/tf; if (!w.rollT) w.rollT=(R()<0.5?-1:1)*Math.PI; w.man=null;
+    w.blowing=null; }
+
+  const stationLen=w=>w.g.sEnd*w.k/(NS-1);
+
+  /* ---------- the spine: stations from the snout back past the flukes, each with its frame ---------- */
+  const _a=[0,0,0];
+  function spine(w){
+    const P=w.P, X=w.X, U=w.U, dS=stationLen(w), L=w.L;
+    // positions along the trail, or of the rigid body with what is left of the bend it had
+    if (w.rigid){ const [D,Up,Lf]=rigidFrame(w), k=1-sm(w.r);
+      for (let i=0;i<NS;i++){ const o=w.sp-i*dS, a=w.dl[i*3]*k, b=w.dl[i*3+1]*k, c=w.dl[i*3+2]*k;
+        for (let q=0;q<3;q++) P[i*3+q]=w.C[q]+D[q]*o+D[q]*a+Up[q]*b+Lf[q]*c; } }
+    else { let px=w.x, py=w.y, pz=w.z, acc=0, ti=0, s=0, i=0; P[0]=px; P[1]=py; P[2]=pz; i=1; s=dS;
+      while (i<NS){
+        if (ti<w.trail.length){ const q=w.trail[ti], dx=q[0]-px, dy=q[1]-py, dz=q[2]-pz, l=Math.hypot(dx,dy,dz);
+          if (acc+l>=s && l>1e-6){ const t=(s-acc)/l; P[i*3]=px+dx*t; P[i*3+1]=py+dy*t; P[i*3+2]=pz+dz*t; i++; s+=dS; continue; }
+          acc+=l; px=q[0]; py=q[1]; pz=q[2]; ti++; }
+        else { const j=i-1, k2=Math.max(0,i-2); let dx=P[j*3]-P[k2*3], dy=P[j*3+1]-P[k2*3+1], dz=P[j*3+2]-P[k2*3+2]; const l=Math.hypot(dx,dy,dz);
+          if (l<1e-6){ dx=-Math.sin(w.yaw); dy=0; dz=-Math.cos(w.yaw); } else { dx/=l; dy/=l; dz/=l; }
+          P[i*3]=P[j*3]+dx*dS; P[i*3+1]=P[j*3+1]+dy*dS; P[i*3+2]=P[j*3+2]+dz*dS; i++; } } }
+    w.B.set(P);
+    frames(w);
+    // the beat of the flukes, a wave running back along the body and growing towards the tail, and the lift of the head
+    const lam=1.3*L;
+    for (let i=0;i<NS;i++){ const s=i*dS, f=cl((s/L-0.32)/0.68,0,1);
+      const d=w.amp*L*f*f*Math.sin(w.flex-TAU*s/lam)+w.lift*Math.pow(cl(1-s/(0.4*L),0,1),2);
+      for (let k=0;k<3;k++) P[i*3+k]+=U[i*3+k]*d; }
+    frames(w);
+    // roll about the length of the body
+    if (Math.abs(w.roll)>1e-4){ const c=Math.cos(w.roll), s=Math.sin(w.roll);
+      for (let i=0;i<NS;i++) for (let k=0;k<3;k++){ const x=X[i*3+k], u=U[i*3+k]; X[i*3+k]=x*c+u*s; U[i*3+k]=u*c-x*s; } }
+  }
+  function frames(w){
+    const P=w.P, X=w.X, U=w.U, yx=Math.cos(w.yaw), yz=-Math.sin(w.yaw);
+    for (let i=0;i<NS;i++){ const a=Math.max(0,i-1), b=Math.min(NS-1,i+1);
+      let tx=P[a*3]-P[b*3], ty=P[a*3+1]-P[b*3+1], tz=P[a*3+2]-P[b*3+2]; const tl=Math.hypot(tx,ty,tz)||1; tx/=tl; ty/=tl; tz/=tl;
+      // the left of the body: up across the tangent, or across the heading where the body stands near upright
+      let lx=tz, ly=0, lz=-tx; const ll=Math.hypot(lx,lz), wy=Math.max(0,0.4-ll)*4;
+      lx+=yx*wy; lz+=yz*wy; const d=lx*tx+ly*ty+lz*tz; lx-=tx*d; ly-=ty*d; lz-=tz*d; const l2=Math.hypot(lx,ly,lz)||1; lx/=l2; ly/=l2; lz/=l2;
+      X[i*3]=lx; X[i*3+1]=ly; X[i*3+2]=lz;
+      U[i*3]=ty*lz-tz*ly; U[i*3+1]=tz*lx-tx*lz; U[i*3+2]=tx*ly-ty*lx; } }
+  // a point on the body (s back from the snout, x to the left, y up, in the whale's metres) in the world
+  function wpt(w,s,x,y,out){ const dS=stationLen(w); let f=s/dS, i=Math.floor(f); i=cl(i,0,NS-2); const t=f-i, P=w.P, X=w.X, U=w.U, a=i*3, b=a+3;
+    for (let k=0;k<3;k++) out[k]=lerp(P[a+k],P[b+k],t)+x*lerp(X[a+k],X[b+k],t)+y*lerp(U[a+k],U[b+k],t); return out; }
+
+  /* ---------- a step of one whale ---------- */
+  function steer(w,h){
+    const gr=w.group; let turn=0.035*Math.sin(w.t*0.05+w.i*1.7)+0.02*Math.sin(w.t*0.13+w.i);
+    turn+=cl(angTo(w.yaw,gr.head),-1,1)*0.04;
+    const dG=Math.hypot(gr.x-w.x,gr.z-w.z); if (dG>70) turn+=cl(angTo(w.yaw,Math.atan2(gr.x-w.x,gr.z-w.z)),-1,1)*0.05;
+    for (const o of whales) if (o!==w && !o.dormant){ const dx=w.x-o.x, dz=w.z-o.z, d=Math.hypot(dx,dz); if (d<w.L*1.6 && d>0.01) turn+=cl(angTo(w.yaw,Math.atan2(dx,dz)),-1,1)*0.08*(1-d/(w.L*1.6)); }
+    const fx=Math.sin(w.yaw), fz=Math.cos(w.yaw);
+    if (depth(w.x+fx*60,w.z+fz*60)<40 || keepOut(w.x+fx*60,w.z+fz*60)) turn+=0.12;
+    const lim=w.phase==='surface'||w.phase==='terminal'?0.05:0.09;
+    w.yaw+=cl(turn,-lim,lim)*h; }
+  function groupStep(gr,h){ gr.t+=h; gr.head+=(0.03*Math.sin(gr.t*0.021+gr.ph)+0.02*Math.sin(gr.t*0.057))*h;
+    // shallows or water kept clear ahead: the group turns towards the side with more room
+    gr.look=(gr.look||0)-h; if (gr.look<=0){ gr.look=1; const ah=(a,d)=>okWater(gr.x+Math.sin(a)*d,gr.z+Math.cos(a)*d);
+      gr.turn=(ah(gr.head,150)&&ah(gr.head,300))?0:(ah(gr.head+0.8,200)?1:ah(gr.head-0.8,200)?-1:1); }
+    gr.head+=(gr.turn||0)*0.08*h;
+    const d=Math.hypot(gr.x-FX,gr.z-FZ); if (d>RNG) gr.head+=cl(angTo(gr.head,Math.atan2(FX-gr.x,FZ-gr.z)),-1,1)*0.05*h;
+    let n=0, mx=0, mz=0; for (const w of whales) if (w.group===gr && !w.dormant){ mx+=w.x; mz+=w.z; n++; }
+    if (n){ gr.x=mx/n; gr.z=mz/n; } }
+
+  function whaleStep(w,h){
+    const S=w.S, L=w.L; w.t+=h; w.blowCool-=h; w.slickCool-=h;
+    // speed by state
+    let vT=S.cruise, fr=S.beat, aT=S.amp;
+    if (w.phase==='surface'||w.phase==='terminal'){ vT=S.surf; aT=S.amp*(S.log?0.25:0.7); fr=S.beat*(S.log?0.6:0.85); }
+    if (w.phase==='prebreach'){ vT=3.2; }
+    if (w.phase==='charge'){ vT=5.4; aT=S.amp*1.5; fr=S.beat*1.9; }
+    if (w.phase==='deep' && w.sound>0){ vT=2.2; }
+    if (w.phase==='fluke'||w.phase==='flight'){ aT=0; }
+    if (w.phase==='sink'){ aT=S.amp*0.5; }
+    w.amp+=(aT-w.amp)*(1-Math.exp(-h*1.5)); w.beat+=(fr-w.beat)*(1-Math.exp(-h*1.5)); w.flex+=TAU*w.beat*h;
+    { const om=w.phase==="flight"||w.phase==="charge"?2.3:w.phase==="sink"?0.9:1.0; w.rv+=(om*om*(w.rollT-w.roll)-2*om*w.rv)*h; w.roll+=w.rv*h; }
+
+    if (!w.rigid){
+      w.spd+=cl(vT-w.spd,-1.2*h,(w.phase==='charge'?3.2:0.6)*h);
+      steer(w,h);
+      let m;
+      if (w.man){ const s=w.man.segs[w.man.i];
+        if (s.y0===null){ s.y0=w.y; s.m0=w.vy/Math.max(0.3,Math.sqrt(Math.max(0.01,w.spd*w.spd-w.vy*w.vy))); }
+        const m0=s.m0;
+        const dx=w.spd/Math.sqrt(1+Math.pow(w.lastM||m0,2))*h; s.x+=dx;
+        const [y,dy,done,u]=evalH(s); w.vy=(y-w.y)/h; w.y=y; m=dy; w.lastM=dy;
+        // the head rises on the climb to breathe and settles again after the blow
+        w.liftT=s.lift?s.lift*sm(u*1.6):s.lo?s.lo*(1-sm(u*2.2)):0;
+        w.x+=Math.sin(w.yaw)*dx; w.z+=Math.cos(w.yaw)*dx;
+        if (done){ w.man.i++; if (w.man.i>=w.man.segs.length) manDone(w); }
+      } else {
+        const lim=w.sound>0?w.spd*0.95:w.spd*0.3; w.sound-=h; w.liftT=0;
+        const vyT=cl((w.ty-w.y)*0.3,-lim,lim); w.vy+=(vyT-w.vy)*(1-Math.exp(-h*(w.sound>0?0.4:0.7)));
+        const dx=Math.sqrt(Math.max(0.04,w.spd*w.spd-w.vy*w.vy))*h; w.y+=w.vy*h; w.x+=Math.sin(w.yaw)*dx; w.z+=Math.cos(w.yaw)*dx; w.lastM=w.vy/Math.max(0.2,dx/h);
+        phaseStep(w,h); }
+      w.lift+=(w.liftT-w.lift)*(1-Math.exp(-h*2.2));
+      // the trail
+      const q=w.trail[0]; if (!q || Math.hypot(q[0]-w.x,q[1]-w.y,q[2]-w.z)>=w.ds){ w.trail.unshift([w.x,w.y,w.z]); const n=Math.ceil(w.g.sEnd*w.k/w.ds)+6; if (w.trail.length>n) w.trail.length=n; }
+      if (w.rollT!==0 && w.phase!=='flight' && w.phase!=='charge') w.rollT=0;
+    } else rigidStep(w,h);
+    spine(w);
+    if (w.phase==='charge'){ if (!w.rollT && w.y>SEA) w.rollT=(R()<0.5?-1:1)*Math.PI; const p=wpt(w,0.42*L,0,0,_a); if (p[1]>SEA-0.2) startFlight(w); }
+    surfaceFx(w,h);
+    if (w.blowing){ const b=w.blowing, B=S.blow; b.t+=h; const n=Math.round(B.n*b.str*h/b.dur*(b.t<b.dur?1:0)+(R()<0.5?1:0)*(b.t<b.dur?1:0));
+      if (b.t<b.dur){ const p=wpt(w,w.g.blow[0]*w.k,w.g.blow[1]*w.k,w.g.blow[2]*w.k,_a), D=blowDir(w);
+        puff(p[0],p[1],p[2],B,D,b.str*(1-0.35*b.t/b.dur),n); }
+      else w.blowing=null; }
+  }
+  function blowDir(w){ const d=w.S.blow.dir; if (d[0]===0 && d[2]===0) return [0,1,0];
+    // the sperm whale's blow leans forward and to its left, from the blowhole at the front of the head
+    const i=1, X=w.X, P=w.P; let fx=P[0]-P[i*3+3], fy=0, fz=P[2]-P[i*3+5]; const l=Math.hypot(fx,fz)||1; fx/=l; fz/=l;
+    const v=[X[0]*d[0]+fx*d[2],d[1],X[2]*d[0]+fz*d[2]], n=Math.hypot(...v); return v.map(c=>c/n); }
+
+  function manDone(w){
+    const m=w.man; w.man=null;
+    if (w.phase==='surface'){ w.breathsLeft--; if (w.breathsLeft<=0) terminal(w); else nextBreath(w); return; }
+    if (w.phase==='terminal'){ if (m.fluke) startFluke(w); else { goDeep(w); w.sound=6; } return; }
+    if (w.phase==='charge'){ w.man={segs:[H(w.L*0.6+20,2.4,20)],i:0}; return; }
+  }
+  function phaseStep(w,h){
+    const S=w.S;
+    if (w.phase==='deep'){ w.ty=Math.max(S.deep,-(depth(w.x,w.z)-5)); w.timer-=h; if (w.timer<=0){ w.phase='rise'; w.ty=S.log?axisFor(w,S.show)-1.5:S.shallow; } }
+    else if (w.phase==='rise'){ if (Math.abs(w.y-w.ty)<0.4 || w.y>w.ty) startSurface(w); }
+    else if (w.phase==='prebreach'){ if (w.y<w.ty+1.5) startCharge(w); }
+    else if (w.phase==='surface'||w.phase==='terminal'){ if (!w.man) nextBreath(w); }
+  }
+  function rigidStep(w,h){
+    const S=w.S; w.r=Math.min(1,w.r+h/(w.phase==='fluke'?1.2:0.7)); w.lift*=Math.exp(-h*2);
+    if (w.phase==='fluke'){
+      // the body tips forward about a point three quarters of the way back, so that the flukes rise clear of the
+      // water, and then slides down along its length until they are gone
+      w.ft=(w.ft||0); w.t2=(w.t2||0)+h; const T1=3.4, tt=w.t2;
+      const pT=S.flukePitch||-1.2, e=sm(tt/T1);
+      const pPrev=w.pitch; w.pitch=lerp(w.p0,pT,e);
+      const D=fwd(w.yaw,w.pitch);
+      if (tt<T1){ const v=S.surf*(1-e)*0.8; w.C[0]+=Math.sin(w.yaw)*v*h; w.C[2]+=Math.cos(w.yaw)*v*h; w.C[1]-=0.12*h; }
+      else { w.slideV=Math.min(2.6,w.slideV+1.1*h); for (let k=0;k<3;k++) w.C[k]+=D[k]*w.slideV*h; }
+      w.spd=Math.max(w.slideV,0.4);
+      const tip=wpt(w,w.g.sEnd*w.k,0,0,_a)[1];
+      if (tt>T1 && tip<SEA-2.5){ w.t2=0; fromRigid(w); w.spd=2.4; w.vy=w.spd*Math.sin(w.pitch); goDeep(w); w.sound=14; }
+      return; }
+    if (w.phase==='flight'){
+      w.V[1]-=GB*h; for (let k=0;k<3;k++) w.C[k]+=w.V[k]*h;
+      if (!w.breachSnd){ const tHit=(w.V[1]+Math.sqrt(Math.max(0,w.V[1]*w.V[1]+2*GB*(w.C[1]-SEA+0.3))))/GB;
+        if (tHit<=O.breachLead){ w.breachSnd=true; sound('breach',w.C[0],SEA,w.C[2],1); } } w.pv+=(-w.pRate-w.pv)*(1-Math.exp(-h*4)); w.pitch+=w.pv*h;
+      if (w.C[1]<SEA-0.3 && w.V[1]<0){ w.phase='sink'; w.t2=0; if (O.onSplash) try { const D=fwd(w.yaw,0), o=w.sp-0.5*w.L; O.onSplash(w.C[0]+D[0]*o,w.C[2]+D[2]*o,cl(-w.V[1]/6,0.3,1.5),w.L,w.yaw); } catch(e){} }
+      return; }
+    if (w.phase==='sink'){
+      // The broad back slaps flat on the water, which stops the fall within a body's depth, so that the whale lies
+      // on its back with the belly awash, almost where it fell. From there it settles slowly, never rising again;
+      // after a few seconds it rolls on round the way it was turning, right way up, and swims off.
+      w.t2=(w.t2||0)+h; const k=Math.exp(-3*h); w.V[0]*=k; w.V[2]*=k;
+      const up=w.t2<3.6, sink=up?0.12:0.35;
+      w.V[1]+=(-sink-w.V[1])*(1-Math.exp(-h*(w.V[1]<-sink?7:1.2)));
+      for (let i=0;i<3;i++) w.C[i]+=w.V[i]*h; { const om=1.4; w.pv+=(om*om*(0.02-w.pitch)-2*om*w.pv)*h; w.pitch+=w.pv*h; }
+      if (!w.sinkRoll){ w.sinkRoll=true; w.rollSign=Math.sign(w.roll)||1; w.rollT=Math.abs(w.roll)>1.2?w.rollSign*Math.PI:0; }
+      if (!up && Math.abs(w.rollT)===Math.PI) w.rollT=w.rollSign*TAU;
+      if (w.t2>5 && Math.abs(w.roll-w.rollT)<0.12 && Math.abs(w.pv)<0.05){ w.t2=0; w.roll-=w.rollT; w.rollT=0; w.sinkRoll=false; w.spd=Math.max(1,Math.hypot(w.V[0],w.V[1],w.V[2])); fromRigid(w);
+        if (w.resume==='surface'){ w.phase='rise'; w.ty=S.log?axisFor(w,S.show)-1.5:S.shallow; } else goDeep(w); }
+      return; }
+  }
+
+  /* ---------- where the body meets the water ---------- */
+  const _b=[0,0,0];
+  function surfaceFx(w,h){
+    const k=w.k, g=w.g, fx=Math.sin(w.yaw), fz=Math.cos(w.yaw);
+    const pts=(list,prev)=>{ const out=[]; for (const [s,x,y] of list){ const p=wpt(w,s*k,x*k,y*k,_a); out.push([p[0],p[1]-SEA,p[2]]); } return out; };
+    const tops=pts(g.tops), tips=pts(g.tips), bl=pts([g.blow])[0];
+    for (let i=0;i<w.cool.length;i++) w.cool[i]-=h;
+    // the blow: as the blowhole clears the water
+    if (w.prevBlow!==null && w.prevBlow<0 && bl[1]>=0 && w.blowCool<=0 && w.phase!=='flight' && w.phase!=='charge'){
+      const first=w.phase==='surface'&&w.breathN<=1, str=first?1.15:rr(0.85,1);
+      w.blowing={t:0,dur:rr(0.7,1.0)*(first?1.15:1),str}; w.blowCool=4; sound('blow',bl[0],SEA,bl[2],str);
+      patch(bl[0],bl[2],0.4,1.6*k,2.2,0.6); }
+    w.prevBlow=bl[1];
+    const cross=(arr,prev,base,big)=>{ if (!prev) return; for (let j=0;j<arr.length;j++){ const y0=prev[j], y1=arr[j][1]; if ((y0<0)===(y1<0) || w.cool[base+j]>0) continue;
+      const [x,,z]=arr[j], v=(y1-y0)/h, up=y1>=0, av=Math.abs(v), hw=Math.max(0.4,(big?g.halfW(g.tops[j][0])*k:0.5));
+      w.cool[base+j]=0.18;
+      const violent=w.phase==='flight'||w.phase==='sink'||w.phase==='charge';
+      if (av>2.6 && violent){ // a breach, the fall back, or flukes thrown clear: a crown of spray and a heavy mist over it
+        const n=Math.round(cl(av*hw*6,14,90)), vs=Math.max(av,0.65*w.L); drops(x,SEA,z,n,av*(up?0.7:rr(0.9,1.5)),1.2+hw,fx,fz,1.5,1.6);
+        if (j%3===0) ring(x,z,hw,hw*2.4+av*0.4,3.4,0.8); patch(x,z,hw*0.8,hw*2.2,4.2,1); if (!up) drops(x,SEA,z,Math.round(n*0.4),av*rr(1.4,2.1),0.8,fx,fz,0.5,1.3);
+        if (!up){ sprayCrown(x,SEA+0.1,z,Math.round(n*6),vs,hw*1.6); patch(x,z,hw*2,hw*4.5,9,1); if (j%2===0) ring(x,z,hw*2,hw*6+vs,6,0.7);
+          puff(x,SEA+0.3,z,{v:4,lat:0.7,life:[0.9,1.5],size:[0.25,0.45],grow:0.35,a:0.18,k:1.8,spread:0.4,fall:3.5},[0,1,0],av/7,Math.round(n*0.35)); }
+        if (w.cool[31]<=0){ sound('splash',x,SEA,z,cl(av/8,0,1)); w.cool[31]=0.6; } }
+      else if (up){ patch(x,z,hw*0.5,hw*1.4,2.4,0.55); if (R()<0.5) drops(x,SEA,z,4,1.2,0.6,fx,fz,0.4); }
+      else { ring(x,z,hw*0.4,hw*1.5,2.2,0.5); patch(x,z,hw*0.4,hw*1.1,2.0,0.45); } } };
+    cross(tops,w.prevTop,0,true); cross(tips,w.prevTips,20,false);
+    // a fluke print where the tail stock leaves the surface at the end of a surfacing or a dive
+    { const j=14; if (w.prevTop && w.prevTop[j]>=0 && tops[j][1]<0 && w.slickCool<=0){ w.slickCool=5;
+      slick(tops[j][0],tops[j][2],w.L*(w.phase==='fluke'||w.phase==='deep'?0.42:0.3),1.5,w.yaw,rr(30,45)); } }
+    w.prevTop=tops.map(p=>p[1]); w.prevTips=tips.map(p=>p[1]);
+    // wash where the back cuts the surface, and water running off the raised flukes
+    w.washT-=h;
+    if (w.washT<=0){ w.washT=0.09;
+      for (let j=0;j<tops.length-1;j++){ const a=tops[j], b=tops[j+1]; if ((a[1]>0)===(b[1]>0)) continue; const t=a[1]/(a[1]-b[1]);
+        const hw=g.halfW(lerp(g.tops[j][0],g.tops[j+1][0],t))*k; patch(lerp(a[0],b[0],t),lerp(a[2],b[2],t),hw*0.6,hw*(1.3+0.1*w.spd),1.8,0.5); } }
+    if (w.phase==='fluke' || (w.phase==='terminal' && w.lift<0.01)){ for (const [s,x,y] of g.tail){ const p=wpt(w,s*k,x*k,y*k,_a), hgt=p[1]-SEA;
+      if (hgt>0.25 && R()<h*14){ addP({sy:SEA,x:p[0]+(R()-0.5)*0.2,y:p[1]-0.05,z:p[2]+(R()-0.5)*0.2,vx:(R()-0.5)*0.4,vy:rr(-0.6,0.2),vz:(R()-0.5)*0.4,age:0,life:rr(0.8,1.6),size:rr(0.05,0.11),grow:0,a:rr(0.55,0.9),soft:0,drag:0.3});
+        } } }
+  }
+
+  function fxStep(dt){
+    const wx=WIND[0], wz=WIND[1];
+    for (let i=PT.length-1;i>=0;i--){ const p=PT[i]; p.age+=dt/p.life;
+      if (p.soft){ const k=Math.exp(-p.drag*dt); p.vx=p.vx*k+(wx-p.vx)*(1-k)*0.35+p.ex*p.sp*dt; p.vz=p.vz*k+(wz-p.vz)*(1-k)*0.35+p.ez*p.sp*dt; p.vy=p.vy*k-p.fall*dt; p.size+=dt*p.grow; }
+      else { const k=Math.exp(-p.drag*dt); p.vx*=k; p.vz*=k; p.vy-=(p.g||G)*dt; }
+      p.x+=p.vx*dt; p.y+=p.vy*dt; p.z+=p.vz*dt;
+      if (p.age>=1 || (!p.soft && p.y<p.sy-0.05 && p.vy<0)){ PT[i]=PT[PT.length-1]; PT.pop(); } }
+    for (let i=RG.length-1;i>=0;i--){ RG[i].age+=dt/RG[i].life; if (RG[i].age>=1) RG.splice(i,1); }
+  }
+
+  const _m=new THREE.Matrix4(), _q=new THREE.Quaternion(), _p=new THREE.Vector3(), _s=new THREE.Vector3(), _Y=new THREE.Vector3(0,1,0);
+  function write(){
+    for (const w of whales){
+      const vis=!w.dormant; w.body.visible=w.ghost.visible=w.mask.visible=vis; if (!vis) continue;
+      const g=w.g, pos=w.pos, k=w.k, sw=seaAt?seaAt(w.x,w.z):0;
+      const dS=stationLen(w), P=w.P, X=w.X, U=w.U;
+      for (let v=0;v<g.n;v++){ const s=g.bs[v]*k, x=g.bx[v]*k, y=g.by[v]*k; let f=s/dS, i=Math.floor(f); i=i<0?0:i>NS-2?NS-2:i; const t=f-i, a=i*3, b=a+3;
+        pos[v*3]=P[a]+(P[b]-P[a])*t+x*(X[a]+(X[b]-X[a])*t)+y*(U[a]+(U[b]-U[a])*t);
+        pos[v*3+1]=P[a+1]+(P[b+1]-P[a+1])*t+x*(X[a+1]+(X[b+1]-X[a+1])*t)+y*(U[a+1]+(U[b+1]-U[a+1])*t)+sw;
+        pos[v*3+2]=P[a+2]+(P[b+2]-P[a+2])*t+x*(X[a+2]+(X[b+2]-X[a+2])*t)+y*(U[a+2]+(U[b+2]-U[a+2])*t); }
+      w.geo.attributes.position.needsUpdate=true; w.gm.U.uSeaY.value=SEA+sw;
+      w.gm.ghost.color.setScalar(0.35+0.65*bright); w.gm.ghost.opacity=O.ghost; }
+    RG.forEach((g,i)=>{ const r=lerp(g.r0,g.r1,Math.sqrt(g.age)); _p.set(g.x,SEA+(seaAt?seaAt(g.x,g.z):0)+0.02,g.z); _q.setFromAxisAngle(_Y,g.yaw); _s.set(r,1,r*g.ex); _m.compose(_p,_q,_s); rings.setMatrixAt(i,_m); ringA.setXYZ(i,g.age,g.seed,g.str); });
+    rings.count=RG.length; rings.instanceMatrix.needsUpdate=true; ringA.needsUpdate=true;
+    PT.forEach((p,i)=>{ pPos[i*3]=p.x; pPos[i*3+1]=p.y; pPos[i*3+2]=p.z; pSize[i]=p.size; pSoft[i]=p.soft;
+      pAlpha[i]=p.soft?p.a*Math.pow(1-p.age,2.2)*Math.min(1,p.age*10+0.15):p.a*(1-p.age)*Math.min(1,p.age*8+0.3); });
+    pGeo.setDrawRange(0,PT.length); for (const k of ['position','aSize','aAlpha','aSoft']) pGeo.attributes[k].needsUpdate=true;
+  }
+
+  function disposeWhale(w){ parent.remove(w.body,w.mask,w.ghost); w.geo.dispose(); w.gm.ghost.dispose(); w.gm.mask.dispose(); }
+  let group=null;
+  function rebuild(){
+    const n=cl(Math.round(O.count),0,O.maxWhales);
+    if (whales.length && whales[0].key!==O.species){ for (const w of whales) disposeWhale(w); whales.length=0; RG.length=0; PT.length=0; }
+    if (!group) group={x:FX,z:FZ,head:R()*TAU,t:0,ph:R()*TAU};
+    while (whales.length>n) disposeWhale(whales.pop());
+    while (whales.length<n){ const w=newWhale(whales.length,group); w.dormant=true; whales.push(w); }
+    respawn(); }
+  // the group is placed afresh in open, deep water within reach of the focus, the first whale at the surface the
+  // first time; where there is none the whales wait and it is tried again every two seconds
+  let retry=0, firstPlace=true;
+  const okWater=(x,z)=>!keepOut(x,z) && depth(x,z)>15;
+  function respawn(){
+    let q=null;
+    if (whales.some(w=>!w.dormant) && okWater(group.x,group.z) && Math.hypot(group.x-FX,group.z-FZ)<RNG*1.5) q=[group.x,group.z];
+    for (let k=0;k<120 && !q;k++){ const a=R()*TAU, r=RNG*(firstPlace&&k<40?rr(0.05,0.3):rr(0.3,0.95)), x=FX+Math.sin(a)*r, z=FZ+Math.cos(a)*r; if (okWater(x,z)) q=[x,z]; }
+    if (!q){ for (const w of whales) w.dormant=true; retry=2; return; }
+    group.x=q[0]; group.z=q[1];
+    for (const w of whales) if (w.dormant){ w.dormant=false; w.group=group; place(w,firstPlace&&w.i===0); spine(w); }
+    firstPlace=false; }
+
+  function readCtx(ctx){
+    SEA=ctx.seaLevel||0; seaAt=ctx.seaAt||null;
+    if (ctx.depthAt) depthAt=ctx.depthAt; keepOut=ctx.keepOut||(()=>false); RNG=ctx.range||O.range; WIND=ctx.wind||O.wind;
+    const f=ctx.focus||(ctx.camera&&ctx.camera.position); if (f){ FX=f.x; FZ=f.z; }
+    bright=ctx.bright===undefined?1:ctx.bright; fxU.uBright.value=bright; }
+  let started=false;
+  function update(dt,ctx={}){
+    readCtx(ctx);
+    if (!started){ started=true; rebuild(); write(); }
+    if (ctx.paused || !(dt>0)) return;
+    dt=Math.min(dt,0.1); const n=Math.ceil(dt*60-1e-6), h=dt/n;
+    if (whales.length && whales.every(w=>w.dormant)){ retry-=dt; if (retry<=0) respawn(); }
+    for (let k=0;k<n;k++){ if (group) groupStep(group,h);
+      for (const w of whales){
+        if (w.dormant) continue;
+        if (Math.hypot(w.x-FX,w.z-FZ)>RNG*3 && !w.rigid){ for (const o of whales) o.dormant=true; respawn(); break; }
+        if (!w.rigid && (w.phase==='surface'||w.phase==='deep') && R()<O.breachesPerHour*w.S.breachK/3600*h) startBreach(w);
+        whaleStep(w,h); } }
+    fxStep(dt); write();
+  }
+  function setOptions(o){ const sp=o.species && o.species!==O.species; Object.assign(O,o);
+    if (started && (sp || 'count' in o)){ if (sp) group=null; rebuild(); write(); } }
+  function trigger(kind,i=0){ const w=whales[i%Math.max(1,whales.length)]; if (!w) return;
+    if (kind==='surface'){ if (w.phase==='deep'){ w.timer=0; w.sound=0; } }
+    else if (kind==='breach') startBreach(w);
+    else if (kind==='dive'){ if (w.phase==='surface') w.breathsLeft=1; } }
+  function reset(){ RG.length=0; PT.length=0; group=null; if (started){ for (const w of whales) disposeWhale(w); whales.length=0; rebuild(); write(); } }
+  function shift(dz){ if (group) group.z+=dz; for (const w of whales){ w.z+=dz; w.C[2]+=dz; for (const q of w.trail) q[2]+=dz; }
+    for (const g of RG) g.z+=dz; for (const q of PT) q.z+=dz; if (started){ for (const w of whales) spine(w); write(); } }
+  function dispose(){ for (const w of whales) disposeWhale(w); parent.remove(rings,spray); ringGeo.dispose(); pGeo.dispose(); for (const m of [bodyMat,ringMat,sprayMat]) m.dispose(); }
+  const fmt=s=>{ s=Math.max(0,Math.round(s)); return Math.floor(s/60)+':'+String(s%60).padStart(2,'0'); };
+  function status(i){ const w=whales[i]; if (!w) return ['',''];
+    switch (w.phase){
+      case 'deep': return ['Diving',w.sound>0?'sounding':'up in '+fmt(w.timer+Math.max(0,(w.ty-w.y)/0.6))];
+      case 'rise': return ['Rising','depth '+Math.round(-w.y)+' m'];
+      case 'surface': return [w.S.log?'Logging':'Surfacing','breath '+w.breathN+' of '+(w.breathN+w.breathsLeft-1)];
+      case 'terminal': return ['Last breath',w.S.terminal==='arch'?'arching':'fluking'];
+      case 'fluke': return ['Diving','flukes up'];
+      case 'prebreach': case 'charge': return ['Breach','rising fast'];
+      case 'flight': return ['Breach','clear of the water'];
+      case 'sink': return ['Breach','falling back'];
+    } return [w.phase,'']; }
+  return {update,setOptions,trigger,reset,shift,dispose,status,get whales(){ return whales; },options:O,species:SPECIES,
+    point:(i,s)=>{ const w=whales[i]; return w?wpt(w,s*w.L,0,0,[0,0,0]):null; }};
+}
+/* ================= end of whales ================= */
+
+/* Coast's whales: two humpbacks, far out in open water at least 350 m from any shore and clear of islands and rocks,
+   within about 700 m of the player. They surface to blow, raise their flukes to dive, and now and then breach; the
+   fall back after a breach is heard (the crash of whale_breach comes 1.25 s into the sample, and the sound is
+   started that long before the whale lands) and sends a ring of waves across the sea, which boats ride. A new
+   island places them afresh, and the north-south repeat moves them with the player. */
+function whKeepOut(x,z){
+  if (seaDist(x,z)>-350) return true;
+  for (let k=0;k<8;k++){ const a=k*Math.PI/4; if (heightAt(x+Math.cos(a)*200,z+Math.sin(a)*200)>-4) return true; }
+  return false; }
+const whales=createWhales(world,{species:'humpback',count:2,diveSeconds:150,breaths:5,breachesPerHour:6,range:700,ghost:0.5,layer:1,seed:(SEED*104729+7)>>>0,
+  onSound:(kind,x,y,z,st)=>{ if (kind==='breach') sndPlay('whale_breach','world',[x,0,z],{gain:1}); },
+  onSplash:(x,z,st,L,yaw)=>SEA.addRing(x,z,0.077*L*st,0.9*L,30,yaw,0.42*L)});
+const whFocus={x:0,z:0}, whWindO={x:0,z:0}, whWind=[0,0];
+const whCtx={camera,focus:whFocus,depthAt:(x,z)=>-heightAt(x,z),seaLevel:0,seaAt:(x,z)=>swellH(x,z),bright:1,paused:false,keepOut:whKeepOut,wind:whWind};
+let whSeed=SEED;
+wrapHooks.push(d=>whales.shift(d));
+function updateWhales(wdt){
+  if (SEED!==whSeed){ whSeed=SEED; whales.reset(); }
+  whFocus.x=player.x; whFocus.z=player.z; whCtx.paused=paused; whCtx.bright=surfMat.uniforms.uBright.value;
+  WIND.at(player.x,player.z,null,whWindO); whWind[0]=whWindO.x; whWind[1]=whWindO.z;
+  // the full sea shows the bodies under the water through its depth pass; the faint shape is for the coarse sea
+  whales.options.ghost=seaHidden?0:0.5*(1-SEA.uniforms.uDetail.value);
+  whales.update(wdt,whCtx);
+  // under the water the whales are heard singing: each submerged whale sends out a phrase every 5 to 14 s, heard
+  // from where it is and carrying far, as sound does in water; above the water nothing of it is heard
+  if (!paused && wdt>0) for (const w of whales.whales){ if (w.dormant) continue;
+    w.songT=(w.songT??Math.random()*6)-wdt;
+    if (w.songT<=0){ w.songT=5+Math.random()*9;
+      if (SNDS.wet>0.5 && w.y<-1.5 && !['flight','sink','charge'].includes(w.phase)) sndPlay('whale_song','player',[w.x,w.y,w.z],{gain:0.8+Math.random()*0.3,rate:0.94+Math.random()*0.12}); } }
+  // following a whale or a dolphin the water is clearer than a swimmer's, so that the animal can be made out from
+  // some way off and at depth: 70 m of visibility instead of 28
+  const vis=mode==='follow'&&(FOL.kind==='whale'||FOL.kind==='dolphin')?70:28; if (UW.options.visibility!==vis) UW.setOptions({visibility:vis});
+  if (window.__village && !window.__village.whales) window.__village.whales=whales;
+}
 
 /* ================= wind =================
    One wind over the whole sea, for Coast. Everything below this line and above the matching closing line is
@@ -7886,7 +8695,8 @@ ${GLSL} uniform float uPx; attribute vec2 aPar; varying float vA;
            -> the same for the ground round the eye, asked each time the eye enters another cell (wrecks and
            amphorae placed from the host's own seed), castShadow (true: rocks, the wreck and the fish cast shadows)
    L.update(dt, ctx)   ctx: eye {x,y,z} (the swimmer, whom the fish avoid), active (false: nothing is drawn or
-                       moved), surge (0..1: how strongly the swell rocks the weed), paused
+                       moved), fish (false: the fish are left out), surge (0..1: how strongly the swell rocks the
+                       weed), paused
    L.collide(p, r)     pushes the point p (Vector3) out of the boulders and the wreck, for a swimmer of radius r;
                        returns true if it moved it
    L.info() -> {cells, instances, fish, calls}
@@ -8147,11 +8957,11 @@ function createSeabedLife(parent, opts={}){
   const shade=(back,flank,belly)=>{ const B=C(back), F=C(flank), L=C(belly); return (y)=>y>0.35?B:y>-0.35?F:L; };
   const SPECIES={
     silver:{len:[0.11,0.16],h:0.085,w:0.045,st:[0.1,0.25,0.45,0.65,0.82,0.94],prof:u=>Math.pow(Math.sin(Math.PI*cl(u*0.95+0.04,0,1)),0.75),tail:0.09,fork:0.045,fin:C('#9aa6ad'),
-      col:(()=>{ const f=shade('#536b80','#c6d0d6','#eceeea'); return y=>f(y); })(),spec:'#d9e2ea',shin:60,amp:0.07,cap:420},
+      col:(()=>{ const f=shade('#536b80','#c6d0d6','#eceeea'); return y=>f(y); })(),spec:'#d9e2ea',shin:60,amp:0.07,cap:1400},
     chromis:{len:[0.09,0.13],h:0.16,w:0.055,st:[0.12,0.25,0.42,0.62,0.8,0.93],prof:u=>Math.pow(Math.sin(Math.PI*cl(u*0.92+0.06,0,1)),0.6),tail:0.15,fork:0.09,fin:C('#2a2826'),dors:[0.2,-0.28,0.04],
-      col:shade('#262427','#332f2d','#3f3a35'),spec:'#2a3a4a',shin:20,amp:0.06,cap:260},
+      col:shade('#262427','#332f2d','#3f3a35'),spec:'#2a3a4a',shin:20,amp:0.06,cap:700},
     bream:{len:[0.2,0.3],h:0.19,w:0.055,st:[0.1,0.16,0.2,0.26,0.4,0.55,0.66,0.7,0.76,0.86,0.95],prof:u=>Math.pow(Math.sin(Math.PI*cl(u*0.92+0.06,0,1)),0.62),tail:0.14,fork:0.07,fin:C('#7c8084'),dors:[0.2,-0.25,0.05],
-      col:(()=>{ const f=shade('#7f878d','#c3c6c1','#e2e0d8'), k=C('#1d1d1f'); return (y,u)=>(u>0.16&&u<0.24)||(u>0.66&&u<0.74&&y>-0.5)?k:f(y); })(),spec:'#cfd6da',shin:40,amp:0.06,cap:90},
+      col:(()=>{ const f=shade('#7f878d','#c3c6c1','#e2e0d8'), k=C('#1d1d1f'); return (y,u)=>(u>0.16&&u<0.24)||(u>0.66&&u<0.74&&y>-0.5)?k:f(y); })(),spec:'#cfd6da',shin:40,amp:0.06,cap:260},
     grouper:{len:[0.65,0.9],h:0.2,w:0.1,st:[0.1,0.2,0.4,0.6,0.78,0.9],prof:u=>Math.pow(Math.sin(Math.PI*cl(u*0.88+0.1,0,1)),0.55),yo:u=>-0.02*u,snout:-0.03,tail:0.1,fork:-0.02,fin:C('#4e3a2c'),dors:[0.25,-0.32,0.04],
       col:(()=>{ const B=C('#4f3b2d'), F=C('#644a36'), L=C('#a99474'), P=C('#8f7a5f'); return (y,u,p)=>{ const hh=hash(Math.round(p[1]*90),Math.round(p[2]*60),Math.round(p[0]*40))%10; return y<-0.4?L:hh<3?P:y>0.3?B:F; }; })(),spec:'#3a3028',shin:10,amp:0.035,cap:8}};
   const FM={};
@@ -8178,11 +8988,13 @@ function createSeabedLife(parent, opts={}){
       if (d>0.5){ rock+=hb.rock/9; grass+=hb.grass/9; deep=Math.max(deep,d); if (hb.rock>0.5 && d>2.5 && (!rockP || r()<0.4)) rockP=[x,z,d]; } }
     const spot=(minD)=>{ for (let t=0;t<12;t++){ const x=x0+r()*GCELL, z=z0+r()*GCELL, d=O.seaLevel-H(x,z); if (d>minD) return [x,z,d]; } return null; };
     if (rockP && rock>0.15){ const [x,z,d]=rockP;
-      if (r()<0.85) out.push(makeGroup('chromis',_p.set(x,H(x,z)+Math.min(d*0.45,2.2+r()*2),z),r,{cur:r()*TAU}));
-      if (r()<0.6){ const q=spot(2); if (q) out.push(makeGroup('bream',_p.set(q[0],H(q[0],q[1])+0.8,q[1]),r)); }
+      out.push(makeGroup('chromis',_p.set(x,H(x,z)+Math.min(d*0.45,2.2+r()*2),z),r,{cur:r()*TAU}));
+      if (r()<0.6){ const q=spot(2); if (q) out.push(makeGroup('chromis',_p.set(q[0],H(q[0],q[1])+Math.min(q[2]*0.45,1.5+r()*2),q[1]),r,{cur:r()*TAU})); }
+      for (let b=0;b<2;b++) if (r()<0.8){ const q=spot(2); if (q) out.push(makeGroup('bream',_p.set(q[0],H(q[0],q[1])+0.8,q[1]),r)); }
       if (d>5 && r()<0.4){ const gx2=x+(r()-0.5)*3, gz2=z+(r()-0.5)*3; out.push(makeGroup('grouper',_p.set(gx2,H(gx2,gz2)+0.9,gz2),r)); } }
-    if ((rock>0.1 || grass>0.3) && r()<0.55){ const q=spot(4); if (q) out.push(makeGroup('silver',_p.set(q[0],O.seaLevel-Math.min(q[2]*0.45,1.6+r()*3),q[1]),r)); }
-    if (grass>0.3 && r()<0.35){ const q=spot(3); if (q) out.push(makeGroup('bream',_p.set(q[0],H(q[0],q[1])+0.9,q[1]),r)); }
+    // shoals over every kind of ground, more of them where there is rock or meadow to shelter in
+    for (let b=0;b<2;b++) if (r()<((rock>0.1 || grass>0.3)?0.9:0.45)){ const q=spot(3); if (q) out.push(makeGroup('silver',_p.set(q[0],O.seaLevel-Math.min(q[2]*0.45,1.6+r()*3),q[1]),r)); }
+    if (grass>0.3 && r()<0.75){ const q=spot(3); if (q) out.push(makeGroup('bream',_p.set(q[0],H(q[0],q[1])+0.9,q[1]),r)); }
     for (const W of wrecks){ if (Math.floor(W.x/GCELL)!==gx || Math.floor(W.z/GCELL)!==gz) continue;
       out.push(makeGroup('chromis',_p.set(W.x,W.y+2.4,W.z),r,{cur:r()*TAU})); out.push(makeGroup('grouper',_p.set(W.x+1.6,W.y+0.7,W.z+0.5),r)); out.push(makeGroup('bream',_p.set(W.x-3,W.y+0.8,W.z+2),r)); }
     return out; }
@@ -8253,12 +9065,15 @@ function createSeabedLife(parent, opts={}){
     const on=!!ctx.active;
     if (on!==active){ active=on; for (const k in meshes) meshes[k].visible=on; for (const k in FM) FM[k].m.visible=on; for (const W of wrecks) W.m.visible=false; if (!on){ eyeCell=null; } }
     if (!on) return;
+    // ctx.fish false: the fish are not drawn or moved (their groups are kept for when they are wanted again)
+    const fishOn=ctx.fish!==false; for (const k in FM) FM[k].m.visible=fishOn;
     const e=ctx.eye, run=!ctx.paused&&dt>0, h=run?Math.min(dt,0.05):0;
     if (run) time+=h; T.uTime.value=time;
     const sg=ctx.surge??0.5; T.uSurge.value.set(0.05+0.13*sg,0.03+0.06*sg);
     const key=Math.floor(e.x/CELL)+','+Math.floor(e.z/CELL);
     if (key!==eyeCell){ eyeCell=key; syncProps(e.x,e.z); refill(e.x,e.z); }
     for (const W of wrecks) W.m.visible=Math.hypot(W.x-e.x,W.z-e.z)<O.radius+8;
+    if (!fishOn){ st.fish=0; return; }
     // the groups round the eye
     const gx0=Math.floor(e.x/GCELL), gz0=Math.floor(e.z/GCELL), GR=O.radius+20;
     groupKeys.clear();
@@ -8594,9 +9409,11 @@ function underwaterKey(){
   player.x=spot.x; player.z=spot.z; mode='swim';
   swimmer.enter({x:spot.x,y:spot.y,z:spot.z,yaw,pitch:fpPitch});
   const S=swimmer.state; S.mode='under'; S.under=true; S.underT=2; diveQuiet=true; }
-// following a gull (7) or a dolphin (8): the camera flies behind the nearest one in flight or in the water, the mouse
-// carries it round, and + and − bring it nearer or further; the same key again, or 5, returns the player to where they
-// were before. FOL.t is the creature followed: a gull's index, or a dolphin
+// following a whale (7) or a dolphin (8): the camera follows behind the nearest one in the water, the mouse carries it
+// round, and + and − bring it nearer or further; the same key again, or 5, returns the player to where they were
+// before. FOL.t is the creature followed: a gull's index (gulls are followed only from a saved view), a dolphin or a
+// whale. A whale is followed under the water as it dives; when it makes ready to breach the camera comes up above
+// the surface and stands off to its side, so that the leap is seen whole.
 const FOL={kind:null,t:null,yaw:0,pitch:0.25,d:10,fresh:true,ret:null,p:new THREE.Vector3()};
 function leaveModes(){
   if (sailD) dinghyAshore(true); if (riding()) leaveTrain('street'); if (mode==='ferry'||ridden) leaveFerry('street'); if (mode==='coach') mode='street';
@@ -8605,17 +9422,19 @@ function leaveModes(){
 function followTarget(kind){
   let best=null, bd=Infinity;
   if (kind==='gull'){ const B=GULLS.birds; for (let i=0;i<B.length;i++){ const b=B[i]; if (b.mode>2) continue; const d=Math.hypot(b.x-player.x,b.z-player.z); if (d<bd){ bd=d; best=i; } } }
+  else if (kind==='whale'){ for (const w of whales.whales){ if (w.dormant) continue; const q=Math.hypot(w.x-player.x,w.z-player.z); if (q<bd){ bd=q; best=w; } } }
   else for (const d of dolphins.dolphins){ if (d.pod.dormant) continue; const q=Math.hypot(d.x-player.x,d.z-player.z); if (q<bd){ bd=q; best=d; } }
   return best; }
 function followPose(out){
   if (FOL.kind==='gull'){ const b=GULLS.birds[FOL.t]; if (!b) return null; out.set(b.x,b.y,b.z); return b.psi; }
+  if (FOL.kind==='whale'){ const w=FOL.t, i=whales.whales.indexOf(w); if (!w || i<0 || w.dormant) return null; const c=whales.point(i,0.45); out.set(c[0],c[1],c[2]); return w.yaw; }
   const d=FOL.t; if (!d || dolphins.dolphins.indexOf(d)<0) return null; out.set(d.x,d.y,d.z); return d.head; }
 function followKey(kind){
   if (mode==='follow' && FOL.kind===kind){ followLeave(); return; }
   const ret=mode==='follow'?FOL.ret:null;
   if (mode==='follow'){ if (FOL.kind==='gull' && GULLS.birds[FOL.t]) GULLS.birds[FOL.t].lead=null; mode='street'; } else leaveModes();
   const t=followTarget(kind); if (t===null){ if (ret) followBack(ret); return; }
-  FOL.kind=kind; FOL.t=t; FOL.yaw=0; FOL.pitch=kind==='gull'?0.15:0.08; FOL.d=kind==='gull'?4.5:7; FOL.fresh=true;
+  FOL.kind=kind; FOL.t=t; FOL.yaw=0; FOL.pitch=kind==='gull'?0.15:0.08; FOL.d=kind==='gull'?4.5:kind==='whale'?t.L*1.7:7; FOL.fresh=true;
   FOL.ret=ret||{x:player.x,y:player.y,z:player.z,yaw};
   if (document.pointerLockElement) document.exitPointerLock();
   mode='follow'; camera.fov=60; camera.near=0.2; camera.far=3600; camera.updateProjectionMatrix(); glowScale();
@@ -8639,17 +9458,20 @@ function followStep(dt){
   const zk=((keys.Minus||keys.NumpadSubtract)?1:0)-((keys.Equal||keys.NumpadAdd)?1:0);
   if (zk) FOL.d=clamp(FOL.d*Math.exp(zk*dt*1.5),4,120);
   // the gull's heading and position are eased, so that the camera does not swing with every turn and wingbeat
-  const P=FOL.p, wet=FOL.kind==='dolphin', kh=FOL.kind==='gull'?1.2:3;
+  const P=FOL.p, wet=FOL.kind==='dolphin'||FOL.kind==='whale', kh=FOL.kind==='gull'?1.2:FOL.kind==='whale'?1.5:3;
+  const wh=FOL.kind==='whale'?FOL.t:null, brch=wh && (['flight','sink'].includes(wh.phase) || (wh.phase==='charge' && wh.y>-wh.L*0.45));   // up out of the water about a second before the whale breaks it
   if (FOL.fresh || FOL.h===undefined){ FOL.h=h; FOL.tp=(FOL.tp||new THREE.Vector3()).copy(P); }
   FOL.h+=Math.atan2(Math.sin(h-FOL.h),Math.cos(h-FOL.h))*(1-Math.exp(-dt*kh)); FOL.tp.lerp(P,1-Math.exp(-dt*(FOL.kind==='gull'?3:8)));
-  const a=FOL.h+Math.PI+FOL.yaw, cp=Math.cos(FOL.pitch);
+  const a=FOL.h+(brch?Math.PI*0.62:Math.PI)+FOL.yaw, cp=Math.cos(FOL.pitch);
   camTarget.copy(FOL.tp);
-  const want=_cv.set(P.x+Math.sin(a)*cp*FOL.d, camTarget.y+Math.sin(FOL.pitch)*FOL.d, P.z+Math.cos(a)*cp*FOL.d);
+  if (brch) camTarget.y=Math.max(FOL.tp.y,0)+wh.L*0.2;
+  const dd=brch?Math.max(FOL.d,wh.L*2.4):FOL.d;
+  const want=_cv.set(P.x+Math.sin(a)*cp*dd, camTarget.y+Math.sin(FOL.pitch)*dd, P.z+Math.cos(a)*cp*dd);
   // the dolphin's camera is under the water while it swims under, and comes up with it as it surfaces or leaps
-  const sub=wet && P.y<-0.3;
-  if (wet) want.y=sub?Math.min(want.y,-0.7):Math.max(want.y,1.2);
+  const sub=wet && P.y<-0.3 && !brch;
+  if (wet) want.y=sub?Math.min(want.y,-0.7):Math.max(want.y,brch?Math.max(3,wh.L*0.3):1.2);
   want.y=Math.max(want.y,heightAt(want.x,want.z)+(wet?0.8:2));
-  if (FOL.fresh || camPos.distanceTo(want)>60){ camPos.copy(want); FOL.fresh=false; } else camPos.lerp(want,1-Math.exp(-dt*(FOL.kind==='gull'?1.6:4)));
+  if (FOL.fresh || camPos.distanceTo(want)>60){ camPos.copy(want); FOL.fresh=false; } else camPos.lerp(want,1-Math.exp(-dt*(FOL.kind==='gull'?1.6:FOL.kind==='whale'?(brch?2.6:2.5):4)));
   camPos.y=Math.max(camPos.y,heightAt(camPos.x,camPos.z)+(wet?0.6:1.5));
   camera.position.copy(camPos); camLookAt(camTarget);
   // the player is carried with the creature, so that the world, the flock and the pods are built and kept round it
@@ -10389,7 +11211,7 @@ const SOUND_DEF={
   train_doors_open:{g:0.7,ref:3}, train_doors_close:{g:0.7,ref:3},
   ferry_start:{g:1,ref:15}, ferry_run:{g:1,ref:15}, ferry_stop:{g:1,ref:15}, ferry_idle:{g:0.7,ref:8}, ferry_wake:{g:0.9,ref:10},
   ferry_horn:{g:1,ref:35}, ferry_gangway:{g:0.8,ref:5}, ferry_gate:{g:0.6,ref:3}, ferry_fender:{g:0.7,ref:4},
-  bow_wave:{g:0.8}, splash:{g:0.9}, sail_flap:{g:0.5}, sail_wind:{g:0.8}, sail_over:{g:0.8}, gybe_bang:{g:0.9}, hull_knock:{g:0.8},
+  bow_wave:{g:0.8}, splash:{g:0.9}, whale_breach:{g:1,ref:60}, whale_song:{g:0.9,ref:120}, sail_flap:{g:0.5}, sail_wind:{g:0.8}, sail_over:{g:0.8}, gybe_bang:{g:0.9}, hull_knock:{g:0.8},
 };
 const SND={asked:{}, ready:false, buf:{}, last:{}, master:null, rev:null, revOut:null, bus:{}, cut:{}, gmul:{}, send:{}, voices:[], t:{}};
 // sounds without recordings of their own borrow those of a like sound until they have them
@@ -10573,9 +11395,10 @@ function sndUpdate(dt){
   SND.cut.world=inCoach?900:inCab?1400:iK>0.02?20000*Math.pow(1200/20000,iK):20000; SND.cut.train=inCoach?1100:inCab?1800:20000; SND.cut.ferry=cabin?1800:20000; SND.cut.player=20000;
   SND.gmul.world=(inside?0.7:1-0.45*iK)*(1-0.92*(room||inCave?0:tK)); SND.gmul.train=1; SND.gmul.ferry=1; SND.gmul.player=1;
   SND.send.world=0; SND.send.train=0.8*tK; SND.send.ferry=0; SND.send.player=0.8*tK;
-  // with the ears under the water the sounds of the air are muffled and lowered, as far as the lens is under (UW.wet)
-  SNDS.wet=(SNDS.wet??0)+((mode==='swim'?UW.wet:0)-(SNDS.wet??0))*(1-Math.exp(-dt*10));
-  if (SNDS.wet>0.001){ const w=SNDS.wet; for (const g of ['world','train','ferry']){ SND.cut[g]=Math.min(SND.cut[g],20000*Math.pow(500/20000,w)); SND.gmul[g]*=1-0.7*w; } }
+  // with the ears under the water (swimming, or the camera following a dolphin or a whale under) the sounds of the
+  // air are muffled and all but silenced, as far as the lens is under (UW.wet), and the water is heard instead
+  SNDS.wet=(SNDS.wet??0)+((wetView()?UW.wet:0)-(SNDS.wet??0))*(1-Math.exp(-dt*10));
+  if (SNDS.wet>0.001){ const w=SNDS.wet; for (const g of ['world','train','ferry']){ SND.cut[g]=Math.min(SND.cut[g],20000*Math.pow(500/20000,w)); SND.gmul[g]*=1-0.92*w; } }
   for (const g in SND.bus) sndParam(SND.bus[g].lp.frequency,SND.cut[g],0.15);
   sndParam(SND.revOut.gain,tK>0.01?1:0,0.2);
 
@@ -10744,7 +11567,7 @@ function sndFerries(dt){
 // 5 the ferry, 6 the dinghy, 7 following a gull, 8 following a dolphin, 9 under the water by a wreck, and 0 the view from behind (the train followed, the ferry or the dinghy from astern). Each is translated to the
 // name the handlers below use; the letters that once did the same no longer do (C is still held to dive)
 const VIEW_KEY={Digit1:'ToStart',Numpad1:'ToStart',Digit2:'KeyV',Numpad2:'KeyV',Digit3:'KeyR',Numpad3:'KeyR',Digit4:'KeyG',Numpad4:'KeyG',
-  Digit5:'KeyF',Numpad5:'KeyF',Digit6:'KeyY',Numpad6:'KeyY',Digit7:'Gull',Numpad7:'Gull',Digit8:'Dolphin',Numpad8:'Dolphin',Digit9:'Under',Numpad9:'Under',Digit0:'KeyC',Numpad0:'KeyC'};
+  Digit5:'KeyF',Numpad5:'KeyF',Digit6:'KeyY',Numpad6:'KeyY',Digit7:'Whale',Numpad7:'Whale',Digit8:'Dolphin',Numpad8:'Dolphin',Digit9:'Under',Numpad9:'Under',Digit0:'KeyC',Numpad0:'KeyC'};
 const OLD_VIEW=new Set(['KeyR','KeyG','KeyF','KeyY','KeyV','KeyC']);
 addEventListener('keydown',e=>{ keys[e.code]=true;
   const code=VIEW_KEY[e.code]||(OLD_VIEW.has(e.code)?'':e.code);
@@ -10766,7 +11589,7 @@ addEventListener('keydown',e=>{ keys[e.code]=true;
   if (code==='KeyY' && !e.repeat) dinghyKey();
   if (e.code==='KeyF' && !e.repeat && mode==='swim') torchOn=!torchOn;
   if (code==='Under' && !e.repeat) underwaterKey();
-  if (code==='Gull' && !e.repeat) followKey('gull');
+  if (code==='Whale' && !e.repeat) followKey('whale');
   if (code==='Dolphin' && !e.repeat) followKey('dolphin');
   if (code==='ToStart' && !e.repeat) homeKey();
   if (code==='KeyB' && e.shiftKey){ if (!e.repeat){ setAO(!aoOn); toast('Ambient occlusion',aoOn?'on':'off'); } }
@@ -10787,8 +11610,8 @@ addEventListener('keydown',e=>{ keys[e.code]=true;
   if (code==='KeyN' && !e.repeat){ hour=nightU.value>0.5?10:22; SNDS.hour=Math.floor(hour); }   // to night, or back to day, without the bells striking the jump
   if (code==='KeyM' && !e.repeat) setMuted(!muted);
   if (code==='KeyK' && !e.repeat){ PEOPLE.setLevel(PEOPLE.level+(e.shiftKey?-1:1)); toast('Population level',`${PEOPLE.level}`); }   // 0, no one, to 9
-  // F sets full screen, except in the water, where it turns the diver's torch on or off
-  if (e.code==='KeyF' && mode!=='swim'){ e.preventDefault(); if (!e.repeat) try{ if (document.fullscreenElement) document.exitFullscreen(); else { const q=document.documentElement.requestFullscreen(); if (q&&q.catch) q.catch(()=>{}); } }catch(_){} }
+  // Tab sets full screen
+  if (e.code==='Tab'){ e.preventDefault(); if (!e.repeat) try{ if (document.fullscreenElement) document.exitFullscreen(); else { const q=document.documentElement.requestFullscreen(); if (q&&q.catch) q.catch(()=>{}); } }catch(_){} }
   if ((code==='Minus'||code==='NumpadSubtract') && (mode==='street'||(mode==='ferry'&&!feChase)) && !e.repeat) toggleView();
   if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(code)) e.preventDefault(); });
 addEventListener('keyup',e=>{ keys[e.code]=false; });
@@ -11565,7 +12388,7 @@ function sceneRestore(o){
       ridden=null; player.x=x; player.z=z; player.y=0; player.vy=0; eyeY=null; dinghyBoard(e); { const S=e.D.state; S.u=N(o.D,5); S.boom=N(o.D,6,S.boom); S.sheet=N(o.D,7,S.sheet); } if (Number.isFinite(+o.D[8])) WIND.set({dir:+o.D[8]});
       dgyLook.yaw=N(l,0); dgyLook.pitch=N(l,1,-0.1); if (m==='astern'){ dgyChase=true; dgyChaseD=clamp(N(l,2,11),5,80); } firstCam=true; }
     else walk(); }
-  else if (m==='gull'||m==='dolphin'){
+  else if (m==='gull'||m==='dolphin'||m==='whale'){
     // the gulls and the dolphins come about the player only after the start, so the view waits above the place where
     // the creature was (over the water, where a walker would fall in) until one is there, for up to four seconds, and
     // then follows the nearest one; failing that, the player is set down at the place to return to
@@ -11818,8 +12641,12 @@ function seaDepthPass(){
   renderer.shadowMap.autoUpdate=au; renderer.setRenderTarget(null);
 }
 function render(){
+  SEA.mesh.material.visible=!seaHidden; surfMat.visible=!seaHidden; bedViewU.value=seaHidden?1:0; if (UW.surface.material) UW.surface.material.visible=!seaHidden;
   seaDepthPass();
   // in the water, under it or with the waterline across the lens, the water draws the frame
+  // with the water hidden (the key left of 1) the frame is drawn as in air even under the surface, so the sea bed and what swims
+  // over it are seen clearly
+  if (seaHidden && wetView()){ const u=UW.uniforms.uUnderOn.value; UW.uniforms.uUnderOn.value=0; try { renderMain(); } finally { UW.uniforms.uUnderOn.value=u; scene.matrixWorldAutoUpdate=true; } return; }
   try { if (wetView() && diveRender()) return; renderMain(); } finally { scene.matrixWorldAutoUpdate=true; } }
 // wholly under the water nothing lies within reach but the water, so the distant terrain, its outline and the sky,
 // which the near far plane would clip, are not drawn at all
@@ -11937,7 +12764,7 @@ const swimmer=createSwimmer({groundAt:(x,z)=>heightAt(x,z),surfaceAt:(x,z)=>SEA.
 const swimIn={fwd:0,strafe:0,rise:0,sprint:false,yaw:0,pitch:0};
 let diveOn=false, swimExitT=0, diveQuiet=false;
 // the water's passes run for the swimmer, and for the camera following a dolphin, which goes under with it
-const wetView=()=>mode==='swim'||(mode==='follow'&&FOL.kind==='dolphin');
+const wetView=()=>mode==='swim'||(mode==='follow'&&(FOL.kind==='dolphin'||FOL.kind==='whale'));
 // into the water from the shore, wading on from where the walker stood
 function swimEnter(dt){
   mode='swim'; swimmer.enter({x:player.x,y:(eyeY??player.y)+1.62,z:player.z,yaw,pitch:fpPitch,vx:(player.x-(player.ox??player.x))/Math.max(dt,1e-3),vz:(player.z-(player.oz??player.z))/Math.max(dt,1e-3)}); }
@@ -12001,7 +12828,8 @@ function diveFrame(dt,wdt){
   // wholly under the water the sea's depth pass has nothing to show
   if (UW.lens==='under') seaDepth.on=false;
   _dvEye.x=camera.position.x; _dvEye.y=camera.position.y; _dvEye.z=camera.position.z;
-  L.update(dt,{eye:_dvEye,active:true,paused,surge:clamp(SEA.info().hs*0.8+0.4,0,1)}); }
+  // following a whale or a dolphin there are no fish: the seabed's life is drawn without them
+  L.update(dt,{eye:_dvEye,active:true,fish:sw,paused,surge:clamp(SEA.info().hs*0.8+0.4,0,1)}); }
 // the frame above the water, into a target, for the view split at the waterline; the shadows are already drawn
 function diveAbove(target){ const au=renderer.shadowMap.autoUpdate; renderer.shadowMap.autoUpdate=false; renderer.setRenderTarget(target); renderer.render(scene,camera); renderer.shadowMap.autoUpdate=au; }
 // the heart as breath runs low, the dive and the surfacing, and a gasp; made here, since they have no recordings.
@@ -12323,6 +13151,7 @@ function frame(now){
   if (window.__freeCam){ camera.position.copy(window.__freeCam.p); camLookAt(window.__freeCam.t); sky.position.copy(camera.position); }
   updateBeams(wdt);
   updateDolphins(wdt);
+  updateWhales(wdt);
   updateCats(wdt);
   PEOPLE.update(wdt);
   updateFleet(dt);

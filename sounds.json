@@ -36,5 +36,22 @@
   "amb_cicadas": "sounds/cicadas.mp3",
   "ferry_horn": "sounds/ferry-horn.mp3",
   "door_open": "sounds/door-open.mp3",
-  "sail_over": "sounds/sail-over.mp3"
+  "sail_over": "sounds/sail-over.mp3",
+  "whale_breach": "sounds/whale-breach.mp3",
+  "whale_song": [
+    "sounds/whale-song-01.mp3",
+    "sounds/whale-song-02.mp3",
+    "sounds/whale-song-03.mp3",
+    "sounds/whale-song-04.mp3",
+    "sounds/whale-song-05.mp3",
+    "sounds/whale-song-06.mp3",
+    "sounds/whale-song-07.mp3",
+    "sounds/whale-song-08.mp3",
+    "sounds/whale-song-09.mp3",
+    "sounds/whale-song-10.mp3",
+    "sounds/whale-song-11.mp3",
+    "sounds/whale-song-12.mp3",
+    "sounds/whale-song-13.mp3",
+    "sounds/whale-song-14.mp3"
+  ]
 }
