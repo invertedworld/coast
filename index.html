@@ -14126,8 +14126,8 @@ if (new URLSearchParams(location.search).has('perf')){
 
 /* ================= boot ================= */
 // The world is built in steps, each followed by a paint, so that a bar shows how far it has come: the first blocks
-// round the player (for 400 ms, as before), the tiles, the distant land and the water. The bar then stays, filling,
-// while the rest of the blocks round the player are built in the first frames, and goes when they are done.
+// round the player (for 400 ms, as before), the tiles, the distant land and the water. The bar goes as soon as the
+// world can be explored; the rest of the blocks build in as the player moves about.
 requestAnimationFrame(()=>setTimeout(async ()=>{
   const W='Building the world:', ld=document.getElementById('loading'); if (ld) ld.remove();
   seedShow(0.03,W); await nextPaint();
@@ -14140,13 +14140,9 @@ requestAnimationFrame(()=>setTimeout(async ()=>{
   seedShow(0.68,W); await nextPaint(); rebuildFar(player.x,player.z); farDirty=true;
   seedShow(0.78,W); await nextPaint();
   try { divePrewarm(); } catch(err){ console.warn('The water could not be prepared:',err); }
-  seedShow(0.88,W); await nextPaint();
+  seedShow(1,W); await nextPaint();
   if (SCENE) try{ sceneRestore(SCENE); }catch(err){ console.warn('The shared scene could not be restored:',err); }
-  last=performance.now(); requestAnimationFrame(frame);
-  const q0=Math.max(1,queue.length), tb=performance.now();
-  const tick=()=>{ if (seeding) return; if (!queue.length || performance.now()-tb>20000){ seedEl.hidden=true; return; }
-    seedShow(0.88+0.12*(1-queue.length/q0),W); requestAnimationFrame(tick); };
-  tick();
+  seedEl.hidden=true; last=performance.now(); requestAnimationFrame(frame);
 },30));
 window.__village={ get seed(){ return SEED_TEXT; }, share:{state:sceneState,link:sceneLink,qrEncode,get shared(){ return SCENE; }}, get paused(){ return paused; }, set paused(v){ if (!!v!==paused){ paused=!!v; lastClock=null; } }, goods, glZone, branchesAt, get mantle(){ return mantle; }, get colRoof(){ return colRoof; }, roofAt, roofSlope, topAt, get sit(){ return sit; }, get indoors(){ return indoors; }, roomFns:{flight,localToWorld,obbLocal,roomCeil}, sitKey, sitFind, sitStand, sitSpotOk, beachStretch, BCH_SP, COACH_SEATS, FERRY_SEATS, coachEnter, genChunk, coastRoadZ, brZ, brY, heightAt, player, chunks, rooms, doorMesh, keys, setYaw:v=>{yaw=v;}, get yaw(){return yaw;}, fe, co, lightsNear, beams, ruinIn, cats, catHome, PEOPLE, get ridden(){ return ridden; },
   findHarbour(){ for (let d=0;d<12;d++) for (const sd of SIDES) for (const n of [Math.floor(player.x/HARB)+d,Math.floor(player.x/HARB)-d]){ const H=harbourInfo(sd,n); if (H) return {x:H.x,z:coastZ(sd,H.x)+sd*7,W:H.W,sd,qz:coastZ(sd,H.x+H.W/2-1)+sd*2.5}; } return null; },
