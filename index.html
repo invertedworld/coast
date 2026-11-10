@@ -5768,8 +5768,11 @@ function catFits(x,z,fx,fz,y){
     for (const t of T) if (t>y+1.9) return false; }
   return true; }
 const catSurf=(T,lim)=>{ let b=-1e9; for (const t of T) if (t<=lim && t>b) b=t; return b; };
+// cats keep off the railway: the track and its bed, out to the edge of a platform
+const CAT_RAIL=2.3, catOffRail=(x,z)=>railPerp(x,z)>=CAT_RAIL;
 // a route in short steps from where the cat stands: level or gently sloping ground is walked, a rise of up to 1.9 m is
-// a leap up and a fall of up to 3 m a jump down. The route fails at a building, a tree, deep water or a higher wall
+// a leap up and a fall of up to 3 m a jump down. The route fails at a building, a tree, deep water, a higher wall or
+// the railway
 function catPlan(s,tx,tz){
   const d=Math.hypot(tx-s.x,tz-s.z), n=Math.max(1,Math.ceil(d/0.35)), pts=[]; let y=s.y;
   const fx=(tx-s.x)/(d||1), fz=(tz-s.z)/(d||1);
@@ -5780,6 +5783,7 @@ function catPlan(s,tx,tz){
     else if (Math.max(...T)>y+1.9) return null;                         // a wall too high to climb
     if (ny<y-0.45){ if (y-ny>3) return null; jump=true; }               // an edge: jump down
     if (ny<0.3) return null;                                            // water
+    if (!catOffRail(x,z)) return null;                                  // the railway
     if (!catFits(x,z,fx,fz,ny)) return null;
     pts.push({x,z,y:ny,jump}); y=ny; }
   return pts; }
@@ -5791,7 +5795,7 @@ function catHome(ch){
   if (ch.lod===0 && CAT_KINDS.has(ch.kind) && hash(ch.cx,ch.cz,2101)<0.4){
     const R=rng(Math.floor(hash(ch.cx,ch.cz,2102)*4294967296)), P=ch.piazza;
     for (let t=0;t<30;t++){ const x=P?P.x+(R()-0.5)*P.r*1.6:ch.cx*C+R()*C, z=P?P.z+(R()-0.5)*P.r*1.6:ch.cz*C+R()*C, T=catTops(x,z);
-      if (T && T[0]>0.4 && [[1,0],[0,1],[0.7,0.7],[0.7,-0.7]].every(([fx,fz])=>catFits(x,z,fx,fz,catSurf(T,T[0]+0.45)))){ ch.catHome={x,z,y:catSurf(T,T[0]+0.45),id:ch.cx+','+ch.cz,coat:Math.floor(hash(ch.cx,ch.cz,2103)*CAT_COATS.length),owl:hash(ch.cx,ch.cz,2104)<0.4}; break; } } }
+      if (T && T[0]>0.4 && catOffRail(x,z) && [[1,0],[0,1],[0.7,0.7],[0.7,-0.7]].every(([fx,fz])=>catFits(x,z,fx,fz,catSurf(T,T[0]+0.45)))){ ch.catHome={x,z,y:catSurf(T,T[0]+0.45),id:ch.cx+','+ch.cz,coat:Math.floor(hash(ch.cx,ch.cz,2103)*CAT_COATS.length),owl:hash(ch.cx,ch.cz,2104)<0.4}; break; } } }
   return ch.catHome; }
 function makeCat(coat){
   const K=CAT_COATS[coat], c=new Cat({...K,audio:null});
@@ -6136,7 +6140,7 @@ const tileable=(ch,pcx,pcz)=>ch.lod>=2 || (ch.lod===1 && Math.max(Math.abs(ch.cx
 // still arriving it is not merged over and over again (a tile of simplified blocks takes some milliseconds); a tile a
 // block has left is rebuilt at once, whatever its state
 function updateTiles(budgetMs=2){
-  const t0=performance.now(), pcx=Math.floor(player.x/C), pcz=Math.floor(player.z/C);
+  const t0=performance.now(), pcx=ringX, pcz=ringZ;
   for (const tk of [...tilesUrgent,...tilesDirty]){
     if (performance.now()-t0>budgetMs) break;
     const urgent=tilesUrgent.has(tk); tilesUrgent.delete(tk); tilesDirty.delete(tk);
@@ -6186,22 +6190,49 @@ function setDrawLvl(step){
 }
 function wantLod(dx,dz){ const d=Math.max(Math.abs(dx),Math.abs(dz)); return d<=LOD0?0:d<=VIEW?1:d<=lodRing()?2:-1; }
 let chunkState='', queueT=0;
-const _vf=new THREE.Frustum(), _vm=new THREE.Matrix4(), _vb=new THREE.Box3();
-// The blocks waiting to be built are taken nearest first, but those the camera does not see wait longer, as though
-// eight times as far off (all but the few right round the player), so that after the draw distance is raised the view
-// fills in long before the land behind the camera. The order is worked out again whenever the rings change, and every
-// third of a second while blocks are waiting, as the camera turns
+const _vf=new THREE.Frustum(), _vm=new THREE.Matrix4(), _vb=new THREE.Box3(), _vd=new THREE.Vector3(), sortDir=new THREE.Vector3();
+// The player's velocity over the ground, smoothed over about a third of a second, whichever way they travel (on foot,
+// by train, ferry or dinghy, or carried across the bird's-eye view); a jump of more than 60 m in one frame (a journey,
+// a click to somewhere else, the world wrapping round) starts it afresh from rest
+const mot={x:NaN,z:NaN,vx:0,vz:0,ox:0,oz:0};
+function trackMotion(dt){
+  if (!(dt>0)) return;
+  const dx=player.x-mot.x, dz=player.z-mot.z; mot.x=player.x; mot.z=player.z;
+  if (!(Math.abs(dx)+Math.abs(dz)<60)){ mot.vx=mot.vz=0; mot.ox=mot.oz=0; return; }
+  const k=1-Math.exp(-dt*3); mot.vx+=(dx/dt-mot.vx)*k; mot.vz+=(dz/dt-mot.vz)*k;
+  // the rings of detail are centred up to LOD0-1 blocks ahead of a moving player, where they will be in three seconds,
+  // so that detail is added further ahead and shed sooner behind, with as many blocks in each ring as before. The
+  // player's own block and those beside it stay at full detail. The offset is a whole number of blocks, and only
+  // changes when the place three seconds ahead is three quarters of a block from it, so that it does not flicker
+  const m=Math.max(0,LOD0-1), tx=clamp(mot.vx*3/C,-m,m), tz=clamp(mot.vz*3/C,-m,m);
+  if (Math.abs(tx-mot.ox)>0.75) mot.ox=Math.round(tx); if (Math.abs(tz-mot.oz)>0.75) mot.oz=Math.round(tz);
+  mot.ox=clamp(mot.ox,-m,m); mot.oz=clamp(mot.oz,-m,m); }
+// The blocks waiting to be built are taken in the order in which they will be wanted. That is nearest the camera first
+// while the player stands still (in the bird's-eye view, the land below the camera before that further off); on the
+// move, nearest to where the camera will be in four seconds (no further ahead than half the simplified ring), so that
+// a train, a boat or a view carried across the island builds what it is heading for before what it leaves behind.
+// Those the camera does not see wait longer, as though eight times as far off, so that after the draw distance is
+// raised the view fills in long before the land behind the camera; the few blocks right round the player come first
+// of all. The order is worked out again whenever the rings change, every third of a
+// second while blocks are waiting, and at once when the camera has turned through more than 20 degrees
 function inView(cx,cz){
   const gj=Math.round((cz+0.5)*C/FS), F=farPoint(Math.round((cx+0.5)*C/FS),gj-WRAP_J*Math.round(gj/WRAP_J)), h=Math.max(F.h,0);   // the distant terrain's height there, as a guide to the block's
   _vb.min.set(cx*C-8,h-40,cz*C-8); _vb.max.set(cx*C+C+8,h+60,cz*C+C+8); return _vf.intersectsBox(_vb); }
 // loading (a whole island at once, as at the start or while a new one is seeded) builds every block outright,
 // without fading, in slices of budgetMs
+let ringX=0, ringZ=0;   // the block on which the rings of detail are centred
 function updateChunks(px,pz,budgetMs,loading=budgetMs>=1e8){
-  const pcx=Math.floor(px/C), pcz=Math.floor(pz/C), RR=lodRing(), st=pcx+','+pcz+','+VIEW+','+LOD0, now=performance.now();
-  // the rings only change when the player crosses into another block or the draw distance changes
+  if (window.__holdChunks && !loading) return;   // for automated checks: the blocks held as they are
+  const lead=!loading, bx=Math.floor(px/C), bz=Math.floor(pz/C), pcx=bx+(lead?mot.ox:0), pcz=bz+(lead?mot.oz:0);
+  const RR=lodRing(), st=pcx+','+pcz+','+VIEW+','+LOD0, now=performance.now();
+  // the rings only change when the player crosses into another block, the offset ahead changes or the draw distance changes
   if (st===chunkState && !queue.length && !loading) return;
-  if (st!==chunkState || loading || now-queueT>330){
-    chunkState=st; queueT=now;
+  let turned=false; if (!loading && queue.length && now-queueT>100){ camera.getWorldDirection(_vd); turned=_vd.dot(sortDir)<0.94; }
+  if (st!==chunkState || loading || turned || now-queueT>330){
+    chunkState=st; queueT=now; ringX=pcx; ringZ=pcz; camera.getWorldDirection(sortDir);
+    // where the camera will be in four seconds, and its height above the player, in blocks
+    let ax=0, az=0; if (lead){ const L=Math.hypot(mot.vx,mot.vz)*4, Lm=Math.max(1,VIEW/2)*C, k=L>Lm?Lm/L:1; ax=mot.vx*4*k/C; az=mot.vz*4*k/C; }
+    const cam=!loading && time>2.5, qx=(cam?camera.position.x:px)/C+ax-0.5, qz=(cam?camera.position.z:pz)/C+az-0.5, qy=cam?Math.max(0,camera.position.y-player.y)/C:0, qy2=qy*qy;
     for (const [k,ch] of chunks) if (wantLod(ch.cx-pcx,ch.cz-pcz)<0){ chunks.delete(k); farDirty=true; maskDirty=true; untile(ch);
       if (!loading){ if (ch.prev){ disposeChunk(ch.prev); ch.prev=null; } dying.push(ch); } else disposeChunk(ch); }
       else if (ch.tiled && !tileable(ch,pcx,pcz)) untile(ch);   // come near enough to cast its own shadow again
@@ -6212,12 +6243,12 @@ function updateChunks(px,pz,budgetMs,loading=budgetMs>=1e8){
       queue=[];
       for (let dz=-RR;dz<=RR;dz++) for (let dx=-RR;dx<=RR;dx++){
         const w=wantLod(dx,dz); if (w<0) continue;
-        const ch=chunks.get(key(pcx+dx,pcz+dz)), d2=dx*dx+dz*dz;
-        // as [cx, cz, priority, detail wanted, squared distance in blocks]
-        const pr=()=>look && d2>8 && !inView(pcx+dx,pcz+dz)?d2*8:d2;
-        if (!ch) queue.push([pcx+dx,pcz+dz,pr(),w,d2]);
-        else if (ch.lod>w) queue.push([pcx+dx,pcz+dz,pr(),w,d2]);         // needs more detail
-        else if (ch.lod<w) queue.push([pcx+dx,pcz+dz,1e6+d2,w,d2]);       // can shed detail, low priority
+        const cx=pcx+dx, cz=pcz+dz, ch=chunks.get(key(cx,cz)), d2=(cx-bx)*(cx-bx)+(cz-bz)*(cz-bz), a2=(cx-qx)*(cx-qx)+(cz-qz)*(cz-qz)+qy2;
+        // as [cx, cz, priority, detail wanted, squared distance from the player's block, in blocks]
+        const pr=()=>d2<=2?d2-10:look && d2>8 && !inView(cx,cz)?(a2+2)*8:a2;
+        if (!ch) queue.push([cx,cz,pr(),w,d2]);
+        else if (ch.lod>w) queue.push([cx,cz,pr(),w,d2]);         // needs more detail
+        else if (ch.lod<w) queue.push([cx,cz,1e6+d2,w,d2]);       // can shed detail, low priority
       }
     } finally { if (look) COVE_FAST--; }
     queue.sort((a,b)=>a[2]-b[2]);
@@ -6235,8 +6266,34 @@ function updateChunks(px,pz,budgetMs,loading=budgetMs>=1e8){
     if (ch.fade>=1) tilesDirty.add(tileKey(ch));
   }
 }
-// for automated checks: the blocks waiting, each as [cx, cz, priority, detail wanted, squared distance in blocks]
+// for automated checks: the blocks waiting, each as [cx, cz, priority, detail wanted, squared distance from the player's
+// block, in blocks]
 window.__chunkQueue=()=>queue;
+// for automated checks of pop-in: of the blocks wanted round the player that the camera sees within the fog, those
+// missing and those built with less detail than wanted, counted out to 400 m and to the fog; and the blocks that
+// have arrived or changed detail since the last call, each as [detail, distance from the camera in metres, seen]
+const _pv=new THREE.Frustum(), _pmx=new THREE.Matrix4(), probeSeen=new Map();
+window.__chunkProbe=()=>{
+  const pcx=Math.floor(player.x/C), pcz=Math.floor(player.z/C), RR=lodRing(), far=scene.fog.far, cx0=camera.position.x, cz0=camera.position.z;
+  _pmx.compose(camera.position,camera.quaternion,camera.scale).invert().premultiply(camera.projectionMatrix); _pv.setFromProjectionMatrix(_pmx);
+  const fw=new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion), P=camera.position;
+  const r={cam:{p:{x:P.x,y:P.y,z:P.z},t:{x:P.x+fw.x*10,y:P.y+fw.y*10,z:P.z+fw.z*10}},q:queue.length,miss:0,miss400:0,coarse:0,coarse400:0,coarse0:0,fading:0,view:0,missAll:0,coarseAll:0,arr:[]};
+  const seen=(cx,cz)=>{ const gj=Math.round((cz+0.5)*C/FS), F=farPoint(Math.round((cx+0.5)*C/FS),gj-WRAP_J*Math.round(gj/WRAP_J)), h=Math.max(F.h,0);
+    _vb.min.set(cx*C,h-25,cz*C); _vb.max.set(cx*C+C,h+40,cz*C+C); return _pv.intersectsBox(_vb); };
+  COVE_FAST++;
+  try {
+    for (let dz=-RR;dz<=RR;dz++) for (let dx=-RR;dx<=RR;dx++){ const w=wantLod(dx,dz); if (w<0) continue;
+      const cx=pcx+dx, cz=pcz+dz, d=Math.hypot(cx*C+C/2-cx0,cz*C+C/2-cz0)-C*0.7; if (d>1500) continue;
+      _vb.min.set(cx*C,-30,cz*C); _vb.max.set(cx*C+C,600,cz*C+C); if (!_pv.intersectsBox(_vb) || !seen(cx,cz)) continue;
+      const ch=chunks.get(key(cx,cz)); if (!ch) r.missAll++; else if (ch.lod>w) r.coarseAll++;
+      if (d>far) continue; r.view++;
+      if (!ch){ r.miss++; if (d<400) r.miss400++; }
+      else { if (ch.lod>w){ r.coarse++; if (d<400) r.coarse400++; if (w===0) r.coarse0++; } if (ch.fade<1) r.fading++; } }
+    for (const [k,ch] of chunks){ if (probeSeen.get(k)===ch) continue; probeSeen.set(k,ch);
+      const d=Math.max(0,Math.hypot(ch.cx*C+C/2-cx0,ch.cz*C+C/2-cz0)-C*0.7); r.arr.push([ch.lod,Math.round(d),d<far && seen(ch.cx,ch.cz)?1:0]); }
+    for (const k of probeSeen.keys()) if (!chunks.has(k)) probeSeen.delete(k);
+  } finally { COVE_FAST--; }
+  return r; };
 function resetWorld(){ chunkState=''; farCache.clear(); hgTiles.clear(); clearXMemos(); spCache.clear(); lhCache.clear(); hbCache.clear(); rxCache.clear(); farOrigin=''; for (const T of tiles.values()) disposeTile(T); tiles.clear(); tilesDirty.clear(); tilesUrgent.clear(); for (const ch of chunks.values()) disposeChunk(ch); chunks.clear(); for (const ch of dying) disposeChunk(ch); dying.length=0; pkCache.clear(); pzCache.clear(); alCache.clear(); hbCache.clear(); vgCache.clear(); vmCache.clear(); ckCache.clear(); ryCache.clear(); rzCache.clear(); rrCache.clear(); rsCache.clear(); stCache.clear(); rxCache.clear(); lhCache.clear(); rkCache.clear(); ruCache.clear(); cvCache.clear(); icvCache.clear(); cvSlots.clear(); cvMemoN=NaN; cvMemoL=[];
   // the goods lines, the offshore islands, the ferry ports and the ferries' routes all belong to the old island
   brZones.clear(); brBucket.clear(); isCache.clear(); fpCache.clear(); irCache.clear(); hgCache.clear(); sgCache.clear(); mtxCache.clear();
@@ -9037,15 +9094,18 @@ const headSpot=new THREE.SpotLight(hex('#ffeccc'),0,240,0.5,0.75,1.2); world.add
 const coachLamps=[1,2,4].map(i=>({l:new THREE.PointLight(hex('#ffbf73'),0,26,1.5),i})); let coachLampsOn=false; for (const c of coachLamps) world.add(c.l);
 const _hv=new THREE.Vector3();
 function updateTrainLights(){
-  const loco=leadCar().m, dark=Math.max(nightU.value, mode==='train'?tunnelK:0);
+  const loco=leadCar().m, dark=Math.max(nightU.value, mode==='train'||mode==='coach'?tunnelK:0);
   for (const c of train.cars) if (c.lamps){ const front=c===leadCar(); for (const l of c.lamps) l.material=front?lampWhite:lampRed; }
   loco.updateMatrixWorld();
   headSpot.position.copy(_hv.set(0,1.3,LOCO.L/2+0.4).applyMatrix4(loco.matrix));   // the lead locomotive's nose is always its +z end
   headSpot.target.position.copy(_hv.set(0,-0.2,LOCO.L/2+60).applyMatrix4(loco.matrix));
   headSpot.intensity=12+900*dark;
-  const want=coachLampsOn?nightU.value>0.15:nightU.value>0.25;
+  // the saloon lamps are lit after dusk, and in a tunnel while the train is ridden, cab or coach alike; they are kept
+  // low so that the saloon is not washed out
+  const lampK=Math.max(0.25*nightU.value, mode==='train'||mode==='coach'?0.2*tunnelK:0);
+  const want=coachLampsOn?lampK>0.04:lampK>0.06;
   if (want!==coachLampsOn){ coachLampsOn=want; for (const c of coachLamps) c.l.intensity=0; }
-  if (coachLampsOn) for (const c of coachLamps){ const m=train.cars[c.i].m; c.l.position.set(m.position.x,m.position.y+2.4,m.position.z); c.l.intensity=60*nightU.value; }
+  if (coachLampsOn) for (const c of coachLamps){ const m=train.cars[c.i].m; c.l.position.set(m.position.x,m.position.y+2.4,m.position.z); c.l.intensity=60*lampK; }
 }
 for (let i=0;i<6;i++){ const loco=i===0||i===5, spec=loco?LOCO:COACH, m=new THREE.Mesh(spec.geo,matTrain); m.castShadow=true; m.receiveShadow=true; m.rotation.order='YXZ'; world.add(m);
   const doors=[]; if (!loco) for (const sx of [-1,1]) for (const e of [-1,1]){ const d=new THREE.Mesh(CAR_DOOR,matTrain); d.castShadow=true; d.receiveShadow=true; d.userData={sx,e}; m.add(d); doors.push(d); }
@@ -10884,7 +10944,7 @@ function coachStep(dt,turnIn){
   if (mode!=='coach') return;
   co.yaw+=turnIn*dt*1.8;
   let wx=(keys.KeyD?1:0)-(keys.KeyA?1:0)+joy.x+pad.x, wz=(keys.KeyW||keys.ArrowUp?1:0)-(keys.KeyS||keys.ArrowDown?1:0)-joy.y-pad.y; const wl=Math.hypot(wx,wz);
-  if (wl>0.05){ if (wl>1){ wx/=wl; wz/=wl; } const sp=((keys.ShiftLeft||keys.ShiftRight)?2.6:1.5)*dt, sy=Math.sin(co.yaw), cy=Math.cos(co.yaw);
+  if (wl>0.05){ if (wl>1){ wx/=wl; wz/=wl; } const sp=((keys.ShiftLeft||keys.ShiftRight)?2.6:1.5)*(1-0.55*crouchK)*dt, sy=Math.sin(co.yaw), cy=Math.cos(co.yaw);
     const nx=co.lx+(sy*wz-cy*wx)*sp, nz=co.lz+(cy*wz+sy*wx)*sp;
     if (coachValid(nx,nz)){ co.lx=nx; co.lz=nz; }
     // walking at a narrow opening (the doorway into the saloon or the gangway) eases the walker to its centre
@@ -10904,9 +10964,9 @@ function coachStep(dt,turnIn){
     player.x=_cvv.x; player.z=_cvv.z; player.y=_cvv.y; player.vy=0; player.holdT=0; eyeY=null;
     yaw=m.rotation.y+Math.PI+co.yaw; fpPitch=co.pitch; mode='street';
     tunnelK=0; sky.visible=true; scene.fog.near=90; scene.fog.far=1500; return; }
-  _cvv.set(co.lx,1.25+1.6,co.lz).applyMatrix4(m.matrix);
+  _cvv.set(co.lx,1.25+lerp(1.6,0.95,crouchK),co.lz).applyMatrix4(m.matrix);
   camera.position.copy(_cvv); camera.rotation.set(co.pitch,m.rotation.y+Math.PI+co.yaw,0,'YXZ');
-  player.x=_cvv.x; player.z=_cvv.z; player.y=_cvv.y-1.6; eyeY=player.y; sky.position.copy(camera.position);
+  player.x=_cvv.x; player.z=_cvv.z; player.y=_cvv.y-lerp(1.6,0.95,crouchK); eyeY=player.y; sky.position.copy(camera.position);
 }
 /* ---------- sitting ----------
    X sits on the nearest free seat within SIT_REACH that the player is turned towards: a chair, a bench, a pew, the
@@ -11008,15 +11068,29 @@ function sitStep(dt){
 }
 let tYaw=0, tPitch=-0.04, tunnelK=0, prevMode='street';
 // inside a tunnel the world goes dark beyond the headlights, and the darkness lifts as daylight at the far
-// portal comes into view
+// portal comes into view. While the far portal lies in a straight line of sight within 600 m, the bore up to it is
+// left clear of the dark fog and the land beyond it is seen through a glare of daylight that thins as the train draws
+// nearer, rather than lying hidden in darkness until the last fifty metres and then appearing all at once
+const tunV={vis:0}, _tc1=new THREE.Color(), _tc2=new THREE.Color();
 function tunnelLight(dt,on){
-  const RT=rideTrain(); let inT=0; if (on && RT.st(camera.position.x)==='tunnel'){ const sg=RT.dir; let ah=0; while (ah<70 && RT.st(camera.position.x+sg*(ah+2))==='tunnel') ah+=2; inT=clamp((ah-4)/50,0,1); }
+  const RT=rideTrain(), P=camera.position; let inT=0, vis=0, ah=600;
+  if (on && RT.st(P.x)==='tunnel'){ const sg=RT.dir; ah=0; while (ah<600 && RT.st(P.x+sg*(ah+2))==='tunnel') ah+=2; inT=clamp((ah-4)/50,0,1);
+    // the line from the eye to the middle of the far opening, 2.9 m above the rails there, keeps within the bore
+    // (2.6 m either side of the track and from 0.3 m to 6.5 m above the rails) all the way to it
+    if (ah<600){ const xe=P.x+sg*(ah+2), ez=RT.Z(xe), ey=RT.Y(xe)+2.9; vis=1;
+      for (let d=6;d<ah;d+=6){ const t=d/(ah+2), x=P.x+sg*d, h=lerp(P.y,ey,t)-RT.Y(x);
+        if (Math.abs(lerp(P.z,ez,t)-RT.Z(x))>2.0 || h<0.3 || h>6.5){ vis=0; break; } }
+      vis*=1-smooth((ah-350)/250); } }
   tunnelK+=(inT-tunnelK)*(1-Math.exp(-dt*4));
+  tunV.vis+=(vis-tunV.vis)*(1-Math.exp(-dt*3)); if (!on) tunV.vis=0;
   hemi.intensity*=lerp(1,0.1,tunnelK); sun.intensity*=1-tunnelK;
   sky.visible=tunnelK<0.9;
-  scene.fog.near=lerp(90,25,tunnelK); scene.fog.far=lerp(1500,140,tunnelK);
-  scene.fog.color.lerp(_c2.set('#0c0a08'),tunnelK); scene.background.copy(scene.fog.color);
-  if (tunnelK>0.001) _c1.copy(skyU.uMid.value).lerp(_c2,tunnelK).getRGB(FOG_MID);
+  // the fog inside: dark from 25 m to 140 m, or, with the far portal in sight, clear up to the portal and thickening
+  // into the colour of the daylit horizon over the 250 m beyond it
+  const v=tunV.vis, dark=_tc1.set('#0c0a08');
+  scene.fog.near=lerp(90,lerp(25,ah,v),tunnelK); scene.fog.far=lerp(1500,lerp(140,ah+250,v),tunnelK);
+  _tc2.copy(dark).lerp(scene.fog.color,v); scene.fog.color.lerp(_tc2,tunnelK); scene.background.copy(scene.fog.color);
+  if (tunnelK>0.001){ _tc2.copy(dark).lerp(skyU.uMid.value,v); _c1.copy(skyU.uMid.value).lerp(_tc2,tunnelK).getRGB(FOG_MID); }
 }
 function look(dx,dy){ if (mode==='dinghy'){ dgyLook.yaw-=dx*0.0026; dgyLook.pitch=clamp(dgyLook.pitch-dy*0.0026,-1.1,1.1); return; } if (mode==='coach'){ co.yaw-=dx*0.0026; co.pitch=clamp(co.pitch-dy*0.0026,-1.1,1.1); return; } if (mode==='ferry' && feChase){ feLook.yaw-=dx*0.004; feLook.pitch=clamp(feLook.pitch+dy*0.003,0.02,1.3); return; } if (mode==='ferry'){ fe.yaw-=dx*0.0026; fe.pitch=clamp(fe.pitch-dy*0.0026,-1.1,1.1); return; } if (mode==='chase'){ chase.yaw-=dx*0.004; chase.pitch=clamp(chase.pitch+dy*0.003,0.02,1.3); return; } if (mode==='follow'){ FOL.yaw-=dx*0.004; FOL.pitch=clamp(FOL.pitch+dy*0.003,-0.3,1.3); return; } if (mode==='train'){ tYaw=clamp(tYaw-dx*0.0026,-2.6,2.6); tPitch=clamp(tPitch-dy*0.0026,-1,1); return; } if (mode==='above'){ yaw-=dx*0.005; const d=dy*0.004;
     // past the shallowest tilt, the mouse raises the view itself, up to the sky; brought back, it lowers it first
@@ -11097,11 +11171,20 @@ function tracksideSpot(RT){
     // beside a viaduct the camera keeps to the level of the track: on the hillside further off, where the ground rises to
     // the rails, so that it sees the train across the deck rather than the arches from below
     const via=stx==='viaduct', y=RT.Y(x), z=RT.Z(x), s=(RT.Z(x+1)-RT.Z(x-1))/2, l=Math.hypot(1,s), nx=-s/l, nz=1/l;
-    const offs=via?[14,20,28,38,50,65]:[6+Math.random()*8];
+    const offs=via?[14,20,28,38,50,65]:[6+Math.random()*8,16,24];
     for (const sd of (Math.random()<0.5?[1,-1]:[-1,1])) for (const oo of offs){ const o=sd*oo, px=x+nx*o, pz=z+nz*o, h=heightAt(px,pz);
       if (!(h>0.3 && Math.abs(h-y)<(via?3:5) && gullTopAt(px,pz)<=walkGround(px,pz,1e3)+0.5)) continue;
       const ey=via?Math.max(h+1.7,y+1.8):h+1.7+Math.random()*2.5, xm=(RT.x+x)/2;
       if (sightClear(px,ey,pz,L.x,L.y+1.8,L.z) && sightClear(px,ey,pz,xm,RT.Y(xm)+1.8,RT.Z(xm))) return {x:px,y:ey,z:pz,tx:x}; } }
+  // where there is no such place (beside a station, where the platform, its canopy and the buildings stand in the way),
+  // a higher place further from the line, looking down on the train as it comes in
+  for (let k=0;k<24;k++){ const x=RT.x+RT.dir*(15+k*5);
+    if (RT.st(x)==='tunnel' || RT.st(x+RT.dir*30)==='tunnel') continue;
+    const y=RT.Y(x), z=RT.Z(x), s=(RT.Z(x+1)-RT.Z(x-1))/2, l=Math.hypot(1,s), nx=-s/l, nz=1/l;
+    for (const sd of (Math.random()<0.5?[1,-1]:[-1,1])) for (const oo of [12,18,26,36,48]){ const o=sd*oo, px=x+nx*o, pz=z+nz*o, h=heightAt(px,pz);
+      if (!(h>0.3 && Math.abs(h-y)<12 && gullTopAt(px,pz)<=walkGround(px,pz,1e3)+0.5)) continue;
+      const ey=Math.max(h+1.7,y+6);
+      if (sightClear(px,ey,pz,L.x,L.y+1.8,L.z)) return {x:px,y:ey,z:pz,tx:x}; } }
   return null; }
 // the train the cab and chase views ride with: the passenger train, or the goods train when that is the nearer
 let rideGoods=false;
@@ -11714,7 +11797,7 @@ function glowScale(){ glowU.uScale.value=renderer.getPixelRatio()*innerHeight/(2
 function resize(){ const w=innerWidth, h=innerHeight; renderer.setSize(w,h,false); camera.aspect=w/h; camera.updateProjectionMatrix(); glowScale(); }
 addEventListener('resize',resize); resize();
 const camPos=new THREE.Vector3(), camTarget=new THREE.Vector3();
-let crouch=false, crouchK=0;   // Z: crouching at street level, the eye at 0.95 m instead of 1.62 m and the pace slowed
+let crouch=false, crouchK=0;   // Z: crouching at street level, in a coach and aboard the ferry, the eye at 0.95 m instead of 1.62 m and the pace slowed
 /* ---------- people ----------
    The townspeople (people/people.js): in the streets and squares, waiting on the platforms and at the ferry landings,
    and passengers on the trains and the ferries. K raises the population level and Shift+K lowers it, from 0 (no
@@ -11744,7 +11827,7 @@ function frame(now){
   if (sit && sit.dir>0 && Math.hypot(mx,mz)>0.3) sitStand();   // a step stands the sitter up
   const ml=Math.hypot(mx,mz), moving=started&&ml>0.05&&!onBoard()&&!sailD&&mode!=='swim'&&!(sit&&sit.dir>0);
   player.ox=player.x; player.oz=player.z;
-  crouchK+=((crouch&&mode==='street'?1:0)-crouchK)*(1-Math.exp(-dt*10));
+  crouchK+=((crouch&&(mode==='street'||mode==='coach'||mode==='ferry')?1:0)-crouchK)*(1-Math.exp(-dt*10));
   if (moving){
     if (ml>1){ mx/=ml; mz/=ml; }
     const fly=mode==='above'&&dist>60, sp=Math.min((fly?dist*0.45:4.6)*((keys.ShiftLeft||keys.ShiftRight)?(fly?2.5:1.96):1)*(fly?1:1-0.55*crouchK),fly||player.grounded||mode!=='street'?1e9:AIR_SP);
@@ -11805,7 +11888,7 @@ function frame(now){
   { const q=camera.quaternion, P=camStill.p, Q=camStill.q;
     if (Math.abs(camera.position.x-P.x)+Math.abs(camera.position.y-P.y)+Math.abs(camera.position.z-P.z)>0.02 || Math.abs(q.dot(Q))<0.999999) camStill.t=0; else camStill.t+=dt;
     P.copy(camera.position); Q.copy(q); }
-  updateChunks(player.x,player.z,fillBoost?(camStill.t>0.25?24:12):6); if (fillBoost && !queue.length) fillBoost=false; updateFades(dt); updateTiles(fillBoost?6:2); roomsUpdate(dt);
+  trackMotion(dt); updateChunks(player.x,player.z,fillBoost?(camStill.t>0.25?24:12):6); if (fillBoost && !queue.length) fillBoost=false; updateFades(dt); updateTiles(fillBoost?6:2); roomsUpdate(dt);
   // dynamic draw distance: frames spent building blocks are ignored; slow frames shrink the view, sustained headroom grows it
   // a draw distance fixed with Page Up or Page Down is left as it is
   // (with the eye in the water the draw distance is left as it was: under the water the land beyond reach is not drawn,
@@ -11911,10 +11994,10 @@ function frame(now){
     // walking about the main deck relative to where one looks; the eye rides the ferry's gentle motion
     fe.yaw+=turn*dt*1.8;
     { let wx=(keys.KeyD?1:0)-(keys.KeyA?1:0)+joy.x+pad.x, wz=(keys.KeyW||keys.ArrowUp?1:0)-(keys.KeyS||keys.ArrowDown?1:0)-joy.y-pad.y; const wl=Math.hypot(wx,wz);
-      if (started && wl>0.05){ if (wl>1){ wx/=wl; wz/=wl; } const sp=((keys.ShiftLeft||keys.ShiftRight)?3.4:1.9)*dt, sy=Math.sin(fe.yaw), cy=Math.cos(fe.yaw);
+      if (started && wl>0.05){ if (wl>1){ wx/=wl; wz/=wl; } const sp=((keys.ShiftLeft||keys.ShiftRight)?3.4:1.9)*(1-0.55*crouchK)*dt, sy=Math.sin(fe.yaw), cy=Math.cos(fe.yaw);
         fe.lx+=(sy*wz-cy*wx)*sp; fe.lz+=(cy*wz+sy*wx)*sp; } }
     const fox=fe.lx, foz=fe.lz;
-    ferryDeckClamp(); ferryInside(dt,fe.px??fox,fe.pz??foz); fe.px=fe.lx; fe.pz=fe.lz; fe.ey+=(ferryFloor()-fe.ey)*(1-Math.exp(-dt*12)); FERRY_EYE.set(fe.lx,fe.ey+1.65,fe.lz);
+    ferryDeckClamp(); ferryInside(dt,fe.px??fox,fe.pz??foz); fe.px=fe.lx; fe.pz=fe.lz; fe.ey+=(ferryFloor()-fe.ey)*(1-Math.exp(-dt*12)); FERRY_EYE.set(fe.lx,fe.ey+lerp(1.65,0.95,crouchK),fe.lz);
     const m=ridden.m; m.updateMatrixWorld();
     camera.position.copy(FERRY_EYE).applyMatrix4(m.matrix);
     // the eye turns with the ship as it pitches and rolls, so the deck stays level under it and the horizon moves
@@ -11952,8 +12035,12 @@ function frame(now){
       // a new place once the train is 40 m past, or as soon as the locomotive has been out of sight for half a second
       if (chase.spot){ const S=chase.spot; chase.blind=sightClear(S.x,S.y,S.z,loco.position.x,loco.position.y+1.8,loco.position.z)?0:(chase.blind||0)+dt; }
       chase.retry=(chase.retry||0)-dt;
-      if ((!chase.spot || (chase.spot.tx-RT.x)*RT.dir<-40 || chase.blind>0.5 || chase.cab) && chase.retry<=0){ chase.retry=0.4; const n=tracksideSpot(RT); if (n){ chase.spot=n; chase.fresh=true; chase.blind=0; chase.cab=false; } }
-      sideOk=!chase.cab && !!chase.spot && chase.blind<=0.5 && (chase.spot.tx-RT.x)*RT.dir>-40 && Math.hypot(chase.spot.x-loco.position.x,chase.spot.z-loco.position.z)<260;
+      const need=!chase.spot || (chase.spot.tx-RT.x)*RT.dir<-40 || chase.blind>0.5 || chase.cab;
+      if (need && chase.retry<=0){ chase.retry=0.4; const n=tracksideSpot(RT); if (n){ chase.spot=n; chase.fresh=true; chase.blind=0; chase.cab=false; } }
+      // until a new place is found (beside a station or a viaduct it may take some seconds), the camera keeps the old
+      // one and watches the train go on from there; it rides in the cab only once the locomotive has been out of
+      // sight for some time, or is far off
+      sideOk=!chase.cab && !!chase.spot && chase.blind<=3 && Math.hypot(chase.spot.x-loco.position.x,chase.spot.z-loco.position.z)<260;
       if (sideOk) chase.cab=false;
     }
     const inCab=mode==='train' || (chase.side && !sideOk);
@@ -12943,7 +13030,7 @@ window.__village={ get seed(){ return SEED_TEXT; }, share:{state:sceneState,link
   findHarbour(){ for (let d=0;d<12;d++) for (const sd of SIDES) for (const n of [Math.floor(player.x/HARB)+d,Math.floor(player.x/HARB)-d]){ const H=harbourInfo(sd,n); if (H) return {x:H.x,z:coastZ(sd,H.x)+sd*7,W:H.W,sd,qz:coastZ(sd,H.x+H.W/2-1)+sd*2.5}; } return null; },
   findBeach(){ for (let x=player.x; x<player.x+3000; x+=10) for (const sd of SIDES){ const z=coastZ(sd,x)+sd*5; if (heightAt(x,z)<0.6 && heightAt(x,z)>0.1 && !harbourAt(sd,x)) return {x,z,sd}; } return null; },
   ridge(x){ return {x,z:ridgeZ(x)}; },
-  sea,farMesh,scene,setTilt,audioState:()=>({ctx:audioCtx&&audioCtx.state,muted,ready:SND.ready,loaded:Object.keys(SND.buf)}),SND,SNDV,SNDS,shore,surfaceAt,startAudio,updateChunks:(x,z)=>updateChunks(x,z,1e9),disposeChunk,farPoint(gi,gj){ COVE_FAST++; try{ return farPoint(gi,gj); } finally{ COVE_FAST--; } },FS,findPeak(){ const i0=Math.floor(player.x/PEAK), j0=Math.floor(player.z/PEAK); for (let r=0;r<30;r++) for (let i=-r;i<=r;i++) for (let j=-r;j<=r;j++){ const P=peakInfo(i0+i,j0+j); if (P) return P; } return null; },toggleTrain,get tunnelK(){return tunnelK;},railZ,railY,railState,findStation(){ const n0=Math.floor(player.x/ST_SP); for (let k=0;k<200;k++) for (const sg of [1,-1]){ const S=stationInfo(n0+sg*k); if (S) return S; } return null; },findBridge(){ const i0=Math.round(player.x/C); for (let k=0;k<300;k++) for (const sg of [1,-1]){ const X=railCross(i0+sg*k); if (X) return X; } return null; },get view(){return VIEW;},findRail(kind){ for (let x=player.x; x<player.x+6000; x+=8){ if (railState(x)===kind) return {x,z:railZ(x),y:railY(x)}; } return null; },findCountry(kind){ for (let r=0;r<20;r++) for (let i=-r;i<=r;i++) for (let j=-r;j<=r;j++){ const cx=Math.floor(player.x/C)+i, cz=Math.floor(player.z/C)+j; if (chunkKind(cx,cz)===kind) return {x:cx*C+C/2,z:cz*C+C/2}; } return null; },train,setHour:v=>{hour=v;}, get hour(){ return hour; }, lightHour(h){ hour=h; updateDaylight(); updateShadowFrame(); },
+  sea,farMesh,scene,setTilt,audioState:()=>({ctx:audioCtx&&audioCtx.state,muted,ready:SND.ready,loaded:Object.keys(SND.buf)}),SND,SNDV,SNDS,shore,surfaceAt,startAudio,updateChunks:(x,z)=>updateChunks(x,z,1e9),disposeChunk,farPoint(gi,gj){ COVE_FAST++; try{ return farPoint(gi,gj); } finally{ COVE_FAST--; } },FS,findPeak(){ const i0=Math.floor(player.x/PEAK), j0=Math.floor(player.z/PEAK); for (let r=0;r<30;r++) for (let i=-r;i<=r;i++) for (let j=-r;j<=r;j++){ const P=peakInfo(i0+i,j0+j); if (P) return P; } return null; },toggleTrain,get tunnelK(){return tunnelK;},get chase(){return chase;},cats,railPerp,railZ,railY,railState,findStation(){ const n0=Math.floor(player.x/ST_SP); for (let k=0;k<200;k++) for (const sg of [1,-1]){ const S=stationInfo(n0+sg*k); if (S) return S; } return null; },findBridge(){ const i0=Math.round(player.x/C); for (let k=0;k<300;k++) for (const sg of [1,-1]){ const X=railCross(i0+sg*k); if (X) return X; } return null; },get view(){return VIEW;},findRail(kind){ for (let x=player.x; x<player.x+6000; x+=8){ if (railState(x)===kind) return {x,z:railZ(x),y:railY(x)}; } return null; },findCountry(kind){ for (let r=0;r<20;r++) for (let i=-r;i<=r;i++) for (let j=-r;j<=r;j++){ const cx=Math.floor(player.x/C)+i, cz=Math.floor(player.z/C)+j; if (chunkKind(cx,cz)===kind) return {x:cx*C+C/2,z:cz*C+C/2}; } return null; },train,setHour:v=>{hour=v;}, get hour(){ return hour; }, lightHour(h){ hour=h; updateDaylight(); updateShadowFrame(); },
   boatCam(){ for (const ch of chunks.values()) for (const b of ch.boats) if (b.floating) return {x:b.m.position.x,z:b.m.position.z,rot:b.m.rotation.y}; return null; },
   ferries,islandRoute,coastZ,harbourInfo,ferryLanding,ferryPortInfo,hbS,sailers,harbourAt,
   // whether a walker starting at (x0,z0,y0) can reach a point where goal(x,z) holds, under the player's own rules:

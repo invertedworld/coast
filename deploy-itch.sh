@@ -31,10 +31,14 @@ chmod 755 "$build"
 git archive "$REV" -- index.html sounds.json sounds cat photo people | tar -x -C "$build"
 cp -R "$SITE/vendor" "$SITE/fonts" "$build/"
 
-# the same replacements as publish-site.sh: the fonts and three.js from the local copies
-python3 - "$build/index.html" <<'PY'
+# the same replacements as publish-site.sh: the build number, and the fonts and three.js from the local copies
+BUILD="$(git rev-list --count "$REV") ($(git rev-parse --short "$REV"))"
+python3 - "$build/index.html" "$BUILD" <<'PY'
 import sys
 p = sys.argv[1]; s = open(p).read()
+# the build number shown in the About box: the number of commits, and the commit
+if s.count("'__COAST_BUILD__'") != 1: sys.exit('deploy-itch: the build number placeholder in index.html is not as expected')
+s = s.replace("'__COAST_BUILD__'", "'" + sys.argv[2] + "'")
 fonts = ('<link rel="preconnect" href="https://fonts.googleapis.com">\n'
          '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n'
          '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Marcellus&family=Alegreya+Sans:ital,wght@0,400;0,500;0,700;1,400&display=swap">')
