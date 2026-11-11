@@ -14265,7 +14265,9 @@ if (TOUCH){
   function actionsFor(){
     const B=[];
     if (mode==='swim') B.push(['up','Rise','hold','Space'],['down','Dive','hold','KeyC'],['torch','Torch','tap',()=>press('KeyF')]);
-    else if (mode==='street') B.push(['up','Jump','hold','Space'],['crouch','Crouch','tap',()=>press('KeyZ')],['sit','Sit','tap',()=>press('KeyX')]);
+    else if (mode==='street') B.push(['up','Jump','hold','Space'],['crouch','Crouch','tap',()=>press('KeyZ')]);
+    // the seat button stands only by a seat within reach, or while seated, to stand up again
+    if (['street','coach','ferry'].includes(mode)){ let near=!!sit; if (!near) try{ near=!!sitFind(); }catch(_){} if (near) B.push(['sit',sit?'Stand':'Sit','tap',()=>press('KeyX')]); }
     else if (mode==='dinghy') B.push(['view','Next view','tap',()=>press('Digit0')]);
     if (mode==='follow'||mode==='above'||mode==='chase'||(mode==='ferry'&&feChase)||(mode==='dinghy'&&dgyChase)) B.push(['plus','Nearer','hold','Equal'],['minus','Further','hold','Minus']);
     B.push(['cam','Camera','tap',()=>PHOTO.api.toggle()]);
