@@ -14204,7 +14204,7 @@ if (TOUCH){
   const svg=d=>`<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
   const IC={menu:svg('<path d="M4 7h16M4 12h16M4 17h16"/>'),close:svg('<path d="M6 6l12 12M18 6L6 18"/>'),
     up:svg('<path d="M12 19V5M6 11l6-6 6 6"/>'),down:svg('<path d="M12 5v14M6 13l6 6 6-6"/>'),crouch:svg('<path d="M12 5v14M6 13l6 6 6-6"/>'),
-    sit:svg('<circle cx="12" cy="4.2" r="1.9"/><path d="M12 7.5v6h5.5v6M12 9.5l3.5 2.5M7 9v11M7 15.5h7.5M14.5 15.5v4.5"/>'),torch:svg('<path d="M9 3h6l-1 6h-4zM10 9h4v12h-4z"/><path d="M12 13v2"/>'),
+    sit:svg('<path d="M7 4v9h9l1 7M7 13l-1 7"/>'),torch:svg('<path d="M9 3h6l-1 6h-4zM10 9h4v12h-4z"/><path d="M12 13v2"/>'),
     plus:svg('<path d="M12 5v14M5 12h14"/>'),minus:svg('<path d="M5 12h14"/>'),cam:svg('<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>'),view:svg('<path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z"/><circle cx="12" cy="12" r="2.6"/>')};
   const el=(tag,cls,html)=>{ const e=document.createElement(tag); if (cls) e.className=cls; if (html!=null) e.innerHTML=html; return e; };
   // a key pressed for an instant, or held while a button is held
