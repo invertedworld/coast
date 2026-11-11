@@ -20,13 +20,13 @@ Two principal views are provided.
 
 **Street level** shows the island from the player's eye, 1.62 m above the ground. It is the view used for walking, sitting, climbing, swimming and riding.
 
-**The bird's-eye view** shows the island from above. **2** changes between the two views. The bird's-eye view always opens at a low height, looking out ahead. A drag with the mouse moves over the landscape: upwards on the screen travels forward and to the right travels right, whichever way the view faces. A drag with the right button, or with **Shift** held, turns and tilts the view; past its shallowest tilt it raises the view towards the sky. A double click on land goes down to street level there, outside any building. **+** and **−** set its height, and a pinch on a touch screen does the same; **−** at street level changes to the bird's-eye view. The arrow keys turn and tilt the view, and a two-finger drag pans across the island. The view rises to keep clear of higher ground but does not descend over lower ground.
+**The bird's-eye view** shows the island from above. **2** changes between the two views. The bird's-eye view always opens at a low height, looking out ahead. A drag with the mouse moves over the landscape: upwards on the screen travels forward and to the right travels right, whichever way the view faces. A drag with the right button, or with **Shift** held, turns and tilts the view; past its shallowest tilt it raises the view towards the sky. A double click on land goes down to street level there, outside any building. **+** and **−** set its height; **−** at street level changes to the bird's-eye view. The arrow keys turn and tilt the view. The view rises to keep clear of higher ground but does not descend over lower ground.
 
 A double click on land in the bird's-eye view brings the camera down to street level at the point clicked over one and a half seconds, facing the same way. A double click on open water has no effect.
 
 **B** sets tilt-shift on or off in the bird's-eye and chase views. Tilt-shift blurs the top and bottom of the picture so that the island resembles a model.
 
-**Shift+B** sets ambient occlusion on or off. Ambient occlusion darkens creases, the foot of walls, doorways, the undersides of eaves and the ground beneath benches and people slightly. It is on when the game starts, except on a touch screen, where it is off until it is set on; the new setting is shown briefly at the top of the screen.
+**Shift+B** sets ambient occlusion on or off. Ambient occlusion darkens creases, the foot of walls, doorways, the undersides of eaves and the ground beneath benches and people slightly. It is on when the game starts; the new setting is shown briefly at the top of the screen.
 
 ## Walking
 
@@ -102,9 +102,9 @@ The new island replaces the present one entirely, and the player begins it on fo
 
 **Copy QR code** copies the code to the clipboard as an image, and **Copy URL** copies the link. **L** again, **Esc** or **Close** hides the panel.
 
-Opening the link, on a telephone or in another browser, generates the same island and places the viewer in the same scene, aboard the same vehicle at the same place. The gulls, the whales, the dolphins, the other boats and the gusts of the wind are not recorded, since each is simulated afresh; a whale or a dolphin that was being followed is replaced by the one nearest to where it was, so that view is approximate.
+Opening the link, on another computer or in another browser, generates the same island and places the viewer in the same scene, aboard the same vehicle at the same place. The gulls, the whales, the dolphins, the other boats and the gusts of the wind are not recorded, since each is simulated afresh; a whale or a dolphin that was being followed is replaced by the one nearest to where it was, so that view is approximate.
 
-> **Example:** To show a friend the view from the ferry's saloon, board the ferry with **5**, press **0** twice to sit at a window seat, press **P** to hold the moment, press **L**, and scan the code with the friend's telephone.
+> **Example:** To show a friend the view from the ferry's saloon, board the ferry with **5**, press **0** twice to sit at a window seat, press **P** to hold the moment, press **L**, and send the friend the link with **Copy URL**.
 
 ## The camera and the gallery
 
@@ -158,13 +158,11 @@ The arrow at the top left returns to the gallery, as does **Esc**. If the finish
 
 **K** and **Shift+K** raise and lower the population level (see People). **M** mutes or restores the sound. The sound is positional: fountains, church bells, the sea, trains, ferries, gulls, cats and breaching whales are heard from where they are, and the ambience changes between day and night. With the camera under the water, the sounds of the air are muffled and all but silenced, and the water and the songs of the whales are heard instead.
 
-## Game controllers and touch screens
+## Game controllers, phones and tablets
 
 A game controller is supported. The left stick walks, swims and steers, and the right stick looks. **A** jumps, and rises in the water; **B** crouches, and dives while held in the water. **X** steps through the views, as **0** does, and **Y** changes to the bird's-eye view, as **2** does; the bumpers bring the view nearer or further. The right trigger takes a quick picture. With the camera raised, the right trigger takes a picture through the lens, **B** lowers the camera, **Y** opens the gallery, the bumpers zoom, the D-pad's up and down set the focus further and nearer, and its left and right set the exposure. At the helm the triggers trim the sail. A press of the left stick changes between running and walking, and **Menu** shows the help panel. On the controller's tab of the help panel, **Invert vertical look** reverses the right stick's up and down, and **Sensitivity** sets how fast it turns the view, from 25 % to 300 %; both are remembered.
 
-On a touch screen, a touch on the left part of the screen places a joystick there for walking, and a drag elsewhere turns the view. The button at the top right opens the menu, which takes the player to each of the places reached by the number keys and into the sea; raises the camera, takes a snapshot and opens the gallery, from which artist mode is reached; sets the time of day, pauses the world and changes between day and night; sets tilt-shift, ambient occlusion, full screen, the draw distance, the field of view and the performance overlay; sets the sound and the population level; and opens the island panel, the sharing panel, the help panel and the about panel. Round buttons at the bottom right do what the moment calls for: on foot they jump, crouch, sit and jump into the sea; in the water they rise, dive and set the torch on or off; while following an animal or in a distant view they bring the view nearer or further; and one always raises the camera. With the camera raised on a screen held sideways, its controls lie in a compact panel, which the button beneath the shutter puts away and brings back.
-
-On a touch screen the picture is drawn with a lighter load: its resolution follows the frame rate, between 0.75 and 2 pixels to each point of the screen, the shadows are less finely drawn, and the draw distance is shorter.
+Coast is not built on a phone or a tablet, whose browsers cannot yet hold the world in memory. A short note is shown instead, stating that a desktop or laptop computer is needed.
 
 ## Principle of operation
 
