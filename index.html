@@ -111,9 +111,6 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
 .tmenu input[type=range]{width:100%;accent-color:var(--verdigris);height:32px}
 @media (max-width:520px){ .tmenu{width:100vw;border-left:0} }
 [hidden]{display:none!important}
-.no3d{min-height:100vh;min-height:100dvh;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;padding:24px max(24px,env(safe-area-inset-left));max-width:34rem;margin:0 auto;color:var(--plaster,#f5e9d7)}
-.no3d h1{margin:0 0 12px;font:400 2.4rem/1.1 var(--font-display,serif)}
-.no3d p{margin:0;font-size:1.05rem;line-height:1.55;color:var(--plaster-dim,#d9c8b0)}
 </style>
 
 <canvas id="scene" tabindex="0" aria-label="Procedurally generated medieval village"></canvas>
@@ -254,15 +251,6 @@ import { Cat, catRimUniforms } from './cat/cat.js';
 // the camera for taking pictures (C): lens, depth of field, exposure, viewfinder and gallery; its API is window.__village.photo
 import { createPhoto } from './photo/camera.js';
 import { createPeople } from './people/people.js';
-
-/* ================= phones and tablets =================
-   The world is not built on a phone or a tablet, whose browsers cannot yet hold it in memory: a short note is shown
-   instead. ?touch in the address builds it all the same, with the touch controls, for testing. */
-if (matchMedia('(pointer: coarse)').matches && !/[?&]touch\b/.test(location.search)){
-  document.title='Coast';
-  document.body.innerHTML=`<main class="no3d"><h1>Coast</h1><p>Coast is drawn in three dimensions and needs a desktop or laptop computer. It cannot yet be played on a phone or a tablet.</p></main>`;
-  await new Promise(()=>{});
-}
 
 /* ================= random & noise ================= */
 // The island grows from a seed, which may be any text of up to SEED_MAX characters, kept in capitals. A seed of digits
