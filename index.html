@@ -14201,8 +14201,7 @@ if (TOUCH){
   const IC={menu:svg('<path d="M4 7h16M4 12h16M4 17h16"/>'),close:svg('<path d="M6 6l12 12M18 6L6 18"/>'),
     up:svg('<path d="M12 19V5M6 11l6-6 6 6"/>'),down:svg('<path d="M12 5v14M6 13l6 6 6-6"/>'),crouch:svg('<path d="M12 5v14M6 13l6 6 6-6"/>'),
     sit:svg('<circle cx="12" cy="4.2" r="1.9"/><path d="M12 7.5v6h5.5v6M12 9.5l3.5 2.5M7 9v11M7 15.5h7.5M14.5 15.5v4.5"/>'),torch:svg('<path d="M9 3h6l-1 6h-4zM10 9h4v12h-4z"/><path d="M12 13v2"/>'),
-    plus:svg('<path d="M12 5v14M5 12h14"/>'),minus:svg('<path d="M5 12h14"/>'),cam:svg('<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>'),
-    swim:svg('<path d="M3 17c2 1.5 4 1.5 6 0s4-1.5 6 0 4 1.5 6 0"/><path d="M8 13l4-6 4 2"/><circle cx="17" cy="5" r="1.6"/>'),view:svg('<path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z"/><circle cx="12" cy="12" r="2.6"/>')};
+    plus:svg('<path d="M12 5v14M5 12h14"/>'),minus:svg('<path d="M5 12h14"/>'),cam:svg('<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>'),view:svg('<path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z"/><circle cx="12" cy="12" r="2.6"/>')};
   const el=(tag,cls,html)=>{ const e=document.createElement(tag); if (cls) e.className=cls; if (html!=null) e.innerHTML=html; return e; };
   // a key pressed for an instant, or held while a button is held
   const press=(code,shift=false)=>{ dispatchEvent(new KeyboardEvent('keydown',{code,key:'',shiftKey:shift,bubbles:true})); dispatchEvent(new KeyboardEvent('keyup',{code,key:'',bubbles:true})); };
@@ -14262,8 +14261,8 @@ if (TOUCH){
   function actionsFor(){
     const B=[];
     if (mode==='swim') B.push(['up','Rise','hold','Space'],['down','Dive','hold','KeyC'],['torch','Torch','tap',()=>press('KeyF')]);
-    else if (mode==='street') B.push(['up','Jump','hold','Space'],['crouch','Crouch','tap',()=>press('KeyZ')],['sit','Sit','tap',()=>press('KeyX')],['swim','Jump in the sea','tap',()=>press('KeyJ')]);
-    else if (mode==='dinghy') B.push(['view','Next view','tap',()=>press('Digit0')],['swim','Jump in the sea','tap',()=>press('KeyJ')]);
+    else if (mode==='street') B.push(['up','Jump','hold','Space'],['crouch','Crouch','tap',()=>press('KeyZ')],['sit','Sit','tap',()=>press('KeyX')]);
+    else if (mode==='dinghy') B.push(['view','Next view','tap',()=>press('Digit0')]);
     if (mode==='follow'||mode==='above'||mode==='chase'||(mode==='ferry'&&feChase)||(mode==='dinghy'&&dgyChase)) B.push(['plus','Nearer','hold','Equal'],['minus','Further','hold','Minus']);
     B.push(['cam','Camera','tap',()=>PHOTO.api.toggle()]);
     return B; }
