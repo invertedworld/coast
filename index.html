@@ -364,6 +364,10 @@ const T={
   sph:tpl(new THREE.IcosahedronGeometry(.5,2),true),
   sphLo:tpl(new THREE.IcosahedronGeometry(.5,1),true),
   quad:tpl(new THREE.PlaneGeometry(1,1).rotateX(-Math.PI/2),false),
+  // the soffit of a round arch: a half tube along z, radius 0.5, length 1, its faces turned inward to be seen from below
+  vault:tpl((()=>{ const g=new THREE.CylinderGeometry(.5,.5,1,24,1,true,Math.PI/2,Math.PI).rotateX(Math.PI/2), ix=g.index.array;
+    for (let i=0;i<ix.length;i+=3){ const t=ix[i+1]; ix[i+1]=ix[i+2]; ix[i+2]=t; }
+    const n=g.attributes.normal.array; for (let i=0;i<n.length;i++) n[i]=-n[i]; return g; })(),true),
   prism:prismTpl(),
   ico:tpl(new THREE.IcosahedronGeometry(0.5,0),true),
   crag:tpl(new THREE.IcosahedronGeometry(0.5,0),false),   // an angular, flat-faced rock
@@ -3239,6 +3243,7 @@ function addArch(gb,ch,R,a,build=true){
   ch.place.push({...ob,hd:D/2+0.3});
   for (const s of [-1,1]){ const [px,pz]=localToWorld(ob,s*(r+0.45),0); ch.obbs.push({x:px,z:pz,hw:0.45,hd:D/2,rot,top:Infinity}); }
   if (!build) return;
+  (ch.archs||(ch.archs=[])).push(a);
   const base=heightAt(x,z)-gb.oy, H=mat(x,base,z,1,1,1,rot);
   const spring=2.5, crown=spring+r, topY=crown+0.7+(R()<0.65?2.5:0.3);
   const wall=shade(pick(R,C_.walls),R,0.03), stone=shade(C_.stone,R,0.04);
@@ -3247,11 +3252,14 @@ function addArch(gb,ch,R,a,build=true){
     gb.add(T.box, mm(H,mat(s*(r+0.45),spring,0,0.9,topY-spring,D)), wall, null, SP);
     gb.add(T.box, mm(H,mat(s*(r+0.45),spring-0.18,0,1.02,0.2,D+0.1)), C_.trim, null);
   }
-  const n=14; for (let i=0;i<n;i++){ const x0=-r+(i+0.5)*S/n, ya=spring+Math.sqrt(Math.max(0,r*r-x0*x0));
-    gb.add(T.box, mm(H,mat(x0,ya,0,S/n+0.02,topY-ya,D)), wall, null, SP); }
+  // the masonry over the arch, each block resting just above the curve, and a smooth vault beneath it
+  const n=14; for (let i=0;i<n;i++){ const xa=-r+i*S/n, xb=xa+S/n, xn=Math.min(Math.abs(xa),Math.abs(xb))*(xa*xb<0?0:1), ya=spring+Math.sqrt(Math.max(0,r*r-xn*xn));
+    gb.add(T.box, mm(H,mat((xa+xb)/2,ya,0,S/n+0.02,topY-ya,D)), wall, null, SP); }
+  gb.add(T.vault, mm(H,mat(0,spring,0,2*r,2*r,D)), stone, null, SS);
+  // a ring of voussoirs on each face of the arch, standing a little proud
   const m=Math.max(9,Math.round(S*2.4)), seg=Math.PI*(r+0.14)/m+0.03;
-  for (let i=0;i<m;i++){ const ang=Math.PI*(i+0.5)/m, vx=Math.cos(ang)*(r+0.14), vy=spring+Math.sin(ang)*(r+0.14);
-    gb.add(T.boxC, mm(H,mat(vx,vy,0,0.34,seg,D+0.1,0,0,ang)), i===Math.floor(m/2)?C_.trim:stone, null, SS); }
+  for (const fz of [-D/2-0.02,D/2+0.02]) for (let i=0;i<m;i++){ const ang=Math.PI*(i+0.5)/m, vx=Math.cos(ang)*(r+0.14), vy=spring+Math.sin(ang)*(r+0.14);
+    gb.add(T.boxC, mm(H,mat(vx,vy,fz,0.34,seg,0.16,0,0,ang)), i===Math.floor(m/2)?C_.trim:stone, null, SS); }
   const roofC=shade(pick(R,C_.roofs),R,0.05);
   gableRoof(gb,H,S+1.8,D,topY,(S+1.8)*0.36,wall,roofC);
   if (topY-crown>2) for (const s of [1,-1]) addWin(gb,H,0,(crown+0.7+topY)/2,s*(D/2+0.01),s>0?0:Math.PI,0.55,0.8,R()<0.4?pick(R,C_.shutters):null);
