@@ -89,7 +89,7 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
 .tbtn.on{background:var(--plaster);color:var(--ink)}
 .tbtn:disabled{opacity:.35}
 .tmenu-btn{top:calc(14px + env(safe-area-inset-top));right:calc(14px + env(safe-area-inset-right))}
-.tacts{position:fixed;z-index:6;right:calc(14px + env(safe-area-inset-right));bottom:calc(16px + env(safe-area-inset-bottom));display:flex;flex-direction:row-reverse;flex-wrap:nowrap;gap:12px}
+.tacts{position:fixed;z-index:6;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom));display:flex;flex-wrap:nowrap;gap:12px}
 .tacts .tbtn{position:static}
 .tacts .lab{display:flex;align-items:center;gap:8px}
 .tmenu{position:fixed;z-index:7;top:0;right:0;bottom:0;width:min(380px,100vw);box-sizing:border-box;overflow-y:auto;overscroll-behavior:contain;
@@ -14196,7 +14196,7 @@ window.__village={ get seed(){ return SEED_TEXT; }, share:{state:sceneState,link
    On a touch screen (or with ?touch in the address) a menu button stands at the top right. Its menu takes the player to
    each of the scenes the number keys reach, raises the camera, takes a snapshot and opens the gallery (and from it the
    artist mode), sets the time of day, pauses, and sets the view, the sound and the number of people. Beside the left
-   thumb's stick, buttons at the bottom right do what the moment calls for: jump, crouch and sit on foot; rise, dive and
+   thumb's stick, a row of buttons at the foot of the screen does what the moment calls for: jump, crouch and sit on foot; rise, dive and
    the torch in the water; nearer and further when following or watching from afar. Each button acts as its key does,
    by pressing that key or holding it while it is held. Everything is hidden while the camera, the gallery or a panel
    is open, since those have controls of their own. */
@@ -14269,7 +14269,8 @@ if (TOUCH){
     else if (mode==='street') B.push(['up','Jump','hold','Space'],['crouch','Crouch','tap',()=>press('KeyZ')]);
     // the seat button is greyed out unless a seat is within reach, or the player is seated and may stand up again
     if (['street','coach','ferry'].includes(mode)){ let near=!!sit; if (!near) try{ near=!!sitFind(); }catch(_){} B.push(['sit','Sit','tap',()=>press('KeyX'),near]); }
-    else if (mode==='dinghy') B.push(['view','Next view','tap',()=>press('Digit0')]);
+    // the train, the ferry and the dinghy each have views to cycle through
+    if (['dinghy','ferry','train','chase','coach'].includes(mode)) B.push(['view','Next view','tap',()=>press('Digit0')]);
     if (mode==='follow'||mode==='above'||mode==='chase'||(mode==='ferry'&&feChase)||(mode==='dinghy'&&dgyChase)) B.push(['plus','Nearer','hold','Equal'],['minus','Further','hold','Minus']);
     B.push(['cam','Camera','tap',()=>PHOTO.api.toggle()]);
     return B; }
