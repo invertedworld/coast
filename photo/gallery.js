@@ -131,17 +131,18 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
 .gal header .sum,.art header .src{color:var(--plaster-dim,#d9c8b0);font-size:.9rem;margin-right:auto}
 .gal button,.art button{font:500 .95rem/1 var(--font-body,system-ui);color:var(--plaster,#f5e9d7);background:var(--g-raise2);border:1px solid transparent;border-radius:4px;
   padding:0 14px;height:38px;display:inline-flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;white-space:nowrap;transition:background .12s,border-color .12s,opacity .12s}
-.gal button:hover:not(:disabled),.art button:hover:not(:disabled){background:rgba(245,233,215,.18)}
+@media (hover:hover){.gal button:hover:not(:disabled),.art button:hover:not(:disabled){background:rgba(245,233,215,.18)}}
 .gal button:disabled,.art button:disabled{opacity:.35;cursor:default}
 .gal button svg,.art button svg{width:20px;height:20px;flex:none}
 .gal button.pri,.art button.pri{background:var(--accent,#2f72b8);color:#fff}
-.gal button.pri:hover:not(:disabled),.art button.pri:hover:not(:disabled){background:var(--accent-deep,#235c97)}
+@media (hover:hover){.gal button.pri:hover:not(:disabled),.art button.pri:hover:not(:disabled){background:var(--accent-deep,#235c97)}}
 .gal button.ib,.art button.ib{width:40px;padding:0;background:transparent}
 .gal button:focus-visible,.art button:focus-visible,.art input:focus-visible,.art select:focus-visible{outline:2px solid var(--verdigris,#7cc3ad);outline-offset:2px}
 .gal .body{flex:1;min-height:0;display:grid;grid-template-columns:var(--split,41.6%) 7px minmax(0,1fr)}
 .gal .split{cursor:col-resize;position:relative;touch-action:none}
 .gal .split::after{content:"";position:absolute;top:0;bottom:0;left:3px;width:1px;background:var(--g-line)}
-.gal .split:hover::after,.gal .split.drag::after{left:2px;width:3px;background:rgba(124,195,173,.7)}
+.gal .split.drag::after{left:2px;width:3px;background:rgba(124,195,173,.7)}
+@media (hover:hover){.gal .split:hover::after{left:2px;width:3px;background:rgba(124,195,173,.7)}}
 .gal .sheet{overflow-y:auto;padding:14px 16px 20px;display:flex;flex-direction:column;gap:10px}
 .gal .none{margin:auto;color:var(--plaster-dim,#d9c8b0);font-family:var(--font-display,serif);font-size:1.1rem;letter-spacing:.04em}
 .gal .set{display:flex;align-items:stretch;gap:12px;padding:10px;background:var(--g-raise);border-radius:5px}
@@ -150,11 +151,13 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
 .gal .cw{position:relative;align-self:flex-start;display:flex;flex:none}
 .gal .cw button.cp{position:absolute;top:8px;right:8px;width:30px;height:30px;padding:0;display:grid;place-items:center;border-radius:4px;background:rgba(20,30,40,.72);color:var(--plaster,#f5e9d7);border:1px solid rgba(245,233,215,.25);opacity:0;transition:opacity .12s}
 .gal .cw button.cp svg{width:17px;height:17px}
-.gal .cw:hover button.cp,.gal .cw button.cp:focus-visible,.gal .cw button.cp.done{opacity:1}
-.gal .cw button.cp:hover{background:rgba(20,30,40,.92)}
+.gal .cw button.cp:focus-visible,.gal .cw button.cp.done{opacity:1}
+@media (hover:hover){.gal .cw:hover button.cp{opacity:1}}
+@media (hover:none){.gal .cw button.cp{opacity:1}}
+@media (hover:hover){.gal .cw button.cp:hover{background:rgba(20,30,40,.92)}}
 .gal .cw button.cp.done{color:var(--verdigris,#7cc3ad)}
 .gal .card{align-self:flex-start;display:flex;flex-direction:column;align-items:stretch;gap:6px;height:auto;padding:4px;background:transparent;border:1.5px solid transparent;border-radius:4px;flex:none}
-.gal .card:hover:not(.sel){background:rgba(245,233,215,.08)!important}
+@media (hover:hover){.gal .card:hover:not(.sel){background:rgba(245,233,215,.08)!important}}
 .gal .card img{display:block;align-self:flex-start;height:84px;width:auto;min-width:104px;max-width:180px;object-fit:cover;border-radius:2px;box-shadow:0 2px 8px rgba(0,0,0,.4)}
 .gal .card.wk img{height:62px;min-width:92px;max-width:132px}
 .gal .card span{width:0;min-width:100%;overflow:hidden;white-space:nowrap;display:flex;justify-content:space-between;gap:8px;font:500 .78rem/1 var(--font-body,system-ui);letter-spacing:.04em;color:var(--plaster-dim,#d9c8b0)}
@@ -214,7 +217,7 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
 .art .btns{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .art .btns button{height:44px;font-size:1rem}
 .art .btns button.ok:not(:disabled){background:var(--verdigris,#7cc3ad);color:var(--ink,#26232b)}
-.art .btns button.ok:hover:not(:disabled){background:#95d3bf}
+@media (hover:hover){.art .btns button.ok:hover:not(:disabled){background:#95d3bf}}
 .art .stage{min-width:0;min-height:0;display:flex;align-items:center;justify-content:center;padding:22px;background:radial-gradient(ellipse at 50% 40%,#1a2a3a,#0b141d 75%)}
 .art .stage canvas{display:block;box-shadow:0 10px 40px rgba(0,0,0,.6);background:#0e1216}
 .gal .ask,.art .ask{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(4,8,12,.6);z-index:2}
