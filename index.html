@@ -4842,8 +4842,8 @@ function genChunk(cx,cz,lod=0){
 const CV_TRODDEN=hex('#8e7356'), DIRT=hex('#c4a57c'), GRAVEL=hex('#8f8577'), FIELD_A=hex('#7f9145'), FIELD_B=hex('#8a6a4a'), LIMESTONE=hex('#cfc7b6'), DRYGRASS=hex('#a8a465');
 /* ================= renderer & scene ================= */
 const canvas=document.getElementById('scene');
-/* A phone or a tablet (a touch screen) draws with a lighter hand: no multisampling, a smaller shadow map, no ambient
-   occlusion unless it is asked for, and a resolution that follows the frame rate (MOBILE_PR, from 0.75 to 2 pixels
+/* A phone or a tablet (a touch screen) draws with a lighter hand: no multisampling, a smaller shadow map, and a
+   resolution that follows the frame rate (MOBILE_PR, from 0.75 to 1.5 pixels
    to the point), so that its GPU keeps up at 60 frames a second. */
 const MOBILE=matchMedia('(pointer: coarse)').matches || /[?&]touch\b/.test(location.search);
 const renderer=new THREE.WebGLRenderer({canvas,antialias:!MOBILE,stencil:true,powerPreference:'high-performance'});
@@ -12575,7 +12575,7 @@ const postQuad=new THREE.Mesh(new THREE.PlaneGeometry(2,2),postMat); postScene.a
    or on distant ground, and the bird's-eye view from high up is drawn directly, as it is with the effect off
    (Shift+B). At night the brightest pixels, which are lamps and lit windows, are left alone. The camera's lens
    and the views in and under the water have their own passes and are drawn without it. */
-let aoOn=!MOBILE;
+let aoOn=true;
 try{ const v=localStorage.getItem('borgo-ao'); if (v!==null) aoOn=v==='1'; }catch(_){}
 function setAO(on){ aoOn=!!on; try{ localStorage.setItem('borgo-ao',aoOn?'1':'0'); }catch(_){} }
 const AO={radius:1.1,strength:2.4,depth:0.5,minPx:2,

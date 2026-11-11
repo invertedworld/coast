@@ -26,7 +26,7 @@ A double click on land in the bird's-eye view brings the camera down to street l
 
 **B** sets tilt-shift on or off in the bird's-eye and chase views. Tilt-shift blurs the top and bottom of the picture so that the island resembles a model.
 
-**Shift+B** sets ambient occlusion on or off. Ambient occlusion darkens creases, the foot of walls, doorways, the undersides of eaves and the ground beneath benches and people slightly. It is on when the game starts, except on a touch screen, where it is off until it is set on; the new setting is shown briefly at the top of the screen.
+**Shift+B** sets ambient occlusion on or off. Ambient occlusion darkens creases, the foot of walls, doorways, the undersides of eaves and the ground beneath benches and people slightly. It is on when the game starts; the new setting is shown briefly at the top of the screen.
 
 ## Walking
 
@@ -164,7 +164,7 @@ A game controller is supported. The left stick walks, swims and steers, and the 
 
 On a touch screen, a touch on the left part of the screen places a joystick there for walking, and a drag elsewhere turns the view. The button at the top right opens the menu, which takes the player to each of the places reached by the number keys and into the sea; raises the camera, takes a snapshot and opens the gallery, from which artist mode is reached; sets the time of day, pauses the world and changes between day and night; sets tilt-shift, ambient occlusion, full screen, the draw distance, the field of view and the performance overlay; sets the sound and the population level; and opens the island panel, the sharing panel, the help panel and the about panel. Round buttons at the bottom right do what the moment calls for: on foot they jump, crouch, sit and jump into the sea; in the water they rise, dive and set the torch on or off; while following an animal or in a distant view they bring the view nearer or further; and one always raises the camera. With the camera raised on a screen held sideways, its controls lie in a compact panel, which the button beneath the shutter puts away and brings back.
 
-On a touch screen the picture is drawn with a lighter load: its resolution follows the frame rate, between 0.75 and 2 pixels to each point of the screen, the shadows are less finely drawn, and the draw distance is shorter.
+On a touch screen the picture is drawn with a lighter load: its resolution follows the frame rate, between 0.75 and 1.5 pixels to each point of the screen, the shadows are less finely drawn, and the draw distance is shorter.
 
 ## Principle of operation
 
