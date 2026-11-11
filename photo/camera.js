@@ -15,7 +15,8 @@
    - The aspect ratio of the frame: the whole space between the controls, or 16:9, 3:2, 4:3, 5:4, 1:1, 4:5, 2:3 or
      9:16, fitted within it.
    - A vignette, from off to 100 per cent in tenths, darkening the corners of the frame.
-   - The frame is the part of the window inside the crop marks, centred on the lens's axis; the window around it is
+   - The frame is the part of the window inside the crop marks, above the controls, and the lens is shifted so that
+     its axis passes through the frame's centre; the window around it is
      darkened, and a picture holds the frame alone. The focal length sets the field of view of the frame.
 
    While the camera is raised its controls are on the screen: the zoom, the focus (autofocus or manual, and the
@@ -76,8 +77,9 @@ const DEPTH_FN = `
 
 export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, allowed = () => true, onShutter = null, quickOk = null, cameraKeyOk = null }) {
   const S = { on: false, focal: 35, fNumber: 2.8, focus: 5, autofocus: true, ev: 0, vignette: 0, ratio: 0, afTarget: 5, afT: 0, af: false };
-  // the frame within the window, as fractions of its width and height, centred; set from the viewfinder's layout
-  const FR = { x: 1, y: 1 };
+  // the frame within the window, as fractions of its width and height, and the height of its centre above the
+  // window's, in the window's device coordinates (-1 to 1); set from the viewfinder's layout
+  const FR = { x: 1, y: 1, oy: 0 };
   // the shapes of the frame: the whole of the space between the controls, or a fixed ratio of width to height
   const RATIOS = [['Full', 0], ['16:9', 16 / 9], ['3:2', 3 / 2], ['4:3', 4 / 3], ['5:4', 5 / 4], ['1:1', 1], ['4:5', 4 / 5], ['2:3', 2 / 3], ['9:16', 9 / 16]];
   const hooks = [], pending = [];
@@ -184,9 +186,9 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
     }`, gatherU);
 
   // exposure and the game's tone curve, to the screen
-  const outU = { tColor: { value: null }, uGain: { value: 1 }, uRes: { value: new THREE.Vector2() }, uVig: { value: 0 }, uFrame: { value: new THREE.Vector2(1, 1) } };
+  const outU = { tColor: { value: null }, uGain: { value: 1 }, uRes: { value: new THREE.Vector2() }, uVig: { value: 0 }, uFrame: { value: new THREE.Vector2(1, 1) }, uOy: { value: 0 } };
   const outMat = new THREE.ShaderMaterial({ uniforms: outU, vertexShader: VERT, depthTest: false, depthWrite: false,
-    fragmentShader: `uniform sampler2D tColor; uniform float uGain; uniform vec2 uRes; uniform float uVig; uniform vec2 uFrame; varying vec2 vUv;
+    fragmentShader: `uniform sampler2D tColor; uniform float uGain; uniform vec2 uRes; uniform float uVig; uniform vec2 uFrame; uniform float uOy; varying vec2 vUv;
     void main(){
       vec4 c=texture2D(tColor,vUv); vec3 col=c.rgb;
       if (c.a>0.0){
@@ -198,7 +200,7 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
         col=mix(c.rgb,acc/ws,c.a);
       }
       // the vignette: the light falls away towards the corners of the frame, as through a lens
-      vec2 fp=(vUv-0.5)*2.0/uFrame; float fa=uRes.x*uFrame.x/(uRes.y*uFrame.y);
+      vec2 fp=(vUv-vec2(0.5,0.5+0.5*uOy))*2.0/uFrame; float fa=uRes.x*uFrame.x/(uRes.y*uFrame.y);
       float d=length(fp*vec2(fa,1.0))/length(vec2(fa,1.0));
       float vig=1.0-uVig*0.85*smoothstep(0.15,1.0,d)*(0.5+0.5*d);
       gl_FragColor=vec4(col*uGain,1.0);
@@ -208,12 +210,12 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
     }` });
 
   // autofocus: the nearest surface among points spread over the AF point
-  const afU = { tDepth: { value: null }, uBox: { value: new THREE.Vector2(0.02, 0.03) }, ...nearFar() };
-  const afMat = pass(`uniform sampler2D tDepth; uniform vec2 uBox; varying vec2 vUv; ${DEPTH_FN}
+  const afU = { tDepth: { value: null }, uBox: { value: new THREE.Vector2(0.02, 0.03) }, uOy: { value: 0.5 }, ...nearFar() };
+  const afMat = pass(`uniform sampler2D tDepth; uniform vec2 uBox; uniform float uOy; varying vec2 vUv; ${DEPTH_FN}
     void main(){
       float m=1e9;
       for (int j=-3;j<=3;j++) for (int i=-3;i<=3;i++){
-        vec2 p=vec2(0.5)+vec2(float(i),float(j))/3.0*uBox; m=min(m,linZ(texture2D(tDepth,p).r)); }
+        vec2 p=vec2(0.5,uOy)+vec2(float(i),float(j))/3.0*uBox; m=min(m,linZ(texture2D(tDepth,p).r)); }
       gl_FragColor=vec4(m,0.0,0.0,1.0);
     }`, afU);
 
@@ -235,6 +237,8 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
   function lensOn() {
     saved = camera.fov;
     camera.fov = lensFov(); camera.updateProjectionMatrix(); onFov && onFov();
+    // the lens is shifted, as a view camera's is, to put its axis at the centre of the frame
+    if (FR.oy) { camera.projectionMatrix.elements[9] = -FR.oy; camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert(); }
   }
   function lensOff() {
     if (saved === null) return;
@@ -275,7 +279,7 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
     // autofocus, read back about eight times a second
     if (S.autofocus && (S.afT -= 1) <= 0) {
       S.afT = 7;
-      afU.tDepth.value = rtScene.depthTexture; afU.uBox.value.set(0.022 / camera.aspect, 0.022);
+      afU.tDepth.value = rtScene.depthTexture; afU.uBox.value.set(0.022 / camera.aspect, 0.022); afU.uOy.value = 0.5 + FR.oy * 0.5;
       draw(afMat, rtAF);
       renderer.readRenderTargetPixels(rtAF, 0, 0, 1, 1, afBuf);
       if (afBuf[0] > 0) S.afTarget = clamp(afBuf[0], FOCUS_MIN, FOCUS_MAX);
@@ -290,7 +294,7 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
       depthOut = out;
     }
 
-    outU.tColor.value = rtGather.texture; outU.uGain.value = Math.pow(2, S.ev); outU.uRes.value.set(W, H); outU.uVig.value = S.vignette; outU.uFrame.value.set(FR.x, FR.y);
+    outU.tColor.value = rtGather.texture; outU.uGain.value = Math.pow(2, S.ev); outU.uRes.value.set(W, H); outU.uVig.value = S.vignette; outU.uFrame.value.set(FR.x, FR.y); outU.uOy.value = FR.oy;
     draw(outMat, null);
     return true;
   }
@@ -319,7 +323,7 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
     const src = renderer.domElement, c = document.createElement('canvas');
     // a picture taken through the lens is the frame inside the crop marks; otherwise the whole of the game's frame
     const crop = S.on && saved !== null, W = src.width, H = src.height;
-    const cw = crop ? Math.round(W * FR.x) : W, ch = crop ? Math.round(H * FR.y) : H, x0 = (W - cw) >> 1, y0 = (H - ch) >> 1;
+    const cw = crop ? Math.round(W * FR.x) : W, ch = crop ? Math.round(H * FR.y) : H, x0 = (W - cw) >> 1, y0 = crop ? clamp(Math.round(H * (1 - FR.oy) / 2 - ch / 2), 0, H - ch) : 0;
     c.width = cw; c.height = ch;
     c.getContext('2d').drawImage(src, x0, y0, cw, ch, 0, 0, cw, ch);
     let fov = camera.fov, aspect = camera.aspect, pm = camera.projectionMatrix.elements.slice();
@@ -480,20 +484,29 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
   function flash() { shutterEl.classList.remove('go'); void shutterEl.offsetWidth; shutterEl.classList.add('go'); }
 
   /* ---------- controls ---------- */
-  // the crop marks stand an equal distance from the top and the foot of the window, clear of the controls, so that
-  // the frame is centred on the lens's axis
-  const frEl = hud.querySelector('.fr');
+  // the crop marks stand clear of the controls: between the buttons along the top and the dials (and, on a narrow
+  // screen, the rail of buttons) along the foot
+  const frEl = hud.querySelector('.fr'), railEl = hud.querySelector('.rail');
   function layoutFrame() {
     hud.style.setProperty('--deck', deckEl.offsetHeight + 'px');
     const W = innerWidth, H = innerHeight, narrow = W <= 860, short = H <= 520;
-    // on a short screen the frame clears the rail of buttons on the right, and the dials below when they are shown;
-    // its margins are kept equal on opposite sides, so that it stays centred on the lens's axis
+    // on a short screen the frame clears the rail of buttons on the right, which runs the full height, and the dials
+    // below when they are shown
     const side = short ? 96 : Math.round(W * 0.035), dk = deckEl.offsetHeight;
-    const v = short ? Math.max(12, dk ? dk + 12 : 12) : Math.min(Math.round(H * 0.3), Math.max(narrow ? 72 : 76, dk + (narrow ? 20 : 28)));
-    let fw = W - 2 * side, fh = H - 2 * v; const r = RATIOS[S.ratio][1];
+    let top, foot;
+    if (short) { top = 12; foot = dk ? dk + 12 : 12; }
+    else {
+      top = narrow ? 72 : 76;
+      let ctl = dk ? deckEl.getBoundingClientRect().top : H;
+      if (narrow) ctl = Math.min(ctl, railEl.getBoundingClientRect().top);
+      foot = Math.max(top, H - ctl + (narrow ? 14 : 20));
+    }
+    let fw = W - 2 * side, fh = Math.max(40, H - top - foot); const r = RATIOS[S.ratio][1];
     if (r) { if (fw / fh > r) fw = fh * r; else fh = fw / r; }
-    frEl.style.inset = `${(H - fh) / 2}px ${(W - fw) / 2}px`;
-    FR.x = fw / W; FR.y = fh / H;
+    const cy = top + (H - top - foot) / 2, y0 = cy - fh / 2;
+    frEl.style.inset = `${y0}px ${(W - fw) / 2}px ${H - y0 - fh}px`;
+    afEl.style.top = cy + 'px';
+    FR.x = fw / W; FR.y = fh / H; FR.oy = 1 - 2 * cy / H;
   }
   function enter() {
     if (S.on || !allowed()) return; S.on = true; S.afT = 0; S.afTarget = S.focus;
