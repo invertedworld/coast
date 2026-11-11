@@ -4836,7 +4836,7 @@ const canvas=document.getElementById('scene');
    to the point), so that its GPU keeps up at 60 frames a second. */
 const MOBILE=matchMedia('(pointer: coarse)').matches || /[?&]touch\b/.test(location.search);
 const renderer=new THREE.WebGLRenderer({canvas,antialias:!MOBILE,stencil:true,powerPreference:'high-performance'});
-const MOBILE_PR_MAX=Math.min(window.devicePixelRatio,2); let MOBILE_PR=Math.min(1.25,MOBILE_PR_MAX);
+const MOBILE_PR_MAX=Math.min(window.devicePixelRatio,1.5); let MOBILE_PR=Math.min(1.25,MOBILE_PR_MAX);
 renderer.setPixelRatio(MOBILE?MOBILE_PR:Math.min(window.devicePixelRatio,2));
 renderer.outputColorSpace=THREE.SRGBColorSpace;
 renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.toneMappingExposure=1.0;
@@ -6250,6 +6250,9 @@ function addChunkToScene(ch){
   if (ch.doors) doorsDirty=true;
   const x0=ch.cx*C, z0=ch.cz*C, at=m=>{ m.position.set(x0,0,z0); return m; };
   ch.mesh=at(new THREE.Mesh(ch.geo,matB)); ch.mesh.castShadow=true; ch.mesh.receiveShadow=true;
+  // a block at full detail is never merged into a tile (it is built again, simplified, as the player moves away), so
+  // its arrays are let go once they are on the GPU
+  if (ch.lod===0){ for (const a of Object.values(ch.geo.attributes)) a.onUpload(dropArray); }
   ch.ground=at(new THREE.Mesh(ch.groundGeo,matG)); ch.ground.receiveShadow=true;
   // only the blocks that reach below the sea are seen through the water, in the sea's depth pass
   if (!ch.groundGeo.boundingBox) ch.groundGeo.computeBoundingBox();
@@ -6340,7 +6343,8 @@ function updateTiles(budgetMs=2){
   }
 }
 // rings of detail: full detail close by, simplified in the middle distance, outlines further out to the fog
-let LOD0=2;
+// on a phone full detail reaches one ring instead of two, the full-detail blocks holding most of the memory
+const LOD0_AUTO=MOBILE?1:2; let LOD0=LOD0_AUTO;
 // on a phone the ring of outlines reaches half as far, which halves the blocks built and held
 const lodRing=()=>MOBILE?Math.max(VIEW+2,Math.min(8,VIEW*2+1)):Math.max(VIEW+2,Math.min(36,VIEW*4));
 // Page Up and Page Down step to the next fixed draw distance beyond or within the present one; Home restores the automatic one
@@ -6350,7 +6354,7 @@ function toast(label,text){ const el=document.getElementById('toast'); el.textCo
   el.classList.add('on'); clearTimeout(toastT); toastT=setTimeout(()=>el.classList.remove('on'),1600); }
 function setDrawLvl(step){
   fillBoost=true;
-  if (step===0){ drawLvl=-1; LOD0=2; VIEW=Math.min(Math.max(VIEW,VIEW_MIN),VIEW_MAX); }
+  if (step===0){ drawLvl=-1; LOD0=LOD0_AUTO; VIEW=Math.min(Math.max(VIEW,VIEW_MIN),VIEW_MAX); }
   else { let i=drawLvl;
     if (i<0){ i=step>0?DRAW_LVLS.findIndex(L=>L[1]>VIEW):DRAW_LVLS.findLastIndex(L=>L[1]<VIEW); if (i<0) i=step>0?DRAW_LVLS.length-1:0; }
     else i=clamp(i+step,0,DRAW_LVLS.length-1);
