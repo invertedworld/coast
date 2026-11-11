@@ -14204,14 +14204,12 @@ const TOUCH=MOBILE;
 if (TOUCH){
   const svg=d=>`<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
   const IC={menu:svg('<path d="M4 7h16M4 12h16M4 17h16"/>'),close:svg('<path d="M6 6l12 12M18 6L6 18"/>'),
-    up:svg('<path d="M12 19V5M6 11l6-6 6 6"/>'),down:svg('<path d="M12 5v14M6 13l6 6 6-6"/>'),crouch:svg('<path d="M12 5v14M6 13l6 6 6-6"/>'),
+    up:svg('<path d="M12 19V5M6 11l6-6 6 6"/>'),down:svg('<path d="M12 5v14M6 13l6 6 6-6"/>'),run:svg('<path d="M6 12l5-5 5 5M6 18l5-5 5 5" transform="rotate(90 11 12.5)"/>'),
     sit:svg('<path d="M7 4v9h9l1 7M7 13l-1 7"/>'),torch:svg('<path d="M9 3h6l-1 6h-4zM10 9h4v12h-4z"/><path d="M12 13v2"/>'),
     plus:svg('<path d="M12 5v14M5 12h14"/>'),minus:svg('<path d="M5 12h14"/>'),cam:svg('<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>'),view:svg('<path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z"/><circle cx="12" cy="12" r="2.6"/>')};
   const el=(tag,cls,html)=>{ const e=document.createElement(tag); if (cls) e.className=cls; if (html!=null) e.innerHTML=html; return e; };
   // a key pressed for an instant, or held while a button is held
   const press=(code,shift=false)=>{ dispatchEvent(new KeyboardEvent('keydown',{code,key:'',shiftKey:shift,bubbles:true})); dispatchEvent(new KeyboardEvent('keyup',{code,key:'',bubbles:true})); };
-  const holdBtn=(b,code)=>{ const on=e=>{ e.preventDefault(); keys[code]=true; b.classList.add('on'); }, off=e=>{ keys[code]=false; b.classList.remove('on'); };
-    b.addEventListener('pointerdown',on); for (const t of ['pointerup','pointercancel','pointerleave']) b.addEventListener(t,off); };
   const tapBtn=(b,f)=>b.addEventListener('click',e=>{ e.preventDefault(); f(); });
   const round=(icon,label)=>{ const b=el('button','tbtn',IC[icon]); b.type='button'; b.setAttribute('aria-label',label); b.title=label; return b; };
 
@@ -14233,7 +14231,7 @@ if (TOUCH){
   item(places,'Start',()=>press('Digit1')); item(places,'Aerial',()=>press('Digit2')); item(places,'Passenger train',()=>press('Digit3'));
   item(places,'Freight train',()=>press('Digit4')); item(places,'Ferry',()=>press('Digit5')); item(places,'Sailing dinghy',()=>press('Digit6'));
   item(places,'Whale',()=>press('Digit7')); item(places,'Dolphin',()=>press('Digit8')); item(places,'Shipwreck',()=>press('Digit9'));
-  item(places,'Next view',()=>press('Digit0')); item(places,'Jump in the sea',()=>press('KeyJ'));
+  item(places,'Next view',()=>press('Digit0')); item(places,'Jump in the sea',()=>press('KeyJ')); item(places,'Torch',()=>press('KeyF'));
   const pics=sec('Pictures');
   item(pics,'Camera',()=>PHOTO.api.toggle()); item(pics,'Snapshot',()=>{ closeMenu(); setTimeout(()=>PHOTO.api.quick(),250); },{stay:true}); item(pics,'Gallery and artist mode',()=>PHOTO.api.openGallery());
   const timeG=sec('Time');
@@ -14245,6 +14243,8 @@ if (TOUCH){
   item(viewG,'Tilt-shift',()=>setTilt(!tiltShift),{toggle:()=>tiltShift});
   item(viewG,'Ambient occlusion',()=>setAO(!aoOn),{toggle:()=>aoOn});
   item(viewG,'Full screen',()=>{ try{ if (document.fullscreenElement) document.exitFullscreen(); else { const q=document.documentElement.requestFullscreen(); if (q&&q.catch) q.catch(()=>{}); } }catch(_){} },{toggle:()=>!!document.fullscreenElement});
+  const nudge=code=>{ keys[code]=true; setTimeout(()=>{ keys[code]=false; },350); };
+  item(viewG,'Camera nearer',()=>nudge('Equal'),{stay:true}); item(viewG,'Camera further',()=>nudge('Minus'),{stay:true});
   item(viewG,'Draw nearer',()=>setDrawLvl(-1),{stay:true}); item(viewG,'Draw further',()=>setDrawLvl(1),{stay:true}); item(viewG,'Automatic distance',()=>setDrawLvl(0),{stay:true});
   item(viewG,'Performance',()=>{ statsEl.hidden=!statsEl.hidden; statsT=0; },{toggle:()=>!statsEl.hidden});
   const fovIn=document.getElementById('fovIn');
@@ -14261,26 +14261,32 @@ if (TOUCH){
   tapBtn(menuBtn,()=>{ if (menu.hidden) openMenu(); else closeMenu(); });
   menu.querySelector('[data-a=close]').addEventListener('click',closeMenu);
 
-  // the buttons of the moment, rebuilt only when the moment changes
-  let ctxKey='';
-  function actionsFor(){
-    const B=[];
-    if (mode==='swim') B.push(['up','Rise','hold','Space'],['down','Dive','hold','KeyC'],['torch','Torch','tap',()=>press('KeyF')]);
-    else if (mode==='street') B.push(['up','Jump','hold','Space'],['crouch','Crouch','tap',()=>press('KeyZ')]);
-    // the seat button is greyed out unless a seat is within reach, or the player is seated and may stand up again
-    if (['street','coach','ferry'].includes(mode)){ let near=!!sit; if (!near) try{ near=!!sitFind(); }catch(_){} B.push(['sit','Sit','tap',()=>press('KeyX'),near]); }
-    // the train, the ferry and the dinghy each have views to cycle through
-    if (['dinghy','ferry','train','chase','coach'].includes(mode)) B.push(['view','Next view','tap',()=>press('Digit0')]);
-    if (mode==='follow'||mode==='above'||mode==='chase'||(mode==='ferry'&&feChase)||(mode==='dinghy'&&dgyChase)) B.push(['plus','Nearer','hold','Equal'],['minus','Further','hold','Minus']);
-    B.push(['cam','Camera','tap',()=>PHOTO.api.toggle()]);
-    return B; }
-  function rebuild(B){ acts.textContent=''; for (const [icon,label,kind,a] of B){ const b=round(icon,label); if (kind==='hold') holdBtn(b,a); else tapBtn(b,a); acts.appendChild(b); } }
-  function enable(B){ B.forEach((e,i)=>{ const b=acts.children[i]; if (b) b.disabled=e[4]===false; }); }
+  // the row of buttons is always the same five: jump, crouch, seat, view and camera. Each acts as its key does where that
+  // key does something, in the water rising and diving while held, and is greyed out where it does nothing
+  const sitNear=()=>{ if (sit) return true; try{ return !!sitFind(); }catch(_){ return false; } };
+  let runOn=false;
+  const ROW=[
+    ['run','Run',()=>['street','swim','coach','ferry','above'].includes(mode)?{toggle:1}:null],
+    ['up','Jump',()=>mode==='swim'||mode==='street'?{hold:'Space'}:null],
+    ['down','Crouch',()=>mode==='swim'?{hold:'KeyC'}:['street','coach','ferry'].includes(mode)?{tap:()=>press('KeyZ')}:null],
+    ['sit','Sit',()=>['street','coach','ferry'].includes(mode)&&sitNear()?{tap:()=>press('KeyX')}:null],
+    ['view','Next view',()=>['dinghy','ferry','train','chase','coach'].includes(mode)?{tap:()=>press('Digit0')}:null],
+    ['cam','Camera',()=>({tap:()=>PHOTO.api.toggle()})]];
+  const rowBtns=ROW.map(([icon,label,act])=>{ const b=round(icon,label); acts.appendChild(b); let held=null;
+    b.addEventListener('pointerdown',e=>{ e.preventDefault(); const r=act(); if (!r) return;
+      if (r.toggle){ runOn=!runOn; keys.ShiftLeft=runOn; b.classList.toggle('on',runOn); b.setAttribute('aria-pressed',String(runOn)); }
+      else if (r.hold){ held=r.hold; keys[held]=true; b.classList.add('on'); } else r.tap(); });
+    const off=()=>{ if (held){ keys[held]=false; held=null; } if (icon!=='run') b.classList.remove('on'); };
+    for (const t of ['pointerup','pointercancel','pointerleave']) b.addEventListener(t,off);
+    b.addEventListener('click',e=>e.preventDefault());
+    return {b,act,off}; });
+  // running stays on until the button is pressed again; it holds the run key only where running means something
+  function enable(){ for (const R of rowBtns){ const ok=!!R.act(); if (!ok && R.b.classList.contains('on')) R.off(); R.b.disabled=!ok; }
+    keys.ShiftLeft=runOn && !rowBtns[0].b.disabled; }
   setInterval(()=>{
     const G=PHOTO.api.studio, busy=PHOTO.api.state.on || (G && (G.isOpen||G.artOpen)) || islandShown() || shareShown() || !helpEl.hidden || !aboutEl.hidden || !started;
     menuBtn.hidden=busy; acts.hidden=busy||!menu.hidden; if (busy && !menu.hidden) closeMenu();
-    const B=actionsFor(), k=B.map(b=>b[1]).join('|'); if (k!==ctxKey){ ctxKey=k; for (const c of ['Space','KeyC','Equal','Minus']) keys[c]=false; rebuild(B); }
-    enable(B);
+    enable();
     if (!menu.hidden) tSl.sync();
   },250);
 }
