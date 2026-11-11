@@ -87,6 +87,7 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
   color:var(--plaster);backdrop-filter:blur(8px);-webkit-tap-highlight-color:transparent;touch-action:manipulation;user-select:none;-webkit-user-select:none}
 .tbtn svg{width:24px;height:24px}
 .tbtn.on{background:var(--plaster);color:var(--ink)}
+.tbtn:disabled{opacity:.35}
 .tmenu-btn{top:calc(14px + env(safe-area-inset-top));right:calc(14px + env(safe-area-inset-right))}
 .tacts{position:fixed;z-index:6;right:calc(14px + env(safe-area-inset-right));bottom:calc(16px + env(safe-area-inset-bottom));display:flex;flex-direction:row-reverse;flex-wrap:nowrap;gap:12px}
 .tacts .tbtn{position:static}
@@ -14266,17 +14267,19 @@ if (TOUCH){
     const B=[];
     if (mode==='swim') B.push(['up','Rise','hold','Space'],['down','Dive','hold','KeyC'],['torch','Torch','tap',()=>press('KeyF')]);
     else if (mode==='street') B.push(['up','Jump','hold','Space'],['crouch','Crouch','tap',()=>press('KeyZ')]);
-    // the seat button stands only by a seat within reach, or while seated, to stand up again
-    if (['street','coach','ferry'].includes(mode)){ let near=!!sit; if (!near) try{ near=!!sitFind(); }catch(_){} if (near) B.push(['sit',sit?'Stand':'Sit','tap',()=>press('KeyX')]); }
+    // the seat button is greyed out unless a seat is within reach, or the player is seated and may stand up again
+    if (['street','coach','ferry'].includes(mode)){ let near=!!sit; if (!near) try{ near=!!sitFind(); }catch(_){} B.push(['sit','Sit','tap',()=>press('KeyX'),near]); }
     else if (mode==='dinghy') B.push(['view','Next view','tap',()=>press('Digit0')]);
     if (mode==='follow'||mode==='above'||mode==='chase'||(mode==='ferry'&&feChase)||(mode==='dinghy'&&dgyChase)) B.push(['plus','Nearer','hold','Equal'],['minus','Further','hold','Minus']);
     B.push(['cam','Camera','tap',()=>PHOTO.api.toggle()]);
     return B; }
   function rebuild(B){ acts.textContent=''; for (const [icon,label,kind,a] of B){ const b=round(icon,label); if (kind==='hold') holdBtn(b,a); else tapBtn(b,a); acts.appendChild(b); } }
+  function enable(B){ B.forEach((e,i)=>{ const b=acts.children[i]; if (b) b.disabled=e[4]===false; }); }
   setInterval(()=>{
     const G=PHOTO.api.studio, busy=PHOTO.api.state.on || (G && (G.isOpen||G.artOpen)) || islandShown() || shareShown() || !helpEl.hidden || !aboutEl.hidden || !started;
     menuBtn.hidden=busy; acts.hidden=busy||!menu.hidden; if (busy && !menu.hidden) closeMenu();
     const B=actionsFor(), k=B.map(b=>b[1]).join('|'); if (k!==ctxKey){ ctxKey=k; for (const c of ['Space','KeyC','Equal','Minus']) keys[c]=false; rebuild(B); }
+    enable(B);
     if (!menu.hidden) tSl.sync();
   },250);
 }
