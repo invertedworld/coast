@@ -51,6 +51,8 @@ export const Q_GROUPS = [
     sl('colours', 'Colour blocks', 0, 0, 4, 1, v => v ? String(v) : 'None') ] },
 ];
 export const STYLES = [['watercolour', 'Watercolour'], ['oil', 'Oil'], ['vangogh', 'Van Gogh'], ['woodcut', 'Woodcut'], ['render3d', '3D render']];
+// a phone or a tablet is not offered the 3D render, whose path tracing needs more memory than its browser allows
+const NO_TRACE = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
 const styleName = id => (STYLES.find(s => s[0] === id) || [id, id])[1];
 
 const svg = (d, extra = '') => `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" ${extra}>${d}</svg>`;
@@ -438,7 +440,7 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
   art.setAttribute('role', 'dialog'); art.setAttribute('aria-label', 'Artist mode');
   art.innerHTML = `<header><button class="ib" data-a="back" title="Back to the pictures (Esc)" aria-label="Back">${ICON.back}</button><h2>Artist mode</h2><span class="src"></span></header>
     <div class="body"><aside><div class="scroll">
-        <section><h3>Style</h3><div class="tiles">${STYLES.map(([id, name]) => `<button type="button" data-style="${id}" aria-pressed="false">${ICON[id]}${name}</button>`).join('')}</div></section>
+        <section><h3>Style</h3><div class="tiles">${STYLES.filter(([id]) => !(id === 'render3d' && NO_TRACE)).map(([id, name]) => `<button type="button" data-style="${id}" aria-pressed="false">${ICON[id]}${name}</button>`).join('')}</div></section>
         <section class="opts" hidden><h3></h3><form></form><button type="button" class="reset" data-a="reset">Reset to default</button></section></div>
       <div class="dock"><div class="state"><span class="st"></span><span class="bar"><i></i></span></div>
         <div class="btns"><button class="pri" data-a="render" disabled>Create</button><button class="ok" data-a="save" disabled>Save</button></div></div></aside>
