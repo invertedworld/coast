@@ -368,6 +368,11 @@ const T={
   vault:tpl((()=>{ const g=new THREE.CylinderGeometry(.5,.5,1,24,1,true,Math.PI/2,Math.PI).rotateX(Math.PI/2), ix=g.index.array;
     for (let i=0;i<ix.length;i+=3){ const t=ix[i+1]; ix[i+1]=ix[i+2]; ix[i+2]=t; }
     const n=g.attributes.normal.array; for (let i=0;i<n.length;i++) n[i]=-n[i]; return g; })(),true),
+  // the masonry over a round arch up to the height of its crown: a unit square whose lower edge is the half circle of
+  // radius 0.5 centred on the origin, 1 deep, centred on z; scaled, it fills over an arch of any span and rise
+  spandrel:tpl((()=>{ const sh=new THREE.Shape(); sh.moveTo(0.5,0); sh.lineTo(0.5,0.5); sh.lineTo(-0.5,0.5); sh.lineTo(-0.5,0);
+    for (let i=1;i<24;i++){ const a=Math.PI*(1-i/24); sh.lineTo(0.5*Math.cos(a),0.5*Math.sin(a)*0.999); } sh.lineTo(0.5,0);
+    return new THREE.ExtrudeGeometry(sh,{depth:1,bevelEnabled:false,curveSegments:1}).translate(0,0,-0.5); })(),false),
   prism:prismTpl(),
   ico:tpl(new THREE.IcosahedronGeometry(0.5,0),true),
   crag:tpl(new THREE.IcosahedronGeometry(0.5,0),false),   // an angular, flat-faced rock
@@ -3249,6 +3254,13 @@ function addHouse(gb,ch,R,o){
   ch.obbs.push(ob); ch.place.push(ob);
   return ob;
 }
+// the masonry over an arch and the smooth vault beneath it: M stands at the middle of the springing line, the span (2
+// half) along its x, the rise along y and the depth along z; the masonry rises to top above the springing
+function archFill(gb,M,half,rise,depth,top,fillC,fillS,vaultC,vaultS){
+  gb.add(T.spandrel, mm(M,mat(0,0,0,2*half,2*rise,depth)), fillC, null, fillS);
+  if (top>rise+0.01) gb.add(T.box, mm(M,mat(0,rise,0,2*half,top-rise,depth)), fillC, null, fillS);
+  gb.add(T.vault, mm(M,mat(0,0,0,2*half*0.99,2*rise*0.99,depth-0.01)), vaultC, null, vaultS);
+}
 // vaulted passage: two stone piers, a round arch with voussoirs and a room above
 function addArch(gb,ch,R,a,build=true){
   const {x,z,S,rot,D}=a, r=S/2, ob={x,z,hw:r+0.9,hd:D/2,rot};
@@ -3264,10 +3276,7 @@ function addArch(gb,ch,R,a,build=true){
     gb.add(T.box, mm(H,mat(s*(r+0.45),spring,0,0.9,topY-spring,D)), wall, null, SP);
     gb.add(T.box, mm(H,mat(s*(r+0.45),spring-0.18,0,1.02,0.2,D+0.1)), C_.trim, null);
   }
-  // the masonry over the arch, each block resting just above the curve, and a smooth vault beneath it
-  const n=14; for (let i=0;i<n;i++){ const xa=-r+i*S/n, xb=xa+S/n, xn=Math.min(Math.abs(xa),Math.abs(xb))*(xa*xb<0?0:1), ya=spring+Math.sqrt(Math.max(0,r*r-xn*xn));
-    gb.add(T.box, mm(H,mat((xa+xb)/2,ya,0,S/n+0.02,topY-ya,D)), wall, null, SP); }
-  gb.add(T.vault, mm(H,mat(0,spring,0,2*r,2*r,D)), stone, null, SS);
+  archFill(gb,mm(H,mat(0,spring,0)),r,r,D,topY-spring,wall,SP,stone,SS);
   // a ring of voussoirs on each face of the arch, standing a little proud
   const m=Math.max(9,Math.round(S*2.4)), seg=Math.PI*(r+0.14)/m+0.03;
   for (const fz of [-D/2-0.02,D/2+0.02]) for (let i=0;i<m;i++){ const ang=Math.PI*(i+0.5)/m, vx=Math.cos(ang)*(r+0.14), vy=spring+Math.sin(ang)*(r+0.14);
@@ -3632,8 +3641,7 @@ function buildBridge(gb,ch,R,X){
   const zc=X.z, xc=X.x, rot=X.rot, W=2*vRoadW(X.i,zc)+0.8, F=X.flat;
   const r=Math.min(9,4.6/X.sinT), deck=X.deck, spring=X.ry+0.5, rise=4.6, stone=shade(C_.stone,R,0.04);
   const H=mat(xc,0,zc,1,1,1,rot), n=40;
-  for (let k=0;k<n;k++){ const zl=-r+(k+0.5)*2*r/n, ya=spring+rise*Math.sqrt(Math.max(0,1-(zl/r)*(zl/r)));
-    gb.add(T.box, mm(H,mat(0,ya,zl,W,deck-0.9-ya,2*r/n+0.02)), stone, null, SS); }
+  archFill(gb,mm(H,mat(0,spring,0,1,1,1,Math.PI/2)),r,rise,W,deck-0.9-spring,stone,SS,stone,SS);
   gb.add(T.box, mm(H,mat(0,deck-0.9,0,W+0.3,0.9,2*F)), stone, null, SS);
   for (const sg of [-1,1]){
     const al=F-r, ac=sg*(r+al/2);
@@ -4638,8 +4646,7 @@ function genChunk(cx,cz,lod=0){
         const Hp=mat(xb,yb,zb,1,1,1,rot), PD=4.15, zc=into*(PD/2-0.15), zf=-into*0.17;
         for (const sg of [-1,1]) gb.add(T.box, mm(Hp,mat(sg*(PA+1.85),-1.5,zc,3.7,PT+1.5,PD)), stoneR, -1.5, SS);
         const ns=14;
-        for (let k=0;k<ns;k++){ const xl=-PA+(k+0.5)*2*PA/ns, ya=PS+Math.sqrt(Math.max(0,PA*PA-xl*xl));
-          gb.add(T.box, mm(Hp,mat(xl,ya,zc,2*PA/ns+0.03,PT-ya,PD)), stoneR, null, SS); }
+        archFill(gb,mm(Hp,mat(0,PS,zc)),PA,PA,PD,PT-PS,stoneR,SS,stoneR,SS);
         gb.add(T.box, mm(Hp,mat(0,PT,zc,2*PA+7.8,0.4,PD+0.4)), C_.trim, null, SS);
         gb.add(T.box, mm(Hp,mat(0,-1.5,zc,2*PA+0.2,1.25,PD)), lining, null);
         for (let k=0;k<13;k++){ const ang=Math.PI*(k+0.5)/13; gb.add(T.boxC, mm(Hp,mat(Math.cos(ang)*(PA+0.22),PS+Math.sin(ang)*(PA+0.22),zf-into*0.02,0.85,0.6,0.14,0,0,ang)), k===6?C_.trim:shade(C_.stone,R,0.06), null, SS); }
@@ -4673,9 +4680,13 @@ function genChunk(cx,cz,lod=0){
         const span=14;
         for (let q=0;q<2;q++){ const xs=xa+q+0.5, xl=((xs%span)+span)%span-span/2, r=span/2-1, ys=railY(xs), zs=railZ(xs), g=baseH(xs,zs);
           const deckBottom=ys-1.45, spring=deckBottom-r-0.6, inArch=Math.abs(xl)<r;
-          const bottom=inArch?Math.max(g-1,spring+Math.sqrt(r*r-xl*xl)):g-1;
-          if (deckBottom-bottom>0.05) gb.add(T.box, mat(xs,bottom,zs,1.02,deckBottom-bottom,3.9,rot), stoneR, null, SS);
+          // the piers between the arches are built in 1 m slices down to the ground; the arches whole, below
+          const bottom=g-1;
+          if (!inArch && deckBottom-bottom>0.05) gb.add(T.box, mat(xs,bottom,zs,1.02,deckBottom-bottom,3.9,rot), stoneR, null, SS);
           if (!inArch) ch.obbs.push({x:xs,z:zs,hw:0.5,hd:1.9,rot,top:Infinity}); }
+        { const xc=Math.floor(xa/span)*span+span/2;
+          if (xc>=xa && xc<xb){ const r=span/2-1, yc=railY(xc), zc=railZ(xc), sp=yc-1.45-r-0.6;
+            archFill(gb,mat(xc,sp,zc,1,1,1,rot),r,r,3.9,yc-1.45-sp,stoneR,SS,stoneR,SS); } }
       }
     }
   }
@@ -14174,7 +14185,7 @@ requestAnimationFrame(()=>setTimeout(async ()=>{
   last=performance.now(); requestAnimationFrame(frame);
   requestAnimationFrame(()=>requestAnimationFrame(()=>{ canvas.style.visibility=''; seedEl.hidden=true; }));
 },30));
-window.__village={ get seed(){ return SEED_TEXT; }, share:{state:sceneState,link:sceneLink,qrEncode,get shared(){ return SCENE; }}, get paused(){ return paused; }, set paused(v){ if (!!v!==paused){ paused=!!v; lastClock=null; } }, goods, glZone, branchesAt, get mantle(){ return mantle; }, get colRoof(){ return colRoof; }, roofAt, roofSlope, topAt, get sit(){ return sit; }, get indoors(){ return indoors; }, roomFns:{flight,localToWorld,obbLocal,roomCeil}, sitKey, sitFind, sitStand, sitSpotOk, beachStretch, BCH_SP, COACH_SEATS, FERRY_SEATS, coachEnter, genChunk, coastRoadZ, brZ, brY, heightAt, player, chunks, rooms, doorMesh, keys, setYaw:v=>{yaw=v;}, get yaw(){return yaw;}, fe, co, lightsNear, beams, ruinIn, cats, catHome, PEOPLE, get ridden(){ return ridden; },
+window.__village={ get seed(){ return SEED_TEXT; }, get origin(){ return ORIGIN; }, share:{state:sceneState,link:sceneLink,qrEncode,get shared(){ return SCENE; }}, get paused(){ return paused; }, set paused(v){ if (!!v!==paused){ paused=!!v; lastClock=null; } }, goods, glZone, branchesAt, get mantle(){ return mantle; }, get colRoof(){ return colRoof; }, roofAt, roofSlope, topAt, get sit(){ return sit; }, get indoors(){ return indoors; }, roomFns:{flight,localToWorld,obbLocal,roomCeil}, sitKey, sitFind, sitStand, sitSpotOk, beachStretch, BCH_SP, COACH_SEATS, FERRY_SEATS, coachEnter, genChunk, coastRoadZ, brZ, brY, heightAt, player, chunks, rooms, doorMesh, keys, setYaw:v=>{yaw=v;}, get yaw(){return yaw;}, fe, co, lightsNear, beams, ruinIn, cats, catHome, PEOPLE, get ridden(){ return ridden; },
   findHarbour(){ for (let d=0;d<12;d++) for (const sd of SIDES) for (const n of [Math.floor(player.x/HARB)+d,Math.floor(player.x/HARB)-d]){ const H=harbourInfo(sd,n); if (H) return {x:H.x,z:coastZ(sd,H.x)+sd*7,W:H.W,sd,qz:coastZ(sd,H.x+H.W/2-1)+sd*2.5}; } return null; },
   findBeach(){ for (let x=player.x; x<player.x+3000; x+=10) for (const sd of SIDES){ const z=coastZ(sd,x)+sd*5; if (heightAt(x,z)<0.6 && heightAt(x,z)>0.1 && !harbourAt(sd,x)) return {x,z,sd}; } return null; },
   ridge(x){ return {x,z:ridgeZ(x)}; },
