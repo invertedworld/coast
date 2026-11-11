@@ -14139,10 +14139,14 @@ requestAnimationFrame(()=>setTimeout(async ()=>{
   seedShow(0.58,W); await nextPaint(); updateTiles(1e9);
   seedShow(0.68,W); await nextPaint(); rebuildFar(player.x,player.z); farDirty=true;
   seedShow(0.78,W); await nextPaint();
+  // the water's programs are compiled by drawing it once, from wherever the camera stands before the first frame: the
+  // canvas is hidden until the first frame has replaced that drawing
+  canvas.style.visibility='hidden';
   try { divePrewarm(); } catch(err){ console.warn('The water could not be prepared:',err); }
   seedShow(1,W); await nextPaint();
   if (SCENE) try{ sceneRestore(SCENE); }catch(err){ console.warn('The shared scene could not be restored:',err); }
-  seedEl.hidden=true; last=performance.now(); requestAnimationFrame(frame);
+  last=performance.now(); requestAnimationFrame(frame);
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{ canvas.style.visibility=''; seedEl.hidden=true; }));
 },30));
 window.__village={ get seed(){ return SEED_TEXT; }, share:{state:sceneState,link:sceneLink,qrEncode,get shared(){ return SCENE; }}, get paused(){ return paused; }, set paused(v){ if (!!v!==paused){ paused=!!v; lastClock=null; } }, goods, glZone, branchesAt, get mantle(){ return mantle; }, get colRoof(){ return colRoof; }, roofAt, roofSlope, topAt, get sit(){ return sit; }, get indoors(){ return indoors; }, roomFns:{flight,localToWorld,obbLocal,roomCeil}, sitKey, sitFind, sitStand, sitSpotOk, beachStretch, BCH_SP, COACH_SEATS, FERRY_SEATS, coachEnter, genChunk, coastRoadZ, brZ, brY, heightAt, player, chunks, rooms, doorMesh, keys, setYaw:v=>{yaw=v;}, get yaw(){return yaw;}, fe, co, lightsNear, beams, ruinIn, cats, catHome, PEOPLE, get ridden(){ return ridden; },
   findHarbour(){ for (let d=0;d<12;d++) for (const sd of SIDES) for (const n of [Math.floor(player.x/HARB)+d,Math.floor(player.x/HARB)-d]){ const H=harbourInfo(sd,n); if (H) return {x:H.x,z:coastZ(sd,H.x)+sd*7,W:H.W,sd,qz:coastZ(sd,H.x+H.W/2-1)+sd*2.5}; } return null; },
