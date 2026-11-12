@@ -4676,17 +4676,23 @@ function genChunk(cx,cz,lod=0){
         segBox(gb,[xa,ya-0.85,za],[xb,yb-0.85,zb],4.2,1.2,stoneR,SS);
         for (const o of [-2.0,2.0]){ segBox(gb,[xa+nx*o,ya+0.45,za+nz*o],[xb+nx*o,yb+0.45,zb+nz*o],0.35,0.9,stoneR,SS);
           ch.obbs.push({x:(xa+xb)/2+nx*o,z:(za+zb)/2+nz*o,hw:0.2,hd:len/2,rot,top:Infinity,bot:Math.min(ya,yb)}); }
-        // arched spans between piers every 14 m
-        const span=14;
-        for (let q=0;q<2;q++){ const xs=xa+q+0.5, xl=((xs%span)+span)%span-span/2, r=span/2-1, ys=railY(xs), zs=railZ(xs), g=baseH(xs,zs);
-          const deckBottom=ys-1.45, spring=deckBottom-r-0.6, inArch=Math.abs(xl)<r;
-          // the piers between the arches are built in 1 m slices down to the ground; the arches whole, below
+        // arched spans between piers, one every 14 m of x. Where the line crosses x at an angle a metre of x is L metres of
+        // track, so each pier is 2 m thick along the track and each arch spans the rest of the 14L between them. The
+        // piers and the arches are laid along the track (rotA turns a box's x axis onto it) and 3.9 m wide across it
+        const span=14, L=len/step, rx=span/2-1/L, rotA=rot-Math.PI/2;
+        for (let q=0;q<2;q++){ const xs=xa+q+0.5, xl=((xs%span)+span)%span-span/2;
+          // the part of this metre of x outside the arch
+          const lo=xl>0?Math.max(xl-0.5,rx):xl-0.5, hi=xl>0?xl+0.5:Math.min(xl+0.5,-rx);
+          if (hi-lo<0.001) continue;
+          const xm=xs+(lo+hi)/2-xl, ys=railY(xm), zs=railZ(xm), deckBottom=ys-1.45;
+          // the piers are built in slices down to the ground at its lowest across their width
+          let g=baseH(xm,zs); for (const o of [-1.95,1.95]) g=Math.min(g,baseH(xm+nx*o,zs+nz*o));
           const bottom=g-1;
-          if (!inArch && deckBottom-bottom>0.05) gb.add(T.box, mat(xs,bottom,zs,1.02,deckBottom-bottom,3.9,rot), stoneR, null, SS);
-          if (!inArch) ch.obbs.push({x:xs,z:zs,hw:0.5,hd:1.9,rot,top:Infinity}); }
+          if (deckBottom-bottom>0.05) gb.add(T.box, mat(xm,bottom,zs,(hi-lo)*L+0.02,deckBottom-bottom,3.9,rotA), stoneR, null, SS);
+          ch.obbs.push({x:xm,z:zs,hw:1.95,hd:(hi-lo)*L/2,rot,top:Infinity}); }
         { const xc=Math.floor(xa/span)*span+span/2;
-          if (xc>=xa && xc<xb){ const r=span/2-1, yc=railY(xc), zc=railZ(xc), sp=yc-1.45-r-0.6;
-            archFill(gb,mat(xc,sp,zc,1,1,1,rot),r,r,3.9,yc-1.45-sp,stoneR,SS,stoneR,SS); } }
+          if (xc>=xa && xc<xb){ const r=rx*L, yc=railY(xc), zc=railZ(xc), sp=yc-1.45-r-0.6;
+            archFill(gb,mat(xc,sp,zc,1,1,1,rotA),r,r,3.9,yc-1.45-sp,stoneR,SS,stoneR,SS); } }
       }
     }
   }
