@@ -4681,6 +4681,12 @@ function genChunk(cx,cz,lod=0){
         // piers and the arches are laid along the track (rotA turns a box's x axis onto it) and 3.9 m wide across it
         const span=14, L=len/step, rx=span/2-1/L, rotA=rot-Math.PI/2;
         for (let q=0;q<2;q++){ const xs=xa+q+0.5, xl=((xs%span)+span)%span-span/2;
+          // the part of this metre of x under the arch: the masonry above the curve of the arch is solid down to the lowest
+          // point of the curve over it, so that where the ground rises under an arch the player cannot walk into it
+          { const a=Math.max(xl-0.5,-rx), b=Math.min(xl+0.5,rx);
+            if (b-a>0.001){ const R=rx*L, xc=xs-xl, d=Math.max(Math.abs(a),Math.abs(b))*L, xa2=xs+(a+b)/2-xl;
+              const bot=railY(xc)-1.45-R-0.6+Math.sqrt(Math.max(0,R*R-d*d));
+              ch.obbs.push({x:xa2,z:railZ(xa2),hw:1.95,hd:(b-a)*L/2,rot,top:Infinity,bot}); } }
           // the part of this metre of x outside the arch
           const lo=xl>0?Math.max(xl-0.5,rx):xl-0.5, hi=xl>0?xl+0.5:Math.min(xl+0.5,-rx);
           if (hi-lo<0.001) continue;
