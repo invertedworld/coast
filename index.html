@@ -5415,7 +5415,7 @@ function createSea(parent, opts={}){
     uCentre:{value:new THREE.Vector2()},uSpc:{value:1},uField:{value:null},uFieldR:{value:new THREE.Vector4(0,0,1,1)},
     uSunDir:{value:new THREE.Vector3(0,1,0)},uSunCol:{value:new THREE.Color(1,1,1)},uSkyTop:{value:new THREE.Color()},uSkyHor:{value:new THREE.Color()},
     uDeep:{value:new THREE.Color('#0a3a64')},uMid:{value:new THREE.Color('#2c79b4')},uThin:{value:new THREE.Color('#3fb3a8')},uShallow:{value:new THREE.Color('#5cc4c0')},
-    uFoam:{value:new THREE.Color('#f4f1e8')},uTime:{value:0},uWind:{value:0},uWindDir:{value:new THREE.Vector2(0,1)},uWhite:{value:1},uBright:{value:1},uSwellA:{value:0.3},
+    uFoam:{value:new THREE.Color('#f4f1e8')},uTime:{value:0},uWind:{value:0},uWindDir:{value:new THREE.Vector2(0,1)},uDrift:{value:new THREE.Vector2(0,0)},uWhite:{value:1},uBright:{value:1},uSwellA:{value:0.3},
     uGustTex:{value:null},uGust:{value:new THREE.Vector4(0,1,0,36)},uGustAmt:{value:0},
     uOff:{value:new THREE.Vector3()},uGustC:{value:0},uScale:{value:1},uOutside:{value:new THREE.Vector3(...O.outside)},
     uRing:{value:[...Array(8)].map(()=>new THREE.Vector4())},uRingK:{value:[...Array(8)].map(()=>new THREE.Vector4())},uRingD:{value:[...Array(8)].map(()=>new THREE.Vector4())},uRingN:{value:0},
@@ -5533,7 +5533,7 @@ function createSea(parent, opts={}){
       }`,
     fragmentShader:`
       uniform vec3 uSunDir, uSunCol, uSkyTop, uSkyHor, uDeep, uMid, uThin, uShallow, uFoam; uniform float uTime, uWind, uWhite, uBright, uSwellA;
-      uniform vec2 uWindDir; uniform sampler2D uGustTex; uniform vec4 uGust; uniform float uGustAmt;
+      uniform vec2 uWindDir, uDrift; uniform sampler2D uGustTex; uniform vec4 uGust; uniform float uGustAmt;
       uniform sampler2D uScene, uSceneDepth; uniform vec2 uRes; uniform mat4 uProjInv, uCamWorld; uniform float uClarity, uHasScene, uPassFar, uDetail;
       varying vec3 vP; varying vec3 vN; varying float vFold, vDepth, vSwl, vH, vWf; varying vec2 vQ;
       uniform float uGustC; uniform vec3 uOff; uniform sampler2D uField; uniform vec4 uFieldR; uniform vec3 uOutside;
@@ -5547,9 +5547,9 @@ function createSea(parent, opts={}){
       mat2 rot2(float a){ float c=cos(a), s=sin(a); return mat2(c,-s,s,c); }
       // ripples too small for the mesh, each layer fading out as it nears the size of a pixel
       float rip(vec2 q,float t,float px){
-        return n2(rot2(0.3)*q*0.9+uWindDir*t*0.5)*0.45*(1.0-smoothstep(0.12,0.3,px*0.9))
-             + n2(rot2(1.9)*q*2.1+uWindDir*t*0.8)*0.3*(1.0-smoothstep(0.12,0.3,px*2.1))
-             + n2(rot2(4.1)*q*4.7+uWindDir*t*1.2)*0.25*(1.0-smoothstep(0.12,0.3,px*4.7)); }
+        return n2(rot2(0.3)*q*0.9+uDrift*0.5)*0.45*(1.0-smoothstep(0.12,0.3,px*0.9))
+             + n2(rot2(1.9)*q*2.1+uDrift*0.8)*0.3*(1.0-smoothstep(0.12,0.3,px*2.1))
+             + n2(rot2(4.1)*q*4.7+uDrift*1.2)*0.25*(1.0-smoothstep(0.12,0.3,px*4.7)); }
       // where the scene behind the water lies, from the depth of the pass drawn without the sea
       vec3 scenePos(vec2 uv,float d){ vec4 v=uProjInv*vec4(uv*2.0-1.0,d*2.0-1.0,1.0); v/=v.w; return (uCamWorld*v).xyz; }
       // light focused by the waves on the sea bed
@@ -5619,7 +5619,7 @@ function createSea(parent, opts={}){
         float fl=n2(q*0.7+vec2(t*0.15,-t*0.1))*0.6+n2(q*1.9-vec2(t*0.25,t*0.2))*0.4;
         float lace=0.5+0.5*sin(q.x*2.3+q.y*1.1+fl*6.0-t*1.3);
         float fleck=smoothstep(0.8,0.92,fl)*smoothstep(0.55,1.0,vSwl/max(uSwellA,0.15))*smoothstep(0.22,0.6,uSwellA)*0.3;
-        vec2 dr=q-uWindDir*t*1.4;
+        vec2 dr=q-uDrift*1.4;
         float wn=n2(dr*0.55)*0.55+n2(dr*1.6+3.1)*0.3+n2(dr*4.0-1.7)*0.15;
         float crest=1.0-smoothstep(0.08,0.55,vFold);
         float wc=uWhite*smoothstep(4.0,7.0,uWind)*crest*smoothstep(0.42,0.62,wn)*(0.55+0.45*lace);
@@ -5676,6 +5676,10 @@ function createSea(parent, opts={}){
     const run=!ctx.paused && dt>0;
     if (run){ st.time+=dt; U.uTime.value=st.time;
       st.U+=(st.Ut-st.U)*(1-Math.exp(-dt/O.ease));
+      // the distance the ripples and whitecaps have drifted with the wind, gathered frame by frame, so that a change
+      // of wind direction turns their drift gradually and never moves the pattern as a whole
+      const ke=1-Math.exp(-dt/6); st.ddx=(st.ddx??Math.sin(st.dirT))+(Math.sin(st.dirT)-(st.ddx??Math.sin(st.dirT)))*ke; st.ddz=(st.ddz??Math.cos(st.dirT))+(Math.cos(st.dirT)-(st.ddz??Math.cos(st.dirT)))*ke;
+      U.uDrift.value.x+=st.ddx*dt; U.uDrift.value.y+=st.ddz*dt;
       turnSets(); sets[0].w=Math.min(1,sets[0].w+dt/10); sets[1].w=Math.max(0,sets[1].w-dt/10);
       for (let i=RINGS.length-1;i>=0;i--){ RINGS[i].t+=dt; if (RINGS[i].t>RINGS[i].tau*5) RINGS.splice(i,1); } }
     // ctx.qorigin {x,z}: the part of the world's position not carried in the shader's positions; ctx.offset: a
