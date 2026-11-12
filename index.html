@@ -5415,7 +5415,7 @@ function createSea(parent, opts={}){
     uCentre:{value:new THREE.Vector2()},uSpc:{value:1},uField:{value:null},uFieldR:{value:new THREE.Vector4(0,0,1,1)},
     uSunDir:{value:new THREE.Vector3(0,1,0)},uSunCol:{value:new THREE.Color(1,1,1)},uSkyTop:{value:new THREE.Color()},uSkyHor:{value:new THREE.Color()},
     uDeep:{value:new THREE.Color('#0a3a64')},uMid:{value:new THREE.Color('#2c79b4')},uThin:{value:new THREE.Color('#3fb3a8')},uShallow:{value:new THREE.Color('#5cc4c0')},
-    uFoam:{value:new THREE.Color('#f4f1e8')},uTime:{value:0},uWind:{value:0},uWindDir:{value:new THREE.Vector2(0,1)},uDrift:{value:new THREE.Vector2(0,0)},uWhite:{value:1},uBright:{value:1},uSwellA:{value:0.3},
+    uFoam:{value:new THREE.Color('#f4f1e8')},uTime:{value:0},uWind:{value:0},uWindDir:{value:new THREE.Vector2(0,1)},uDrift:{value:new THREE.Vector2(0,0)},uStep:{value:new THREE.Vector2(0,0)},uWhite:{value:1},uBright:{value:1},uSwellA:{value:0.3},
     uGustTex:{value:null},uGust:{value:new THREE.Vector4(0,1,0,36)},uGustAmt:{value:0},
     uOff:{value:new THREE.Vector3()},uGustC:{value:0},uScale:{value:1},uOutside:{value:new THREE.Vector3(...O.outside)},
     uRing:{value:[...Array(8)].map(()=>new THREE.Vector4())},uRingK:{value:[...Array(8)].map(()=>new THREE.Vector4())},uRingD:{value:[...Array(8)].map(()=>new THREE.Vector4())},uRingN:{value:0},
@@ -5533,7 +5533,7 @@ function createSea(parent, opts={}){
       }`,
     fragmentShader:`
       uniform vec3 uSunDir, uSunCol, uSkyTop, uSkyHor, uDeep, uMid, uThin, uShallow, uFoam; uniform float uTime, uWind, uWhite, uBright, uSwellA;
-      uniform vec2 uWindDir, uDrift; uniform sampler2D uGustTex; uniform vec4 uGust; uniform float uGustAmt;
+      uniform vec2 uWindDir, uDrift, uStep; uniform sampler2D uGustTex; uniform vec4 uGust; uniform float uGustAmt;
       uniform sampler2D uScene, uSceneDepth; uniform vec2 uRes; uniform mat4 uProjInv, uCamWorld; uniform float uClarity, uHasScene, uPassFar, uDetail;
       varying vec3 vP; varying vec3 vN; varying float vFold, vDepth, vSwl, vH, vWf; varying vec2 vQ;
       uniform float uGustC; uniform vec3 uOff; uniform sampler2D uField; uniform vec4 uFieldR; uniform vec3 uOutside;
@@ -5545,11 +5545,15 @@ function createSea(parent, opts={}){
       float h2(vec2 p){ return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453); }
       float n2(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f); return mix(mix(h2(i),h2(i+vec2(1,0)),f.x),mix(h2(i+vec2(0,1)),h2(i+vec2(1,1)),f.x),f.y); }
       mat2 rot2(float a){ float c=cos(a), s=sin(a); return mat2(c,-s,s,c); }
-      // ripples too small for the mesh, each layer fading out as it nears the size of a pixel
+      // how far a pattern of frequency f, drifting at k times the wind's drift, moves past the eye in one frame, in
+      // cells of its noise: 1 while it moves less than a quarter of a cell, falling to 0 by 0.45, so that a pattern
+      // never moves so far between frames that it seems to stand still or run backwards
+      float steady(float f,float k){ return 1.0-smoothstep(0.25,0.45,f*uStep.x+k*f*uStep.y); }
+      // ripples too small for the mesh, each layer fading out as it nears the size of a pixel or moves too far in a frame
       float rip(vec2 q,float t,float px){
-        return n2(rot2(0.3)*q*0.9+uDrift*0.5)*0.45*(1.0-smoothstep(0.12,0.3,px*0.9))
-             + n2(rot2(1.9)*q*2.1+uDrift*0.8)*0.3*(1.0-smoothstep(0.12,0.3,px*2.1))
-             + n2(rot2(4.1)*q*4.7+uDrift*1.2)*0.25*(1.0-smoothstep(0.12,0.3,px*4.7)); }
+        return n2(rot2(0.3)*q*0.9+uDrift*0.5)*0.45*(1.0-smoothstep(0.12,0.3,px*0.9))*steady(0.9,0.5)
+             + n2(rot2(1.9)*q*2.1+uDrift*0.8)*0.3*(1.0-smoothstep(0.12,0.3,px*2.1))*steady(2.1,0.8/2.1)
+             + n2(rot2(4.1)*q*4.7+uDrift*1.2)*0.25*(1.0-smoothstep(0.12,0.3,px*4.7))*steady(4.7,1.2/4.7); }
       // where the scene behind the water lies, from the depth of the pass drawn without the sea
       vec3 scenePos(vec2 uv,float d){ vec4 v=uProjInv*vec4(uv*2.0-1.0,d*2.0-1.0,1.0); v/=v.w; return (uCamWorld*v).xyz; }
       // light focused by the waves on the sea bed
@@ -5616,11 +5620,11 @@ function createSea(parent, opts={}){
         vec3 col=mix(under,sky*uBright,Fr);
         float sd=max(dot(Rf,uSunDir),0.0); col+=uSunCol*(pow(sd,900.0)*7.0+pow(sd,90.0)*0.25)*smoothstep(0.0,0.08,uSunDir.y);   // the sun's glitter
         // foam: soft flecks on the swell's crests, lacy whitecaps on the steepest wind crests, and the shore wash
-        float fl=n2(q*0.7+vec2(t*0.15,-t*0.1))*0.6+n2(q*1.9-vec2(t*0.25,t*0.2))*0.4;
+        float fl=n2(q*0.7+vec2(t*0.15,-t*0.1))*0.6+mix(0.5,n2(q*1.9-vec2(t*0.25,t*0.2)),steady(1.9,0.0))*0.4;
         float lace=0.5+0.5*sin(q.x*2.3+q.y*1.1+fl*6.0-t*1.3);
         float fleck=smoothstep(0.8,0.92,fl)*smoothstep(0.55,1.0,vSwl/max(uSwellA,0.15))*smoothstep(0.22,0.6,uSwellA)*0.3;
         vec2 dr=q-uDrift*1.4;
-        float wn=n2(dr*0.55)*0.55+n2(dr*1.6+3.1)*0.3+n2(dr*4.0-1.7)*0.15;
+        float wn=mix(0.5,n2(dr*0.55),steady(0.55,1.4))*0.55+mix(0.5,n2(dr*1.6+3.1),steady(1.6,1.4))*0.3+mix(0.5,n2(dr*4.0-1.7),steady(4.0,1.4))*0.15;
         float crest=1.0-smoothstep(0.08,0.55,vFold);
         float wc=uWhite*smoothstep(4.0,7.0,uWind)*crest*smoothstep(0.42,0.62,wn)*(0.55+0.45*lace);
         wc+=uWhite*smoothstep(5.0,9.0,uWind)*crest*0.25*smoothstep(0.3,0.5,wn);
@@ -5679,7 +5683,7 @@ function createSea(parent, opts={}){
       // the distance the ripples and whitecaps have drifted with the wind, gathered frame by frame, so that a change
       // of wind direction turns their drift gradually and never moves the pattern as a whole
       const ke=1-Math.exp(-dt/6); st.ddx=(st.ddx??Math.sin(st.dirT))+(Math.sin(st.dirT)-(st.ddx??Math.sin(st.dirT)))*ke; st.ddz=(st.ddz??Math.cos(st.dirT))+(Math.cos(st.dirT)-(st.ddz??Math.cos(st.dirT)))*ke;
-      U.uDrift.value.x+=st.ddx*dt; U.uDrift.value.y+=st.ddz*dt;
+      U.uDrift.value.x+=st.ddx*dt; U.uDrift.value.y+=st.ddz*dt; st.dstep=dt;
       turnSets(); sets[0].w=Math.min(1,sets[0].w+dt/10); sets[1].w=Math.max(0,sets[1].w-dt/10);
       for (let i=RINGS.length-1;i>=0;i--){ RINGS[i].t+=dt; if (RINGS[i].t>RINGS[i].tau*5) RINGS.splice(i,1); } }
     // ctx.qorigin {x,z}: the part of the world's position not carried in the shader's positions; ctx.offset: a
@@ -5688,6 +5692,12 @@ function createSea(parent, opts={}){
     st.scale=ctx.scale||1; mesh.scale.setScalar(st.scale); U.uScale.value=st.scale;
     const c=ctx.centre; if (c){ const sn=st.scale; mesh.position.set(Math.round(c.x/sn)*sn,0,Math.round(c.z/sn)*sn); st.cx=mesh.position.x; st.cz=mesh.position.z; U.uCentre.value.set(st.cx-st.qx,st.cz-st.qz); }
     if (F) U.uFieldR.value.set(F.x0-st.qx,F.z0-st.qz,F.cell,F.n);
+    // how far the eye has moved over the water since the last frame, in the frame of the patterns (uStep.x), and how
+    // far the wind's drift has carried them (uStep.y); a jump of more than 50 m is a move, not motion, and is let pass.
+    // The step rises at once and eases back over a few frames, so that one slow frame does not flicker the ripples
+    if (run && ctx.eye){ const cp=ctx.eye, ox=ctx.offset?ctx.offset.x:0, oz=ctx.offset?ctx.offset.z:0, px=cp.x+ox, pz=cp.z+oz;
+      let d=st.px===undefined?0:Math.hypot(px-st.px,pz-st.pz); if (d>50) d=0; st.px=px; st.pz=pz;
+      const S=U.uStep.value; S.x=Math.max(d,S.x*0.7); S.y=Math.max(st.dstep||0,S.y*0.7); }
     if (ctx.gustU){ U.uGust.value.copy(ctx.gustU.uGust.value); U.uGustC.value=ctx.gustU.uGustC.value; U.uGustAmt.value=ctx.gustU.uGustAmt.value; }
     if (ctx.sunDir) U.uSunDir.value.copy(ctx.sunDir); if (ctx.sunColor) U.uSunCol.value.copy(ctx.sunColor);
     if (ctx.skyTop) U.uSkyTop.value.copy(ctx.skyTop); if (ctx.skyHorizon) U.uSkyHor.value.copy(ctx.skyHorizon);
@@ -12715,7 +12725,7 @@ function seaFrame(wdt){
   // in the bird's-eye view the disc of the sea grows with the zoom, so that it reaches the fog
   const scale=mode==='above'?Math.max(1,scene.fog.far*1.15/3000):1;
   _seaSun.copy(sun.color).multiplyScalar(clamp(sun.intensity/2.6,0,1));
-  SEA.update(wdt,{centre:C,qorigin:QORIGIN,offset:origU.value,scale,sunDir:LIGHT_DIR,sunColor:_seaSun,skyTop:skyU.uMid.value,skyHorizon:skyU.uHor.value,
+  SEA.update(wdt,{centre:C,eye:C,qorigin:QORIGIN,offset:origU.value,scale,sunDir:LIGHT_DIR,sunColor:_seaSun,skyTop:skyU.uMid.value,skyHorizon:skyU.uHor.value,
     bright:surfMat.uniforms.uBright.value,paused,detail:onWater?1:0,camera:seaDepth.cam,behind:seaDepth.on?seaDepth.behind:null,gustU:seaGust});
 }
 function seaDepthPass(){
