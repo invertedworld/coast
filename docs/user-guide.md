@@ -40,11 +40,11 @@ Doors open when they are walked into. A door swings away from the side from whic
 
 **R** pitches a camp: a small ridge tent and a camp fire, with a log to sit on beside the fire. The fire is laid 2.6 m ahead of the player and the tent stands beyond it, its door facing the fire. **R** again strikes the camp, wherever the player then is. Only one camp may stand at a time, and generating a new island strikes it.
 
-A camp may be pitched only on foot, out of doors, in the wild country of the main island (the rocky scrub, the uncultivated hillsides and the mountains) or on one of the offshore islands. It may not be pitched in or near a village, on olive terraces or farmland, beside a road or the railway, near a station, a harbour, a lighthouse or any building, in a cove, at the water's edge, or where the ground is not nearly level or where trees, rocks or walls stand in the way. Where a camp may not be pitched, a notice at the top of the screen gives the reason.
+A camp may be pitched only on foot, out of doors, in the wild country of the main island (the rocky scrub, the uncultivated hillsides and the mountains) or on one of the offshore islands. It may not be pitched in or near a village, on olive terraces or farmland, beside a road or the railway, near a station, a harbour, a lighthouse or any building, in a cove, at the water's edge, on a hillside steeper than a gentle slope, or where trees, shrubs, rocks or walls stand in the way. Gently sloping or slightly uneven ground is accepted, and the tent, the fire and the logs follow it. Where a camp may not be pitched, a notice at the top of the screen gives the reason.
 
-**X**, facing the door of the tent from within about 2 m, lies down in the tent, looking out of the door at the fire. **X** facing the log sits on it. **X** again, or a step with **W A S D**, stands the player up outside the tent. The tent, the fire and the log cannot be walked through.
+**X**, facing the door of the tent from within about 2 m, lies down in the tent, looking out of the door at the fire. **X** facing the log sits on it, and **X** standing close to the fire and facing it sits on the ground there, looking at the flames. **X** again, or a step with **W A S D**, stands the player up. The tent and the fire cannot be walked through.
 
-The fire flickers, throws up sparks and, by day, a thin smoke, and after dusk lights the ground, the tent and the trees round it. Its crackle is heard close to it once a recording is supplied.
+Small tongues of flame lick up from the logs over a bed of red coals, sparks rise and, by day, a thin smoke; after dusk the fire lights the ground round it and the front of the tent with a warm, flickering light. Its crackle is heard close to it, and fades away as the camp is struck.
 
 > **Example:** To spend a night under canvas, take the ferry to an offshore island, walk up from the landing to open, level ground, press **R**, then press **N** for night and **X** at the door of the tent.
 
@@ -114,7 +114,7 @@ The new island replaces the present one entirely, and the player begins it on fo
 
 **Copy QR code** copies the code to the clipboard as an image, and **Copy URL** copies the link. **L** again, **Esc** or **Close** hides the panel.
 
-Opening the link, on a telephone or in another browser, generates the same island and places the viewer in the same scene, aboard the same vehicle at the same place. The gulls, the whales, the dolphins, the other boats and the gusts of the wind are not recorded, since each is simulated afresh; a whale or a dolphin that was being followed is replaced by the one nearest to where it was, so that view is approximate.
+A camp, if one is pitched, is recorded with the link, and so is the player lying in its tent or sitting by its fire. Opening the link, on a telephone or in another browser, generates the same island and places the viewer in the same scene, aboard the same vehicle at the same place. The gulls, the whales, the dolphins, the other boats and the gusts of the wind are not recorded, since each is simulated afresh; a whale or a dolphin that was being followed is replaced by the one nearest to where it was, so that view is approximate.
 
 > **Example:** To show a friend the view from the ferry's saloon, board the ferry with **5**, press **0** twice to sit at a window seat, press **P** to hold the moment, press **L**, and scan the code with the friend's telephone.
 
