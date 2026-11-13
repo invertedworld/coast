@@ -8565,14 +8565,14 @@ function createUnderwater(renderer, opts={}){
     for (let a=0;a<SEGS;a++) I.push(0,v(1,a+1),v(1,a));
     for (let r=1;r<RINGS;r++) for (let a=0;a<SEGS;a++){ const p=v(r,a), q=v(r,a+1), s=v(r+1,a), t=v(r+1,a+1); I.push(p,t,s,p,q,t); }
     const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.Float32BufferAttribute(P,3)); g.setIndex(I); return g; })();
-  const SU={uSkyTop:{value:new THREE.Color()},uSkyMid:{value:new THREE.Color()},uSkyHor:{value:new THREE.Color()},uSunAir:{value:new THREE.Vector3(0,1,0)},uSunAirCol:{value:new THREE.Color()},uBrightW:{value:1}};
+  const SU={uSkyTop:{value:new THREE.Color()},uSkyMid:{value:new THREE.Color()},uSkyHor:{value:new THREE.Color()},uSunAir:{value:new THREE.Vector3(0,1,0)},uSunAirCol:{value:new THREE.Color()},uBrightW:{value:1},uSplitEye:{value:0}};
   const surfMat=new THREE.ShaderMaterial({uniforms:Object.assign({},SU,U),side:THREE.DoubleSide,
     vertexShader:`${sea.glsl}
       varying vec3 vP; varying vec3 vN; varying vec2 vQ;
       void main(){ vec3 wp=(modelMatrix*vec4(position,1.0)).xyz; vec2 q0=wp.xz+uOff.xz; vec3 dp, nr; float fo, swl; seaSurf(q0,dp,nr,fo,swl);
         vP=wp+dp; vN=nr; vQ=q0+dp.xz; gl_Position=projectionMatrix*viewMatrix*vec4(vP,1.0); }`,
     fragmentShader:`#include <packing>
-      ${GLSL} uniform vec3 uSkyTop, uSkyMid, uSkyHor, uSunAir, uSunAirCol; uniform float uBrightW; varying vec3 vP; varying vec3 vN; varying vec2 vQ;
+      ${GLSL} uniform vec3 uSkyTop, uSkyMid, uSkyHor, uSunAir, uSunAirCol; uniform float uBrightW, uSplitEye; varying vec3 vP; varying vec3 vN; varying vec2 vQ;
       vec3 skyCol(vec3 d){ float y=d.y; vec3 c=y>0.12?mix(uSkyMid,uSkyTop,clamp((y-0.12)/0.6,0.0,1.0)):mix(uSkyHor,uSkyMid,clamp((y+0.04)/0.16,0.0,1.0));
         float s=max(dot(d,uSunAir),0.0); return c+uSunAirCol*(pow(s,600.0)*30.0+pow(s,40.0)*0.8+pow(s,6.0)*0.15); }
       float fresnel(float ci,float eta){ float k=1.0-eta*eta*(1.0-ci*ci); float ct=sqrt(max(k,0.0)); float ec=eta*ci, et=eta*ct;
@@ -8582,6 +8582,9 @@ function createUnderwater(renderer, opts={}){
         vec2 g=vec2(0.0); float fw=max(length(fwidth(vQ)),1e-3);
         for (int i=0;i<${NC};i++){ vec4 a=uCW[i]; float amp=uCB[i].x*exp(-0.5*fw*fw*a.z*a.z*4.0); g+=a.xy*a.z*amp*cos(a.z*dot(a.xy,vQ)-a.w*uCTime+uCB[i].y); }
         vec3 N=normalize(normalize(vN)+vec3(-g.x,0.0,-g.y)*0.7);
+        // in a split view the eye stands just above the water, and the surface it would see from above is the frame
+        // above the water, not this one: the part of the view under the water sees past it to the water and the bed
+        if (uSplitEye>0.5 && uCam.y>vP.y) discard;
         vec3 V=normalize(uCam-vP), Nb=-N; float ci=clamp(dot(Nb,V),0.0,1.0);
         float F=fresnel(ci,${N_W.toFixed(3)});
         vec3 up=refract(-V,Nb,${N_W.toFixed(3)});
@@ -8772,7 +8775,7 @@ ${GLSL} uniform float uPx; attribute vec2 aPar; varying float vA;
     // the far plane pulled in: nothing beyond the reach of the light is drawn
     const far0=camera.far, seaVis=sea.mesh.visible; camera.far=Math.min(far0,cl(O.visibility,4,80)*2.7+10); camera.updateProjectionMatrix();
     sea.mesh.visible=false;
-    clip(SR,split?st.rW:null); U.uOwnMark.value=1; r.setRenderTarget(SR); r.render(scene,camera); U.uOwnMark.value=0;
+    clip(SR,split?st.rW:null); U.uOwnMark.value=1; SU.uSplitEye.value=split?1:0; r.setRenderTarget(SR); r.render(scene,camera); U.uOwnMark.value=0; SU.uSplitEye.value=0;
     sea.mesh.visible=seaVis;
     PU.uPInv.value.copy(camera.projectionMatrixInverse); PU.uCamW.value.copy(camera.matrixWorld);
     camera.far=far0; camera.updateProjectionMatrix();
