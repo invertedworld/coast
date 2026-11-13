@@ -137,7 +137,6 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
       <div class="row"><span><kbd>Space</kbd></span><span>Jump</span></div>
       <div class="row"><span><kbd>Z</kbd></span><span>Crouch</span></div>
       <div class="row"><span><kbd>X</kbd></span><span>Sit</span></div>
-      <div class="row"><span><kbd>R</kbd></span><span>Pitch or strike camp</span></div>
       <div class="row"><span>Mouse</span><span>Look</span></div>
     </div>
     <div class="group"><h3>Aerial view</h3>
@@ -168,12 +167,15 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
       <div class="row"><span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><span>Swim</span></div>
       <div class="row"><span><kbd>C</kbd></span><span>Descend</span></div>
       <div class="row"><span><kbd>Space</kbd></span><span>Ascend</span></div>
-      <div class="row"><span><kbd>F</kbd></span><span>Flashlight</span></div>
     </div>
     <div class="group"><h3>Sailing</h3>
       <div class="row"><span><kbd>A</kbd><kbd>D</kbd></span><span>Steer</span></div>
       <div class="row"><span><kbd>W</kbd><kbd>S</kbd></span><span>Paddle</span></div>
       <div class="row"><span><kbd>Q</kbd><kbd>E</kbd></span><span>Turn head</span></div>
+    </div>
+    <div class="group"><h3>Camp</h3>
+      <div class="row"><span><kbd>R</kbd></span><span>Pitch or strike camp</span></div>
+      <div class="row"><span><kbd>X</kbd></span><span>Lie in the tent or sit by the fire</span></div>
     </div>
     <div class="group"><h3>Camera</h3>
       <div class="row"><span><kbd>+</kbd><kbd>−</kbd></span><span>Zoom in and out</span></div>
@@ -201,6 +203,7 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
     </div>
     <div class="group"><h3>Other</h3>
       <div class="row"><span><kbd>Tab</kbd></span><span>Full screen</span></div>
+      <div class="row"><span><kbd>F</kbd></span><span>Flashlight</span></div>
       <div class="row"><span><kbd>M</kbd></span><span>Mute sound</span></div>
       <div class="row"><span><kbd>K</kbd></span><span>More people</span></div>
       <div class="row"><span><kbd>Shift</kbd>+<kbd>K</kbd></span><span>Fewer people</span></div>
@@ -364,6 +367,9 @@ const PAL={
 };
 const C_={}; for (const k in PAL) C_[k]=Array.isArray(PAL[k])?PAL[k].map(hex):hex(PAL[k]);
 const shade=(c,R,a=0.05)=>c.clone().multiplyScalar(1+(R()-0.5)*2*a);
+// the tone of the i-th voussoir of an arch: each a single dressed stone, set radially, a little lighter or darker
+// than its neighbours so that the joints between them read
+const vsTone=(c,i)=>c.clone().multiplyScalar(i%2?0.9:1.04+0.03*Math.sin(i*2.3));
 const GREY_ROCK=hex('#9a948a');
 const SP=1, SR=2, SS=3, SW=4, SB=7; // surface patterns: plaster, roof tiles, stone, wood, brick
 
@@ -1479,7 +1485,17 @@ function coveCore(x,z){ const cv=coveAtXZ(x,z); if (!cv) return false; const G=c
   if (!cvSdf(G,u,s)) return false; return _cd<14; }
 /* ---------- walking in a cove: the cliffs cannot be climbed or stepped off, the ravine's slope is walked only on
    the path, and inside the cave its floor is the ground ---------- */
+// a railway tunnel may be walked through along the track: in its bore, within TUN_HW m of the main line and below
+// the springing of its vault, the floor is the top of the ballast; beside the bore, below the vault, is solid rock
+const TUN_HW=2.2, TUN_VAULT=4.6;
+// The terrain's cover over the bore runs a cell (2 m) past where railState turns, so the floor is carried on to there,
+// or the walker coming out would be set on the cover for a step and drop from it
+const tunCell=x=>railState(x)==='tunnel' || railState(x-2)==='tunnel' || railState(x+2)==='tunnel';
+function tunFloor(x,z,y){ if (!tunCell(x) || mainPerp(x,z)>TUN_HW) return null; const ry=railY(x); return y<ry+TUN_VAULT?ry+0.25:null; }
+function tunMoveOk(x,z,y){ if (!tunCell(x) || mainPerp(x,z)<=TUN_HW || y>railY(x)+TUN_VAULT) return true; return heightAt(x,z)<y+1; }
+function inTunnel(x,z,y){ return tunFloor(x,z,y)!==null; }
 function walkGround(x,z,y){
+  { const f=tunFloor(x,z,y); if (f!==null) return f; }
   const cv=coveAtXZ(x,z); if (!cv || !cv.geo) return heightAt(x,z);
   const G=cv.geo, u=cvU(cv,x,z), s=cvS(cv,x,z);
   { const f=cvCaveFloor(G.cave,u,s,y); if (f!==null) return f; }
@@ -1496,6 +1512,7 @@ function coveNoWalk(cv,x,z){ const G=cv.geo; if (!G) return false; const u=cvU(c
   return Math.hypot(gx,gz)/0.8>0.6; }
 // whether a step from (ox,oz), standing on gO, to (nx,nz), whose standing height is gN, is allowed
 function coveMoveOk(ox,oz,y,gO,nx,nz,gN){
+  if (!tunMoveOk(nx,nz,y)) return false;
   const cv=coveAtXZ(nx,nz); if (!cv || !cv.geo) return true;
   if (gN-Math.max(y,gO)>STEP) return false;
   if (gO-gN>1.4) return false;
@@ -2514,7 +2531,7 @@ function addDoorFrame(gb,H,dx,Z){
   gb.add(T.box, mm(H,mat(dx,-0.3,Z+0.25,1.35,0.32,0.5)), C_.stone, null, SS);
   for (const s of [-1,1]) gb.add(T.box, mm(H,mat(dx+s*(DR+0.075),0,Z,0.14,DS,0.1)), C_.stone, null, SS);
   const m=9, rr=DR+0.075;
-  for (let i=0;i<m;i++){ const a=Math.PI*(i+0.5)/m; gb.add(T.boxC, mm(H,mat(dx+Math.cos(a)*rr,DS+Math.sin(a)*rr,Z,0.14,Math.PI*rr/m+0.02,0.1,0,0,a)), i===4?C_.trim:C_.stone, null, SS); }
+  for (let i=0;i<m;i++){ const a=Math.PI*(i+0.5)/m; gb.add(T.boxC, mm(H,mat(dx+Math.cos(a)*rr,DS+Math.sin(a)*rr,Z,0.14,Math.PI*rr/m+0.02,0.1,0,0,a)), i===4?C_.trim:vsTone(C_.stone,i), null); }
 }
 // whether a house can be entered, and if so its room: the floor lies just above the foot of the front wall. Where
 // the hillside rises inside the house above the floor, the ground is not drawn inside the room (see roomClip)
@@ -3365,7 +3382,7 @@ function addArch(gb,ch,R,a,build=true){
   // a ring of voussoirs on each face of the arch, standing a little proud
   const m=Math.max(9,Math.round(S*2.4)), seg=Math.PI*(r+0.14)/m+0.03;
   for (const fz of [-D/2-0.02,D/2+0.02]) for (let i=0;i<m;i++){ const ang=Math.PI*(i+0.5)/m, vx=Math.cos(ang)*(r+0.14), vy=spring+Math.sin(ang)*(r+0.14);
-    gb.add(T.boxC, mm(H,mat(vx,vy,fz,0.34,seg,0.16,0,0,ang)), i===Math.floor(m/2)?C_.trim:stone, null, SS); }
+    gb.add(T.boxC, mm(H,mat(vx,vy,fz,0.34,seg,0.16,0,0,ang)), i===Math.floor(m/2)?C_.trim:vsTone(stone,i), null); }
   const roofC=shade(pick(R,C_.roofs),R,0.05);
   gableRoof(gb,H,S+1.8,D,topY,(S+1.8)*0.36,wall,roofC);
   if (topY-crown>2) for (const s of [1,-1]) addWin(gb,H,0,(crown+0.7+topY)/2,s*(D/2+0.01),s>0?0:Math.PI,0.55,0.8,R()<0.4?pick(R,C_.shutters):null);
@@ -3742,7 +3759,7 @@ function buildBridge(gb,ch,R,X){
   const nv=17;
   for (const fx of faces) for (let k=0;k<nv;k++){ const a=Math.PI*(k+0.5)/nv, zl=Math.cos(a)*(r+0.35), yl=spring+Math.sin(a)*(rise+0.35);
     const dz=Math.cos(a)/r, dy=Math.sin(a)/rise, seg=Math.PI*Math.hypot(r,rise)/nv/1.25;
-    gb.add(T.boxC, mm(H,mat(fx,yl,zl,0.14,0.85,Math.min(1.1,seg),0,Math.atan2(dz,dy))), k===Math.floor(nv/2)?C_.trim:shade(C_.stone,R,0.06), null, SS); }
+    gb.add(T.boxC, mm(H,mat(fx,yl,zl,0.14,0.85,Math.min(1.1,seg),0,Math.atan2(dz,dy))), k===Math.floor(nv/2)?C_.trim:vsTone(C_.stone,k), null); }
   ch.obbs.push({x:xc,z:zc,hw:W/2+0.2,hd:F,rot,top:deck,bot:deck-0.9});
 }
 function buildStation(gb,ch,R,S){
@@ -4111,6 +4128,10 @@ function genChunk(cx,cz,lod=0){
   const ch={lod,field:null,cx,cz,obbs:[],circles:[],place:[],placeCircles:[],kind:chunkKind(cx,cz),piazza:null,alleys:[],garden:null,checker:null,boats:[],glow:[]};
   const gb=new GB(lod), saint=pick(R,SAINTS), MR=peakNear(xc,zc,1.15)?7.5:4.6;
   if (lod>=2) gb.glow=ch.glow;
+  // a bridge carrying a street over the railway is straight while the street may curve, so its footprint (deck,
+  // parapets and a metre to spare) is reserved in every block it reaches before anything is placed there
+  for (let i=cx-2;i<=cx+3;i++){ const X=railCross(i); if (!X) continue; const o={x:X.x,z:X.z,hw:vRoadW(X.i,X.z)+1.4,hd:X.flat+1,rot:X.rot};
+    if (Math.abs(o.x-(cx+0.5)*C)<C/2+o.hd+o.hw && Math.abs(o.z-(cz+0.5)*C)<C/2+o.hd+o.hw) ch.place.push(o); }
   const cellOk=(x,z,m)=>insideCell(cx,cz,x,z,m);
   const alleyS=(A,x,z)=>A.dir==='h'?z-A.f(x):x-A.f(z);
   function canPlace(o,pad=0.04,opt={}){
@@ -4187,7 +4208,7 @@ function genChunk(cx,cz,lod=0){
         if (CR){ // jambs and an arch of voussoirs round the doorway, standing proud of the facade
           const {r:dr,s:ds,f:df}=CHURCH_DOOR, rr=dr+0.2, m=13;
           for (const sx of [-1,1]) gb.add(T.box, mm(H,mat(sx*(dr+0.2),df,L/2,0.39,ds-df,0.16)), C_.trim, null, SS);
-          for (let i=0;i<m;i++){ const a=Math.PI*(i+0.5)/m; gb.add(T.boxC, mm(H,mat(Math.cos(a)*rr,ds+Math.sin(a)*rr,L/2,0.39,Math.PI*rr/m+0.03,0.16,0,0,a)), C_.trim, null, SS); } }
+          for (let i=0;i<m;i++){ const a=Math.PI*(i+0.5)/m; gb.add(T.boxC, mm(H,mat(Math.cos(a)*rr,ds+Math.sin(a)*rr,L/2,0.39,Math.PI*rr/m+0.03,0.16,0,0,a)), vsTone(C_.trim,i), null); } }
         else {
         gb.add(T.box, mm(H,mat(0,0,fz,1.7,2.7,0.16)), C_.door, null, SW);
         gb.add(T.cylC, mm(H,mat(0,2.7,fz,1.7,0.16,1.7,0,Math.PI/2)), C_.door, null, SW);
@@ -4734,9 +4755,8 @@ function genChunk(cx,cz,lod=0){
         archFill(gb,mm(Hp,mat(0,PS,zc)),PA,PA,PD,PT-PS,stoneR,SS,stoneR,SS);
         gb.add(T.box, mm(Hp,mat(0,PT,zc,2*PA+7.8,0.4,PD+0.4)), C_.trim, null, SS);
         gb.add(T.box, mm(Hp,mat(0,-1.5,zc,2*PA+0.2,1.25,PD)), lining, null);
-        for (let k=0;k<13;k++){ const ang=Math.PI*(k+0.5)/13; gb.add(T.boxC, mm(Hp,mat(Math.cos(ang)*(PA+0.22),PS+Math.sin(ang)*(PA+0.22),zf-into*0.02,0.85,0.6,0.14,0,0,ang)), k===6?C_.trim:shade(C_.stone,R,0.06), null, SS); }
+        for (let k=0;k<13;k++){ const ang=Math.PI*(k+0.5)/13; gb.add(T.boxC, mm(Hp,mat(Math.cos(ang)*(PA+0.22),PS+Math.sin(ang)*(PA+0.22),zf-into*0.02,0.85,0.6,0.14,0,0,ang)), k===6?C_.trim:vsTone(C_.stone,k), null); }
         for (const sg of [-1,1]){ const [px,pz]=localToWorld({x:xb,z:zb,rot},sg*(PA+1.85),zc); ch.obbs.push({x:px,z:pz,hw:1.85,hd:PD/2,rot,top:Infinity}); }
-        { const [px,pz]=localToWorld({x:xb,z:zb,rot},0,zc+into*1.2); ch.obbs.push({x:px,z:pz,hw:PA,hd:0.4,rot,top:Infinity}); }
       }
       prev=st;
       if (!mine) continue;
@@ -4988,7 +5008,7 @@ scene.fog=new THREE.Fog(FOG,90,1500); scene.background=FOG.clone();
 // the field of view at street level, in the water, at the helm and in a coach (vertical, in degrees), set on the help panel
 let FOV=70; try{ const v=+localStorage.getItem('coast.fov'); if (v>=50&&v<=100) FOV=v; }catch(_){}
 const camera=new THREE.PerspectiveCamera(FOV,1,0.3,3600); world.add(camera);
-// the diver's torch (F under the water): a spot carried with the eye, pointing where it looks. It stays in the scene
+// the torch (F, under the water or on foot): a spot carried with the eye, pointing where it looks. It stays in the scene
 // at nothing while off, so that turning it on does not make every material compile again
 const torch=new THREE.SpotLight(0xfff1dc,0,32,0.42,0.55,1.4), torchAim=new THREE.Object3D();
 torchAim.position.set(0,0,-1); camera.add(torch,torchAim); torch.target=torchAim; torch.position.set(0.15,-0.1,0);
@@ -10256,18 +10276,40 @@ function updateCarDoors(dt){
   // shut, a door's edges lie 5 cm into the pocket and 3 cm into the groove; open, it is inside the pocket
   for (const c of train.cars) for (const d of c.doors){ const {sx,e}=d.userData; d.position.set(sx*CDX,1.31,e*(CDZ-0.01)-e*k*(CDW+0.02)); }
 }
+/* A walker in a railway tunnel is not met by a train that was not already on its way. On going in, the tunnel's two
+   portals are found along the line; a train then running towards it within 900 m, or already in it, is let come,
+   and any other train stops 40 m short of the portal on its side until the walker is out. Once the train let come
+   is 250 m beyond the far portal, the next is held too. */
+const TUNW={on:false,xa:0,xb:0,coming:false};
+function tunWalkStep(){
+  const w=mode==='street' && inTunnel(player.x,player.z,player.y);
+  if (!w){ TUNW.on=false; return; }
+  if (!TUNW.on){ let a=player.x, b=player.x; while (player.x-a<4000 && railState(a-2)==='tunnel') a-=2; while (b-player.x<4000 && railState(b+2)==='tunnel') b+=2;
+    TUNW.on=true; TUNW.xa=a; TUNW.xb=b;
+    const into=train.dir>0?TUNW.xa-train.x:train.x-TUNW.xb, inside=train.x>=TUNW.xa-150 && train.x<=TUNW.xb+150;
+    TUNW.coming=inside || (train.wait<=0 && into>0 && into<900); }
+  // the train let come has gone through
+  if (TUNW.coming && (train.dir>0?train.x-TUNW.xb:TUNW.xa-train.x)>250) TUNW.coming=false; }
+function tunHoldD(){
+  if (!TUNW.on || TUNW.coming) return 1e9;
+  const portal=train.dir>0?TUNW.xa:TUNW.xb, d=(portal-train.x)*train.dir;
+  // short of the stopping mark it brakes to it; past the mark but short of the portal it stops where it stands
+  return d>40?d-40:d>0?0.001:1e9; }
 function updateTrain(dt){
+  tunWalkStep();
   if (!train.init){ train.init=true; train.x=player.x-train.dir*300; train.v=train.sp; train.wait=0; }
   if (train.wait>0){ train.wait-=dt; train.v=0; }
   else {
     // brake for the next station ahead so the locomotive stops near the far end of the platform
     let d=1e9; const n0=Math.floor(train.x/ST_SP);
     for (let k=0;k<5;k++){ const S=stationInfo(n0+train.dir*k); if (!S) continue; const stop=S.x+train.dir*28, dd=(stop-train.x)*train.dir; if (dd>0.001){ d=dd; break; } }
+    // a walker in a tunnel: a train not already on its way there waits short of the portal until they are out
+    const hd=tunHoldD(); let held=false; if (hd<d){ d=hd; held=true; }
     // constant deceleration of 0.7 m/s² brings the train to rest exactly at the stopping mark
     const target=Math.min(train.sp,Math.sqrt(2*0.7*Math.max(0,d)));
     train.v+=clamp(target-train.v,-1.6*dt,0.7*dt);
     const s=(railZ(train.x+1)-railZ(train.x-1))/2, step=train.v*dt/Math.sqrt(1+s*s);
-    if (d<1e8 && (step>=d || (d<0.004 && train.v<0.08))){ train.x+=train.dir*d; train.v=0; train.wait=12; }
+    if (d<1e8 && (step>=d || (d<0.004 && train.v<0.08))){ train.x+=train.dir*d; train.v=0; if (!held) train.wait=12; }
     else train.x+=train.dir*step;
   }
   if (Math.abs(train.x-player.x)>1600){ train.dir=Math.random()<0.5?1:-1; train.x=player.x-train.dir*1400; train.v=train.sp; train.wait=0; }
@@ -11626,7 +11668,7 @@ function sndUpdate(dt){
   const open=room&&room.kind!=='church'?Math.min(1,Math.abs(room.a||0)):0;
   SNDS.inK=(SNDS.inK??0)+(((room||cabin)?1:0)-(SNDS.inK??0))*(1-Math.exp(-dt*4)); const iK=SNDS.inK*(1-0.6*open);
   // the reverb follows whether the listener is inside the bore, eased so it swells and dies away at the portals
-  const inCave=mode==='street'&&coveInCave(player.x,player.z,player.y), inBore=(inside&&railState(camera.position.x)==='tunnel')||(room&&room.kind==='church')||inCave?1:0; SNDS.tun=(SNDS.tun??0)+(inBore-(SNDS.tun??0))*(1-Math.exp(-dt*2.5)); const tK=SNDS.tun;
+  const inCave=mode==='street'&&coveInCave(player.x,player.z,player.y), inBore=(inside&&railState(camera.position.x)==='tunnel')||(mode==='street'&&inTunnel(player.x,player.z,player.y))||(room&&room.kind==='church')||inCave?1:0; SNDS.tun=(SNDS.tun??0)+(inBore-(SNDS.tun??0))*(1-Math.exp(-dt*2.5)); const tK=SNDS.tun;
   // the listener is the camera
   _sl.copy(camera.position); camera.getWorldDirection(_sf);
   const L=ctx.listener;
@@ -11837,7 +11879,7 @@ addEventListener('keydown',e=>{ keys[e.code]=true;
   if (code==='KeyF' && !e.repeat) toggleFerry();
   if (code==='KeyG' && !e.repeat) toggleGoods(); }
   if (code==='KeyY' && !e.repeat) dinghyKey();
-  if (e.code==='KeyF' && !e.repeat && mode==='swim') torchOn=!torchOn;
+  if (e.code==='KeyF' && !e.repeat && (mode==='swim'||mode==='street')) torchOn=!torchOn;
   if (code==='Under' && !e.repeat) underwaterKey();
   if (code==='Whale' && !e.repeat) followKey('whale');
   if (code==='Dolphin' && !e.repeat) followKey('dolphin');
@@ -12720,9 +12762,12 @@ let tYaw=0, tPitch=-0.04, tunnelK=0, prevMode='street';
 // left clear of the dark fog and the land beyond it is seen through a glare of daylight that thins as the train draws
 // nearer, rather than lying hidden in darkness until the last fifty metres and then appearing all at once
 const tunV={vis:0}, _tc1=new THREE.Color(), _tc2=new THREE.Color();
-function tunnelLight(dt,on){
-  const RT=rideTrain(), P=camera.position; let inT=0, vis=0, ah=600;
-  if (on && RT.st(P.x)==='tunnel'){ const sg=RT.dir; ah=0; while (ah<600 && RT.st(P.x+sg*(ah+2))==='tunnel') ah+=2; inT=clamp((ah-4)/50,0,1);
+function tunnelLight(dt,on,RT=rideTrain()){
+  const P=camera.position; let inT=0, vis=0, ah=600;
+  if (on && RT.st(P.x)==='tunnel'){ const sg=RT.dir; ah=0; while (ah<600 && RT.st(P.x+sg*(ah+2))==='tunnel') ah+=2;
+    // on foot the daylight reaching in from the nearer portal counts, whichever way the walker looks
+    let deep=ah; if (RT.both){ let bh=0; while (bh<deep && RT.st(P.x-sg*(bh+2))==='tunnel') bh+=2; deep=Math.min(deep,bh); }
+    inT=clamp((deep-4)/50,0,1);
     // the line from the eye to the middle of the far opening, 2.9 m above the rails there, keeps within the bore
     // (2.6 m either side of the track and from 0.3 m to 6.5 m above the rails) all the way to it
     if (ah<600){ const xe=P.x+sg*(ah+2), ez=RT.Z(xe), ey=RT.Y(xe)+2.9; vis=1;
@@ -13572,7 +13617,8 @@ const _dvSun=new THREE.Color(), _dvSky=new THREE.Color(), _dvEye={x:0,y:0,z:0};
 function diveFrame(dt,wdt){
   // out of the water, what has come into the scene is compiled for the water's passes every few seconds
   if (!wetView() && (uwWarmT-=dt)<=0){ uwWarmT=3; uwWarmMs=UW.warm(renderer,scene,camera); }
-  if (!wetView()){ torch.intensity=0; if (diveOn){ diveOn=false; UW.uniforms.uUnderOn.value=0; UW.surface.visible=UW.particles.visible=false; if (seabedLife) seabedLife.update(0,{active:false}); } return; }
+  // on foot the torch lights the way, in a tunnel or at night
+  if (!wetView()){ torch.intensity=torchOn && mode==='street' ? 60 : 0; if (diveOn){ diveOn=false; UW.uniforms.uUnderOn.value=0; UW.surface.visible=UW.particles.visible=false; if (seabedLife) seabedLife.update(0,{active:false}); } return; }
   diveOn=true; const S=swimmer.state, L=seabedLifeNow(), sw=mode==='swim';
   // taken under by a key (6), the swimmer is simply there: the rush of bubbles belongs to jumping or diving in
   const quiet=sw && diveQuiet; if (sw && S.under) diveQuiet=false;
@@ -14002,6 +14048,9 @@ function frame(now){
   }
   if (mode==='follow') followStep(dt);
   if (mode==='coach') tunnelLight(dt,true);
+  // on foot in a tunnel the darkness is reckoned along the line in the direction looked
+  { const w=mode==='street' && inTunnel(player.x,player.z,player.y);
+    if (w || (mode==='street' && tunnelK>0.001)) tunnelLight(dt,w,{dir:-Math.sin(yaw)<0?-1:1,Z:railZ,Y:railY,st:railState,both:true}); }
   sitStep(dt);
   campStep();
   sndUpdate(dt);

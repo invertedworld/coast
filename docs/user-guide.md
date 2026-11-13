@@ -50,7 +50,7 @@ Small tongues of flame lick up from the logs over a bed of red coals, sparks ris
 
 ## Travelling by train
 
-A passenger railway runs the length of the island, weaving between its two coasts, with stations in the villages and cuttings and tunnels through the hills. Goods lines are railways of their own, quite separate from the main line: each joins two harbours 2 km to 6 km apart on the same shore, runs along the shore between them, and ends in a siding along each quay. A goods train of twelve wagons, with a shunter at each end, works each line, waiting at each quay while it is unloaded and loaded and reversing there.
+A passenger railway runs the length of the island, weaving between its two coasts, with stations in the villages and cuttings and tunnels through the hills. A tunnel may be walked through along the track. It is dark inside, and **F** turns on a torch. While the player is in a tunnel, a passenger train that was not already approaching waits outside it until the player has come out. Goods lines are railways of their own, quite separate from the main line: each joins two harbours 2 km to 6 km apart on the same shore, runs along the shore between them, and ends in a siding along each quay. A goods train of twelve wagons, with a shunter at each end, works each line, waiting at each quay while it is unloaded and loaded and reversing there.
 
 **3** rides in the cab of the passenger train, and **4** in the cab of the goods train working the nearest goods line, which sets one to work there if none is near. **0** then steps through the views of the train: the cab; in the passenger train, a window seat in the first coach, looking out; a view from behind the train, which the mouse moves round it and **+** and **−** bring nearer or further; and a view from beside the line, which turns to watch the train pass and moves on to a new place ahead, riding in the cab while the train is in a tunnel. **0** after the last view returns to the cab. **3** or **4** again, or **2**, steps off beside the track. Away from a train, **0** follows the nearer train from behind.
 
@@ -76,7 +76,7 @@ The player wades into the sea from any shore that shelves, and swims once the wa
 
 **9** takes the player under the water, beside the nearest wreck on the seabed offshore, or where no wreck lies within reach, to the nearest open water between 4.5 m and 9 m deep, facing the shore. **9** again returns the player to where they were before.
 
-In the water, **W A S D** swim in the direction of the view. At the surface the head rides the waves. Looking down while swimming forward dives; **C** held also dives, and **Space** held rises. **Shift** swims faster at the cost of more breath. Under the water the light dims and colours with depth, and wrecks, amphorae and the life of the sea bed may be found. Under the water, **F** turns a torch on or off; it lights what lies ahead of the diver.
+In the water, **W A S D** swim in the direction of the view. At the surface the head rides the waves. Looking down while swimming forward dives; **C** held also dives, and **Space** held rises. **Shift** swims faster at the cost of more breath. Under the water the light dims and colours with depth, and wrecks, amphorae and the life of the sea bed may be found. **F** turns a torch on or off, under the water or on foot; it lights what lies ahead.
 
 The swimmer leaves the water by swimming to a beach and wading ashore, by climbing a quay's ladder, or by climbing onto any ledge less than about 1 m above the water.
 
