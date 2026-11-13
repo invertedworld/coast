@@ -27,9 +27,11 @@ BR="$(git -C "$SITE" branch --show-current)"
 git -C "$SITE" fetch -q origin
 git -C "$SITE" merge-base --is-ancestor origin/master "$BR" || { echo "publish-site: $BR in $SITE does not contain origin/master" >&2; exit 1; }
 
-tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+tmp="$(mktemp -d)"; trap 'rm -rf "$tmp" "$tmp.tar"' EXIT
 chmod 755 "$tmp"   # mktemp's 700 would otherwise be copied onto play/coast
-git archive "$REV" -- "${FILES[@]}" | tar -x -C "$tmp"
+# (the archive is written to a file and then unpacked: tar stops reading at the end of the archive, and git archive,
+# still writing its padding, would otherwise fail on the broken pipe)
+git archive -o "$tmp.tar" "$REV" -- "${FILES[@]}"; tar -x -C "$tmp" -f "$tmp.tar"; rm -f "$tmp.tar"
 
 # the build number, and the three replacements that make the page load nothing from other sites
 python3 - "$tmp/index.html" "$BUILD" <<'PY'
