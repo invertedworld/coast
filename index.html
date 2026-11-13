@@ -137,6 +137,7 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
       <div class="row"><span><kbd>Space</kbd></span><span>Jump</span></div>
       <div class="row"><span><kbd>Z</kbd></span><span>Crouch</span></div>
       <div class="row"><span><kbd>X</kbd></span><span>Sit</span></div>
+      <div class="row"><span><kbd>R</kbd></span><span>Pitch or strike camp</span></div>
       <div class="row"><span>Mouse</span><span>Look</span></div>
     </div>
     <div class="group"><h3>Scenes</h3>
@@ -3009,6 +3010,7 @@ function addFlora0(gb,ch,x,z,s=1,base,kind,lean){
   const r=rng(Math.floor(hash(Math.round(x*16),Math.round(z*16),kind.length*131+7)*4294967296)), lod=gb.lod, seed=Math.floor(r()*1e6);
   const sh=(c,a=0.06)=>c.clone().multiplyScalar(1+(r()-0.5)*2*a), Y=base;
   if (FLORA[kind] && ch) (ch.treeSpots||(ch.treeSpots=[])).push([x,z,s]);
+  else if (ch) (ch.shrubSpots||(ch.shrubSpots=[])).push([x,z,s]);   // the shrubs, which a camp keeps clear of
   // a trunk or branch from p to q, of diameter d at its foot; it runs on a little past q, into the next piece, so
   // that no seam shows where two pieces meet
   const limb=(p,q,d,c,t=TV.trunk)=>{ const L=Math.hypot(q[0]-p[0],q[1]-p[1],q[2]-p[2])||1, e=1+0.3*d/L; gb.add(t,segM(p,[p[0]+(q[0]-p[0])*e,p[1]+(q[1]-p[1])*e,p[2]+(q[2]-p[2])*e],d,d),c,base); };
@@ -10200,6 +10202,8 @@ const headSpot=new THREE.SpotLight(hex('#ffeccc'),0,240,0.5,0.75,1.2); world.add
 // the coach lamps join the scene only after dusk, since every light adds to the cost of every lit pixel
 // the lamps stay in the scene, dark by day: adding or removing a light would recompile every lit material
 const coachLamps=[1,2,4].map(i=>({l:new THREE.PointLight(hex('#ffbf73'),0,26,1.5),i})); let coachLampsOn=false; for (const c of coachLamps) world.add(c.l);
+// the light of a camp fire, kept in the scene for the same reason and dark while there is no camp (see Camping)
+const campLight=new THREE.PointLight(hex('#ff7a30'),0,9,1.8); world.add(campLight);   // its reach is CAMP_LIGHT_R
 const _hv=new THREE.Vector3();
 let headTun=0;   // how far the lead locomotive is into a tunnel's darkness, eased
 function updateTrainLights(){
@@ -10930,7 +10934,8 @@ function roofSlide(dt){
 }
 let colRoof=null;   // the roof the player last stood on, from collide, for sliding
 function collide(){
-  const near=nearbyChunks(), r=player.r, py=player.y;
+  // a camp's tent, fire and log are colliders as a block's are
+  const near=CAMP.ch?[...nearbyChunks(),CAMP.ch]:nearbyChunks(), r=player.r, py=player.y;
   const pushOut=(o,wall)=>{
       if (o.top<=py+STEP) return;
       if (o.bot!==undefined && py+1.75<o.bot) return;   // clear underneath
@@ -11418,7 +11423,7 @@ const SOUND_DEF={
   wind_trees:{g:0.6}, wind_open:{g:0.8}, owl:{g:0.8,ref:12}, gulls:{g:0.7,ref:18},
   water_lap:{g:1,ref:14}, surf:{g:1,ref:14}, waves_rocks:{g:1,ref:10}, hull_slap:{g:0.7,ref:3}, boat_creak:{g:0.6,ref:3}, rigging:{g:0.5,ref:3},
   camera_shutter:{g:0.8}, door_open:{g:0.7,ref:3}, door_close:{g:0.7,ref:3}, sit_down:{g:0.5,ref:2}, stand_up:{g:0.5,ref:2},
-  fountain:{g:0.8,ref:3}, cat_mew:{g:0.8,ref:2.5}, clock_bell:{g:1,ref:30}, church_bell:{g:1,ref:45}, cafe:{g:0.7,ref:5},
+  fountain:{g:0.8,ref:3}, campfire:{g:0.8,ref:3}, cat_mew:{g:0.8,ref:2.5}, clock_bell:{g:1,ref:30}, church_bell:{g:1,ref:45}, cafe:{g:0.7,ref:5},
   step_pavement:{g:0.5}, step_sand:{g:0.5}, step_soil:{g:0.5}, step_grass:{g:0.5}, step_wood:{g:0.5}, step_metal:{g:0.5}, land:{g:0.7},
   rail_joint:{g:0.8,ref:5}, train_start:{g:1,ref:15}, train_run:{g:1,ref:15}, train_stop:{g:1,ref:15}, train_idle:{g:0.7,ref:8},
   goods_run:{g:0.75,ref:12}, goods_idle:{g:0.6,ref:8}, goods_start:{g:0.75,ref:12}, goods_stop:{g:0.75,ref:12}, goods_horn:{g:0.8,ref:50}, goods_buffer:{g:0.7,ref:6},
@@ -11646,6 +11651,9 @@ function sndUpdate(dt){
   slotUpdate(slots.fountain,'fountain',dt,1,SNDS.src.filter(s=>s.id==='fountain'&&s.d<90));
   const cafeK=clamp((hour-7.5)/1.5,0,1)*clamp((23.5-hour)/1.5,0,1)*(0.7+0.3*clamp((hour-18)/2,0,1));
   slotUpdate(slots.cafe,'cafe',dt,cafeK,SNDS.src.filter(s=>s.id==='cafe'&&s.d<80));
+  // a camp fire crackling, heard at the fire while it burns
+  { const v=sv('campfire','campfire','world',true), F=CAMP.c;
+    sndVoice(v,dt,easeTo('campfire',F&&!paused?0.85+0.15*F.fireLevel():0,dt,4),F?CAMP.x:_sl.x,F?CAMP.y+0.3:_sl.y,F?CAMP.z:_sl.z); }
   // harbour boats: water slapping at the nearest hull, with creaks and rigging now and then
   const fl=SNDS.boats.filter(o=>o.b.floating);
   slotUpdate(slots.hull,'hull_slap',dt,1,fl.slice(0,1).map(o=>({x:o.b.m.position.x,y:o.b.m.position.y+0.3,z:o.b.m.position.z})));
@@ -11821,6 +11829,7 @@ addEventListener('keydown',e=>{ keys[e.code]=true;
   if (code==='KeyI' && !e.repeat) openIsland();
   if (code==='KeyZ' && !e.repeat) crouch=!crouch;
   if (code==='KeyX' && !e.repeat) sitKey();
+  if (e.code==='KeyR' && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) campKey();
   // on a Mac without these keys, Fn with an arrow gives them: matched by the key as well as by its code
   if (code==='PageUp'||(e.key==='PageUp'&&code!=='PageUp')){ e.preventDefault(); if (!e.repeat) setDrawLvl(1); }
   if (code==='PageDown'||(e.key==='PageDown'&&code!=='PageDown')){ e.preventDefault(); if (!e.repeat) setDrawLvl(-1); }
@@ -12108,7 +12117,9 @@ function coachStep(dt,turnIn){
    the sitter rides with it, the ferry's pitch and roll included. A seat within 0.45 m of a cat is taken. The look is
    kept in the frame's own variables: yaw and fpPitch at street level, co.yaw and co.pitch in a coach, fe.yaw and
    fe.pitch on the ferry, with L the heading in the frame (yaw-π at street level). */
-const SIT_T=0.4, SIT_YAW=2.09, SIT_REACH=1.5;
+const SIT_T=0.4, SIT_YAW=2.09, SIT_REACH=1.5, SIT_EXTRA={lounger:0.4,tent:0.7};
+// where the eye lies above the floor on the seats that are lain on rather than sat on
+const SIT_LIE={lounger:0.8,tent:0.3};
 let sit=null;
 const _sm=new THREE.Matrix4(), _sq=new THREE.Quaternion(), _sq2=new THREE.Quaternion(), _stP=new THREE.Vector3(), _sp2=new THREE.Vector3(), _se=new THREE.Euler(), _sY=new THREE.Vector3(0,1,0);
 function sitM(fr){
@@ -12118,7 +12129,7 @@ function sitM(fr){
 const sitLookGet=fr=>fr==='coach'?[co.yaw,co.pitch]:fr==='ferry'?[fe.yaw,fe.pitch]:[yaw-Math.PI,fpPitch];
 function sitLookSet(fr,L,p){ if (fr==='coach'){ co.yaw=L; co.pitch=p; } else if (fr==='ferry'){ fe.yaw=L; fe.pitch=p; } else { yaw=L+Math.PI; fpPitch=p; } }
 // the seated eye in the seat's frame, looking along L and p
-function sitEye(s,L,p,P,Q){ const ey=s.kind==='lounger'?s.y-s.h+0.8:s.y+0.7;
+function sitEye(s,L,p,P,Q){ const ey=SIT_LIE[s.kind]?s.y-s.h+SIT_LIE[s.kind]:s.y+0.7;
   P.set(s.x-s.fx*s.back,ey,s.z-s.fz*s.back); Q.setFromEuler(_se.set(p,Math.PI+L,0,'YXZ')); }
 // whether the walking rules let the player stand at (x,z) on a floor at fy: collision leaves them where they are, and
 // the ground there is that floor and dry
@@ -12133,6 +12144,7 @@ function sitFind(){
   if (mode==='street' && descent.t<0){ fr='world'; px=player.x; pz=player.z; py=player.y; L=yaw-Math.PI;
     const N=nearbyChunks(); let inRoom=null;
     for (const D of rooms) if (D.room && D.seats && sitInside(D,px,pz) && Math.abs(py-(D.base??py))<12){ inRoom=D; list.push(...D.seats); }
+    if (!inRoom) list.push(...CAMP.seats);
     if (!inRoom) for (const ch of N) if (ch.seats) for (const s of ch.seats){
       // never through the wall of a building
       let clear=true; for (let t=0.15;t<0.9 && clear;t+=0.15){ const qx=px+(s.x-px)*t, qz=pz+(s.z-pz)*t;
@@ -12143,11 +12155,14 @@ function sitFind(){
   else return null;
   const lx=Math.sin(L), lz=Math.cos(L); let best=null, bs=1e9;
   for (const s of list){ const dx=s.x-px, dz=s.z-pz, d=Math.hypot(dx,dz);
-    if (d>SIT_REACH+(s.kind==='lounger'?0.4:0) || Math.abs(s.y-s.h-py)>0.7) continue;   // a lounger is reached from either end
+    if (d>SIT_REACH+(SIT_EXTRA[s.kind]||0) || Math.abs(s.y-s.h-py)>0.7) continue;   // a lounger is reached from either end, the tent from its door
     const c=d>1e-3?(dx*lx+dz*lz)/d:1; if (d>0.45 && c<0.45) continue;
     if (fr==='world' && s.ppl) continue;
     if (fr==='world' && catOnSeat(s)) continue;
     const sc=d-0.6*c; if (sc<bs){ bs=sc; best=s; } }
+  // failing a seat, by a camp's fire the ground is a seat: within 2 m of the fire and turned towards it
+  if (!best && fr==='world' && CAMP.c){ const dx=CAMP.x-px, dz=CAMP.z-pz, d=Math.hypot(dx,dz);
+    if (d<2.0 && d>0.1 && (dx*lx+dz*lz)/d>0.5) best=campGroundSeat(px,pz); }
   return best?{s:best,fr,home:[px,pz,py]}:null;
 }
 function sitKey(f0){
@@ -12158,7 +12173,7 @@ function sitKey(f0){
   const inv=_sm.clone().invert();
   sit={s,fr,home:f.home,mode,seed:SEED,k:0,dir:1,L0:Math.atan2(s.fx,s.fz),
     fp:camera.position.clone().applyMatrix4(inv), fq:_sq.clone().invert().multiply(camera.quaternion), sp:new THREE.Vector3(), sq:new THREE.Quaternion()};
-  sitLookSet(fr,sit.L0,s.kind==='lounger'?0.14:-0.04); crouch=false;
+  sitLookSet(fr,sit.L0,s.kind==='lounger'?0.14:s.kind==='tent'?0.06:s.kind==='ground'?-0.3:-0.04); crouch=false;
   _stP.set(s.x,s.y,s.z).applyMatrix4(_sm); sndPlay('sit_down','player',[_stP.x,_stP.y,_stP.z]);
 }
 function sitStand(){
@@ -12169,7 +12184,7 @@ function sitStand(){
   else {
     // in front, to either side or behind the seat, in its own frame; failing those, where the player stood before
     const fy=s.y-s.h, rx=s.fz, rz=-s.fx; let spot=null;
-    for (const [a,b] of [[0.75,0],[1.0,0],[0,0.8],[0,-0.8],[0,1.3],[0,-1.3],[0,1.5],[0,-1.5],[0.75,0.75],[0.75,-0.75],[1.3,0],[-0.8,0],[1.6,0],[-1.2,0]]){
+    for (const [a,b] of [...(s.out||[]),[0.75,0],[1.0,0],[0,0.8],[0,-0.8],[0,1.3],[0,-1.3],[0,1.5],[0,-1.5],[0.75,0.75],[0.75,-0.75],[1.3,0],[-0.8,0],[1.6,0],[-1.2,0]]){
       const x=s.x+s.fx*a+rx*b, z=s.z+s.fz*a+rz*b; if (sitSpotOk(x,z,fy)){ spot=[x,z,fy]; break; } }
     if (!spot) spot=sit.home;
     player.x=spot[0]; player.z=spot[1]; player.y=spot[2]; player.vy=0; player.grounded=true; eyeY=player.y; }
@@ -12183,7 +12198,7 @@ function sitStep(dt){
   if (sit.dir<0 && sit.k<=0){ sit=null; return; }
   sitM(sit.fr);
   if (sit.dir>0){
-    let [L,p]=sitLookGet(sit.fr); const lie=sit.s.kind==='lounger';
+    let [L,p]=sitLookGet(sit.fr); const lie=!!SIT_LIE[sit.s.kind];
     const d=Math.atan2(Math.sin(L-sit.L0),Math.cos(L-sit.L0)); L=sit.L0+clamp(d,-SIT_YAW,SIT_YAW); p=clamp(p,lie?-0.45:-0.9,lie?1.0:0.9); sitLookSet(sit.fr,L,p);
     sitEye(sit.s,L,p,_stP,_sq2); }
   else { _stP.copy(sit.sp); _sq2.copy(sit.sq); }
@@ -12195,6 +12210,411 @@ function sitStep(dt){
   else { camera.position.lerp(_stP,b); camera.quaternion.slerp(_sq2,b); }
   if (camera.near>0.1){ camera.near=0.1; camera.updateProjectionMatrix(); }
   sky.position.copy(camera.position);
+}
+/* ================= camping =================
+   A camp: a small ridge tent and a camp fire in front of its door, in the camp's own frame, with the fire at the
+   origin and the tent along +z, its door facing the fire (-z).
+
+   createCamp(opts) returns
+     { group, seats, obbs, circles, update(dt, ctx), fireLevel(), dispose() }
+   opts:  solid      the material for the tent, the stones and the logs (vertex colours; a 'surf' attribute is
+                     given for the game's buildings shader: 0 plain, 12 natural rock)
+          groundAt   (lx, lz) => the height of the ground in the camp's frame, relative to the camp's origin
+          random     a function returning [0, 1), for the stones and the logs
+          light      optional PointLight driven by the fire, a sibling of the group placed through the group's own
+                     matrix (the game keeps one in its scene always); one is made and added to the group otherwise
+          shadows    whether the tent and the stones cast and receive shadows (true)
+   seats, obbs and circles are in the camp's frame: the place to lie down in the tent (kind 'tent', with out, the
+   places to stand up at outside the door, ahead and to either side in the seat's own frame), a log to sit on
+   beside the fire (kind 'log') and three places on the ground round the fire (kind 'ground', CAMP_GROUND); the tent and the log as boxes {x, z, hw, hd, rot, top}, and the fire's ring of
+   stones as a circle {x, z, r, top}. The tent and the fire stand to any height, so that neither is walked onto.
+   ctx, passed to every update:
+     time      seconds, for the flicker
+     night     0 by day to 1 at night
+     camera    the camera, for the size of the sparks on the screen
+     height    the drawing buffer's height in pixels
+     active    whether the fire is near enough to be animated; while false nothing moves and the light is dark */
+const CAMP_TENT={z:3.3, L:2.2, W:0.82, H:1.12}, CAMP_LIGHT_R=9;   // the light of the fire reaches 9 m
+// places to sit on the ground by the fire, on the side away from the tent: [angle from -z, distance from the middle]
+const CAMP_GROUND=[[-0.85,1.45],[0,1.4],[0.85,1.45]];   // the tent's middle along z, its length, half its width and its height
+function createCamp(opts={}){
+  const R=opts.random||Math.random, gAt=opts.groundAt||(()=>0), solid=opts.solid||new THREE.MeshLambertMaterial({vertexColors:true});
+  const group=new THREE.Group(), P=[], N=[], Cc=[], S=[], _a=new THREE.Vector3(), _b=new THREE.Vector3(), _c=new THREE.Vector3(), _n=new THREE.Vector3();
+  // a flat-shaded triangle a, b, c (counter-clockwise seen from outside)
+  const tri=(a,b,c,col,surf=0)=>{ _a.subVectors(b,a); _b.subVectors(c,a); _n.crossVectors(_a,_b).normalize();
+    P.push(a.x,a.y,a.z,b.x,b.y,b.z,c.x,c.y,c.z); for (let k=0;k<3;k++){ N.push(_n.x,_n.y,_n.z); Cc.push(col.r,col.g,col.b); S.push(surf); } };
+  const quad=(a,b,c,d,col,surf=0)=>{ tri(a,b,c,col,surf); tri(a,c,d,col,surf); };
+  // a three.js geometry put through the matrix M, flat-shaded
+  const put=(geo,M,col,surf=0,jit=0)=>{ const g=geo.index?geo.toNonIndexed():geo, p=g.attributes.position;
+    for (let i=0;i<p.count;i+=3){ const q=[0,1,2].map(k=>new THREE.Vector3(p.getX(i+k),p.getY(i+k),p.getZ(i+k)).applyMatrix4(M));
+      if (jit){ const c=col.clone().multiplyScalar(1+(R()-0.5)*jit); tri(q[0],q[1],q[2],c,surf); } else tri(q[0],q[1],q[2],col,surf); } };
+  const M=(x,y,z,sx,sy,sz,ry=0,rx=0,rz=0)=>new THREE.Matrix4().compose(new THREE.Vector3(x,y,z),new THREE.Quaternion().setFromEuler(new THREE.Euler(rx,ry,rz,'YXZ')),new THREE.Vector3(sx,sy,sz));
+  const V=(x,y,z)=>new THREE.Vector3(x,y,z);
+  const G={ico:new THREE.IcosahedronGeometry(0.5,0), log:new THREE.CylinderGeometry(0.5,0.5,1,7), box:new THREE.BoxGeometry(1,1,1), peg:new THREE.CylinderGeometry(0.5,0.5,1,4)};
+
+  /* --- the tent: an ochre ridge tent of canvas on two poles, its door rolled back, guyed out at each end and along
+     each side. Each end of the ridge stands at the tent's height over the mean of the ground at that end, so that on
+     a slope the ridge runs with the hill, as it would be pitched; each corner of the canvas, the groundsheet, the
+     poles, the pegs and everything inside stand on the ground beneath them --- */
+  const T=CAMP_TENT, tz=T.z, z0=tz-T.L/2, z1=tz+T.L/2, W=T.W, H=T.H;
+  const base=(gAt(-W,z0)+gAt(W,z0)+gAt(-W,z1)+gAt(W,z1)+2*gAt(0,tz))/6, top0=(gAt(-W,z0)+gAt(W,z0))/2+H, top1=(gAt(-W,z1)+gAt(W,z1))/2+H, top=Math.max(top0,top1);
+  const ridge=z=>lerp(top0,top1,(z-z0)/T.L);
+  const canvasO=hex('#c98a4b'), canvasD=hex('#a8693a'), canvasI=hex('#e0a868'), sheet=hex('#4f5a3e'), poleC=hex('#6b5a48'), rope=hex('#e8dcc4'), pegC=hex('#8a8a86');
+  const ov=0.1, eY=(x,z)=>gAt(x,z)+0.05;
+  // a rod of radius r from a to b
+  const rod=(a,b,r,col,surf=0,geo=G.log)=>{ const d=b.clone().sub(a), L=d.length(), q=new THREE.Quaternion().setFromUnitVectors(V(0,1,0),d.multiplyScalar(1/L));
+    put(geo,new THREE.Matrix4().compose(a.clone().add(b).multiplyScalar(0.5),q,V(r*2,L,r*2)),col,surf); };
+  for (const s of [-1,1]){
+    // the slope of canvas from the ridge to the eave, out and in, and a darker band along its foot (the sod cloth)
+    const r0=V(0,ridge(z0-ov),z0-ov), r1=V(0,ridge(z1+ov),z1+ov), e0=V(s*W,eY(s*W,z0),z0-ov*0.4), e1=V(s*W,eY(s*W,z1),z1+ov*0.4);
+    if (s>0) quad(r0,e0,e1,r1,canvasO); else quad(r0,r1,e1,e0,canvasO);
+    const ri0=V(0,ridge(z0)-0.02,z0-ov+0.02), ri1=V(0,ridge(z1)-0.02,z1+ov-0.02), ei0=V(s*(W-0.02),e0.y,z0), ei1=V(s*(W-0.02),e1.y,z1);
+    if (s>0) quad(ri0,ri1,ei1,ei0,canvasI); else quad(ri0,ei0,ei1,ri1,canvasI);
+    const k=0.12/H, b0=e0.clone().lerp(r0,k).add(V(s*0.01,0,0)), b1=e1.clone().lerp(r1,k).add(V(s*0.01,0,0)), f0=e0.clone().add(V(s*0.01,-0.01,0)), f1=e1.clone().add(V(s*0.01,-0.01,0));
+    if (s>0) quad(b0,f0,f1,b1,canvasD); else quad(b0,b1,f1,f0,canvasD);
+    // the door's flap on this side, rolled up and tied back along the edge from the ridge to the corner
+    const rt=V(s*0.07,top0-0.12,z0-0.05), rb=V(s*(W-0.05),eY(s*W,z0)+0.1,z0-0.05);
+    rod(rt,rb,0.04,canvasO.clone().multiplyScalar(0.9));
+    for (const t of [0.3,0.7]) rod(rt.clone().lerp(rb,t).add(V(0,0.0,-0.001)),rt.clone().lerp(rb,t+0.03),0.05,rope);
+  }
+  // the back wall, out and in
+  tri(V(-W,eY(-W,z1),z1),V(W,eY(W,z1),z1),V(0,top1,z1),canvasD); tri(V(W,eY(W,z1),z1-0.02),V(-W,eY(-W,z1),z1-0.02),V(0,top1-0.02,z1-0.02),canvasI);
+  // the groundsheet, following the ground, with a sleeping mat on it and a rolled blanket for a pillow at the back
+  { const nx=2, nz=4, gp=(i,j)=>{ const x=-W+0.04+i*(2*W-0.08)/nx, z=z0+0.02+j*(T.L-0.04)/nz; return V(x,gAt(x,z)+0.035,z); };
+    for (let i=0;i<nx;i++) for (let j=0;j<nz;j++) quad(gp(i,j),gp(i,j+1),gp(i+1,j+1),gp(i+1,j),sheet); }
+  const mx=0.24, mY=z=>gAt(mx,z)+0.06;
+  put(G.box,new THREE.Matrix4().compose(V(mx,(mY(z0+0.3)+mY(z1-0.15))/2,tz+0.07),new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.atan2(mY(z0+0.3)-mY(z1-0.15),T.L-0.45),0,0)),V(0.6,0.04,1.75)),hex('#3f6f8c'));
+  rod(V(mx-0.28,mY(z1-0.3)+0.08,z1-0.3),V(mx+0.28,mY(z1-0.3)+0.08,z1-0.3),0.09,hex('#9c3f34'));
+  // the poles, each standing a little above the ridge
+  for (const z of [z0-0.04,z1+0.04]) rod(V(0,gAt(0,z)-0.05,z),V(0,ridge(z)+0.1,z),0.018,poleC);
+  // the guy lines and their pegs: one out from each pole, two from each side
+  const guy=(ax,ay,az,bx,bz)=>{ const by=gAt(bx,bz)+0.03; rod(V(ax,ay,az),V(bx,by,bz),0.006,rope); put(G.peg,M(bx,by+0.02,bz,0.03,0.16,0.03,0.4),pegC); };
+  guy(0,top0+0.08,z0-0.06,0,z0-1.0); guy(0,top1+0.08,z1+0.06,0,z1+1.0);
+  for (const s of [-1,1]) for (const z of [z0+0.35,z1-0.35]){ const e=eY(s*W,z), r=ridge(z); guy(s*W*0.55,lerp(e,r,0.45),z,s*(W+0.55),z); }
+  // a rucksack beside the door
+  { const x=W+0.32, z=z0+0.25, y=gAt(x,z); put(G.box,M(x,y+0.24,z,0.34,0.48,0.24,0.5),hex('#5d6b4a')); put(G.box,M(x,y+0.5,z,0.3,0.06,0.22,0.5),hex('#4c5a3c')); }
+
+  /* --- the fire: a ring of stones round a bed of ash, and logs leaning together over the embers --- */
+  const fy=gAt(0,0), RING=0.44, nst=11;
+  for (let i=0;i<nst;i++){ const a=i/nst*Math.PI*2+R()*0.25, r=RING+(R()-0.5)*0.05, x=Math.cos(a)*r, z=Math.sin(a)*r, s=0.17+R()*0.07;
+    put(G.ico,M(x,gAt(x,z)+s*0.22,z,s*(1.1+R()*0.3),s*(0.65+R()*0.25),s*(1+R()*0.3),R()*6,R()*0.5,R()*0.5),hex('#9a948a').multiplyScalar(0.8+R()*0.35),12,0.12); }
+  // the ash, tilted with the ground
+  { const gx=(gAt(0.3,0)-gAt(-0.3,0))/0.6, gz=(gAt(0,0.3)-gAt(0,-0.3))/0.6, q=new THREE.Quaternion().setFromUnitVectors(V(0,1,0),V(-gx,1,-gz).normalize());
+    put(G.log,new THREE.Matrix4().compose(V(0,fy+0.01,0),q,V(0.72,0.04,0.72)),hex('#4a4440'),0); }
+  // two logs lying across each other on the ash, and over them logs leaning together, their feet in the ash, their
+  // tops meeting over the middle and charred
+  for (const a of [0.5,2.1]){ const c=Math.cos(a)*0.3, s=Math.sin(a)*0.3, k=a>1?0.07:0; rod(V(-c,gAt(-c,-s)+0.06+k,-s),V(c,gAt(c,s)+0.06+k,s),0.05,hex('#4a3626')); }
+  const nlog=5;
+  for (let i=0;i<nlog;i++){ const a=i/nlog*Math.PI*2+0.3+R()*0.3, rf=0.27+R()*0.04, ht=0.4+R()*0.08, rad=0.035+R()*0.012;
+    const F=V(Math.cos(a)*rf,gAt(Math.cos(a)*rf,Math.sin(a)*rf)+0.04,Math.sin(a)*rf), Tp=V(-Math.cos(a)*0.04,fy+ht*0.72,-Math.sin(a)*0.04), Mid=F.clone().lerp(Tp,0.62);
+    rod(F,Mid,rad,hex('#6a4a30').multiplyScalar(0.85+R()*0.3)); rod(Mid,Tp,rad*0.95,hex('#2a2320')); }
+  // a log beside the fire to sit on, lying across the line to the fire, and a few more stacked by it
+  const lx=-1.15, lz=0.55, la=Math.atan(lx/lz), ly=gAt(lx,lz), lr=0.14, ld=V(Math.cos(la),0,-Math.sin(la)).multiplyScalar(0.55);
+  { const A=V(lx,0,lz).sub(ld), B=V(lx,0,lz).add(ld); A.y=gAt(A.x,A.z)+lr-0.02; B.y=gAt(B.x,B.z)+lr-0.02; rod(A,B,lr,hex('#7a5a3c')); }
+  for (const [x,z,y] of [[1.1,0.62,0.06],[1.17,0.75,0.06],[1.13,0.68,0.15]]){ const d=V(Math.cos(1.22),0,-Math.sin(1.22)).multiplyScalar(0.31), A=V(x,0,z).sub(d), B=V(x,0,z).add(d); A.y=gAt(A.x,A.z)+y; B.y=gAt(B.x,B.z)+y; rod(A,B,0.055,hex('#6e5136')); }
+  const geo=new THREE.BufferGeometry();
+  geo.setAttribute('position',new THREE.Float32BufferAttribute(P,3)); geo.setAttribute('normal',new THREE.Float32BufferAttribute(N,3));
+  geo.setAttribute('color',new THREE.Float32BufferAttribute(Cc,3)); geo.setAttribute('surf',new THREE.Float32BufferAttribute(S,1));
+  geo.computeBoundingSphere();
+  const body=new THREE.Mesh(geo,solid); body.castShadow=body.receiveShadow=opts.shadows!==false; group.add(body);
+
+  const NOISE=`float h21(vec2 p){ return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453); }
+    float vn(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.-2.*f); return mix(mix(h21(i),h21(i+vec2(1,0)),f.x),mix(h21(i+vec2(0,1)),h21(i+vec2(1,1)),f.x),f.y); }`;
+  /* --- the coals: a bed of glowing lumps on the ash among the logs, deep red with orange where they burn hottest,
+     each pulsing slowly on its own and crazed with darker cracks; unlit, and drawn with their own small shader --- */
+  const eg=new THREE.BufferGeometry(), EP=[], EPh=[];
+  { const g=new THREE.IcosahedronGeometry(0.5,0), p=g.attributes.position;
+    for (let k=0;k<32;k++){ const a=R()*Math.PI*2, r=Math.sqrt(R())*0.32, s=0.05+R()*0.055, ph=R()*6.283, m=M(Math.cos(a)*r,gAt(Math.cos(a)*r,Math.sin(a)*r)+0.025+R()*0.015,Math.sin(a)*r,s*1.5,s*0.55,s*1.2,R()*6);
+      for (let i=0;i<p.count;i++){ _a.set(p.getX(i),p.getY(i),p.getZ(i)).applyMatrix4(m); EP.push(_a.x,_a.y,_a.z); EPh.push(ph,1-r/0.32); } } }
+  eg.setAttribute('position',new THREE.Float32BufferAttribute(EP,3)); eg.setAttribute('aPh',new THREE.Float32BufferAttribute(EPh,2));
+  const CU={uTime:{value:0},uHeat:{value:1}};
+  const emberMat=new THREE.ShaderMaterial({uniforms:THREE.UniformsUtils.merge([THREE.UniformsLib.fog,CU]),fog:true,
+    vertexShader:`attribute vec2 aPh; varying vec2 vPh; varying vec3 vP;
+      #include <fog_pars_vertex>
+      void main(){ vPh=aPh; vP=position; vec4 mvPosition=modelViewMatrix*vec4(position,1.0); gl_Position=projectionMatrix*mvPosition;
+        #include <fog_vertex>
+      }`,
+    fragmentShader:`uniform float uTime, uHeat; varying vec2 vPh; varying vec3 vP;
+      #include <common>
+      #include <fog_pars_fragment>
+      ${NOISE}
+      void main(){ float t=uTime, pulse=0.55+0.25*sin(t*0.9+vPh.x)+0.2*sin(t*0.37+vPh.x*2.3);
+        float crack=smoothstep(0.32,0.55,vn(vP.xz*38.0+vPh.x)), glow=pulse*mix(0.5,1.0,vPh.y)*uHeat*mix(0.35,1.0,crack);
+        vec3 col=mix(vec3(0.16,0.02,0.01),vec3(0.75,0.07,0.01),smoothstep(0.1,0.55,glow));
+        col=mix(col,vec3(1.0,0.32,0.04),smoothstep(0.6,1.0,glow));
+        gl_FragColor=vec4(col,1.0);
+        #include <colorspace_fragment>
+        #include <fog_fragment>
+      }`});
+  // UniformsUtils.merge copies the uniforms it is given: the material is pointed back at these, which update() moves
+  Object.assign(emberMat.uniforms,CU);
+  const embers=new THREE.Mesh(eg,emberMat); group.add(embers);
+
+  /* --- the flames: tongues of fire, each a small open cone of 10 sides and 8 rings shaped in the vertex shader and
+     coloured in bands in the fragment shader, after the technique of "Stylized 3D Fire and Smoke" on Godot Shaders
+     (https://godotshaders.com/shader/stylized-3d-fire-and-smoke/, MIT licence): a mesh whose radius is set by its
+     height, noise scrolled up through it in two octaves, a cut-off that rises towards the top so that the flame
+     thins and breaks up, and the heat that remains quantised into a few colours. Nothing of its code is used. Here a
+     cluster of sixteen small tongues of different heights is spread over the logs: three near the middle burn all
+     the time, wavering, and the others are born at the logs,
+     rise, part from the fire and die away, each in a cycle of its own, at a place drawn afresh each cycle. The
+     colours run from a pale yellow core low down through orange to red tips; they are unlit, and drawn opaque with
+     the gaps of the noise cut out, so that the fire reads as flat-shaded shapes like the rest of the scene. One draw
+     call of 2,048 triangles --- */
+  const FU={uTime:{value:0},uNight:{value:0},uLevel:{value:1}};
+  const NT=16, NA=8, NV=8, fpos=[], fT=[], fS=[], fidx=[];
+  for (let i=0;i<NT;i++){
+    const main=i<3, a=i*2.39996+R()*0.4, r=main?0.03+i*0.035:0.06+R()*0.17;
+    const H=main?0.5-i*0.05:0.18+R()*0.22, Rr=main?0.075:0.035+R()*0.025, o=fpos.length/3, sd=R()*50+i*7.3, rate=main?0:1.0+R()*0.9;
+    for (let k=0;k<=NV;k++) for (let j=0;j<NA;j++){ const th=j/NA*Math.PI*2; fpos.push(Math.cos(th),k/NV,Math.sin(th));
+      fT.push(Math.cos(a)*r,Math.sin(a)*r,H,Rr); fS.push(sd,rate,main?1:0,th); }
+    for (let k=0;k<NV;k++) for (let j=0;j<NA;j++){ const q=o+k*NA+j, q1=o+k*NA+(j+1)%NA; fidx.push(q,q1,q+NA,q1,q1+NA,q+NA); } }
+  const fg=new THREE.BufferGeometry(); fg.setAttribute('position',new THREE.Float32BufferAttribute(fpos,3));
+  fg.setAttribute('aT',new THREE.Float32BufferAttribute(fT,4)); fg.setAttribute('aS',new THREE.Float32BufferAttribute(fS,4)); fg.setIndex(fidx);
+  fg.boundingSphere=new THREE.Sphere(V(0,fy+0.6,0),1.3);
+  const flameMat=new THREE.ShaderMaterial({uniforms:THREE.UniformsUtils.merge([THREE.UniformsLib.fog,FU]),fog:true,side:THREE.DoubleSide,
+    vertexShader:`attribute vec4 aT, aS; uniform float uTime, uLevel; varying float vV, vSeed, vLife; varying vec3 vL;
+      #include <fog_pars_vertex>
+      ${NOISE}
+      void main(){ float t=uTime, seed=aS.x, v=position.y, main=aS.z;
+        // a tongue's cycle: born (p=0), grown by the middle, parted from the fire and gone by the end
+        float c=t*aS.y+seed*0.137, p=main>0.5?0.5:fract(c), cyc=floor(c);
+        vec2 at=aT.xy+(main>0.5?vec2(0.0):(vec2(h21(vec2(cyc,seed)),h21(vec2(seed,cyc+3.1)))-0.5)*0.16);
+        float life=main>0.5?1.0:sin(3.14159*p);
+        float H=aT.z*uLevel*(main>0.5?0.82+0.12*sin(t*6.3+seed)+0.07*sin(t*11.7)+0.05*sin(t*19.3+seed):0.45+0.55*life);
+        float lift=main>0.5?0.0:aT.z*0.7*smoothstep(0.45,1.0,p);
+        // the radius: round at the foot, tapering to a point, pinched and swollen by noise running up the flame
+        float rr=1.3*aT.w*mix(0.6,1.0,smoothstep(0.0,0.2,v))*pow(max(1.0-v,0.0),1.4)*(main>0.5?1.0:mix(0.25,1.0,life)*(1.0-0.6*smoothstep(0.45,1.0,p)));
+        rr*=0.85+0.3*vn(vec2(seed,v*1.8-t*2.6))+0.25*sin(aS.w*2.0+seed+t*3.0)*v;
+        // a lean that grows with height, and a lick to one side now and then
+        vec2 sway=(vec2(vn(vec2(t*1.7,seed)),vn(vec2(seed,t*1.5)))-0.5)*0.5*v*v*H+vec2(sin(t*4.1+seed+v*3.0),cos(t*3.7+seed*1.3+v*2.6))*0.03*v;
+        vec3 p3=vec3(at.x+cos(aS.w)*rr+sway.x, lift+v*H+0.02, at.y+sin(aS.w)*rr+sway.y);
+        vV=v; vSeed=seed; vLife=life; vL=vec3(p3.x-at.x,v,p3.z-at.y)/max(aT.w,0.01);
+        vec4 mvPosition=modelViewMatrix*vec4(p3,1.0); gl_Position=projectionMatrix*mvPosition;
+        #include <fog_vertex>
+      }`,
+    fragmentShader:`uniform float uTime, uNight; varying float vV, vSeed, vLife; varying vec3 vL;
+      #include <common>
+      #include <fog_pars_fragment>
+      ${NOISE}
+      void main(){ float t=uTime;
+        // two octaves of noise rising through the flame; the heat falls with height and is eaten away by the noise
+        float n=0.65*vn(vec2((vL.x+vL.z)*1.4+vSeed,vV*3.0-t*3.4))+0.35*vn(vec2((vL.x-vL.z)*2.6-vSeed,vV*6.5-t*6.0));
+        float heat=(1.1-vV)*mix(0.6,1.0,vLife)-0.45*n+0.12;
+        if (heat<0.05+0.14*vV*vV) discard;   // the tips break up now and then
+        vec3 col=heat>0.66?vec3(1.0,0.8,0.3):heat>0.44?vec3(1.0,0.56,0.1):heat>0.26?vec3(0.95,0.3,0.04):vec3(0.72,0.12,0.03);
+        col*=mix(1.0,0.82,uNight);
+        gl_FragColor=vec4(col,1.0);
+        #include <colorspace_fragment>
+        #include <fog_fragment>
+      }`});
+  Object.assign(flameMat.uniforms,FU);
+  const flames=new THREE.Mesh(fg,flameMat); flames.renderOrder=5; flames.frustumCulled=false; group.add(flames);
+
+  /* --- sparks rising from the fire, and by day a thin smoke; points updated on the processor while the fire is
+     active, as the game's spray is --- */
+  const NS=40, NK=14, spk=[], smk=[];
+  const pg=new THREE.BufferGeometry(), pPos=new Float32Array((NS+NK+1)*3), pSize=new Float32Array(NS+NK+1), pCol=new Float32Array((NS+NK+1)*4);
+  pg.setAttribute('position',new THREE.BufferAttribute(pPos,3).setUsage(THREE.DynamicDrawUsage));
+  pg.setAttribute('aSize',new THREE.BufferAttribute(pSize,1).setUsage(THREE.DynamicDrawUsage));
+  pg.setAttribute('aCol',new THREE.BufferAttribute(pCol,4).setUsage(THREE.DynamicDrawUsage));
+  const PU={uScale:{value:600}};
+  const partMat=new THREE.ShaderMaterial({uniforms:THREE.UniformsUtils.merge([THREE.UniformsLib.fog,PU]),transparent:true,depthWrite:false,fog:true,
+    blending:THREE.CustomBlending,blendSrc:THREE.OneFactor,blendDst:THREE.OneMinusSrcAlphaFactor,
+    vertexShader:`attribute float aSize; attribute vec4 aCol; uniform float uScale; varying vec4 vCol;
+      #include <fog_pars_vertex>
+      void main(){ vCol=aCol; vec4 mvPosition=modelViewMatrix*vec4(position,1.0);
+        gl_PointSize=aSize<=0.0?0.0:clamp(aSize*uScale/max(0.1,-mvPosition.z),1.5,400.0); gl_Position=projectionMatrix*mvPosition;
+        #include <fog_vertex>
+      }`,
+    fragmentShader:`varying vec4 vCol;
+      #include <common>
+      #include <fog_pars_fragment>
+      void main(){ vec2 c=gl_PointCoord-0.5; float d=length(c)*2.0; if (d>1.0) discard;
+        // a spark (additive, vCol.a<0) is a hot dot; smoke (vCol.a>0) a soft puff that hides what lies behind it
+        float k=vCol.a<0.0?exp(-d*d*4.0)*(1.0-d*d):(1.0-d*d)*(1.0-d*d);
+        float al=abs(vCol.a)*k;
+        gl_FragColor=vec4(vCol.rgb*(vCol.a<0.0?k:al),vCol.a<0.0?0.0:al);
+        #include <colorspace_fragment>
+        #ifdef USE_FOG
+          gl_FragColor*=1.0-smoothstep(fogNear,fogFar,vFogDepth);
+        #endif
+      }`});
+  pg.boundingSphere=new THREE.Sphere(V(0,fy+2,0),5);
+  Object.assign(partMat.uniforms,PU);
+  const parts=new THREE.Points(pg,partMat); parts.frustumCulled=false; parts.renderOrder=6; group.add(parts);
+  for (let i=0;i<NS;i++) spk.push({age:1+R()*2,life:1});
+  for (let i=0;i<NK;i++) smk.push({age:1,life:0,pre:R()});   // spread over their lives at the start
+
+  /* --- the light of the fire: warm, flickering, strongest after dusk --- */
+  const light=opts.light||new THREE.PointLight(hex('#ff7a30'),0,CAMP_LIGHT_R,1.8); if (!opts.light) group.add(light);
+  // the light's place, from the camp's frame into that of the group's parent when it is not the group's own
+  const lightAt=(x,y,z)=>{ light.position.set(x,y,z); if (opts.light){ group.updateMatrix(); light.position.applyMatrix4(group.matrix); } };
+  lightAt(0,fy+0.55,0);
+  let level=0;
+
+  function update(dt,ctx){
+    const t=ctx.time, night=ctx.night??0, on=ctx.active!==false;
+    flames.visible=parts.visible=embers.visible=on;
+    if (!on){ light.intensity=0; level=0; return; }
+    FU.uTime.value=t; FU.uNight.value=night;
+    PU.uScale.value=(ctx.height||900)/(2*Math.tan(THREE.MathUtils.degToRad((ctx.camera&&ctx.camera.fov||60)/2)));
+    // the flicker: a sum of waves, with now and then a deeper dip as a gust passes
+    const f=0.8+0.09*Math.sin(t*9.7)+0.07*Math.sin(t*17.3+1.1)+0.05*Math.sin(t*29.1+2.3)-0.18*Math.pow(Math.max(0,Math.sin(t*0.71)),16);
+    FU.uLevel.value=0.55+0.5*f;   // the flames rise and sink with the light
+    level=f;
+    CU.uTime.value=t; CU.uHeat.value=0.85+0.25*f;
+    // a point light, in the lit-material units of three.js r160 (candela, physically based falloff)
+    light.intensity=(0.25+1.6*night)*f; light.color.setRGB(1,0.45+0.06*f,0.18);
+    lightAt(Math.sin(t*3.1)*0.04,fy+0.5+0.05*Math.sin(t*4.7),Math.cos(t*2.7)*0.04);
+    // sparks: born in the flames, carried up by the heat with a wander, cooling from yellow to red as they rise
+    let j=0;
+    for (const p of spk){ p.age+=dt;
+      if (p.age>=p.life){ const a=R()*6.283, r=R()*0.18; Object.assign(p,{x:Math.cos(a)*r,y:fy+0.15+R()*0.3,z:Math.sin(a)*r,vx:(R()-0.5)*0.3,vy:0.9+R()*1.4,vz:(R()-0.5)*0.3,age:0,life:0.7+R()*1.6,s:0.018+R()*0.022,ph:R()*6}); }
+      p.vx+=(Math.sin(t*3+p.ph)*0.9)*dt; p.vz+=(Math.cos(t*2.6+p.ph*1.3)*0.9)*dt; p.vy-=0.25*dt;
+      p.x+=p.vx*dt; p.y+=p.vy*dt; p.z+=p.vz*dt;
+      const k=p.age/p.life, fade=(1-k)*(1-k)*smooth(p.age/0.08), tw=0.7+0.3*Math.sin(t*40+p.ph*9);
+      pPos[j*3]=p.x; pPos[j*3+1]=p.y; pPos[j*3+2]=p.z; pSize[j]=p.s;
+      pCol[j*4]=1.6*tw*fade; pCol[j*4+1]=(0.85-0.6*k)*tw*fade; pCol[j*4+2]=(0.35-0.3*k)*fade; pCol[j*4+3]=-1; j++; }
+    // smoke: soft grey puffs that rise, spread and thin; faint at night, when it is lit from below
+    for (const p of smk){ p.age+=dt;
+      if (p.age>=p.life){ Object.assign(p,{x:(R()-0.5)*0.15,y:fy+0.6,z:(R()-0.5)*0.15,vx:(R()-0.5)*0.15+0.12,vy:0.45+R()*0.25,vz:(R()-0.5)*0.15,age:0,life:4.5+R()*3}); }
+      if (p.pre!==undefined){ p.age=p.pre*p.life; delete p.pre; p.x+=p.vx*p.age; p.y+=p.vy*p.age; p.z+=p.vz*p.age; }
+      p.x+=p.vx*dt; p.y+=p.vy*dt; p.z+=p.vz*dt;
+      const k=p.age/p.life, a=smooth(k/0.15)*(1-k)*0.055*(1-0.5*night);
+      pPos[j*3]=p.x; pPos[j*3+1]=p.y; pPos[j*3+2]=p.z; pSize[j]=0.18+k*0.9;
+      const g=lerp(0.42,0.22,night); pCol[j*4]=g; pCol[j*4+1]=g*0.97; pCol[j*4+2]=g*0.94; pCol[j*4+3]=a; j++; }
+    // a glow round the fire at night
+    pPos[j*3]=0; pPos[j*3+1]=fy+0.35; pPos[j*3+2]=0; pSize[j]=night>0.02?1.5:0; pCol[j*4]=0.12*night*f; pCol[j*4+1]=0.035*night*f; pCol[j*4+2]=0.008*night*f; pCol[j*4+3]=-1;
+    for (const a of ['position','aSize','aCol']) pg.attributes[a].needsUpdate=true;
+  }
+  const seats=[
+    // lying in the tent, the head towards the back and the eye looking out of the door at the fire
+    {x:mx,y:gAt(mx,tz)+0.06,z:tz+0.15,fx:0,fz:-1,h:0,kind:'tent',back:0.55,out:[[T.L/2+1.02,mx],[T.L/2+1.02,mx+0.5],[T.L/2+1.02,mx-0.5]]},
+    {x:lx,y:ly+2*lr,z:lz,fx:0,fz:0,h:2*lr,kind:'log',back:0.08}];
+  // on the ground round the fire, the eye about 0.8 m above it
+  for (const [a,r] of CAMP_GROUND){ const x=Math.sin(a)*r, z=-Math.cos(a)*r; seats.push({x,y:gAt(x,z)+0.1,z,fx:0,fz:0,h:0.1,kind:'ground',back:0.1}); }
+  // the log and the places on the ground face the fire
+  for (const s of seats.slice(1)){ const dx=-s.x, dz=-s.z, l=Math.hypot(dx,dz); s.fx=dx/l; s.fz=dz/l; }
+  const obbs=[{x:0,z:tz,hw:W+0.08,hd:T.L/2+0.12,rot:0,top:Infinity},{x:lx,z:lz,hw:0.55,hd:lr,rot:la,top:ly+2*lr}];
+  const circles=[{x:0,z:0,r:RING+0.15,top:Infinity}];
+  function dispose(){ geo.dispose(); eg.dispose(); fg.dispose(); pg.dispose(); emberMat.dispose(); flameMat.dispose(); partMat.dispose(); if (opts.light) opts.light.intensity=0;
+    for (const k in G) G[k].dispose(); }
+  return {group,seats,obbs,circles,update,dispose,fireLevel:()=>level,fire:{x:0,y:fy,z:0},tent:{z:tz,base}};
+}
+/* ================= end of camping ================= */
+/* ---------- camping in the game ----------
+   R pitches a camp 2.6 m ahead of the player, its fire nearest and the tent beyond with its door towards the fire,
+   and R again strikes it, wherever the player is. There is one camp at a time. It may be pitched only on foot, on
+   level open ground away from everything built: on an island, or in the wild country, the rocky scrub and the
+   mountains of the main island, and not within a block of a village, on farmland, by a road, the railway or a
+   harbour, within 25 m of a building or a lighthouse, in a cove, by the water's edge or where anything stands in its
+   way (campWhyNot). Otherwise a notice says why not. The camp is built from createCamp with the buildings' own
+   material (matB) and the fire's light (campLight, kept in the scene always); its seats are offered to X with the seats of
+   the blocks, and its tent, fire and log are colliders. It is drawn within CAMP_SEE m, and the fire is animated and
+   lit within CAMP_LIVE m. A new island strikes it. */
+const CAMP={c:null,x:0,y:0,z:0,rot:0,seed:null,seats:[],ch:null}, CAMP_AHEAD=2.6, CAMP_SEE=400, CAMP_LIVE=150, CAMP_KINDS=new Set(['isle','wild','mount','rocky']), CAMP_RISE=1.0, CAMP_BUMP=0.3;
+// a point of the camp's frame in the world
+const campW=(lx,lz,x=CAMP.x,z=CAMP.z,rot=CAMP.rot)=>{ const c=Math.cos(rot), s=Math.sin(rot); return [x+lx*c+lz*s, z-lx*s+lz*c]; };
+// how the ground lies under a camp with its fire at (x,z), turned by rot: the plane that fits it best, by least squares,
+// over a grid every 0.5 m covering the fire's ring, the log, the places to sit and the tent with its pegs; rise is
+// the difference of the plane's height between the lowest and highest corners of that area, and bump the furthest the
+// ground stands above or below the plane
+function campFit(x,z,rot){
+  const S=[]; for (let u=-1.5;u<=1.5;u+=0.5) for (let v=-1.6;v<=CAMP_TENT.z+CAMP_TENT.L/2+1.0;v+=0.5){ const [px,pz]=campW(u,v,x,z,rot); S.push([u,v,heightAt(px,pz)]); }
+  let n=S.length, su=0, sv=0, sh=0, suu=0, svv=0, suv=0, suh=0, svh=0;
+  for (const [u,v,h] of S){ su+=u; sv+=v; sh+=h; suu+=u*u; svv+=v*v; suv+=u*v; suh+=u*h; svh+=v*h; }
+  // the normal equations of h = a + b u + c v, solved by Cramer's rule
+  const M=[[n,su,sv],[su,suu,suv],[sv,suv,svv]], R=[sh,suh,svh], det=A=>A[0][0]*(A[1][1]*A[2][2]-A[1][2]*A[2][1])-A[0][1]*(A[1][0]*A[2][2]-A[1][2]*A[2][0])+A[0][2]*(A[1][0]*A[2][1]-A[1][1]*A[2][0]);
+  const D=det(M), col=k=>M.map((r,i)=>r.map((q,j)=>j===k?R[i]:q)), a=det(col(0))/D, b=det(col(1))/D, c=det(col(2))/D;
+  let bump=0; for (const [u,v,h] of S) bump=Math.max(bump,Math.abs(h-(a+b*u+c*v)));
+  const v0=-1.6, v1=CAMP_TENT.z+CAMP_TENT.L/2+1.0;
+  return {rise:Math.abs(b)*3+Math.abs(c)*(v1-v0),bump,a,b,c}; }
+// the reason a camp may not be pitched with its fire at (x,z), turned by rot, or null where it may
+function campWhyNot(x,z,rot){
+  if (mode!=='street' || descent.t>=0 || indoors || colRoof || !player.grounded || sit || coveInCave(player.x,player.z,player.y)) return 'A camp can be pitched only on foot, out of doors, on open ground.';
+  const T=CAMP_TENT, fp=[[0,0],[0.6,0],[-0.6,0],[0,-0.6],[-1.15,0.55],[0,T.z]];
+  for (const u of [-1,1]) for (const v of [-1,1]) fp.push([u*(T.W+0.3),T.z+v*(T.L/2+0.3)]);
+  for (const v of [-1,1]) fp.push([0,T.z+v*(T.L/2+1.0)]);   // the pegs of the guy lines at the ends
+  for (const [a,r] of CAMP_GROUND) fp.push([Math.sin(a)*r,-Math.cos(a)*r]);   // the places to sit on the ground
+  const pts=fp.map(([a,b])=>campW(a,b,x,z,rot));
+  // the kind of country: an island, or the wild country of the main island, away from villages and farms
+  const cx=Math.floor(x/C), cz=Math.floor(z/C);
+  for (let j=-1;j<=1;j++) for (let i=-1;i<=1;i++) if (isVillage(cx+i,cz+j)) return 'A camp cannot be pitched in or near a village.';
+  for (const [px,pz] of pts){ const k=chunkKind(Math.floor(px/C),Math.floor(pz/C));
+    if (k==='olives'||k==='farm') return 'A camp cannot be pitched on farmland.';
+    if (!CAMP_KINDS.has(k)) return 'A camp may be pitched only in wild country or on an island.'; }
+  // nothing that people have built or use nearby
+  for (const [px,pz] of pts){
+    if (roadDist(px,pz)<6 || railPerp(px,pz)<20) return 'A camp cannot be pitched beside a road or the railway.';
+    if (stationNear(px,140) && railPerp(px,pz)<80) return 'A camp cannot be pitched near a station.';
+    for (const sd of SIDES){ const H=harbourAt(sd,px); if (H && Math.abs(hbS(H,px,pz))<120) return 'A camp cannot be pitched near a harbour.'; }
+    if (coveShaped(px,pz) || coveAtXZ(px,pz)) return 'A camp cannot be pitched in a cove.'; }
+  if (lightsNear(x,z,60).length) return 'A camp cannot be pitched near a lighthouse.';
+  const near=nearbyChunks();
+  for (const ch of near) for (const o of ch.obbs) if ((o.roof || o.room || (o.hw>1.4 && o.hd>1.4)) && Math.hypot(o.x-x,o.z-z)<25+Math.max(o.hw,o.hd)) return 'A camp cannot be pitched near a building.';
+  // the ground: dry, level and clear
+  let lo=1e9, hi=-1e9;
+  for (const [px,pz] of pts){ const h=heightAt(px,pz); lo=Math.min(lo,h); hi=Math.max(hi,h); }
+  if (lo<0.6) return 'A camp cannot be pitched at the water\'s edge.';
+  // gently sloping or slightly uneven ground will do: a plane is fitted to the ground over the footprint, every 0.5 m,
+  // and the camp is refused where that plane rises by more than CAMP_RISE m across the footprint or where the ground
+  // stands off it by more than CAMP_BUMP m, so that small bumps and dips are passed over and hillsides are not
+  { const g=campFit(x,z,rot); if (g.rise>CAMP_RISE || g.bump>CAMP_BUMP) return 'The ground here is not level enough for a camp.'; }
+  const box={x:0,z:0,hw:T.W+0.3,hd:T.L/2+0.3,rot}; [box.x,box.z]=campW(0,T.z,x,z,rot);
+  for (const ch of near){
+    for (const o of ch.obbs) if (obbOverlap(box,o,0) || Math.hypot(o.x-x,o.z-z)<Math.hypot(o.hw,o.hd)+1.3) return 'Something is in the way of the camp.';
+    for (const c of ch.circles) if (obbCircleDist(box,c.x,c.z)<c.r+0.2 || Math.hypot(c.x-x,c.z-z)<c.r+1.3) return 'Something is in the way of the camp.';
+    // the trunks and crowns of trees and the shrubs, from the tent and from the fire's ring
+    if (ch.treeSpots) for (const [tx,tz,sc] of ch.treeSpots) if (obbCircleDist(box,tx,tz)<0.8*sc || Math.hypot(tx-x,tz-z)<1.2+0.6*sc) return 'Something is in the way of the camp.';
+    if (ch.shrubSpots) for (const [tx,tz,sc] of ch.shrubSpots) if (obbCircleDist(box,tx,tz)<0.5*sc || Math.hypot(tx-x,tz-z)<0.8+0.5*sc) return 'Something is in the way of the camp.'; }
+  return null;
+}
+function campPitch(){
+  const fx=-Math.sin(yaw), fz=-Math.cos(yaw), x=player.x+fx*CAMP_AHEAD, z=player.z+fz*CAMP_AHEAD, rot=Math.atan2(fx,fz);
+  const why=campWhyNot(x,z,rot); if (why){ toast('Camp',why); return false; }
+  campBuild(x,z,rot); toast('Camp','Pitched'); return true;
+}
+// the camp with its fire at (x,z), turned by rot, built without the rules, as campPitch does after them and a shared
+// scene does at once. The place and the turn are rounded as a link records them, so that the camp it rebuilds,
+// whose stones and logs are drawn from a seed of the place, is the same
+function campBuild(x,z,rot){
+  if (CAMP.c) campStrike(true);
+  x=sr2(x); z=sr2(z); rot=Math.round(rot*1000)/1000;
+  const y=heightAt(x,z);
+  Object.assign(CAMP,{x,y,z,rot,seed:SEED});
+  CAMP.c=createCamp({solid:matB,light:campLight,random:rng(Math.floor(hash(Math.round(x*4),Math.round(z*4),7301)*4294967296)),
+    groundAt:(lx,lz)=>{ const [px,pz]=campW(lx,lz); return heightAt(px,pz)-y; }});
+  const g=CAMP.c.group; g.position.set(x,y,z); g.rotation.y=rot; world.add(g);
+  // the seats and colliders in the world
+  const c=Math.cos(rot), s=Math.sin(rot);
+  CAMP.seats=CAMP.c.seats.map(q=>{ const [sx,sz]=campW(q.x,q.z); return {...q,x:sx,y:q.y+y,z:sz,fx:q.fx*c+q.fz*s,fz:-q.fx*s+q.fz*c,camp:true}; });
+  CAMP.ch={obbs:CAMP.c.obbs.map(o=>{ const [ox,oz]=campW(o.x,o.z); return {...o,x:ox,z:oz,rot:o.rot+rot,top:o.top+y}; }),
+    circles:CAMP.c.circles.map(q=>{ const [ox,oz]=campW(q.x,q.z); return {...q,x:ox,z:oz,top:q.top+y}; })};
+}
+function campStrike(quiet){
+  if (!CAMP.c) return;
+  if (sit && sit.s.camp) sit=null;
+  world.remove(CAMP.c.group); CAMP.c.dispose(); CAMP.c=null; CAMP.ch=null; CAMP.seats=[]; campLight.intensity=0;
+  if (!quiet) toast('Camp','Struck');
+}
+// a place to sit on the ground by the fire, on the line from (px,pz) to the fire and 1.3 to 1.7 m from its middle,
+// facing it; none where it would fall within the tent
+function campGroundSeat(px,pz){
+  const dx=px-CAMP.x, dz=pz-CAMP.z, d=Math.hypot(dx,dz)||1, r=clamp(d,1.3,1.7), x=CAMP.x+dx/d*r, z=CAMP.z+dz/d*r;
+  const tent=CAMP.ch&&CAMP.ch.obbs[0]; if (tent){ const [u,v]=obbLocal(tent,x,z); if (Math.abs(u)<tent.hw+0.3 && Math.abs(v)<tent.hd+0.3) return null; }
+  return {x,y:heightAt(x,z)+0.1,z,fx:-dx/d,fz:-dz/d,h:0.1,kind:'ground',back:0.1,camp:true}; }
+function campKey(){ if (CAMP.c) campStrike(); else campPitch(); }
+// each frame: drawn within CAMP_SEE m of the camera, the fire animated and lit within CAMP_LIVE m
+const _cdb=new THREE.Vector2();
+function campStep(){
+  if (!CAMP.c) return;
+  if (CAMP.seed!==SEED){ campStrike(true); return; }
+  const d=Math.hypot(camera.position.x-CAMP.x,camera.position.z-CAMP.z);
+  CAMP.c.group.visible=d<CAMP_SEE;
+  renderer.getDrawingBufferSize(_cdb);
+  CAMP.c.update(paused?0:Math.min(0.05,time-(CAMP.t??time)),{time,night:nightU.value,camera,height:_cdb.y,active:d<CAMP_LIVE && CAMP.c.group.visible});
+  CAMP.t=time;
 }
 let tYaw=0, tPitch=-0.04, tunnelK=0, prevMode='street';
 // inside a tunnel the world goes dark beyond the headlights, and the darkness lifts as daylight at the far
@@ -12525,7 +12945,7 @@ function qrDraw(cv,Q,s){ const n=Q.size+8; cv.width=cv.height=n*s; const g=cv.ge
    leg wait]; C the coach [car,lx,lz]; S the trackside spot [x,y,z,tx]; F the ferry [island x,island z,s,at,next,v,
    wait]; E the ferry's deck [lx,lz,level,eye]; D the dinghy [harbour n,side,x,z,head,u,boom,sheet,the wind's
    direction]; x the seat (in the world [x,y,z,L0], in a coach or the ferry [index,L0]); r the place to return to
-   [x,y,z,yaw]; c the camera [focal,f-number,focus (0 autofocus),ev,ratio] */
+   [x,y,z,yaw]; c the camera [focal,f-number,focus (0 autofocus),ev,ratio]; K the camp [the fire's x,z, the turn] */
 const sr1=v=>Math.round(v*10)/10, sr2=v=>Math.round(v*100)/100;
 function sceneState(){
   const o={v:1,s:SEED_TEXT,h:sr2(hour)}; if (paused) o.z=1;
@@ -12552,6 +12972,7 @@ function sceneState(){
     else { o.m='walk'; o.l=A(yaw,fpPitch); } }
   else if (mode==='follow' && FOL.kind){ o.m=FOL.kind; o.p=P(FOL.p.x,FOL.p.y,FOL.p.z); o.l=[...A(FOL.yaw,FOL.pitch),sr1(FOL.d)]; ret(FOL.ret); }
   else { o.m='walk'; o.l=A(yaw,fpPitch); seat(); }
+  if (CAMP.c) o.K=[CAMP.x,CAMP.z,CAMP.rot];
   const ph=PHOTO.api.state; if (ph.on) o.c=[sr1(ph.focal),ph.fNumber,ph.autofocus?0:sr2(ph.focus),sr2(ph.ev),ph.ratio];
   return o; }
 async function sceneLink(){ return sceneLinkOf(sceneState()); }
@@ -12580,6 +13001,8 @@ function sceneRestore(o){
   const N=sceneNum, l=Array.isArray(o.l)?o.l:[], m=o.m;
   const walk=()=>{ mode='street'; yaw=N(l,0,yaw); fpPitch=clamp(N(l,1),-1.2,1.2); };
   if (o.z){ paused=true; lastClock=null; }
+  // the camp, exactly where it was, without the rules for pitching it; one that cannot be built is left out
+  if (Array.isArray(o.K) && [0,1,2].every(i=>Number.isFinite(+o.K[i]))) try{ campBuild(+o.K[0],+o.K[1],+o.K[2]); }catch(err){ if (CAMP.c) campStrike(true); }
   if (Array.isArray(o.T)){ train.init=true; train.x=N(o.T,0,train.x); train.dir=N(o.T,1,1)<0?-1:1; train.v=N(o.T,2,train.sp); train.wait=N(o.T,3); updateTrain(0); }
   if (Array.isArray(o.G)){ const R=sceneGoodsLine(N(o.G,0,1)<0?-1:1,N(o.G,1)), g=goods;
     if (R){ goodsStart(R,0); g.x=N(o.G,2,g.x); g.dir=N(o.G,3,-1)<0?-1:1; g.lead=N(o.G,4)?1:0; g.v=N(o.G,5); g.wait=N(o.G,6); g.toB=!!N(o.G,7);
@@ -12635,8 +13058,10 @@ function sceneRestore(o){
     // a seat in the world is found among those of the blocks and rooms round the player, as they are built
     if (Array.isArray(o.x) && o.x.length>=4){ const sx=N(o.x,0), sy=N(o.x,1), sz=N(o.x,2); let k=0;
       const find=()=>{ if (mode!=='street' || sit) return; let best=null, bd=0.3;
-        const all=[]; for (const ch of nearbyChunks()) if (ch.seats) all.push(...ch.seats); for (const D of rooms) if (D.seats) all.push(...D.seats);
+        const all=[...CAMP.seats]; for (const ch of nearbyChunks()) if (ch.seats) all.push(...ch.seats); for (const D of rooms) if (D.seats) all.push(...D.seats);
         for (const s of all){ const d=Math.hypot(s.x-sx,s.y-sy,s.z-sz); if (d<bd){ bd=d; best=s; } }
+        // a place on the ground by a camp's fire, which is made when it is sat on
+        if (!best && CAMP.c && Math.hypot(sx-CAMP.x,sz-CAMP.z)<2.0) best=campGroundSeat(sx,sz);
         if (!best){ if (++k<120) requestAnimationFrame(find); return; }
         const L=yaw-Math.PI, p=fpPitch; sitKey({s:best,fr:'world',home:[player.x,player.z,player.y]}); if (!sit) return;
         sit.L0=N(o.x,3,sit.L0); sitLookSet('world',L,p); sit.k=1; };
@@ -13489,6 +13914,7 @@ function frame(now){
   if (mode==='follow') followStep(dt);
   if (mode==='coach') tunnelLight(dt,true);
   sitStep(dt);
+  campStep();
   sndUpdate(dt);
   // a swoop from one view into another (from the bird's-eye view down to the helm of a dinghy): the camera eases from
   // where it was, with its lens, to where the new view puts it this frame
@@ -14454,7 +14880,7 @@ requestAnimationFrame(()=>setTimeout(async ()=>{
   last=performance.now(); requestAnimationFrame(frame);
   requestAnimationFrame(()=>requestAnimationFrame(()=>{ canvas.style.visibility=''; seedEl.hidden=true; }));
 },30));
-window.__village={ get seed(){ return SEED_TEXT; }, TELE, teleRaise, teleLower, teleMag, get teleRing(){ return teleRing; }, viewZoom, get origin(){ return ORIGIN; }, share:{state:sceneState,link:sceneLink,qrEncode,get shared(){ return SCENE; }}, get paused(){ return paused; }, set paused(v){ if (!!v!==paused){ paused=!!v; lastClock=null; } }, goods, glZone, branchesAt, get mantle(){ return mantle; }, get colRoof(){ return colRoof; }, roofAt, roofSlope, topAt, get sit(){ return sit; }, get indoors(){ return indoors; }, roomFns:{flight,localToWorld,obbLocal,roomCeil}, sitKey, sitFind, sitStand, sitSpotOk, beachStretch, BCH_SP, COACH_SEATS, FERRY_SEATS, coachEnter, genChunk, coastRoadZ, brZ, brY, heightAt, player, chunks, rooms, doorMesh, keys, setYaw:v=>{yaw=v;}, get yaw(){return yaw;}, fe, co, lightsNear, beams, ruinIn, cats, catHome, PEOPLE, get ridden(){ return ridden; },
+window.__village={ get seed(){ return SEED_TEXT; }, TELE, teleRaise, teleLower, teleMag, get teleRing(){ return teleRing; }, viewZoom, get origin(){ return ORIGIN; }, share:{state:sceneState,link:sceneLink,qrEncode,get shared(){ return SCENE; }}, get paused(){ return paused; }, set paused(v){ if (!!v!==paused){ paused=!!v; lastClock=null; } }, goods, glZone, branchesAt, get mantle(){ return mantle; }, get colRoof(){ return colRoof; }, roofAt, roofSlope, topAt, get sit(){ return sit; }, get indoors(){ return indoors; }, roomFns:{flight,localToWorld,obbLocal,roomCeil}, sitKey, sitFind, sitStand, sitSpotOk, get camp(){ return CAMP; }, campKey, campPitch, campStrike, campWhyNot, campFit, campBuild, campLight, beachStretch, BCH_SP, COACH_SEATS, FERRY_SEATS, coachEnter, genChunk, coastRoadZ, brZ, brY, heightAt, player, chunks, rooms, doorMesh, keys, setYaw:v=>{yaw=v;}, get yaw(){return yaw;}, fe, co, lightsNear, beams, ruinIn, cats, catHome, PEOPLE, get ridden(){ return ridden; },
   findHarbour(){ for (let d=0;d<12;d++) for (const sd of SIDES) for (const n of [Math.floor(player.x/HARB)+d,Math.floor(player.x/HARB)-d]){ const H=harbourInfo(sd,n); if (H) return {x:H.x,z:coastZ(sd,H.x)+sd*7,W:H.W,sd,qz:coastZ(sd,H.x+H.W/2-1)+sd*2.5}; } return null; },
   findBeach(){ for (let x=player.x; x<player.x+3000; x+=10) for (const sd of SIDES){ const z=coastZ(sd,x)+sd*5; if (heightAt(x,z)<0.6 && heightAt(x,z)>0.1 && !harbourAt(sd,x)) return {x,z,sd}; } return null; },
   ridge(x){ return {x,z:ridgeZ(x)}; },
@@ -14537,6 +14963,7 @@ if (TOUCH){
   item(places,'Freight train',()=>press('Digit4')); item(places,'Ferry',()=>press('Digit5')); item(places,'Sailing dinghy',()=>press('Digit6'));
   item(places,'Whale',()=>press('Digit7')); item(places,'Dolphin',()=>press('Digit8')); item(places,'Shipwreck',()=>press('Digit9'));
   item(places,'Next view',()=>press('Digit0')); item(places,'Jump in the sea',()=>press('KeyJ')); item(places,'Torch',()=>press('KeyF'));
+  item(places,'Camp',()=>campKey(),{toggle:()=>!!CAMP.c});
   const pics=sec('Pictures');
   item(pics,'Camera',()=>PHOTO.api.toggle()); item(pics,'Telescope',()=>{ if (TELE.on) teleLower(); else teleRaise(); },{toggle:()=>TELE.on}); item(pics,'Snapshot',()=>{ closeMenu(); setTimeout(()=>PHOTO.api.quick(),250); },{stay:true}); item(pics,'Gallery and artist mode',()=>PHOTO.api.openGallery());
   const timeG=sec('Time');

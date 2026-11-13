@@ -1,0 +1,447 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coast · camping</title>
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Alegreya+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#9fc0dc;font-family:'Alegreya Sans',system-ui,sans-serif;}
+  canvas{display:block;width:100%;height:100%;touch-action:none;}
+  #panel{position:fixed;top:12px;right:12px;width:260px;padding:12px 14px;border-radius:10px;
+    background:rgba(250,246,238,0.88);color:#2b2b35;font-size:15px;box-shadow:0 2px 14px rgba(0,0,0,0.15);}
+  #panel .row{display:grid;grid-template-columns:78px 1fr 58px;align-items:center;gap:6px;margin:5px 0;}
+  #panel .row.two{grid-template-columns:1fr 1fr;}
+  #panel .row.sel{grid-template-columns:78px 1fr;}
+  #panel label{color:#555}
+  #panel output{text-align:right;font-variant-numeric:tabular-nums;}
+  #panel input[type=range]{width:100%;accent-color:#2f5f8f;}
+  #panel button,#panel select{font:inherit;font-size:14px;padding:4px 6px;border:1px solid #c9bda9;border-radius:6px;background:#fffaf2;color:#2b2b35;cursor:pointer;}
+  #panel button.on{background:#2f5f8f;color:#fff;border-color:#2f5f8f;}
+  #panel .stats{margin-top:8px;font-size:13px;color:#555;font-variant-numeric:tabular-nums;}
+  #panel.hide{display:none}
+  @media (max-width:520px){ #panel{left:12px;right:12px;width:auto;top:auto;bottom:12px;} }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="panel">
+  <div class="row sel"><label for="view">View</label><select id="view">
+    <option value="camp">Camp</option><option value="tent">Tent</option><option value="fire">Fire</option>
+    <option value="lying">Lying in the tent</option><option value="seated">Seated on the log</option><option value="ground">Seated on the ground</option><option value="far">From 40 m</option></select></div>
+  <div class="row"><label for="h">Time</label><input id="h" type="range" min="5" max="23.9" step="0.05" value="11"><output id="hV">11:00</output></div>
+  <div class="row two"><button id="turn">Turn</button><button id="pause">Pause</button></div>
+  <div class="stats" id="stats"></div>
+</div>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"}}</script>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js';
+
+const lerp=(a,b,t)=>a+(b-a)*t;
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const smooth=t=>{ t=clamp(t,0,1); return t*t*(3-2*t); };
+const hex=h=>new THREE.Color(h);
+function rng(s){ return ()=>{ s|=0; s=s+0x6D2B79F5|0; let t=Math.imul(s^s>>>15,1|s); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+
+/* ================= camping =================
+   A camp: a small ridge tent and a camp fire in front of its door, in the camp's own frame, with the fire at the
+   origin and the tent along +z, its door facing the fire (-z).
+
+   createCamp(opts) returns
+     { group, seats, obbs, circles, update(dt, ctx), fireLevel(), dispose() }
+   opts:  solid      the material for the tent, the stones and the logs (vertex colours; a 'surf' attribute is
+                     given for the game's buildings shader: 0 plain, 12 natural rock)
+          groundAt   (lx, lz) => the height of the ground in the camp's frame, relative to the camp's origin
+          random     a function returning [0, 1), for the stones and the logs
+          light      optional PointLight driven by the fire, a sibling of the group placed through the group's own
+                     matrix (the game keeps one in its scene always); one is made and added to the group otherwise
+          shadows    whether the tent and the stones cast and receive shadows (true)
+   seats, obbs and circles are in the camp's frame: the place to lie down in the tent (kind 'tent', with out, the
+   places to stand up at outside the door, ahead and to either side in the seat's own frame), a log to sit on
+   beside the fire (kind 'log') and three places on the ground round the fire (kind 'ground', CAMP_GROUND); the tent and the log as boxes {x, z, hw, hd, rot, top}, and the fire's ring of
+   stones as a circle {x, z, r, top}. The tent and the fire stand to any height, so that neither is walked onto.
+   ctx, passed to every update:
+     time      seconds, for the flicker
+     night     0 by day to 1 at night
+     camera    the camera, for the size of the sparks on the screen
+     height    the drawing buffer's height in pixels
+     active    whether the fire is near enough to be animated; while false nothing moves and the light is dark */
+const CAMP_TENT={z:3.3, L:2.2, W:0.82, H:1.12}, CAMP_LIGHT_R=9;   // the light of the fire reaches 9 m
+// places to sit on the ground by the fire, on the side away from the tent: [angle from -z, distance from the middle]
+const CAMP_GROUND=[[-0.85,1.45],[0,1.4],[0.85,1.45]];   // the tent's middle along z, its length, half its width and its height
+function createCamp(opts={}){
+  const R=opts.random||Math.random, gAt=opts.groundAt||(()=>0), solid=opts.solid||new THREE.MeshLambertMaterial({vertexColors:true});
+  const group=new THREE.Group(), P=[], N=[], Cc=[], S=[], _a=new THREE.Vector3(), _b=new THREE.Vector3(), _c=new THREE.Vector3(), _n=new THREE.Vector3();
+  // a flat-shaded triangle a, b, c (counter-clockwise seen from outside)
+  const tri=(a,b,c,col,surf=0)=>{ _a.subVectors(b,a); _b.subVectors(c,a); _n.crossVectors(_a,_b).normalize();
+    P.push(a.x,a.y,a.z,b.x,b.y,b.z,c.x,c.y,c.z); for (let k=0;k<3;k++){ N.push(_n.x,_n.y,_n.z); Cc.push(col.r,col.g,col.b); S.push(surf); } };
+  const quad=(a,b,c,d,col,surf=0)=>{ tri(a,b,c,col,surf); tri(a,c,d,col,surf); };
+  // a three.js geometry put through the matrix M, flat-shaded
+  const put=(geo,M,col,surf=0,jit=0)=>{ const g=geo.index?geo.toNonIndexed():geo, p=g.attributes.position;
+    for (let i=0;i<p.count;i+=3){ const q=[0,1,2].map(k=>new THREE.Vector3(p.getX(i+k),p.getY(i+k),p.getZ(i+k)).applyMatrix4(M));
+      if (jit){ const c=col.clone().multiplyScalar(1+(R()-0.5)*jit); tri(q[0],q[1],q[2],c,surf); } else tri(q[0],q[1],q[2],col,surf); } };
+  const M=(x,y,z,sx,sy,sz,ry=0,rx=0,rz=0)=>new THREE.Matrix4().compose(new THREE.Vector3(x,y,z),new THREE.Quaternion().setFromEuler(new THREE.Euler(rx,ry,rz,'YXZ')),new THREE.Vector3(sx,sy,sz));
+  const V=(x,y,z)=>new THREE.Vector3(x,y,z);
+  const G={ico:new THREE.IcosahedronGeometry(0.5,0), log:new THREE.CylinderGeometry(0.5,0.5,1,7), box:new THREE.BoxGeometry(1,1,1), peg:new THREE.CylinderGeometry(0.5,0.5,1,4)};
+
+  /* --- the tent: an ochre ridge tent of canvas on two poles, its door rolled back, guyed out at each end and along
+     each side. Each end of the ridge stands at the tent's height over the mean of the ground at that end, so that on
+     a slope the ridge runs with the hill, as it would be pitched; each corner of the canvas, the groundsheet, the
+     poles, the pegs and everything inside stand on the ground beneath them --- */
+  const T=CAMP_TENT, tz=T.z, z0=tz-T.L/2, z1=tz+T.L/2, W=T.W, H=T.H;
+  const base=(gAt(-W,z0)+gAt(W,z0)+gAt(-W,z1)+gAt(W,z1)+2*gAt(0,tz))/6, top0=(gAt(-W,z0)+gAt(W,z0))/2+H, top1=(gAt(-W,z1)+gAt(W,z1))/2+H, top=Math.max(top0,top1);
+  const ridge=z=>lerp(top0,top1,(z-z0)/T.L);
+  const canvasO=hex('#c98a4b'), canvasD=hex('#a8693a'), canvasI=hex('#e0a868'), sheet=hex('#4f5a3e'), poleC=hex('#6b5a48'), rope=hex('#e8dcc4'), pegC=hex('#8a8a86');
+  const ov=0.1, eY=(x,z)=>gAt(x,z)+0.05;
+  // a rod of radius r from a to b
+  const rod=(a,b,r,col,surf=0,geo=G.log)=>{ const d=b.clone().sub(a), L=d.length(), q=new THREE.Quaternion().setFromUnitVectors(V(0,1,0),d.multiplyScalar(1/L));
+    put(geo,new THREE.Matrix4().compose(a.clone().add(b).multiplyScalar(0.5),q,V(r*2,L,r*2)),col,surf); };
+  for (const s of [-1,1]){
+    // the slope of canvas from the ridge to the eave, out and in, and a darker band along its foot (the sod cloth)
+    const r0=V(0,ridge(z0-ov),z0-ov), r1=V(0,ridge(z1+ov),z1+ov), e0=V(s*W,eY(s*W,z0),z0-ov*0.4), e1=V(s*W,eY(s*W,z1),z1+ov*0.4);
+    if (s>0) quad(r0,e0,e1,r1,canvasO); else quad(r0,r1,e1,e0,canvasO);
+    const ri0=V(0,ridge(z0)-0.02,z0-ov+0.02), ri1=V(0,ridge(z1)-0.02,z1+ov-0.02), ei0=V(s*(W-0.02),e0.y,z0), ei1=V(s*(W-0.02),e1.y,z1);
+    if (s>0) quad(ri0,ri1,ei1,ei0,canvasI); else quad(ri0,ei0,ei1,ri1,canvasI);
+    const k=0.12/H, b0=e0.clone().lerp(r0,k).add(V(s*0.01,0,0)), b1=e1.clone().lerp(r1,k).add(V(s*0.01,0,0)), f0=e0.clone().add(V(s*0.01,-0.01,0)), f1=e1.clone().add(V(s*0.01,-0.01,0));
+    if (s>0) quad(b0,f0,f1,b1,canvasD); else quad(b0,b1,f1,f0,canvasD);
+    // the door's flap on this side, rolled up and tied back along the edge from the ridge to the corner
+    const rt=V(s*0.07,top0-0.12,z0-0.05), rb=V(s*(W-0.05),eY(s*W,z0)+0.1,z0-0.05);
+    rod(rt,rb,0.04,canvasO.clone().multiplyScalar(0.9));
+    for (const t of [0.3,0.7]) rod(rt.clone().lerp(rb,t).add(V(0,0.0,-0.001)),rt.clone().lerp(rb,t+0.03),0.05,rope);
+  }
+  // the back wall, out and in
+  tri(V(-W,eY(-W,z1),z1),V(W,eY(W,z1),z1),V(0,top1,z1),canvasD); tri(V(W,eY(W,z1),z1-0.02),V(-W,eY(-W,z1),z1-0.02),V(0,top1-0.02,z1-0.02),canvasI);
+  // the groundsheet, following the ground, with a sleeping mat on it and a rolled blanket for a pillow at the back
+  { const nx=2, nz=4, gp=(i,j)=>{ const x=-W+0.04+i*(2*W-0.08)/nx, z=z0+0.02+j*(T.L-0.04)/nz; return V(x,gAt(x,z)+0.035,z); };
+    for (let i=0;i<nx;i++) for (let j=0;j<nz;j++) quad(gp(i,j),gp(i,j+1),gp(i+1,j+1),gp(i+1,j),sheet); }
+  const mx=0.24, mY=z=>gAt(mx,z)+0.06;
+  put(G.box,new THREE.Matrix4().compose(V(mx,(mY(z0+0.3)+mY(z1-0.15))/2,tz+0.07),new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.atan2(mY(z0+0.3)-mY(z1-0.15),T.L-0.45),0,0)),V(0.6,0.04,1.75)),hex('#3f6f8c'));
+  rod(V(mx-0.28,mY(z1-0.3)+0.08,z1-0.3),V(mx+0.28,mY(z1-0.3)+0.08,z1-0.3),0.09,hex('#9c3f34'));
+  // the poles, each standing a little above the ridge
+  for (const z of [z0-0.04,z1+0.04]) rod(V(0,gAt(0,z)-0.05,z),V(0,ridge(z)+0.1,z),0.018,poleC);
+  // the guy lines and their pegs: one out from each pole, two from each side
+  const guy=(ax,ay,az,bx,bz)=>{ const by=gAt(bx,bz)+0.03; rod(V(ax,ay,az),V(bx,by,bz),0.006,rope); put(G.peg,M(bx,by+0.02,bz,0.03,0.16,0.03,0.4),pegC); };
+  guy(0,top0+0.08,z0-0.06,0,z0-1.0); guy(0,top1+0.08,z1+0.06,0,z1+1.0);
+  for (const s of [-1,1]) for (const z of [z0+0.35,z1-0.35]){ const e=eY(s*W,z), r=ridge(z); guy(s*W*0.55,lerp(e,r,0.45),z,s*(W+0.55),z); }
+  // a rucksack beside the door
+  { const x=W+0.32, z=z0+0.25, y=gAt(x,z); put(G.box,M(x,y+0.24,z,0.34,0.48,0.24,0.5),hex('#5d6b4a')); put(G.box,M(x,y+0.5,z,0.3,0.06,0.22,0.5),hex('#4c5a3c')); }
+
+  /* --- the fire: a ring of stones round a bed of ash, and logs leaning together over the embers --- */
+  const fy=gAt(0,0), RING=0.44, nst=11;
+  for (let i=0;i<nst;i++){ const a=i/nst*Math.PI*2+R()*0.25, r=RING+(R()-0.5)*0.05, x=Math.cos(a)*r, z=Math.sin(a)*r, s=0.17+R()*0.07;
+    put(G.ico,M(x,gAt(x,z)+s*0.22,z,s*(1.1+R()*0.3),s*(0.65+R()*0.25),s*(1+R()*0.3),R()*6,R()*0.5,R()*0.5),hex('#9a948a').multiplyScalar(0.8+R()*0.35),12,0.12); }
+  // the ash, tilted with the ground
+  { const gx=(gAt(0.3,0)-gAt(-0.3,0))/0.6, gz=(gAt(0,0.3)-gAt(0,-0.3))/0.6, q=new THREE.Quaternion().setFromUnitVectors(V(0,1,0),V(-gx,1,-gz).normalize());
+    put(G.log,new THREE.Matrix4().compose(V(0,fy+0.01,0),q,V(0.72,0.04,0.72)),hex('#4a4440'),0); }
+  // two logs lying across each other on the ash, and over them logs leaning together, their feet in the ash, their
+  // tops meeting over the middle and charred
+  for (const a of [0.5,2.1]){ const c=Math.cos(a)*0.3, s=Math.sin(a)*0.3, k=a>1?0.07:0; rod(V(-c,gAt(-c,-s)+0.06+k,-s),V(c,gAt(c,s)+0.06+k,s),0.05,hex('#4a3626')); }
+  const nlog=5;
+  for (let i=0;i<nlog;i++){ const a=i/nlog*Math.PI*2+0.3+R()*0.3, rf=0.27+R()*0.04, ht=0.4+R()*0.08, rad=0.035+R()*0.012;
+    const F=V(Math.cos(a)*rf,gAt(Math.cos(a)*rf,Math.sin(a)*rf)+0.04,Math.sin(a)*rf), Tp=V(-Math.cos(a)*0.04,fy+ht*0.72,-Math.sin(a)*0.04), Mid=F.clone().lerp(Tp,0.62);
+    rod(F,Mid,rad,hex('#6a4a30').multiplyScalar(0.85+R()*0.3)); rod(Mid,Tp,rad*0.95,hex('#2a2320')); }
+  // a log beside the fire to sit on, lying across the line to the fire, and a few more stacked by it
+  const lx=-1.15, lz=0.55, la=Math.atan(lx/lz), ly=gAt(lx,lz), lr=0.14, ld=V(Math.cos(la),0,-Math.sin(la)).multiplyScalar(0.55);
+  { const A=V(lx,0,lz).sub(ld), B=V(lx,0,lz).add(ld); A.y=gAt(A.x,A.z)+lr-0.02; B.y=gAt(B.x,B.z)+lr-0.02; rod(A,B,lr,hex('#7a5a3c')); }
+  for (const [x,z,y] of [[1.1,0.62,0.06],[1.17,0.75,0.06],[1.13,0.68,0.15]]){ const d=V(Math.cos(1.22),0,-Math.sin(1.22)).multiplyScalar(0.31), A=V(x,0,z).sub(d), B=V(x,0,z).add(d); A.y=gAt(A.x,A.z)+y; B.y=gAt(B.x,B.z)+y; rod(A,B,0.055,hex('#6e5136')); }
+  const geo=new THREE.BufferGeometry();
+  geo.setAttribute('position',new THREE.Float32BufferAttribute(P,3)); geo.setAttribute('normal',new THREE.Float32BufferAttribute(N,3));
+  geo.setAttribute('color',new THREE.Float32BufferAttribute(Cc,3)); geo.setAttribute('surf',new THREE.Float32BufferAttribute(S,1));
+  geo.computeBoundingSphere();
+  const body=new THREE.Mesh(geo,solid); body.castShadow=body.receiveShadow=opts.shadows!==false; group.add(body);
+
+  const NOISE=`float h21(vec2 p){ return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453); }
+    float vn(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.-2.*f); return mix(mix(h21(i),h21(i+vec2(1,0)),f.x),mix(h21(i+vec2(0,1)),h21(i+vec2(1,1)),f.x),f.y); }`;
+  /* --- the coals: a bed of glowing lumps on the ash among the logs, deep red with orange where they burn hottest,
+     each pulsing slowly on its own and crazed with darker cracks; unlit, and drawn with their own small shader --- */
+  const eg=new THREE.BufferGeometry(), EP=[], EPh=[];
+  { const g=new THREE.IcosahedronGeometry(0.5,0), p=g.attributes.position;
+    for (let k=0;k<32;k++){ const a=R()*Math.PI*2, r=Math.sqrt(R())*0.32, s=0.05+R()*0.055, ph=R()*6.283, m=M(Math.cos(a)*r,gAt(Math.cos(a)*r,Math.sin(a)*r)+0.025+R()*0.015,Math.sin(a)*r,s*1.5,s*0.55,s*1.2,R()*6);
+      for (let i=0;i<p.count;i++){ _a.set(p.getX(i),p.getY(i),p.getZ(i)).applyMatrix4(m); EP.push(_a.x,_a.y,_a.z); EPh.push(ph,1-r/0.32); } } }
+  eg.setAttribute('position',new THREE.Float32BufferAttribute(EP,3)); eg.setAttribute('aPh',new THREE.Float32BufferAttribute(EPh,2));
+  const CU={uTime:{value:0},uHeat:{value:1}};
+  const emberMat=new THREE.ShaderMaterial({uniforms:THREE.UniformsUtils.merge([THREE.UniformsLib.fog,CU]),fog:true,
+    vertexShader:`attribute vec2 aPh; varying vec2 vPh; varying vec3 vP;
+      #include <fog_pars_vertex>
+      void main(){ vPh=aPh; vP=position; vec4 mvPosition=modelViewMatrix*vec4(position,1.0); gl_Position=projectionMatrix*mvPosition;
+        #include <fog_vertex>
+      }`,
+    fragmentShader:`uniform float uTime, uHeat; varying vec2 vPh; varying vec3 vP;
+      #include <common>
+      #include <fog_pars_fragment>
+      ${NOISE}
+      void main(){ float t=uTime, pulse=0.55+0.25*sin(t*0.9+vPh.x)+0.2*sin(t*0.37+vPh.x*2.3);
+        float crack=smoothstep(0.32,0.55,vn(vP.xz*38.0+vPh.x)), glow=pulse*mix(0.5,1.0,vPh.y)*uHeat*mix(0.35,1.0,crack);
+        vec3 col=mix(vec3(0.16,0.02,0.01),vec3(0.75,0.07,0.01),smoothstep(0.1,0.55,glow));
+        col=mix(col,vec3(1.0,0.32,0.04),smoothstep(0.6,1.0,glow));
+        gl_FragColor=vec4(col,1.0);
+        #include <colorspace_fragment>
+        #include <fog_fragment>
+      }`});
+  // UniformsUtils.merge copies the uniforms it is given: the material is pointed back at these, which update() moves
+  Object.assign(emberMat.uniforms,CU);
+  const embers=new THREE.Mesh(eg,emberMat); group.add(embers);
+
+  /* --- the flames: tongues of fire, each a small open cone of 10 sides and 8 rings shaped in the vertex shader and
+     coloured in bands in the fragment shader, after the technique of "Stylized 3D Fire and Smoke" on Godot Shaders
+     (https://godotshaders.com/shader/stylized-3d-fire-and-smoke/, MIT licence): a mesh whose radius is set by its
+     height, noise scrolled up through it in two octaves, a cut-off that rises towards the top so that the flame
+     thins and breaks up, and the heat that remains quantised into a few colours. Nothing of its code is used. Here a
+     cluster of sixteen small tongues of different heights is spread over the logs: three near the middle burn all
+     the time, wavering, and the others are born at the logs,
+     rise, part from the fire and die away, each in a cycle of its own, at a place drawn afresh each cycle. The
+     colours run from a pale yellow core low down through orange to red tips; they are unlit, and drawn opaque with
+     the gaps of the noise cut out, so that the fire reads as flat-shaded shapes like the rest of the scene. One draw
+     call of 2,048 triangles --- */
+  const FU={uTime:{value:0},uNight:{value:0},uLevel:{value:1}};
+  const NT=16, NA=8, NV=8, fpos=[], fT=[], fS=[], fidx=[];
+  for (let i=0;i<NT;i++){
+    const main=i<3, a=i*2.39996+R()*0.4, r=main?0.03+i*0.035:0.06+R()*0.17;
+    const H=main?0.5-i*0.05:0.18+R()*0.22, Rr=main?0.075:0.035+R()*0.025, o=fpos.length/3, sd=R()*50+i*7.3, rate=main?0:1.0+R()*0.9;
+    for (let k=0;k<=NV;k++) for (let j=0;j<NA;j++){ const th=j/NA*Math.PI*2; fpos.push(Math.cos(th),k/NV,Math.sin(th));
+      fT.push(Math.cos(a)*r,Math.sin(a)*r,H,Rr); fS.push(sd,rate,main?1:0,th); }
+    for (let k=0;k<NV;k++) for (let j=0;j<NA;j++){ const q=o+k*NA+j, q1=o+k*NA+(j+1)%NA; fidx.push(q,q1,q+NA,q1,q1+NA,q+NA); } }
+  const fg=new THREE.BufferGeometry(); fg.setAttribute('position',new THREE.Float32BufferAttribute(fpos,3));
+  fg.setAttribute('aT',new THREE.Float32BufferAttribute(fT,4)); fg.setAttribute('aS',new THREE.Float32BufferAttribute(fS,4)); fg.setIndex(fidx);
+  fg.boundingSphere=new THREE.Sphere(V(0,fy+0.6,0),1.3);
+  const flameMat=new THREE.ShaderMaterial({uniforms:THREE.UniformsUtils.merge([THREE.UniformsLib.fog,FU]),fog:true,side:THREE.DoubleSide,
+    vertexShader:`attribute vec4 aT, aS; uniform float uTime, uLevel; varying float vV, vSeed, vLife; varying vec3 vL;
+      #include <fog_pars_vertex>
+      ${NOISE}
+      void main(){ float t=uTime, seed=aS.x, v=position.y, main=aS.z;
+        // a tongue's cycle: born (p=0), grown by the middle, parted from the fire and gone by the end
+        float c=t*aS.y+seed*0.137, p=main>0.5?0.5:fract(c), cyc=floor(c);
+        vec2 at=aT.xy+(main>0.5?vec2(0.0):(vec2(h21(vec2(cyc,seed)),h21(vec2(seed,cyc+3.1)))-0.5)*0.16);
+        float life=main>0.5?1.0:sin(3.14159*p);
+        float H=aT.z*uLevel*(main>0.5?0.82+0.12*sin(t*6.3+seed)+0.07*sin(t*11.7)+0.05*sin(t*19.3+seed):0.45+0.55*life);
+        float lift=main>0.5?0.0:aT.z*0.7*smoothstep(0.45,1.0,p);
+        // the radius: round at the foot, tapering to a point, pinched and swollen by noise running up the flame
+        float rr=1.3*aT.w*mix(0.6,1.0,smoothstep(0.0,0.2,v))*pow(max(1.0-v,0.0),1.4)*(main>0.5?1.0:mix(0.25,1.0,life)*(1.0-0.6*smoothstep(0.45,1.0,p)));
+        rr*=0.85+0.3*vn(vec2(seed,v*1.8-t*2.6))+0.25*sin(aS.w*2.0+seed+t*3.0)*v;
+        // a lean that grows with height, and a lick to one side now and then
+        vec2 sway=(vec2(vn(vec2(t*1.7,seed)),vn(vec2(seed,t*1.5)))-0.5)*0.5*v*v*H+vec2(sin(t*4.1+seed+v*3.0),cos(t*3.7+seed*1.3+v*2.6))*0.03*v;
+        vec3 p3=vec3(at.x+cos(aS.w)*rr+sway.x, lift+v*H+0.02, at.y+sin(aS.w)*rr+sway.y);
+        vV=v; vSeed=seed; vLife=life; vL=vec3(p3.x-at.x,v,p3.z-at.y)/max(aT.w,0.01);
+        vec4 mvPosition=modelViewMatrix*vec4(p3,1.0); gl_Position=projectionMatrix*mvPosition;
+        #include <fog_vertex>
+      }`,
+    fragmentShader:`uniform float uTime, uNight; varying float vV, vSeed, vLife; varying vec3 vL;
+      #include <common>
+      #include <fog_pars_fragment>
+      ${NOISE}
+      void main(){ float t=uTime;
+        // two octaves of noise rising through the flame; the heat falls with height and is eaten away by the noise
+        float n=0.65*vn(vec2((vL.x+vL.z)*1.4+vSeed,vV*3.0-t*3.4))+0.35*vn(vec2((vL.x-vL.z)*2.6-vSeed,vV*6.5-t*6.0));
+        float heat=(1.1-vV)*mix(0.6,1.0,vLife)-0.45*n+0.12;
+        if (heat<0.05+0.14*vV*vV) discard;   // the tips break up now and then
+        vec3 col=heat>0.66?vec3(1.0,0.8,0.3):heat>0.44?vec3(1.0,0.56,0.1):heat>0.26?vec3(0.95,0.3,0.04):vec3(0.72,0.12,0.03);
+        col*=mix(1.0,0.82,uNight);
+        gl_FragColor=vec4(col,1.0);
+        #include <colorspace_fragment>
+        #include <fog_fragment>
+      }`});
+  Object.assign(flameMat.uniforms,FU);
+  const flames=new THREE.Mesh(fg,flameMat); flames.renderOrder=5; flames.frustumCulled=false; group.add(flames);
+
+  /* --- sparks rising from the fire, and by day a thin smoke; points updated on the processor while the fire is
+     active, as the game's spray is --- */
+  const NS=40, NK=14, spk=[], smk=[];
+  const pg=new THREE.BufferGeometry(), pPos=new Float32Array((NS+NK+1)*3), pSize=new Float32Array(NS+NK+1), pCol=new Float32Array((NS+NK+1)*4);
+  pg.setAttribute('position',new THREE.BufferAttribute(pPos,3).setUsage(THREE.DynamicDrawUsage));
+  pg.setAttribute('aSize',new THREE.BufferAttribute(pSize,1).setUsage(THREE.DynamicDrawUsage));
+  pg.setAttribute('aCol',new THREE.BufferAttribute(pCol,4).setUsage(THREE.DynamicDrawUsage));
+  const PU={uScale:{value:600}};
+  const partMat=new THREE.ShaderMaterial({uniforms:THREE.UniformsUtils.merge([THREE.UniformsLib.fog,PU]),transparent:true,depthWrite:false,fog:true,
+    blending:THREE.CustomBlending,blendSrc:THREE.OneFactor,blendDst:THREE.OneMinusSrcAlphaFactor,
+    vertexShader:`attribute float aSize; attribute vec4 aCol; uniform float uScale; varying vec4 vCol;
+      #include <fog_pars_vertex>
+      void main(){ vCol=aCol; vec4 mvPosition=modelViewMatrix*vec4(position,1.0);
+        gl_PointSize=aSize<=0.0?0.0:clamp(aSize*uScale/max(0.1,-mvPosition.z),1.5,400.0); gl_Position=projectionMatrix*mvPosition;
+        #include <fog_vertex>
+      }`,
+    fragmentShader:`varying vec4 vCol;
+      #include <common>
+      #include <fog_pars_fragment>
+      void main(){ vec2 c=gl_PointCoord-0.5; float d=length(c)*2.0; if (d>1.0) discard;
+        // a spark (additive, vCol.a<0) is a hot dot; smoke (vCol.a>0) a soft puff that hides what lies behind it
+        float k=vCol.a<0.0?exp(-d*d*4.0)*(1.0-d*d):(1.0-d*d)*(1.0-d*d);
+        float al=abs(vCol.a)*k;
+        gl_FragColor=vec4(vCol.rgb*(vCol.a<0.0?k:al),vCol.a<0.0?0.0:al);
+        #include <colorspace_fragment>
+        #ifdef USE_FOG
+          gl_FragColor*=1.0-smoothstep(fogNear,fogFar,vFogDepth);
+        #endif
+      }`});
+  pg.boundingSphere=new THREE.Sphere(V(0,fy+2,0),5);
+  Object.assign(partMat.uniforms,PU);
+  const parts=new THREE.Points(pg,partMat); parts.frustumCulled=false; parts.renderOrder=6; group.add(parts);
+  for (let i=0;i<NS;i++) spk.push({age:1+R()*2,life:1});
+  for (let i=0;i<NK;i++) smk.push({age:1,life:0,pre:R()});   // spread over their lives at the start
+
+  /* --- the light of the fire: warm, flickering, strongest after dusk --- */
+  const light=opts.light||new THREE.PointLight(hex('#ff7a30'),0,CAMP_LIGHT_R,1.8); if (!opts.light) group.add(light);
+  // the light's place, from the camp's frame into that of the group's parent when it is not the group's own
+  const lightAt=(x,y,z)=>{ light.position.set(x,y,z); if (opts.light){ group.updateMatrix(); light.position.applyMatrix4(group.matrix); } };
+  lightAt(0,fy+0.55,0);
+  let level=0;
+
+  function update(dt,ctx){
+    const t=ctx.time, night=ctx.night??0, on=ctx.active!==false;
+    flames.visible=parts.visible=embers.visible=on;
+    if (!on){ light.intensity=0; level=0; return; }
+    FU.uTime.value=t; FU.uNight.value=night;
+    PU.uScale.value=(ctx.height||900)/(2*Math.tan(THREE.MathUtils.degToRad((ctx.camera&&ctx.camera.fov||60)/2)));
+    // the flicker: a sum of waves, with now and then a deeper dip as a gust passes
+    const f=0.8+0.09*Math.sin(t*9.7)+0.07*Math.sin(t*17.3+1.1)+0.05*Math.sin(t*29.1+2.3)-0.18*Math.pow(Math.max(0,Math.sin(t*0.71)),16);
+    FU.uLevel.value=0.55+0.5*f;   // the flames rise and sink with the light
+    level=f;
+    CU.uTime.value=t; CU.uHeat.value=0.85+0.25*f;
+    // a point light, in the lit-material units of three.js r160 (candela, physically based falloff)
+    light.intensity=(0.25+1.6*night)*f; light.color.setRGB(1,0.45+0.06*f,0.18);
+    lightAt(Math.sin(t*3.1)*0.04,fy+0.5+0.05*Math.sin(t*4.7),Math.cos(t*2.7)*0.04);
+    // sparks: born in the flames, carried up by the heat with a wander, cooling from yellow to red as they rise
+    let j=0;
+    for (const p of spk){ p.age+=dt;
+      if (p.age>=p.life){ const a=R()*6.283, r=R()*0.18; Object.assign(p,{x:Math.cos(a)*r,y:fy+0.15+R()*0.3,z:Math.sin(a)*r,vx:(R()-0.5)*0.3,vy:0.9+R()*1.4,vz:(R()-0.5)*0.3,age:0,life:0.7+R()*1.6,s:0.018+R()*0.022,ph:R()*6}); }
+      p.vx+=(Math.sin(t*3+p.ph)*0.9)*dt; p.vz+=(Math.cos(t*2.6+p.ph*1.3)*0.9)*dt; p.vy-=0.25*dt;
+      p.x+=p.vx*dt; p.y+=p.vy*dt; p.z+=p.vz*dt;
+      const k=p.age/p.life, fade=(1-k)*(1-k)*smooth(p.age/0.08), tw=0.7+0.3*Math.sin(t*40+p.ph*9);
+      pPos[j*3]=p.x; pPos[j*3+1]=p.y; pPos[j*3+2]=p.z; pSize[j]=p.s;
+      pCol[j*4]=1.6*tw*fade; pCol[j*4+1]=(0.85-0.6*k)*tw*fade; pCol[j*4+2]=(0.35-0.3*k)*fade; pCol[j*4+3]=-1; j++; }
+    // smoke: soft grey puffs that rise, spread and thin; faint at night, when it is lit from below
+    for (const p of smk){ p.age+=dt;
+      if (p.age>=p.life){ Object.assign(p,{x:(R()-0.5)*0.15,y:fy+0.6,z:(R()-0.5)*0.15,vx:(R()-0.5)*0.15+0.12,vy:0.45+R()*0.25,vz:(R()-0.5)*0.15,age:0,life:4.5+R()*3}); }
+      if (p.pre!==undefined){ p.age=p.pre*p.life; delete p.pre; p.x+=p.vx*p.age; p.y+=p.vy*p.age; p.z+=p.vz*p.age; }
+      p.x+=p.vx*dt; p.y+=p.vy*dt; p.z+=p.vz*dt;
+      const k=p.age/p.life, a=smooth(k/0.15)*(1-k)*0.055*(1-0.5*night);
+      pPos[j*3]=p.x; pPos[j*3+1]=p.y; pPos[j*3+2]=p.z; pSize[j]=0.18+k*0.9;
+      const g=lerp(0.42,0.22,night); pCol[j*4]=g; pCol[j*4+1]=g*0.97; pCol[j*4+2]=g*0.94; pCol[j*4+3]=a; j++; }
+    // a glow round the fire at night
+    pPos[j*3]=0; pPos[j*3+1]=fy+0.35; pPos[j*3+2]=0; pSize[j]=night>0.02?1.5:0; pCol[j*4]=0.12*night*f; pCol[j*4+1]=0.035*night*f; pCol[j*4+2]=0.008*night*f; pCol[j*4+3]=-1;
+    for (const a of ['position','aSize','aCol']) pg.attributes[a].needsUpdate=true;
+  }
+  const seats=[
+    // lying in the tent, the head towards the back and the eye looking out of the door at the fire
+    {x:mx,y:gAt(mx,tz)+0.06,z:tz+0.15,fx:0,fz:-1,h:0,kind:'tent',back:0.55,out:[[T.L/2+1.02,mx],[T.L/2+1.02,mx+0.5],[T.L/2+1.02,mx-0.5]]},
+    {x:lx,y:ly+2*lr,z:lz,fx:0,fz:0,h:2*lr,kind:'log',back:0.08}];
+  // on the ground round the fire, the eye about 0.8 m above it
+  for (const [a,r] of CAMP_GROUND){ const x=Math.sin(a)*r, z=-Math.cos(a)*r; seats.push({x,y:gAt(x,z)+0.1,z,fx:0,fz:0,h:0.1,kind:'ground',back:0.1}); }
+  // the log and the places on the ground face the fire
+  for (const s of seats.slice(1)){ const dx=-s.x, dz=-s.z, l=Math.hypot(dx,dz); s.fx=dx/l; s.fz=dz/l; }
+  const obbs=[{x:0,z:tz,hw:W+0.08,hd:T.L/2+0.12,rot:0,top:Infinity},{x:lx,z:lz,hw:0.55,hd:lr,rot:la,top:ly+2*lr}];
+  const circles=[{x:0,z:0,r:RING+0.15,top:Infinity}];
+  function dispose(){ geo.dispose(); eg.dispose(); fg.dispose(); pg.dispose(); emberMat.dispose(); flameMat.dispose(); partMat.dispose(); if (opts.light) opts.light.intensity=0;
+    for (const k in G) G[k].dispose(); }
+  return {group,seats,obbs,circles,update,dispose,fireLevel:()=>level,fire:{x:0,y:fy,z:0},tent:{z:tz,base}};
+}
+/* ================= end of camping ================= */
+
+/* ---------- the scene ---------- */
+const Q=new URLSearchParams(location.search);
+const state={view:Q.get('v')||'camp', hour:+(Q.get('h')||11), turn:false, paused:false};
+const canvas=document.getElementById('c');
+const renderer=new THREE.WebGLRenderer({canvas,antialias:true,preserveDrawingBuffer:true});
+renderer.setPixelRatio(Math.min(2,devicePixelRatio));
+renderer.outputColorSpace=THREE.SRGBColorSpace; renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.toneMappingExposure=1.0;
+renderer.shadowMap.enabled=true; renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+const scene=new THREE.Scene();
+const FOG=hex('#9fc0dc'); scene.fog=new THREE.Fog(FOG,90,1500); scene.background=FOG.clone();
+const camera=new THREE.PerspectiveCamera(70,1,0.05,3000);
+const controls=new OrbitControls(camera,canvas); controls.enableDamping=true;
+// the game's sky colours and lights
+const SKY={ day:{top:hex('#1f5c9c'),mid:hex('#5f95c4'),hor:hex('#9fc0dc'),hs:hex('#d8cde0'),hg:hex('#f0c49a')},
+  dusk:{top:hex('#2c3f74'),mid:hex('#9b7898'),hor:hex('#f2a477'),hs:hex('#d9a08c'),hg:hex('#8a5f55')},
+  night:{top:hex('#040a1a'),mid:hex('#0a1632'),hor:hex('#16264a'),hs:hex('#3a4f86'),hg:hex('#141a2c')} };
+const skyU={uTop:{value:new THREE.Color()},uMid:{value:new THREE.Color()},uHor:{value:new THREE.Color()},uSun:{value:new THREE.Vector3(0,1,0)}};
+const sky=new THREE.Mesh(new THREE.SphereGeometry(1400,32,16),new THREE.ShaderMaterial({uniforms:skyU,side:THREE.BackSide,depthWrite:false,fog:false,
+  vertexShader:`varying vec3 vDir; void main(){ vDir=normalize(position); gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+  fragmentShader:`uniform vec3 uTop,uMid,uHor,uSun; varying vec3 vDir;
+    void main(){ vec3 d=normalize(vDir); float y=d.y;
+      vec3 c = y>0.12 ? mix(uMid,uTop,clamp((y-0.12)/0.6,0.0,1.0)) : mix(uHor,uMid,clamp((y+0.04)/0.16,0.0,1.0));
+      float sd=max(dot(d,uSun),0.0); c += vec3(1.0,0.95,0.85)*(pow(sd,900.0)*6.0 + pow(sd,12.0)*0.35);
+      gl_FragColor=vec4(c,1.0);
+      #include <tonemapping_fragment>
+      #include <colorspace_fragment>
+    }`}));
+scene.add(sky);
+const hemi=new THREE.HemisphereLight(hex('#d8cde0'),hex('#f0c49a'),2.3); scene.add(hemi);
+const sun=new THREE.DirectionalLight(hex('#fff1dc'),2.6); sun.castShadow=true; sun.shadow.mapSize.set(2048,2048);
+Object.assign(sun.shadow.camera,{left:-20,right:20,top:20,bottom:-20,near:1,far:400}); sun.shadow.bias=-0.0004; sun.shadow.normalBias=0.03;
+scene.add(sun,sun.target);
+const SUN_DIR=new THREE.Vector3(); let night=0;
+const mix3=(out,k,wd,wk,wn)=>out.setRGB(SKY.day[k].r*wd+SKY.dusk[k].r*wk+SKY.night[k].r*wn, SKY.day[k].g*wd+SKY.dusk[k].g*wk+SKY.night[k].g*wn, SKY.day[k].b*wd+SKY.dusk[k].b*wk+SKY.night[k].b*wn);
+function daylight(){
+  const ang=(state.hour-6)/24*Math.PI*2; SUN_DIR.set(0.32,Math.sin(ang)*0.94,-Math.cos(ang)).normalize();
+  const e=SUN_DIR.y, wd=smooth((e-0.04)/0.3), wn=smooth((-e-0.02)/0.2), wk=Math.max(0,1-wd-wn);
+  mix3(skyU.uTop.value,'top',wd,wk,wn); mix3(skyU.uMid.value,'mid',wd,wk,wn); mix3(skyU.uHor.value,'hor',wd,wk,wn); skyU.uSun.value.copy(SUN_DIR);
+  scene.fog.color.copy(skyU.uHor.value); scene.background.copy(skyU.uHor.value);
+  mix3(hemi.color,'hs',wd,wk,wn); mix3(hemi.groundColor,'hg',wd,wk,wn); hemi.intensity=2.3*wd+1.5*wk+1.0*wn;
+  const sunUp=smooth((e+0.02)/0.12), moonUp=smooth((-e-0.04)/0.12);
+  if (sunUp>0.01){ sun.color.set('#ff9a5a').lerp(new THREE.Color('#fff1dc'),wd); sun.intensity=sunUp*(1.1+1.5*wd); }
+  else { sun.color.set('#9fb3ff'); sun.intensity=moonUp*1.0; }
+  night=smooth((0.1-e)/0.22);
+  renderer.toneMappingExposure=1.0+0.35*wn;
+  const h=Math.floor(state.hour), m=Math.round((state.hour-h)*60); document.getElementById('hV').textContent=String(h).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
+}
+// open wild country: dry grass and soil on a gentle slope, with rocks and maquis about
+// ?slope= tilts the ground further, rising towards -x and +z, to see the camp on a hillside (0.25 is one in four)
+const SLOPE=+(Q.get('slope')||0);
+const groundH=(x,z)=>0.04*x+0.02*z+SLOPE*(0.8*z-0.6*x)+0.25*Math.sin(x*0.21)*Math.sin(z*0.17)+0.06*Math.sin(x*1.3+z*0.9);
+const mat0=new THREE.MeshLambertMaterial({vertexColors:true});
+{ const n=160, S=160, g=new THREE.PlaneGeometry(S,S,n,n).rotateX(-Math.PI/2), Pp=g.attributes.position, col=[], c=new THREE.Color();
+  for (let i=0;i<Pp.count;i++){ const x=Pp.getX(i), z=Pp.getZ(i); Pp.setY(i,groundH(x,z)); const q=0.5+0.5*Math.sin(x*0.37+z*0.11)*Math.sin(z*0.29-x*0.07);
+    c.set('#a6a661').lerp(hex('#c4ad92'),q*0.7).multiplyScalar(0.92+0.08*Math.sin(x*3.1+z*2.3)); col.push(c.r,c.g,c.b); }
+  g.setAttribute('color',new THREE.Float32BufferAttribute(col,3)); g.computeVertexNormals();
+  const m=new THREE.Mesh(g,mat0); m.receiveShadow=true; scene.add(m);
+  const R=rng(7), rocks=new THREE.Group();
+  for (let i=0;i<40;i++){ const a=R()*6.283, r=6+R()*40, x=Math.cos(a)*r, z=Math.sin(a)*r, s=0.4+R()*1.4;
+    const mm=new THREE.Mesh(new THREE.IcosahedronGeometry(0.5,0),new THREE.MeshLambertMaterial({color:R()<0.5?hex('#b8a48e'):hex('#9a7a5a'),flatShading:true}));
+    mm.position.set(x,groundH(x,z)+s*0.15,z); mm.scale.set(s*1.4,s*(R()<0.5?0.7:1.1),s); mm.rotation.y=R()*6; mm.castShadow=mm.receiveShadow=true; rocks.add(mm); }
+  scene.add(rocks); }
+
+// the camp, pitched 2.5 m ahead of a player standing at (0, 0) facing +z, turned as the game would turn it
+const CX=0.6, CZ=2.5, ROT=0.4;
+const cR=Math.cos(ROT), sR=Math.sin(ROT), toW=(lx,lz)=>[CX+lx*cR+lz*sR, CZ-lx*sR+lz*cR];
+const CY=groundH(CX,CZ);
+const camp=createCamp({random:rng(11),groundAt:(lx,lz)=>{ const [x,z]=toW(lx,lz); return groundH(x,z)-CY; }});
+camp.group.position.set(CX,CY,CZ); camp.group.rotation.y=ROT; scene.add(camp.group);
+camp.group.updateMatrixWorld();
+const W3=(lx,ly,lz)=>new THREE.Vector3(lx,ly,lz).applyMatrix4(camp.group.matrixWorld);
+
+// the views
+function aim(){
+  const s0=camp.seats[0], s1=camp.seats[1], s3=camp.seats[3];
+  const V={
+    camp:[W3(-3.2,1.7,-2.6),W3(0,0.4,1.4)],
+    tent:[W3(2.6,1.3,0.6),W3(0,0.5,2.75)],
+    fire:[W3(1.4,1.1,-1.1),W3(0,0.3,0)],
+    far:[W3(-16,6,-34),W3(0,0.8,1.2)],
+    // the eye of someone lying in the tent, 0.35 m above the groundsheet, looking out of the door
+    lying:[W3(s0.x-s0.fx*s0.back,s0.y+0.35,s0.z-s0.fz*s0.back),W3(s0.x+s0.fx*4,s0.y+0.5,s0.z+s0.fz*4)],
+    seated:[W3(s1.x-s1.fx*s1.back,s1.y+0.7,s1.z-s1.fz*s1.back),W3(0,0.2,0.4)],
+    ground:[W3(s3.x-s3.fx*s3.back,s3.y+0.7,s3.z-s3.fz*s3.back),W3(0,0.15,0)] }[state.view];
+  camera.position.copy(V[0]); controls.target.copy(V[1]); controls.update();
+}
+document.getElementById('view').value=state.view; document.getElementById('h').value=state.hour;
+document.getElementById('view').onchange=e=>{ state.view=e.target.value; aim(); };
+document.getElementById('h').oninput=e=>{ state.hour=+e.target.value; daylight(); };
+document.getElementById('turn').onclick=e=>{ state.turn=!state.turn; e.target.classList.toggle('on',state.turn); controls.autoRotate=state.turn; };
+document.getElementById('pause').onclick=e=>{ state.paused=!state.paused; e.target.classList.toggle('on',state.paused); };
+if (Q.get('panel')==='0') document.getElementById('panel').classList.add('hide');
+function resize(){ const w=innerWidth, h=innerHeight; renderer.setSize(w,h,false); camera.aspect=w/h; camera.updateProjectionMatrix(); }
+addEventListener('resize',resize); resize();
+daylight(); aim();
+const _db=new THREE.Vector2(); let time=0, last=performance.now(), fr=0, ft=0;
+renderer.setAnimationLoop(now=>{ const dt=Math.min(0.05,(now-last)/1000); last=now; if (!state.paused) time+=dt;
+  controls.update(); sun.target.position.copy(controls.target); sun.position.copy(controls.target).addScaledVector(SUN_DIR,120); sky.position.copy(camera.position);
+  renderer.getDrawingBufferSize(_db);
+  camp.update(state.paused?0:dt,{time,night,camera,height:_db.y,active:true});
+  renderer.render(scene,camera);
+  fr++; ft+=dt; if (ft>0.5){ document.getElementById('stats').textContent=`${Math.round(fr/ft)} frames a second; ${renderer.info.render.calls} draw calls, ${(renderer.info.render.triangles/1000).toFixed(1)} k triangles; camp ${camp.group.children[0].geometry.attributes.position.count/3} triangles`; fr=0; ft=0; } });
+window.__camp={state,aim,daylight,camp,set(o){ Object.assign(state,o); daylight(); aim(); },advance(t){ time+=t; }};
+</script>
+</body>
+</html>
