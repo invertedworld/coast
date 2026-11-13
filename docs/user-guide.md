@@ -20,7 +20,7 @@ Two principal views are provided.
 
 **Street level** shows the island from the player's eye, 1.62 m above the ground. It is the view used for walking, sitting, climbing, swimming and riding.
 
-**The bird's-eye view** shows the island from above. **2** changes between the two views. The bird's-eye view always opens at a low height, looking out ahead. A drag with the mouse moves over the landscape: upwards on the screen travels forward and to the right travels right, whichever way the view faces. A drag with the right button, or with **Shift** held, turns and tilts the view; past its shallowest tilt it raises the view towards the sky. A double click on land goes down to street level there, outside any building. **+** and **−** set its height, and a pinch on a touch screen does the same; **−** at street level changes to the bird's-eye view. The arrow keys turn and tilt the view, and a two-finger drag pans across the island. The view rises to keep clear of higher ground but does not descend over lower ground.
+**The bird's-eye view** shows the island from above. **2** changes between the two views. The bird's-eye view always opens at a low height, looking out ahead. The land is held under the pointer: a drag with the mouse carries it with the pointer, the point first pressed staying beneath it, and two fingers moved on a trackpad do the same. The mouse wheel, and a pinch on a trackpad, zoom towards the point under the pointer. A drag with the right button, or with **Shift**, **Alt** or **Ctrl** held, turns the view about the point at its centre (across) and tilts it (up and down), from looking straight down to looking out nearly level; two fingers moved on a trackpad with **Shift** or **Alt** held do the same, and in Safari a trackpad's twist turns the view. **W**, **A**, **S** and **D** move the view, at a pace that grows with its height, faster with **Shift**; **Q** and **E**, or the left and right arrow keys, turn it; the up arrow tilts it towards the horizon and the down arrow towards the ground; **+** and **−** zoom, and **−** at street level changes to the bird's-eye view. On a touch screen one finger moves the land, and two fingers pinch to zoom, twist to turn and slide up or down together to tilt. A double click, or a double tap, on land goes down to street level there, outside any building. The view keeps its height and its angle wherever it is moved, whatever the ground beneath; where a hill comes near, it glides up to pass over it at the same angle and settles again once past.
 
 A double click on land in the bird's-eye view brings the camera down to street level at the point clicked over one and a half seconds, facing the same way. A double click on open water has no effect.
 
@@ -91,6 +91,8 @@ When **7** follows a whale that is about to breach, the camera comes up above th
 ## Time
 
 The clock runs continuously. **T** held speeds time forty times; **Shift** and **T** held run it backwards at the same rate. **N** changes to 22:00, or to 10:00 if it is already night, and the clock runs on from there. **P** pauses the world: trains, ferries, boats, whales, dolphins, the sea, the lighthouse beams, cats, gulls and the time of day stand still, while the player may still move and look about. **P** again resumes.
+
+At night the stars turn slowly across the sky, and while sailing the dinghy or staying at a camp a shooting star now and then streaks across it, about every 6 to 20 seconds.
 
 ## People
 

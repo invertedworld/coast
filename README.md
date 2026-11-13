@@ -60,7 +60,7 @@ The panel opened with **H** lists the controls. They are reproduced here for ref
 
 | Key | Action |
 |---|---|
-| W A S D | Walk. The up and down arrow keys do the same as W and S, except in the bird's-eye view, where they tilt it. |
+| W A S D | Walk; in the bird's-eye view, move the view. The up and down arrow keys do the same as W and S, except in the bird's-eye view, where they tilt it. |
 | Shift | Run |
 | Space | Jumps. Jumping at a wall, a ledge or the eaves of a roof whose top is within reach climbs onto it. See [Roofs and climbing](#roofs-and-climbing). |
 | Z | Crouches, or stands up again. Crouching, at street level, in a coach of the passenger train or aboard the ferry, lowers the eye from about 1.6 m to 0.95 m and slows walking and running to 45 per cent. |
@@ -68,10 +68,10 @@ The panel opened with **H** lists the controls. They are reproduced here for ref
 | X | Sits down on the nearest free seat within 1.5 m that the player is turned towards, or stands up again. A step with W A S D also stands the player up. See [Sitting](#sitting). |
 | R | Pitches a camp, a tent and a camp fire, 2.6 m ahead, or strikes the camp there is, wherever it is. A camp may be pitched only on foot, on level open ground in the wild country or on an island; elsewhere a notice says why not. X lies down in the tent or sits on the log by the fire. See [Camping](#camping). |
 | Q E | Turn |
-| 2 | Switches between street level and the bird's-eye view. The bird's-eye view always opens at a low height (`dist = 45`), whatever the zoom was before. Moving over lower ground does not bring the view down; it rises only to keep clear of higher ground. While riding a train or a ferry, 2 steps off. |
-| + − | Zoom the bird's-eye view in and out. − at street level changes to the bird's-eye view. A pinch also zooms. |
-| Two-finger drag | Pans across the island in the bird's-eye view. |
-| Arrow keys | Turn and tilt the bird's-eye view. |
+| 2 | Switches between street level and the bird's-eye view. The bird's-eye view always opens at a low height (`dist = 45`), whatever the zoom was before. The view keeps one height and one angle wherever it is moved: the point it looks at stays at the level it had when the view was entered, whatever the ground beneath (`aerCamera`). Where higher ground comes within a third of the zoom distance of the camera (at least 30 m), the whole view glides up to keep 3 m clear of it at the same angle, rising over about a second and settling more slowly once past (`aerLift`); the camera is never let below 0.5 m above the ground directly beneath it. While riding a train or a ferry, 2 steps off. |
+| + − | Zoom the bird's-eye view in and out. − at street level changes to the bird's-eye view. |
+| Bird's-eye view: mouse, trackpad, touch | The land is held under the pointer (`aerHold`): a drag with the left button carries it with the pointer, the ground point first pressed (`aerGround`) staying under it, as do two fingers on a trackpad. The wheel and a trackpad's pinch (a wheel event with Ctrl) zoom towards the point under the pointer (`aerZoom`). A drag with the right button, or with Shift, Alt or Ctrl held, and two fingers on a trackpad with Shift or Alt held, turn the view about its centre and tilt it from 0.06 to 1.5 rad (`aerOrbit`); Safari's trackpad gestures (`gesturechange`) zoom and turn. On a touch screen, one finger holds the land, and two pinch to zoom, twist to turn and slide up or down together to tilt; the joystick is not shown. A double click or a double tap goes down to the ground there (`aerGoDown`). The camera follows its point at once (`aerCamera`), so that the land does not slip under the pointer. |
+| Arrow keys | Turn the bird's-eye view (left and right) and tilt it (up towards the horizon, down towards the ground). W A S D move it at every height, at a pace growing with the height. |
 | B | Turns tilt-shift on or off in the bird's-eye and chase views. |
 | Shift + B | Turns ambient occlusion on or off. It is on at first, and a notice shows the new setting. See [Ambient occlusion](#ambient-occlusion). |
 | T | Speeds up time while held, forty times. |
@@ -588,7 +588,7 @@ Some of the mainland's beaches are let out with rows of loungers and parasols (`
 
 ### Time of day, lighting and shadows
 
-A full day lasts twelve minutes. The sun rises over the south sea at 06:00 and sets over the north sea at 18:00. One light casts shadows: the sun by day and the moon, opposite the sun, by night. The star field turns about the same axis as the sun and the moon.
+A full day lasts twelve minutes. The sun rises over the south sea at 06:00 and sets over the north sea at 18:00. One light casts shadows: the sun by day and the moon, opposite the sun, by night. The star field turns about the same axis as the sun and the moon. At night, while the player sails the dinghy or is within 150 m of a pitched camp, a shooting star falls about every 6 to 20 seconds, now and then two close together (`meteorStep`): from somewhere 20 to 65 degrees above the horizon, along a short arc mostly downwards, in 0.5 to 1.1 s, a thin bright streak with a tail fading behind its head, drawn in the sky's own shader (`uMetA`, `uMetB`, `uMet`), so that it costs nothing while none is falling. It follows the world's clock and stops while the world is paused.
 
 The shadow map is a square centred on the player and moved in 2 m steps. Where the GPU allows an 8,192-pixel texture, the map covers 240 m across at about 2.9 cm per texel; otherwise it covers 120 m. The map is drawn afresh each frame in ordinary play. From the bird's-eye view above 1,000 m it is drawn once in 2 to 8 frames according to the height, and while the world is paused and the player stands still it is drawn once in 4 frames; the map and its matrix are kept together, so the shadows in between stay where they were drawn.
 

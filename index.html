@@ -140,6 +140,17 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
       <div class="row"><span><kbd>R</kbd></span><span>Pitch or strike camp</span></div>
       <div class="row"><span>Mouse</span><span>Look</span></div>
     </div>
+    <div class="group"><h3>Aerial view</h3>
+      <div class="row"><span>Drag</span><span>Move over the land</span></div>
+      <div class="row"><span>Right-drag, <kbd>Shift</kbd>-drag</span><span>Turn and tilt</span></div>
+      <div class="row"><span>Wheel, pinch</span><span>Zoom</span></div>
+      <div class="row"><span>Two-finger scroll</span><span>Move over the land</span></div>
+      <div class="row"><span><kbd>Shift</kbd> two-finger scroll</span><span>Turn and tilt</span></div>
+      <div class="row"><span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><span>Move</span></div>
+      <div class="row"><span><kbd>Q</kbd><kbd>E</kbd> <kbd>←</kbd><kbd>→</kbd></span><span>Turn</span></div>
+      <div class="row"><span><kbd>↑</kbd><kbd>↓</kbd></span><span>Tilt</span></div>
+      <div class="row"><span>Double click</span><span>Go down there</span></div>
+    </div>
     <div class="group"><h3>Scenes</h3>
       <div class="row"><span><kbd>1</kbd></span><span>Return to origin</span></div>
       <div class="row"><span><kbd>2</kbd></span><span>Aerial</span></div>
@@ -4982,10 +4993,10 @@ const camera=new THREE.PerspectiveCamera(FOV,1,0.3,3600); world.add(camera);
 const torch=new THREE.SpotLight(0xfff1dc,0,32,0.42,0.55,1.4), torchAim=new THREE.Object3D();
 torchAim.position.set(0,0,-1); camera.add(torch,torchAim); torch.target=torchAim; torch.position.set(0.15,-0.1,0);
 let torchOn=false;
-const skyU={uTop:{value:new THREE.Color()},uMid:{value:new THREE.Color()},uHor:{value:new THREE.Color()},uSun:{value:new THREE.Vector3(0,1,0)},uSunCol:{value:new THREE.Color()},uNight:{value:0},uDay:{value:1},uRot:{value:0}};
+const skyU={uTop:{value:new THREE.Color()},uMid:{value:new THREE.Color()},uHor:{value:new THREE.Color()},uSun:{value:new THREE.Vector3(0,1,0)},uSunCol:{value:new THREE.Color()},uNight:{value:0},uDay:{value:1},uRot:{value:0},uMetA:{value:new THREE.Vector3(0,1,0)},uMetB:{value:new THREE.Vector3(0,1,0)},uMet:{value:new THREE.Vector3()}};
 const sky=new THREE.Mesh(new THREE.SphereGeometry(500,48,24),new THREE.ShaderMaterial({uniforms:skyU,side:THREE.BackSide,depthWrite:false,fog:false,
   vertexShader:`varying vec3 vDir; void main(){ vDir=normalize(position); gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
-  fragmentShader:`uniform vec3 uTop,uMid,uHor,uSun,uSunCol; uniform float uNight,uDay,uRot; varying vec3 vDir;
+  fragmentShader:`uniform vec3 uTop,uMid,uHor,uSun,uSunCol,uMetA,uMetB,uMet; uniform float uNight,uDay,uRot; varying vec3 vDir;
     float h3(vec3 p){ return fract(sin(dot(p,vec3(12.9898,78.233,37.719)))*43758.5453); }
     void main(){
       vec3 d=normalize(vDir); float y=d.y;
@@ -5005,6 +5016,14 @@ const sky=new THREE.Mesh(new THREE.SphereGeometry(500,48,24),new THREE.ShaderMat
         float b=exp(-dd*dd/(size*size))*(0.35+0.65*h3(cell+7.7));
         float tw=0.75+0.25*sin(st*900.0+uRot*400.0);
         c += vec3(0.9,0.93,1.0)*b*tw*uNight*smoothstep(0.02,0.25,y)*1.6;
+      }
+      // a shooting star (uMet: how far along its path its head is, the length of its tail, its brightness): a streak
+      // along the great circle from uMetA to uMetB, brightest at its head and fading to nothing along its tail
+      if (uMet.z>0.0){
+        vec3 hd=normalize(mix(uMetA,uMetB,uMet.x)), tl=normalize(mix(uMetA,uMetB,max(0.0,uMet.x-uMet.y))), ab=hd-tl;
+        float L2=max(dot(ab,ab),1e-10), f=clamp(dot(d-tl,ab)/L2,0.0,1.0); vec3 q=tl+ab*f; float pd=length(d-q);
+        float core=exp(-pd*pd/(0.0011*0.0011)), glow=exp(-pd*pd/(0.004*0.004))*0.25;
+        c += vec3(1.0,0.96,0.88)*(core+glow)*f*f*uMet.z*3.0;
       }
       gl_FragColor=vec4(c,1.0);
       #include <tonemapping_fragment>
@@ -11928,8 +11947,84 @@ const ascent={t:-1,dur:1.2,p:new THREE.Vector3(),q:new THREE.Quaternion(),fov:70
 let aerUp=0;   // how far the bird's-eye view is raised above the player, looking out towards the sky
 function startAscent(tilt){ pitch=0.25; aerUp=0;   // the bird's-eye view opens at its shallowest tilt, looking out ahead rather than down
   Object.assign(ascent,{t:0,fov:camera.fov,fogN:scene.fog.near,fogF:scene.fog.far}); ascent.p.copy(camera.position); ascent.q.copy(camera.quaternion); }
-canvas.addEventListener('dblclick',e=>{ if (mode!=='above') return;
-  const r=canvas.getBoundingClientRect(); _rp.set((e.clientX-r.left)/r.width*2-1,-(e.clientY-r.top)/r.height*2+1); _ray.setFromCamera(_rp,camera); _ray.ray.origin.add(ORIGIN);
+canvas.addEventListener('dblclick',e=>{ if (mode==='above') aerGoDown(e.clientX,e.clientY); });
+// the camera of the bird's-eye view, set from the point it looks at (the player), its heading, tilt and distance; it is
+// called each frame, and at once whenever the view is moved by the pointer or the fingers (dt 0)
+let aerLift=0;   // how far the bird's-eye view is lifted to glide over higher ground near the camera
+function aerCamera(dt,moving){
+    // the view keeps one height and one angle wherever it is moved, whatever the ground beneath: the point it looks at
+    // stays at the level it had when the view was entered (or the player was last set down), and the camera stands
+    // at its distance and tilt from that point. Where higher ground comes near the camera (within a third of its
+    // distance, and at least 30 m, all round) the whole view glides up to keep 3 m clear of it, at the same angle,
+    // rising over about a second and settling again more slowly once it is past; the camera is never let below 0.5 m
+    // above the ground directly beneath it. While the view is being moved (dt 0) the lift is held as it is
+    if (aboveY===null || firstCam){ aboveY=eyeY; aerLift=0; }
+    const ty=aboveY+1.2, cx=player.x+Math.sin(yaw)*Math.cos(pitch)*dist, cz=player.z+Math.cos(yaw)*Math.cos(pitch)*dist, cy=ty+Math.sin(pitch)*dist;
+    if (dt>0){ const r=Math.max(30,dist*0.33); let h=heightAt(cx,cz);
+      for (let k=0;k<12;k++){ const a=k/12*Math.PI*2; h=Math.max(h,heightAt(cx+Math.cos(a)*r,cz+Math.sin(a)*r),heightAt(cx+Math.cos(a)*r*0.5,cz+Math.sin(a)*r*0.5)); }
+      const want=Math.max(0,h+3-cy); aerLift+=(want-aerLift)*(1-Math.exp(-dt*(want>aerLift?1.6:0.5))); }
+    const lift=Math.max(aerLift,heightAt(cx,cz)+0.5-cy);
+    camTarget.set(player.x,ty+lift,player.z);
+    camPos.set(cx,cy+lift,cz);
+    camera.position.copy(camPos); camLookAt(camTarget); if (aerUp>0) camera.rotateX(aerUp);
+    // the view widens with the zoom: fog, far plane and sea grow so nothing is clipped
+    const far=Math.max(3600,dist*6), fogFar=Math.max(1800,dist*4), near=Math.max(0.3,dist*0.004);
+    if (camera.far!==far||camera.near!==near){ camera.far=far; camera.near=near; camera.updateProjectionMatrix(); }
+    updateIsland(); farMesh.visible=farGlow.visible=dist<2500;
+    scene.fog.near=Math.max(160,dist*1.1); scene.fog.far=fogFar;
+    sea.scale.setScalar(Math.max(1,dist*8/9000));
+  camera.updateMatrixWorld(); }
+/* ---------- the bird's-eye view: moving over the land and turning the view ----------
+   The land is held under the pointer: a drag with the left button (one finger on a touch screen) carries it with the
+   pointer, the point first touched staying under it, and two fingers on a trackpad move it as the drag does. The
+   wheel, a pinch on a trackpad and two fingers on a touch screen zoom towards the point under the pointer or between
+   the fingers. A drag with the right button, or with Shift, Alt or Ctrl held, turns the view about the point it looks
+   at (across) and tilts it (up and down), from looking straight down to nearly level; on a touch screen two fingers
+   turn it as they twist and tilt it as they slide up or down together. W A S D move the view, Q and E (or the left
+   and right arrows) turn it, the up and down arrows tilt it and + and − zoom; Shift moves faster. A double click (a
+   double tap) goes down to the ground there. */
+const AER_PMIN=0.06, AER_PMAX=1.5;
+const aer={drag:null,touch:new Map(),one:null,two:null,tapT:0,tapX:0,tapY:0,t0:0,moved:0};
+function aerRay(cx,cy){ const r=canvas.getBoundingClientRect(); _rp.set((cx-r.left)/r.width*2-1,-(cy-r.top)/r.height*2+1); camera.updateMatrixWorld(); _ray.setFromCamera(_rp,camera); _ray.ray.origin.add(ORIGIN); return _ray.ray; }
+// the point of the ground or the sea under a point of the screen, or null where the line of sight passes over the land
+function aerGround(cx,cy){ const R=aerRay(cx,cy), o=R.origin, d=R.direction; if (d.y>-1e-4) return null;
+  const st=Math.max(0.5,dist/200), reach=Math.min(camera.far,dist*12+800), above=t=>o.y+d.y*t-Math.max(0,heightAt(o.x+d.x*t,o.z+d.z*t));
+  let a=0, b=-1; for (let t=st;t<reach;t+=st) if (above(t)<=0){ a=t-st; b=t; break; }
+  if (b<0) return null; for (let k=0;k<10;k++){ const m=(a+b)/2; if (above(m)>0) a=m; else b=m; }
+  return {x:o.x+d.x*b,y:o.y+d.y*b,z:o.z+d.z*b}; }
+// where the line of sight through a point of the screen meets the level y
+function aerAtLevel(cx,cy,y){ const R=aerRay(cx,cy), o=R.origin, d=R.direction; if (d.y>-1e-4) return null; const t=(y-o.y)/d.y; return t>0?{x:o.x+d.x*t,z:o.z+d.z*t}:null; }
+function aerShift(dx,dz){ if (!Number.isFinite(dx)||!Number.isFinite(dz)) return; player.x+=dx; player.z+=dz; player.y=Math.max(heightAt(player.x,player.z),0); player.vy=0; eyeY=player.y; aerCamera(0,true); }
+// the point P is brought back under the screen point (cx,cy)
+function aerHold(P,cx,cy){ if (!P) return;
+  // (repeated, as the camera may rise or fall over the ground where the view has moved to)
+  for (let k=0;k<4;k++){ const Q=aerAtLevel(cx,cy,P.y); if (!Q) return; const dx=P.x-Q.x, dz=P.z-Q.z; if (Math.hypot(dx,dz)<0.02) return; aerShift(dx,dz); } }
+function aerZoom(f,cx,cy){ const P=cx==null?null:aerGround(cx,cy); dist=clamp(dist*f,7,60000); aerCamera(0,true); if (P) aerHold(P,cx,cy); }
+function aerOrbit(dx,dy){ yaw-=dx*0.005; pitch=clamp(pitch+dy*0.005,AER_PMIN,AER_PMAX); aerUp=0; aerCamera(0,true); }
+canvas.addEventListener('mousedown',e=>{ if (mode!=='above') return;
+  aer.drag={x:e.clientX,y:e.clientY,orbit:e.button!==0||e.shiftKey||e.altKey||e.ctrlKey}; if (!aer.drag.orbit) aer.drag.P=aerGround(e.clientX,e.clientY); });
+addEventListener('mouseup',()=>{ aer.drag=null; });
+// touch: one finger holds the land; two pinch to zoom, twist to turn and slide up or down together to tilt
+function aerTouchSet(){ const L=[...aer.touch.values()];
+  aer.one=L.length===1?{P:aerGround(L[0].x,L[0].y)}:null;
+  aer.two=L.length>=2?{mx:(L[0].x+L[1].x)/2,my:(L[0].y+L[1].y)/2,d:Math.hypot(L[0].x-L[1].x,L[0].y-L[1].y),a:Math.atan2(L[1].y-L[0].y,L[1].x-L[0].x)}:null; }
+function aerTouchStart(e){ for (const t of e.changedTouches) aer.touch.set(t.identifier,{x:t.clientX,y:t.clientY});
+  if (aer.touch.size===1){ aer.t0=performance.now(); aer.moved=0; } else aer.moved=1e9; aerTouchSet(); }
+function aerTouchMove(e){ for (const t of e.changedTouches){ const q=aer.touch.get(t.identifier); if (q){ aer.moved+=Math.hypot(t.clientX-q.x,t.clientY-q.y); q.x=t.clientX; q.y=t.clientY; } }
+  const L=[...aer.touch.values()];
+  if (L.length===1 && aer.one) aerHold(aer.one.P,L[0].x,L[0].y);
+  else if (L.length>=2 && aer.two){ const T=aer.two, mx=(L[0].x+L[1].x)/2, my=(L[0].y+L[1].y)/2, d=Math.hypot(L[0].x-L[1].x,L[0].y-L[1].y), a=Math.atan2(L[1].y-L[0].y,L[1].x-L[0].x);
+    let da=a-T.a; if (da>Math.PI) da-=2*Math.PI; if (da<-Math.PI) da+=2*Math.PI;
+    if (d>1) aerZoom(T.d/d,mx,my);
+    yaw+=da; pitch=clamp(pitch+(my-T.my)*0.006,AER_PMIN,AER_PMAX); aerUp=0; aerCamera(0,true);
+    aer.two={mx,my,d,a}; } }
+function aerTouchEnd(e){ let tap=null;
+  for (const t of e.changedTouches){ if (aer.touch.size===1 && aer.moved<12 && performance.now()-aer.t0<300) tap=t; aer.touch.delete(t.identifier); }
+  // a double tap goes down to the ground there
+  if (tap){ const now=performance.now(); if (now-aer.tapT<350 && Math.hypot(tap.clientX-aer.tapX,tap.clientY-aer.tapY)<30){ aer.tapT=0; aerGoDown(tap.clientX,tap.clientY); } else { aer.tapT=now; aer.tapX=tap.clientX; aer.tapY=tap.clientY; } }
+  aerTouchSet(); }
+function aerGoDown(cx,cy){
+  const r=canvas.getBoundingClientRect(); _rp.set((cx-r.left)/r.width*2-1,-(cy-r.top)/r.height*2+1); _ray.setFromCamera(_rp,camera); _ray.ray.origin.add(ORIGIN);
   const o=_ray.ray.origin, d=_ray.ray.direction; if (d.y>=0) return;
   // march along the ray to the ground or the sea, then close in on the crossing
   const st=Math.max(0.5,dist/300), above=t=>o.y+d.y*t-Math.max(0,heightAt(o.x+d.x*t,o.z+d.z*t));
@@ -11949,19 +12044,15 @@ canvas.addEventListener('dblclick',e=>{ if (mode!=='above') return;
   player.x=x; player.z=z; player.y=top; player.vy=0; player.grounded=true; player.holdT=2; eyeY=null; fpPitch=0;
   const from={p:camera.position.clone(),q:camera.quaternion.clone(),fov:camera.fov,far:camera.far,fogN:scene.fog.near,fogF:scene.fog.far};
   toggleView(); Object.assign(descent,{t:0,fov:from.fov,far:from.far,fogN:from.fogN,fogF:from.fogF}); descent.p.copy(from.p); descent.q.copy(from.q);
-  if (started) lockPointer(); });
+  if (started) lockPointer(); }
 canvas.addEventListener('contextmenu',e=>{ if (mode==='above') e.preventDefault(); });
 addEventListener('mousemove',e=>{
   const locked=document.pointerLockElement===canvas; if (!locked&&!dragging) return;
   const dx=locked?e.movementX:e.clientX-lx, dy=locked?e.movementY:e.clientY-ly; lx=e.clientX; ly=e.clientY; const k=PHOTO.lookScale();
-  // in the bird's-eye view a drag moves over the landscape, the same way whichever way the view faces: pushed up the
-  // screen the view travels forward into it, and drawn sideways it carries the landscape with it, as a map is dragged;
-  // with the right button or Shift held
-  // the drag turns and tilts the view instead
-  if (mode==='above' && !locked && !(e.buttons&2) && !e.shiftKey){
-    const m=Math.max(0.05,dist*0.0022), fx=-Math.sin(yaw), fz=-Math.cos(yaw), rx=Math.cos(yaw), rz=-Math.sin(yaw);
-    player.x+=(-rx*dx-fx*dy)*m; player.z+=(-rz*dx-fz*dy)*m; if (dist>60){ player.y=Math.max(heightAt(player.x,player.z),0); eyeY=player.y; } }
-  else look(dx*k,dy*k);
+  // (in the bird's-eye view the drag holds the land, or turns and tilts the view: see aerOrbit)
+  if (mode==='above'){ const D=aer.drag; if (!D) return;
+    if (D.orbit) aerOrbit(e.clientX-D.x,e.clientY-D.y); else aerHold(D.P,e.clientX,e.clientY); D.x=e.clientX; D.y=e.clientY; return; }
+  look(dx*k,dy*k);
 });
 const cam={y:null,head:0}, chase={d:34,yaw:0,pitch:0.32,fresh:true,lift:0}, _cv=new THREE.Vector3();
 const riding=()=>mode==='train'||mode==='chase';
@@ -12647,32 +12738,30 @@ function tunnelLight(dt,on){
 function look(dx,dy){
   // through the telescope the mouse turns the view less, so that the scene moves across the eyepiece at the usual rate
   if (TELE.on){ const s=Math.tan(camera.fov*Math.PI/360)/Math.tan(TELE.base*Math.PI/360); dx*=s; dy*=s; }
-  if (mode==='dinghy'){ dgyLook.yaw-=dx*0.0026; dgyLook.pitch=clamp(dgyLook.pitch-dy*0.0026,-1.1,1.1); return; } if (mode==='coach'){ co.yaw-=dx*0.0026; co.pitch=clamp(co.pitch-dy*0.0026,-1.1,1.1); return; } if (mode==='ferry' && feChase){ feLook.yaw-=dx*0.004; feLook.pitch=clamp(feLook.pitch+dy*0.003,0.02,1.3); return; } if (mode==='ferry'){ fe.yaw-=dx*0.0026; fe.pitch=clamp(fe.pitch-dy*0.0026,-1.1,1.1); return; } if (mode==='chase'){ chase.yaw-=dx*0.004; chase.pitch=clamp(chase.pitch+dy*0.003,0.02,1.3); return; } if (mode==='follow'){ FOL.yaw-=dx*0.004; FOL.pitch=clamp(FOL.pitch+dy*0.003,-0.3,1.3); return; } if (mode==='train'){ tYaw=clamp(tYaw-dx*0.0026,-2.6,2.6); tPitch=clamp(tPitch-dy*0.0026,-1,1); return; } if (mode==='above'){ yaw-=dx*0.005; const d=dy*0.004;
-    // past the shallowest tilt, the mouse raises the view itself, up to the sky; brought back, it lowers it first
-    if (d<0){ const use=Math.min(pitch-0.25,-d); pitch-=use; aerUp=Math.min(1.2,aerUp-d-use); }
-    else { const back=Math.min(aerUp,d); aerUp-=back; pitch=Math.min(1.35,pitch+d-back); } } else { const pl=mode==='swim'?1.5:1.2; yaw-=dx*0.0026; fpPitch=clamp(fpPitch-dy*0.0026,-pl,pl); } }
-// bird's-eye: two-finger drag pans, pinch zooms; a classic mouse wheel still zooms
-function panView(dx,dy){ const k=dist*0.0016, fx=-Math.sin(yaw), fz=-Math.cos(yaw), rx=Math.cos(yaw), rz=-Math.sin(yaw);
-  player.x+=(rx*dx+fx*dy)*k; player.z+=(rz*dx+fz*dy)*k; player.y=Math.max(heightAt(player.x,player.z),0); player.vy=0; eyeY=player.y; }
+  if (mode==='dinghy'){ dgyLook.yaw-=dx*0.0026; dgyLook.pitch=clamp(dgyLook.pitch-dy*0.0026,-1.1,1.1); return; } if (mode==='coach'){ co.yaw-=dx*0.0026; co.pitch=clamp(co.pitch-dy*0.0026,-1.1,1.1); return; } if (mode==='ferry' && feChase){ feLook.yaw-=dx*0.004; feLook.pitch=clamp(feLook.pitch+dy*0.003,0.02,1.3); return; } if (mode==='ferry'){ fe.yaw-=dx*0.0026; fe.pitch=clamp(fe.pitch-dy*0.0026,-1.1,1.1); return; } if (mode==='chase'){ chase.yaw-=dx*0.004; chase.pitch=clamp(chase.pitch+dy*0.003,0.02,1.3); return; } if (mode==='follow'){ FOL.yaw-=dx*0.004; FOL.pitch=clamp(FOL.pitch+dy*0.003,-0.3,1.3); return; } if (mode==='train'){ tYaw=clamp(tYaw-dx*0.0026,-2.6,2.6); tPitch=clamp(tPitch-dy*0.0026,-1,1); return; } if (mode==='above'){ aerOrbit(dx*1.25,dy*1.25); } else { const pl=mode==='swim'?1.5:1.2; yaw-=dx*0.0026; fpPitch=clamp(fpPitch-dy*0.0026,-pl,pl); } }
+// bird's-eye: the wheel and a pinch zoom towards the pointer; two fingers on a trackpad move the land with them, and
+// with Shift or Alt held turn and tilt the view. Safari gives a trackpad's pinch and twist as gestures of their own
+let aerGest=null;
+canvas.addEventListener('gesturestart',e=>{ if (mode!=='above') return; e.preventDefault(); aerGest={s:1,r:0}; });
+canvas.addEventListener('gesturechange',e=>{ if (mode!=='above' || !aerGest) return; e.preventDefault();
+  if (e.scale>0) aerZoom(aerGest.s/e.scale,e.clientX,e.clientY);
+  yaw+=(e.rotation-aerGest.r)*Math.PI/180; aerCamera(0,true); aerGest={s:e.scale,r:e.rotation}; });
+canvas.addEventListener('gestureend',e=>{ if (aerGest){ e.preventDefault(); aerGest=null; } });
 canvas.addEventListener('wheel',e=>{ e.preventDefault(); if (mode!=='above') return;
-  if (e.ctrlKey){ dist=clamp(dist*Math.exp(clamp(e.deltaY,-60,60)*0.012),7,60000); return; }
+  if (e.shiftKey||e.altKey){ aerOrbit(e.deltaX||0,e.deltaY||0); return; }
+  if (e.ctrlKey){ if (aerGest) return; aerZoom(Math.exp(clamp(e.deltaY,-60,60)*0.012),e.clientX,e.clientY); return; }
   const mouseWheel=e.deltaMode===1 || (e.deltaX===0 && Math.abs(e.deltaY)>=50 && Math.abs(e.deltaY%1)<1e-6 && Math.abs(e.deltaY)%10===0);
-  if (mouseWheel){ dist=clamp(dist*Math.exp(clamp(e.deltaY,-150,150)*0.0012),7,60000); return; }
-  panView(e.deltaX,-e.deltaY); },{passive:false});   // a two-finger swipe moves over the landscape as the mouse's drag does: up the trackpad travels forward, and sideways carries the landscape with the fingers
-let pinch=null;
-canvas.addEventListener('touchstart',e=>{ if (e.touches.length===2 && mode==='above'){ const [a,b]=e.touches; pinch={mx:(a.clientX+b.clientX)/2,my:(a.clientY+b.clientY)/2,d:Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY)}; } },{passive:true});
-canvas.addEventListener('touchmove',e=>{ if (pinch && e.touches.length===2){ const [a,b]=e.touches, mx=(a.clientX+b.clientX)/2, my=(a.clientY+b.clientY)/2, d=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY);
-  panView((mx-pinch.mx)*1.6,(my-pinch.my)*1.6); dist=clamp(dist*pinch.d/Math.max(1,d),7,60000); pinch={mx,my,d}; } },{passive:true});
-canvas.addEventListener('touchend',e=>{ if (e.touches.length<2) pinch=null; });
+  if (mouseWheel){ aerZoom(Math.exp(clamp(e.deltaY*(e.deltaMode===1?33:1),-150,150)*0.0012),e.clientX,e.clientY); return; }
+  aerHold(aerGround(e.clientX,e.clientY),e.clientX-e.deltaX,e.clientY-e.deltaY); },{passive:false});
 const joyEl=document.getElementById('joy'); const joy={id:null,x:0,y:0,ox:0,oy:0}; let lookTouch=null;
-canvas.addEventListener('touchstart',e=>{ for (const t of e.changedTouches){
+canvas.addEventListener('touchstart',e=>{ if (mode==='above'){ aerTouchStart(e); e.preventDefault(); return; } for (const t of e.changedTouches){
   if (t.clientX<innerWidth*0.45&&joy.id===null){ joy.id=t.identifier; joy.ox=t.clientX; joy.oy=t.clientY; joyEl.hidden=false; joyEl.style.left=t.clientX+'px'; joyEl.style.top=t.clientY+'px'; }
   else if (lookTouch===null) lookTouch={id:t.identifier,x:t.clientX,y:t.clientY,sx:t.clientX,sy:t.clientY,t0:performance.now()}; } e.preventDefault(); },{passive:false});
-canvas.addEventListener('touchmove',e=>{ for (const t of e.changedTouches){
+canvas.addEventListener('touchmove',e=>{ if (mode==='above'){ aerTouchMove(e); e.preventDefault(); return; } for (const t of e.changedTouches){
   if (t.identifier===joy.id){ let dx=t.clientX-joy.ox, dy=t.clientY-joy.oy; const l=Math.hypot(dx,dy), m=50; if (l>m){dx*=m/l;dy*=m/l;}
     joy.x=dx/m; joy.y=dy/m; joyEl.firstElementChild.style.transform=`translate(${dx}px,${dy}px)`; }
   else if (lookTouch&&t.identifier===lookTouch.id){ look((t.clientX-lookTouch.x)*1.4,(t.clientY-lookTouch.y)*1.4); lookTouch.x=t.clientX; lookTouch.y=t.clientY; } } e.preventDefault(); },{passive:false});
-const endTouch=e=>{ for (const t of e.changedTouches){ if (t.identifier===joy.id){ joy.id=null; joy.x=joy.y=0; joyEl.hidden=true; joyEl.firstElementChild.style.transform=''; }
+const endTouch=e=>{ if (aer.touch.size){ aerTouchEnd(e); if (mode==='above') return; } for (const t of e.changedTouches){ if (t.identifier===joy.id){ joy.id=null; joy.x=joy.y=0; joyEl.hidden=true; joyEl.firstElementChild.style.transform=''; }
   if (lookTouch&&t.identifier===lookTouch.id){
     // a short tap, hardly moved, on a dinghy within 100 m takes her helm, as 6 does beside her
     if (performance.now()-lookTouch.t0<350 && Math.hypot(t.clientX-lookTouch.sx,t.clientY-lookTouch.sy)<14) tapDinghy(t.clientX,t.clientY);
@@ -13020,7 +13109,7 @@ function sceneRestore(o){
     const [L,p]=sitLookGet(fr); sitKey({s,fr,home}); if (!sit) return; sit.L0=N(o.x,1,sit.L0); sitLookSet(fr,L,p); sit.k=1; };
   if (m==='above'){
     if (F){ deck(); toggleView(); } else { walk(); toggleView(); }
-    yaw=N(l,0,yaw); pitch=clamp(N(l,1,0.25),0.25,1.35); dist=clamp(N(l,2,45),7,60000); aerUp=clamp(N(l,3),0,1.2);
+    yaw=N(l,0,yaw); pitch=clamp(N(l,1,0.25),0.06,1.5); dist=clamp(N(l,2,45),7,60000); aerUp=clamp(N(l,3),0,1.2);
     ascent.t=descent.t=-1; firstCam=true; aboveY=null; }
   else if (m==='swim'){ walk(); mode='swim'; swimmer.enter({x:player.x,y:player.y+1.62,z:player.z,yaw,pitch:fpPitch});
     if (N(l,2)){ const S=swimmer.state; S.mode='under'; S.under=true; S.underT=2; diveQuiet=true; }
@@ -13596,6 +13685,19 @@ function teleAim(){
   const x=P.x+D.x*d, z=P.z+D.z*d, half=d*ht*Math.max(1,camera.aspect), r0=clamp(Math.round(half/C+0.5),1,MOBILE?1:2), R=teleRing;
   if (R && R.r0===r0 && Math.abs(x/C-R.cx-0.5)<1.25 && Math.abs(z/C-R.cz-0.5)<1.25){ R.p.x=x; R.p.y=y; R.p.z=z; return; }
   teleRing={cx:Math.floor(x/C),cz:Math.floor(z/C),r0,r1:r0+3,r2:r0+6,p:{x,y,z}}; }
+// shooting stars at night: one about every 6 to 20 seconds (now and then two close together), from somewhere 20 to 65
+// degrees above the horizon, along a short arc mostly downwards, in 0.5 to 1.1 s, drawn in the sky's shader
+const MET={t:-1,dur:1,wait:4};
+function meteorStep(dt){ const U=skyU, night=U.uNight.value;
+  // shooting stars are seen only from the dinghy, or by a camp within reach of its fire
+  if (MET.t<0){ U.uMet.value.z=0; if (night<0.5 || !(mode==='dinghy' || (CAMP.c && Math.hypot(camera.position.x-CAMP.x,camera.position.z-CAMP.z)<CAMP_LIVE))) return; MET.wait-=dt; if (MET.wait>0) return;
+    const el=(20+45*Math.random())*Math.PI/180, az=Math.random()*Math.PI*2, A=new THREE.Vector3(Math.cos(el)*Math.cos(az),Math.sin(el),Math.cos(el)*Math.sin(az));
+    const da=(Math.random()<0.5?-1:1)*(0.12+0.25*Math.random()), de=-(0.08+0.2*Math.random()), el2=Math.max(0.05,el+de);
+    U.uMetA.value.copy(A); U.uMetB.value.set(Math.cos(el2)*Math.cos(az+da),Math.sin(el2),Math.cos(el2)*Math.sin(az+da));
+    MET.t=0; MET.dur=0.5+0.6*Math.random(); MET.k=0.6+0.4*Math.random(); MET.wait=Math.random()<0.15?0.4+Math.random()*1.5:6+14*Math.random(); }
+  MET.t+=dt/MET.dur; if (MET.t>=1){ MET.t=-1; U.uMet.value.z=0; return; }
+  // the head runs the whole arc; the tail grows behind it and the whole fades in and out
+  U.uMet.value.set(MET.t,0.35,MET.k*Math.sin(Math.PI*MET.t)*smooth((night-0.5)/0.3)); }
 function teleFrame(dt){
   if (TELE.on && (mode!==TELE.mode || !teleModes() || PHOTO.on)) teleLower();
   if (TELE.on){
@@ -13651,7 +13753,7 @@ function frame(now){
   pollPad(dt);
   const turn=(keys.KeyQ||keys.ArrowLeft?1:0)-(keys.KeyE||keys.ArrowRight?1:0);
   yaw+=turn*dt*1.8;
-  if (mode==='above'){ if (keys.ArrowUp) pitch=clamp(pitch+dt,0.25,1.35); if (keys.ArrowDown) pitch=clamp(pitch-dt,0.25,1.35);
+  if (mode==='above'){ if (keys.ArrowUp) pitch=clamp(pitch-dt*0.9,AER_PMIN,AER_PMAX); if (keys.ArrowDown) pitch=clamp(pitch+dt*0.9,AER_PMIN,AER_PMAX); if (keys.ArrowUp||keys.ArrowDown) aerUp=0;
     const zk=((keys.Minus||keys.NumpadSubtract)?1:0)-((keys.Equal||keys.NumpadAdd)?1:0);
     if (zk) dist=clamp(dist*Math.exp(zk*dt*1.8),7,60000); }
   let mx=(keys.KeyD?1:0)-(keys.KeyA?1:0)+joy.x+pad.x, mz=(keys.KeyW||(mode!=="above"&&keys.ArrowUp)?1:0)-(keys.KeyS||(mode!=="above"&&keys.ArrowDown)?1:0)-joy.y-pad.y;
@@ -13661,7 +13763,7 @@ function frame(now){
   crouchK+=((crouch&&(mode==='street'||mode==='coach'||mode==='ferry')?1:0)-crouchK)*(1-Math.exp(-dt*10));
   if (moving){
     if (ml>1){ mx/=ml; mz/=ml; }
-    const fly=mode==='above'&&dist>60, sp=Math.min((fly?dist*0.45:4.6)*((keys.ShiftLeft||keys.ShiftRight)?(fly?2.5:1.96):1)*(fly?1:1-0.55*crouchK),fly||player.grounded||mode!=='street'?1e9:AIR_SP);
+    const fly=mode==='above', sp=Math.min((fly?Math.max(6,dist*0.45):4.6)*((keys.ShiftLeft||keys.ShiftRight)?(fly?2.5:1.96):1)*(fly?1:1-0.55*crouchK),fly||player.grounded||mode!=='street'?1e9:AIR_SP);
     const fx=-Math.sin(yaw), fz=-Math.cos(yaw), rx=Math.cos(yaw), rz=-Math.sin(yaw);
     const vx=(fx*mz+rx*mx)*sp, vz=(fz*mz+rz*mx)*sp, ox=player.x, oz=player.z;
     if (fly){ player.x+=vx*dt; player.z+=vz*dt; player.y=Math.max(heightAt(player.x,player.z),0); player.vy=0; eyeY=player.y; }
@@ -13682,7 +13784,7 @@ function frame(now){
       if (player.x===ox && player.z===oz){ const nx=ox+vx*dt, nz=oz+vz*dt, g4=standableAt(nx,nz); if (g4>=-1.0 && coveMoveOk(ox,oz,player.y,g0,nx,nz,g4)){ player.x=nx; player.z=nz; } } }
     player.face=Math.atan2(vx,vz);
   }
-  if (!onBoard() && !sailD && !(mode==='above'&&dist>60) && mode!=='swim'){
+  if (!onBoard() && !sailD && mode!=='above' && mode!=='swim'){
   if (started && keys.Space && player.grounded && !(sit&&sit.dir>0) && !mantle){ player.vy=JUMP_V; player.grounded=false; }
   playerRadius(dt); doorsStep(dt);
   const ground=collide();
@@ -13749,27 +13851,7 @@ function frame(now){
     const m=ridden.m; m.updateMatrix(); _cvv.set(fe.lx,fe.ey,fe.lz).applyMatrix4(m.matrix);
     player.x=_cvv.x; player.z=_cvv.z; player.y=_cvv.y; eyeY=player.y; }
   if (mode==='above'){
-    // the view keeps its height over lower ground, whether the player moves or stops; it rises only to keep clear of
-    // higher ground, and is never more than half the zoom distance below the ground beneath the player
-    if (aboveY===null || firstCam) aboveY=eyeY;
-    // the height follows the ground up, to keep clear of it, but never comes down by itself over lower ground
-    if (!moving && eyeY>aboveY) aboveY+=(eyeY-aboveY)*(1-Math.exp(-dt*1.5));
-    aboveY=Math.max(aboveY,eyeY-dist*0.5);
-    camTarget.set(player.x,aboveY+1.2,player.z);
-    const desired=new THREE.Vector3(player.x+Math.sin(yaw)*Math.cos(pitch)*dist, aboveY+1.2+Math.sin(pitch)*dist, player.z+Math.cos(yaw)*Math.cos(pitch)*dist);
-    desired.y=Math.max(desired.y,heightAt(desired.x,desired.z)+3);
-    if (dist<2000) for (let k=4;k<=14;k++){ const t=k/15, sx=lerp(camTarget.x,desired.x,t), sz=lerp(camTarget.z,desired.z,t), need=heightAt(sx,sz)+2.5;
-      if (lerp(camTarget.y,desired.y,t)<need) desired.y=Math.max(desired.y,camTarget.y+(need-camTarget.y)/t); }
-    if (firstCam) camPos.copy(desired); else camPos.lerp(desired,1-Math.exp(-dt*10));
-    // the eased camera can lag behind rising ground, so it is also held clear of the ground where it actually is
-    camPos.y=Math.max(camPos.y,heightAt(camPos.x,camPos.z)+2);
-    camera.position.copy(camPos); camLookAt(camTarget); if (aerUp>0) camera.rotateX(aerUp);
-    // the view widens with the zoom: fog, far plane and sea grow so nothing is clipped
-    const far=Math.max(3600,dist*6), fogFar=Math.max(1800,dist*4), near=Math.max(0.3,dist*0.004);
-    if (camera.far!==far||camera.near!==near){ camera.far=far; camera.near=near; camera.updateProjectionMatrix(); }
-    updateIsland(); farMesh.visible=farGlow.visible=dist<2500;
-    scene.fog.near=Math.max(160,dist*1.1); scene.fog.far=fogFar;
-    sea.scale.setScalar(Math.max(1,dist*8/9000));
+    aerCamera(dt,moving);
     if (ascent.t>=0){ ascent.t+=dt; const k=smooth(Math.min(1,ascent.t/ascent.dur));
       _dq.copy(camera.quaternion); camera.position.lerpVectors(ascent.p,camera.position,k); camera.quaternion.slerpQuaternions(ascent.q,_dq,k);
       camera.fov=lerp(ascent.fov,31,k); camera.updateProjectionMatrix(); glowScale();
@@ -13927,7 +14009,7 @@ function frame(now){
     const fv=camera.fov; camera.fov=lerp(swoop.fov,fv,kk); camera.updateProjectionMatrix(); camera.fov=fv; sky.position.copy(camera.position);
     if (swoop.t>=swoop.dur){ swoop.t=-1; camera.updateProjectionMatrix(); } }
   if (window.__freeCam){ camera.position.copy(window.__freeCam.p); camLookAt(window.__freeCam.t); sky.position.copy(camera.position); }
-  teleFrame(dt);
+  teleFrame(dt); meteorStep(wdt);
   updateBeams(wdt);
   updateDolphins(wdt);
   updateWhales(wdt);
@@ -14882,7 +14964,7 @@ requestAnimationFrame(()=>setTimeout(async ()=>{
   last=performance.now(); requestAnimationFrame(frame);
   requestAnimationFrame(()=>requestAnimationFrame(()=>{ canvas.style.visibility=''; seedEl.hidden=true; }));
 },30));
-window.__village={ get seed(){ return SEED_TEXT; }, TELE, teleRaise, teleLower, teleMag, get teleRing(){ return teleRing; }, viewZoom, get origin(){ return ORIGIN; }, share:{state:sceneState,link:sceneLink,qrEncode,get shared(){ return SCENE; }}, get paused(){ return paused; }, set paused(v){ if (!!v!==paused){ paused=!!v; lastClock=null; } }, goods, glZone, branchesAt, get mantle(){ return mantle; }, get colRoof(){ return colRoof; }, roofAt, roofSlope, topAt, get sit(){ return sit; }, get indoors(){ return indoors; }, roomFns:{flight,localToWorld,obbLocal,roomCeil}, sitKey, sitFind, sitStand, sitSpotOk, get camp(){ return CAMP; }, campKey, campPitch, campStrike, campWhyNot, campFit, campBuild, campLight, beachStretch, BCH_SP, COACH_SEATS, FERRY_SEATS, coachEnter, genChunk, coastRoadZ, brZ, brY, heightAt, player, chunks, rooms, doorMesh, keys, setYaw:v=>{yaw=v;}, get yaw(){return yaw;}, fe, co, lightsNear, beams, ruinIn, cats, catHome, PEOPLE, get ridden(){ return ridden; },
+window.__village={ get seed(){ return SEED_TEXT; }, aerGround:(x,y)=>aerGround(x,y), get aerView(){ return {yaw,pitch,dist,x:player.x,z:player.z,cy:camPos.y,gy:heightAt(camPos.x,camPos.z),lift:aerLift}; }, TELE, teleRaise, teleLower, teleMag, get teleRing(){ return teleRing; }, viewZoom, get origin(){ return ORIGIN; }, share:{state:sceneState,link:sceneLink,qrEncode,get shared(){ return SCENE; }}, get paused(){ return paused; }, set paused(v){ if (!!v!==paused){ paused=!!v; lastClock=null; } }, goods, glZone, branchesAt, get mantle(){ return mantle; }, get colRoof(){ return colRoof; }, roofAt, roofSlope, topAt, get sit(){ return sit; }, get indoors(){ return indoors; }, roomFns:{flight,localToWorld,obbLocal,roomCeil}, sitKey, sitFind, sitStand, sitSpotOk, get camp(){ return CAMP; }, campKey, campPitch, campStrike, campWhyNot, campFit, campBuild, campLight, beachStretch, BCH_SP, COACH_SEATS, FERRY_SEATS, coachEnter, genChunk, coastRoadZ, brZ, brY, heightAt, player, chunks, rooms, doorMesh, keys, setYaw:v=>{yaw=v;}, get yaw(){return yaw;}, fe, co, lightsNear, beams, ruinIn, cats, catHome, PEOPLE, get ridden(){ return ridden; },
   findHarbour(){ for (let d=0;d<12;d++) for (const sd of SIDES) for (const n of [Math.floor(player.x/HARB)+d,Math.floor(player.x/HARB)-d]){ const H=harbourInfo(sd,n); if (H) return {x:H.x,z:coastZ(sd,H.x)+sd*7,W:H.W,sd,qz:coastZ(sd,H.x+H.W/2-1)+sd*2.5}; } return null; },
   findBeach(){ for (let x=player.x; x<player.x+3000; x+=10) for (const sd of SIDES){ const z=coastZ(sd,x)+sd*5; if (heightAt(x,z)<0.6 && heightAt(x,z)>0.1 && !harbourAt(sd,x)) return {x,z,sd}; } return null; },
   ridge(x){ return {x,z:ridgeZ(x)}; },
