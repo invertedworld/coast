@@ -516,13 +516,15 @@ function buildPose(p, t, Q){
           heightAt(x,z): the ground, topAt(x,z,yhi): the highest surface at (x,z) no higher than yhi, or null where something higher stands,
           block(cx,cz): the block record, or null; ready(cx,cz): whether it and its neighbours are built in full,
           player(): {x,y,z,vx,vz}, hour(), night() (0 by day to 1 at night), hidden(): true while a picture is made,
+          zoom(): how many times the view is magnified (1 to the naked eye), focus(): the point {x,y,z} looked at
+            through a telescope or a long lens, or null; the places round it come to life as round the player,
           seatTaken(seat): whether the player or a cat is on one of a block's seats,
           train: { cars(), wait(), doorOpen(), obj() (the train's state: x, dir, v, wait), stationNear(x,r), railZ(x), CDX, CDZ, seats, playerCar() },
           ferry: { list(), quay(R,stop), FB, FPL, FGZ, FD0, FSZ0, seats, ridden() } } */
 /* The population level, 0 (no one) to 9, scales every place's numbers, the cap and the passengers; level 3 is the
    ordinary town. */
 const LEVELS=[0,0.3,0.6,1,1.8,3.2,5.5,9,15,25];
-const VIEW_FAR=420, ACT_R=120, CAP0=40, MAXP=1600, SQUARE_KINDS=new Set(['piazza','church']), TOWN_KINDS=new Set(['quarter','piazza','church','shore']), TOWN_W=160;
+const VIEW_FAR=420, PAX_R=2500, ACT_R=120, CAP0=40, MAXP=1600, SQUARE_KINDS=new Set(['piazza','church']), TOWN_KINDS=new Set(['quarter','piazza','church','shore']), TOWN_W=160;
 const ANCHOR_CLR=0.35;
 const NBI=[1,-1,0,0,1,1,-1,-1], NBJ=[0,0,1,-1,1,-1,1,-1], NBW=[1,1,1,1,1.4142,1.4142,1.4142,1.4142], WALK=0.3;
 
@@ -659,7 +661,9 @@ export function createPeople(ctx){
   /* ---------- what the camera sees ---------- */
   const frustum=new THREE.Frustum(), _vm=new THREE.Matrix4(), _sph=new THREE.Sphere();
   function viewUpdate(){ _vm.compose(cam.position,cam.quaternion,cam.scale).invert().premultiply(cam.projectionMatrix); frustum.setFromProjectionMatrix(_vm); }
-  function inView(x,y,z){ if (Math.hypot(x-cam.position.x,y-cam.position.y,z-cam.position.z)>VIEW_FAR) return false; _sph.center.set(x,y+0.9,z); _sph.radius=1.4; return frustum.intersectsSphere(_sph); }
+  // seen through a telescope, anything within its narrow field is in view VIEW_FAR times its magnification away
+  const zoom=()=>ctx.zoom?Math.max(1,ctx.zoom()):1;
+  function inView(x,y,z){ if (Math.hypot(x-cam.position.x,y-cam.position.y,z-cam.position.z)>VIEW_FAR*zoom()) return false; _sph.center.set(x,y+0.9,z); _sph.radius=1.4; return frustum.intersectsSphere(_sph); }
   // out of view, and not right behind the camera either, where a turn of the head would find them
   const hiddenAt=(x,y,z)=>!inView(x,y,z) && Math.hypot(x-cam.position.x,z-cam.position.z)>8;
 
@@ -686,8 +690,20 @@ export function createPeople(ctx){
       for (const t of seats) if (!t.set&&Math.hypot(t.x-s.x,t.z-s.z)<(set.kind==='table'?1.6:1.1)){ t.set=set; set.seats.push(t); }
       pl.seatSets.push(set); }
   }
+  /* The places come to life round the player and round the point looked at through a telescope (ctx.focus), each
+     place keeping the point it is seen from (pl.foc), so that the streets there are peopled about that point. A place
+     made for the telescope while it lies beyond VIEW_FAR is filled at once, as one made by a change of level is:
+     until the telescope was raised, no one could have seen who was there */
+  const focusOf=pl=>pl.foc==='t'?(ctx.focus&&ctx.focus())||pl:ctx.player();
   function scan(){
-    const P=ctx.player(), C=ctx.C;
+    scanFrom(ctx.player(),'p');
+    const F=ctx.focus&&ctx.focus(), P=ctx.player();
+    if (F && Math.hypot(F.x-P.x,F.z-P.z)>150) scanFrom(F,"t");
+    for (const [k,pl] of places){ pl.gone=simT-pl.seen>3; if (pl.gone&&!pl.n&&!pax.some(p=>p.veh.place===pl)) places.delete(k); }
+  }
+  function scanFrom(P,foc){
+    const C=ctx.C, far=foc==='t'&&Math.hypot(P.x-cam.position.x,P.z-cam.position.z)>VIEW_FAR;
+    const made=pl=>{ pl.foc=foc; if (far) pl.filled=false; return pl; };
     for (let j=-4;j<=4;j++) for (let i=-4;i<=4;i++){ const cx=Math.floor(P.x/C)+i, cz=Math.floor(P.z/C)+j, ch=ctx.block(cx,cz);
       if (!ch||ch.lod!==0||!ch.piazza||!SQUARE_KINDS.has(ch.kind)||!ctx.ready(cx,cz)) continue;
       const Pz=ch.piazza; if (Math.hypot(Pz.x-P.x,Pz.z-P.z)>ACT_R) continue;
@@ -695,7 +711,7 @@ export function createPeople(ctx){
       if (!pl){ const r=Pz.r+6, lv=Pz.level;
         pl=newPlace(key,'square',Pz.x,Pz.z,2*r,2*r,(x,z)=>{ if (Math.hypot(x-Pz.x,z-Pz.z)>r) return null; const s=ctx.topAt(x,z,lv+0.45); return (s==null||s<0.3||Math.abs(s-lv)>2.2)?null:s; },
           {exitOk:(x,z)=>Math.hypot(x-Pz.x,z-Pz.z)>r-1.2, spotOk:(x,z)=>Math.hypot(x-Pz.x,z-Pz.z)<Pz.r});
-        places.set(key,pl); }
+        places.set(key,made(pl)); }
       pl.seen=simT; }
     /* the streets: one place 160 m across over the village blocks round the player, made afresh once the player is
        more than 45 m from its middle; the old one empties out of view and is then forgotten */
@@ -707,22 +723,21 @@ export function createPeople(ctx){
         let old=null, od=1e9; for (const pl of places.values()) if (pl.kind==='town'&&pl.G.ready){ const e=Math.hypot(pl.x-tx,pl.z-tz); if (e<od){ od=e; old=pl; } }
         town=newPlace(key,'town',tx,tz,TOWN_W,TOWN_W,(x,z)=>{ const ch=ctx.block(Math.floor(x/C),Math.floor(z/C)); if (!ch||ch.lod!==0) return undefined; if (!TOWN_KINDS.has(ch.kind)) return null;
             const h=ctx.heightAt(x,z), s=ctx.topAt(x,z,h+0.6); return (s==null||s<0.3)?null:s; },
-          {exitOk:()=>false, spotOk:()=>true},old&&old.G); places.set(key,town); } }
-    town.seen=simT;
+          {exitOk:()=>false, spotOk:()=>true},old&&old.G); places.set(key,made(town)); } }
+    town.seen=simT; town.foc=foc;
     const S=ctx.train.stationNear(P.x,ACT_R);
     if (S&&Math.hypot(S.x-P.x,S.z-P.z)<ACT_R&&ctx.ready(Math.floor(S.x/C),Math.floor(S.z/C))){ const key='st:'+S.n; let pl=places.get(key);
       if (!pl){ pl=newPlace(key,'station',S.x,S.z+S.side*3.4,62,18,(x,z)=>{ const u=x-S.x, v=(z-ctx.train.railZ(x))*S.side; if (Math.abs(u)>29.5||v<2.05||v>4.85) return null;
             const s=ctx.topAt(x,z,S.ry+1.4); return (s==null||s<S.ry+0.12)?null:s; },
           {S, exitOk:(x)=>Math.abs(x-S.x)>22.5, spotOk:(x)=>Math.abs(x-S.x)<20});
-        places.set(key,pl); }
+        places.set(key,made(pl)); }
       pl.seen=simT; }
     for (const F of ctx.ferry.list()){ if (!F.R) continue;
       for (const stop of [0,1]){ const [qx,qz]=ctx.ferry.quay(F.R,stop); if (Math.hypot(qx-P.x,qz-P.z)>ACT_R||!ctx.ready(Math.floor(qx/C),Math.floor(qz/C))) continue;
         const key='fq:'+Math.round(qx)+','+Math.round(qz); let pl=places.get(key);
         if (!pl){ pl=newPlace(key,'quay',qx,qz,24,24,(x,z)=>{ const s=ctx.topAt(x,z,2.6); return (s==null||s<0.9)?null:s; },
-            {exitOk:(x,z)=>Math.hypot(x-qx,z-qz)>9, spotOk:(x,z)=>Math.hypot(x-qx,z-qz)<7}); places.set(key,pl); }
+            {exitOk:(x,z)=>Math.hypot(x-qx,z-qz)>9, spotOk:(x,z)=>Math.hypot(x-qx,z-qz)<7}); places.set(key,made(pl)); }
         pl.F=F; pl.stop=stop; pl.seen=simT; } }
-    for (const [k,pl] of places){ pl.gone=simT-pl.seen>3; if (pl.gone&&!pl.n&&!pax.some(p=>p.veh.place===pl)) places.delete(k); }
   }
   // how many people a place holds: few at night and in the hours after lunch, most in the evening
   function target(pl){
@@ -788,9 +803,9 @@ export function createPeople(ctx){
     const leave=(pl.gone||pl.n>target(pl))?0.8:0.06+0.08*g.visits;
     const w=[leave, elder?0.45:0.25, n>1?0.3:0.25, 0.2], opts=['leave','sit','spot','pause'];
     for (let t=0;t<5;t++){ const kind=pickW(rnd,opts,w);
-      if (kind==='leave'&&pl.kind==='town'){ const P=ctx.player(), e=someSpot(pl,c=>Math.hypot(c.x-P.x,c.z-P.z)>50); if (e){ g.dest={kind:'leave',x:e.x,z:e.z}; return; } continue; }
+      if (kind==='leave'&&pl.kind==='town'){ const P=focusOf(pl), e=someSpot(pl,c=>Math.hypot(c.x-P.x,c.z-P.z)>50); if (e){ g.dest={kind:'leave',x:e.x,z:e.z}; return; } continue; }
       if (kind==='leave'&&pl.exits.length){ const e=pick(rnd,pl.exits); g.dest={kind:'leave',x:e.x,z:e.z}; return; }
-      if (pl.kind==='town'&&kind!=='sit'){ const P=ctx.player(), c=someSpot(pl,c=>{ const d=Math.hypot(c.x-P.x,c.z-P.z), e=Math.hypot(c.x-g.ax,c.z-g.az); return d<70&&e>18; });
+      if (pl.kind==='town'&&kind!=='sit'){ const P=focusOf(pl), c=someSpot(pl,c=>{ const d=Math.hypot(c.x-P.x,c.z-P.z), e=Math.hypot(c.x-g.ax,c.z-g.az); return d<70&&e>18; });
         if (c){ g.dest={kind:rnd()<0.75?'walk':'pause',x:c.x,z:c.z}; return; } }
       if (kind==='sit'){ const k=Math.max(1,Math.min(3,adults.length+(g.kind==='family'?1:0)));
         _sets.length=0; for (const set of pl.seatSets) _sets.push(set);
@@ -1165,15 +1180,17 @@ export function createPeople(ctx){
         const g=makeGroup([p],'single',pl); g.alighted=true; g.ax=p.x; g.az=p.z; g.ayaw=p.yaw; people.push(p); pl.n++; groups.push(g);
         const ex=pl.exits.slice().sort((a,b)=>Math.hypot(a.x-p.x,a.z-p.z)-Math.hypot(b.x-p.x,b.z-p.z)), e=ex[Math.floor(rnd()*Math.min(6,ex.length))];
         g.dest=e?{kind:'leave',x:e.x,z:e.z}:{kind:'spot',x:p.x,z:p.z}; continue; }
-      if (Math.hypot(p.x-cam.position.x,p.z-cam.position.z)>600&&hiddenAt(p.x,p.y,p.z)) pax.splice(pax.indexOf(p),1); }
+      if (Math.hypot(p.x-cam.position.x,p.z-cam.position.z)>PAX_R+200&&hiddenAt(p.x,p.y,p.z)) pax.splice(pax.indexOf(p),1); }
     // passengers take their seats where no one sees them appear: each seat is tested on its own, so a coach or a ferry
     // being ridden fills behind the player's back; just after a change of level they appear at once
+    // they are aboard any train or ferry within PAX_R, as far as the ferries run, so that one watched through a
+    // telescope is not empty
     const anyw=simT<fillUntil, tries=anyw?40:3;
     const trySeat=v=>{ if (!seatFree(v,v.seat)) return 0; const p=makePax(v); paxStep(p,0); if (!(anyw||hiddenAt(p.x,p.y,p.z))) return 0; pax.push(p); return 1; };
     if (wait<=0&&cars.length>2){ let n=pax.filter(p=>p.veh.kind==='coach').length; const cap=Math.round(6*Math.min(mult,8));
       for (let k=0;k<tries&&n<cap;k++){ const ci=1+Math.floor(rnd()*(cars.length-2)), c=cars[ci]; if (!c||c.loco) continue; const w=toWorld(c.m,0,1.5,0);
-        if (Math.hypot(w.x-cam.position.x,w.z-cam.position.z)<500) n+=trySeat({kind:'coach',car:ci,seat:pick(rnd,ctx.train.seats),state:'sit'}); } }
-    for (const F of ctx.ferry.list()){ if (!F.R||F.wait>0||!F.m.visible) continue; const w=toWorld(F.m,0,2,0); if (Math.hypot(w.x-cam.position.x,w.z-cam.position.z)>500) continue;
+        if (Math.hypot(w.x-cam.position.x,w.z-cam.position.z)<PAX_R) n+=trySeat({kind:'coach',car:ci,seat:pick(rnd,ctx.train.seats),state:'sit'}); } }
+    for (const F of ctx.ferry.list()){ if (!F.R||F.wait>0||!F.m.visible) continue; const w=toWorld(F.m,0,2,0); if (Math.hypot(w.x-cam.position.x,w.z-cam.position.z)>PAX_R) continue;
       let n=pax.filter(p=>p.veh.F===F).length; const cap=Math.round(5*Math.min(mult,8));
       for (let k=0;k<tries&&n<cap;k++) n+=trySeat({kind:'ferry',F,seat:pick(rnd,ctx.ferry.seats),state:'sit'}); }
   }
@@ -1189,7 +1206,7 @@ export function createPeople(ctx){
         // where no one sees: a way into the place, or a spot within it, out of view
         // (up to twenty candidates are drawn at random and the first out of view is taken: in the streets, spots 25 to
         // 80 m from the player; elsewhere twelve ways in and then eight spots)
-        const P=ctx.player(), hid=c=>hiddenAt(c.x,pl.G.ground(c.x,c.z,0),c.z); let at=null;
+        const P=focusOf(pl), hid=c=>hiddenAt(c.x,pl.G.ground(c.x,c.z,0),c.z); let at=null;
         if (now) at=pl.kind==='town'?someSpot(pl,c=>Math.hypot(c.x-P.x,c.z-P.z)<80):(pl.spots.length?pick(rnd,pl.spots):null);
         else if (pl.kind==='town'){ const S=pl.spots; for (let k=0,n=0;k<80&&n<20&&S.length&&!at;k++){ const c=S[Math.floor(rnd()*S.length)], d=Math.hypot(c.x-P.x,c.z-P.z); if (d>25&&d<80){ n++; if (hid(c)) at=c; } } }
         else { for (let k=0;k<12&&pl.exits.length&&!at;k++){ const c=pick(rnd,pl.exits); if (hid(c)) at=c; } for (let k=0;k<8&&pl.spots.length&&!at;k++){ const c=pick(rnd,pl.spots); if (hid(c)) at=c; } }
@@ -1225,7 +1242,7 @@ export function createPeople(ctx){
     let r=0; const reach=1.4+(ctx.shadowReach?ctx.shadowReach():14);
     for (const list of [people,pax]) for (const p of list){ if (r>=MAXP) break;
       _sph.center.set(p.x,p.y+0.9,p.z); _sph.radius=reach;
-      if (!frustum.intersectsSphere(_sph)||_sph.center.distanceTo(cam.position)>2500){ p.unposed=true; p.needStep=p.inSwing=false; continue; }
+      if (!frustum.intersectsSphere(_sph)||_sph.center.distanceTo(cam.position)>PAX_R+500){ p.unposed=true; p.needStep=p.inSwing=false; continue; }
       if (p.unposed){ p.unposed=false; if (p.lockFeet){ p.pinL=p.pinR=null; p.hipW=null; } }
       buildPose(p,simT,POSE); body.write(r++,p.look,POSE); }
     body.setCount(r); body.mesh.position.copy(O); body.mesh.visible=r>0&&!ctx.hidden();

@@ -110,11 +110,17 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
 .tmenu .sl output{text-align:right;font-variant-numeric:lining-nums tabular-nums}
 .tmenu input[type=range]{width:100%;accent-color:var(--verdigris);height:32px}
 @media (max-width:520px){ .tmenu{width:100vw;border-left:0} }
+/* the telescope's eyepiece: a round field, dark round its edge, with the magnification beneath it */
+.tele{position:fixed;inset:0;z-index:2;pointer-events:none;opacity:0;transition:opacity .18s;
+  background:radial-gradient(circle closest-side at 50% 48%,transparent 0,transparent 86%,rgba(4,8,14,.55) 91%,#04080e 94%)}
+.tele.on{opacity:1}
+.tele span{position:absolute;left:50%;bottom:max(10px,1.6vh);transform:translateX(-50%);font-size:.82rem;letter-spacing:.14em;color:var(--plaster-dim);font-variant-numeric:lining-nums tabular-nums}
 [hidden]{display:none!important}
 </style>
 
 <canvas id="scene" tabindex="0" aria-label="Procedurally generated medieval village"></canvas>
 <div class="vignette"></div>
+<div class="tele" id="tele" aria-hidden="true"><span id="teleMag"></span></div>
 <div class="loading" id="loading">World building…</div>
 <div class="stats" id="stats" hidden aria-label="Statistics"></div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
@@ -166,6 +172,11 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
       <div class="row"><span><kbd>Enter</kbd></span><span>Take snapshot</span></div>
       <div class="row"><span><kbd>C</kbd></span><span>Camera mode</span></div>
       <div class="row"><span><kbd>G</kbd></span><span>Gallery</span></div>
+    </div>
+    <div class="group"><h3>Telescope</h3>
+      <div class="row"><span><kbd>V</kbd></span><span>Raise or lower the telescope</span></div>
+      <div class="row"><span><kbd>+</kbd><kbd>−</kbd></span><span>Magnification</span></div>
+      <div class="row"><span>Mouse wheel</span><span>Magnification</span></div>
     </div>
     <div class="group"><h3>Camera mode</h3>
       <div class="row"><span><kbd>+</kbd><kbd>−</kbd></span><span>Focal length</span></div>
@@ -5025,7 +5036,9 @@ sun.castShadow=true; { const n=MOBILE?2048:SHADOW_BIG?8192:4096; sun.shadow.mapS
 const SH=SHADOW_BIG?120:60; Object.assign(sun.shadow.camera,{left:-SH,right:SH,top:SH,bottom:-SH,near:1,far:SHADOW_BIG?420:320});
 // the shadow map is a square centred on the player, moved in 2 m steps
 function updateShadowFrame(){
-  const tx=Math.round(player.x/2)*2, tz=Math.round(player.z/2)*2, ty=Math.round(player.y);
+  // through the telescope the map is centred on the point looked at, the player's surroundings being out of sight
+  const P=teleRing?teleRing.p:player;
+  const tx=Math.round(P.x/2)*2, tz=Math.round(P.z/2)*2, ty=Math.round(P.y);
   const D=SHADOW_BIG?200:140; sun.target.position.set(tx,ty,tz); sun.position.set(tx+LIGHT_DIR.x*D,ty+LIGHT_DIR.y*D,tz+LIGHT_DIR.z*D);
 }
 sun.shadow.bias=-0.0004; sun.shadow.normalBias=0.04;
@@ -6389,7 +6402,7 @@ function disposeTile(T){ for (const m of T.objs){ world.remove(m); m.geometry.di
 // Simplified blocks are merged into tiles as well, once they lie more than three rings beyond full detail, where their
 // shadows (which a tile does not cast) fall outside the sun's shadow map; nearer than that they are drawn on their own.
 // With the draw distance raised, thousands of simplified blocks otherwise cost thousands of draw calls a frame
-const tileable=(ch,pcx,pcz)=>ch.lod>=2 || (ch.lod===1 && Math.max(Math.abs(ch.cx-pcx),Math.abs(ch.cz-pcz))>LOD0+3);
+const tileable=(ch,pcx,pcz)=>ch.lod>=2 || (ch.lod===1 && Math.max(Math.abs(ch.cx-pcx),Math.abs(ch.cz-pcz))>LOD0+3 && teleD(ch.cx,ch.cz)>(teleRing?teleRing.r1:0));
 // tiles are rebuilt a few at a time, so that a ring of blocks arriving or leaving together costs no long frame. A tile
 // is only merged once every block in it is built at the detail wanted and has faded in, so that while the blocks are
 // still arriving it is not merged over and over again (a tile of simplified blocks takes some milliseconds); a tile a
@@ -6401,7 +6414,7 @@ function updateTiles(budgetMs=2){
     const urgent=tilesUrgent.has(tk); tilesUrgent.delete(tk); tilesDirty.delete(tk);
     const [tx,tz]=tk.split(',').map(Number), B=[], G=[], S=[], L=[], oB=[], oS=[], oL=[], X0=tx*TILE*C, Z0=tz*TILE*C;
     if (!urgent){ let settled=true;
-      for (let j=0;j<TILE && settled;j++) for (let i=0;i<TILE;i++){ const cx=tx*TILE+i, cz=tz*TILE+j, w=wantLod(cx-pcx,cz-pcz); if (w<0) continue;
+      for (let j=0;j<TILE && settled;j++) for (let i=0;i<TILE;i++){ const cx=tx*TILE+i, cz=tz*TILE+j, w=wantAt(cx,cz,pcx,pcz); if (w<0) continue;
         const ch=chunks.get(key(cx,cz)); if (!ch || ch.lod!==w || ch.fade<1 || ch.prev){ settled=false; break; } }
       if (!settled) continue; }   // the last of its blocks to fade in marks it again
     let T=tiles.get(tk); if (T) disposeTile(T); else { T={objs:[]}; tiles.set(tk,T); }
@@ -6446,6 +6459,18 @@ function setDrawLvl(step){
   const vs=document.getElementById('viewState'); if (vs) vs.textContent=`${drawLvl<0?'automatic':'fixed'}, full detail to about ${(LOD0+0.5)*C} m, simplified to about ${(VIEW+0.5)*C} m and outlines to about ${(lodRing()+0.5)*C} m`;
 }
 function wantLod(dx,dz){ const d=Math.max(Math.abs(dx),Math.abs(dz)); return d<=LOD0?0:d<=VIEW?1:d<=lodRing()?2:-1; }
+// While the telescope, or the camera with a long lens, is raised, the point it looks at has rings of detail of its own
+// (teleRing, set by teleAim): full detail out to r0 blocks from the block looked at, simplified out to r1 and outlines
+// out to r2, so that what is seen there is built as it would be for a player standing there. A block takes the more
+// detailed of the two levels it is given
+let teleRing=null;
+// the telescope's state: whether it is raised, the magnification asked for (mag) and the one shown (k, eased towards
+// it), the view it was raised in, and that view's own field of view and fog, which are restored when it is lowered
+const TELE={on:false,mag:20,k:1,mode:null,base:FOV,fovSet:0,fogN:90,fogF:1500,fogSetF:0,aimT:0};
+const TELE_MIN=8, TELE_MAX=60, TELE_RANGE=2200;   // the telescope's point is looked for out to TELE_RANGE, within the far terrain and the blocks' mask
+const teleD=(cx,cz)=>teleRing?Math.max(Math.abs(cx-teleRing.cx),Math.abs(cz-teleRing.cz)):1e9;
+function wantAt(cx,cz,pcx,pcz){ const w=wantLod(cx-pcx,cz-pcz); if (!teleRing) return w;
+  const d=teleD(cx,cz), t=d<=teleRing.r0?0:d<=teleRing.r1?1:d<=teleRing.r2?2:-1; return t>=0&&(w<0||t<w)?t:w; }
 let chunkState='', queueT=0;
 const _vf=new THREE.Frustum(), _vm=new THREE.Matrix4(), _vb=new THREE.Box3(), _vd=new THREE.Vector3(), sortDir=new THREE.Vector3();
 // The player's velocity over the ground, smoothed over about a third of a second, whichever way they travel (on foot,
@@ -6481,7 +6506,7 @@ let ringX=0, ringZ=0;   // the block on which the rings of detail are centred
 function updateChunks(px,pz,budgetMs,loading=budgetMs>=1e8){
   if (window.__holdChunks && !loading) return;   // for automated checks: the blocks held as they are
   const lead=!loading, bx=Math.floor(px/C), bz=Math.floor(pz/C), pcx=bx+(lead?mot.ox:0), pcz=bz+(lead?mot.oz:0);
-  const RR=lodRing(), st=pcx+','+pcz+','+VIEW+','+LOD0, now=performance.now();
+  const RR=lodRing(), TR=teleRing, st=pcx+','+pcz+','+VIEW+','+LOD0+(TR?','+TR.cx+','+TR.cz+','+TR.r0:''), now=performance.now();
   // the rings only change when the player crosses into another block, the offset ahead changes or the draw distance changes
   if (st===chunkState && !queue.length && !loading) return;
   let turned=false; if (!loading && queue.length && now-queueT>100){ camera.getWorldDirection(_vd); turned=_vd.dot(sortDir)<0.94; }
@@ -6490,7 +6515,7 @@ function updateChunks(px,pz,budgetMs,loading=budgetMs>=1e8){
     // where the camera will be in four seconds, and its height above the player, in blocks
     let ax=0, az=0; if (lead){ const L=Math.hypot(mot.vx,mot.vz)*4, Lm=Math.max(1,VIEW/2)*C, k=L>Lm?Lm/L:1; ax=mot.vx*4*k/C; az=mot.vz*4*k/C; }
     const cam=!loading && time>2.5, qx=(cam?camera.position.x:px)/C+ax-0.5, qz=(cam?camera.position.z:pz)/C+az-0.5, qy=cam?Math.max(0,camera.position.y-player.y)/C:0, qy2=qy*qy;
-    for (const [k,ch] of chunks) if (wantLod(ch.cx-pcx,ch.cz-pcz)<0){ chunks.delete(k); chunkVer++; farDirty=true; maskDirty=true; untile(ch);
+    for (const [k,ch] of chunks) if (wantAt(ch.cx,ch.cz,pcx,pcz)<0){ chunks.delete(k); chunkVer++; farDirty=true; maskDirty=true; untile(ch);
       if (!loading){ if (ch.prev){ disposeChunk(ch.prev); ch.prev=null; } dying.push(ch); } else disposeChunk(ch); }
       else if (ch.tiled && !tileable(ch,pcx,pcz)) untile(ch);   // come near enough to cast its own shadow again
     // the camera's frustum, in the same coordinates as the blocks (the camera's own position, before the floating origin)
@@ -6498,15 +6523,21 @@ function updateChunks(px,pz,budgetMs,loading=budgetMs>=1e8){
     if (look){ _vm.compose(camera.position,camera.quaternion,camera.scale).invert().premultiply(camera.projectionMatrix); _vf.setFromProjectionMatrix(_vm); COVE_FAST++; }
     try {
       queue=[];
-      for (let dz=-RR;dz<=RR;dz++) for (let dx=-RR;dx<=RR;dx++){
-        const w=wantLod(dx,dz); if (w<0) continue;
-        const cx=pcx+dx, cz=pcz+dz, ch=chunks.get(key(cx,cz)), d2=(cx-bx)*(cx-bx)+(cz-bz)*(cz-bz), a2=(cx-qx)*(cx-qx)+(cz-qz)*(cz-qz)+qy2;
-        // as [cx, cz, priority, detail wanted, squared distance from the player's block, in blocks]
-        const pr=()=>d2<=2?d2-10:look && d2>8 && !inView(cx,cz)?(a2+2)*8:a2;
+      const want=(cx,cz)=>{
+        const w=wantAt(cx,cz,pcx,pcz); if (w<0) return;
+        const ch=chunks.get(key(cx,cz)), d2=(cx-bx)*(cx-bx)+(cz-bz)*(cz-bz), a2=(cx-qx)*(cx-qx)+(cz-qz)*(cz-qz)+qy2;
+        // as [cx, cz, priority, detail wanted, squared distance from the player's block, in blocks]; the blocks round
+        // the point the telescope looks at come next after those right round the player, the nearest to it first
+        const tw=w<wantLod(cx-pcx,cz-pcz)||wantLod(cx-pcx,cz-pcz)<0, t2=tw?(cx-TR.cx)*(cx-TR.cx)+(cz-TR.cz)*(cz-TR.cz):0;
+        const pr=()=>d2<=2?d2-10:tw?t2*0.5-7:look && d2>8 && !inView(cx,cz)?(a2+2)*8:a2;
         if (!ch) queue.push([cx,cz,pr(),w,d2]);
         else if (ch.lod>w) queue.push([cx,cz,pr(),w,d2]);         // needs more detail
         else if (ch.lod<w) queue.push([cx,cz,1e6+d2,w,d2]);       // can shed detail, low priority
-      }
+      };
+      for (let dz=-RR;dz<=RR;dz++) for (let dx=-RR;dx<=RR;dx++) want(pcx+dx,pcz+dz);
+      // and the blocks round the telescope's point that lie beyond the player's own rings
+      if (TR) for (let cz=TR.cz-TR.r2;cz<=TR.cz+TR.r2;cz++) for (let cx=TR.cx-TR.r2;cx<=TR.cx+TR.r2;cx++)
+        if (Math.max(Math.abs(cx-pcx),Math.abs(cz-pcz))>RR) want(cx,cz);
     } finally { if (look) COVE_FAST--; }
     queue.sort((a,b)=>a[2]-b[2]);
   }
@@ -12148,7 +12179,10 @@ function tunnelLight(dt,on){
   _tc2.copy(dark).lerp(scene.fog.color,v); scene.fog.color.lerp(_tc2,tunnelK); scene.background.copy(scene.fog.color);
   if (tunnelK>0.001){ _tc2.copy(dark).lerp(skyU.uMid.value,v); _c1.copy(skyU.uMid.value).lerp(_tc2,tunnelK).getRGB(FOG_MID); }
 }
-function look(dx,dy){ if (mode==='dinghy'){ dgyLook.yaw-=dx*0.0026; dgyLook.pitch=clamp(dgyLook.pitch-dy*0.0026,-1.1,1.1); return; } if (mode==='coach'){ co.yaw-=dx*0.0026; co.pitch=clamp(co.pitch-dy*0.0026,-1.1,1.1); return; } if (mode==='ferry' && feChase){ feLook.yaw-=dx*0.004; feLook.pitch=clamp(feLook.pitch+dy*0.003,0.02,1.3); return; } if (mode==='ferry'){ fe.yaw-=dx*0.0026; fe.pitch=clamp(fe.pitch-dy*0.0026,-1.1,1.1); return; } if (mode==='chase'){ chase.yaw-=dx*0.004; chase.pitch=clamp(chase.pitch+dy*0.003,0.02,1.3); return; } if (mode==='follow'){ FOL.yaw-=dx*0.004; FOL.pitch=clamp(FOL.pitch+dy*0.003,-0.3,1.3); return; } if (mode==='train'){ tYaw=clamp(tYaw-dx*0.0026,-2.6,2.6); tPitch=clamp(tPitch-dy*0.0026,-1,1); return; } if (mode==='above'){ yaw-=dx*0.005; const d=dy*0.004;
+function look(dx,dy){
+  // through the telescope the mouse turns the view less, so that the scene moves across the eyepiece at the usual rate
+  if (TELE.on){ const s=Math.tan(camera.fov*Math.PI/360)/Math.tan(TELE.base*Math.PI/360); dx*=s; dy*=s; }
+  if (mode==='dinghy'){ dgyLook.yaw-=dx*0.0026; dgyLook.pitch=clamp(dgyLook.pitch-dy*0.0026,-1.1,1.1); return; } if (mode==='coach'){ co.yaw-=dx*0.0026; co.pitch=clamp(co.pitch-dy*0.0026,-1.1,1.1); return; } if (mode==='ferry' && feChase){ feLook.yaw-=dx*0.004; feLook.pitch=clamp(feLook.pitch+dy*0.003,0.02,1.3); return; } if (mode==='ferry'){ fe.yaw-=dx*0.0026; fe.pitch=clamp(fe.pitch-dy*0.0026,-1.1,1.1); return; } if (mode==='chase'){ chase.yaw-=dx*0.004; chase.pitch=clamp(chase.pitch+dy*0.003,0.02,1.3); return; } if (mode==='follow'){ FOL.yaw-=dx*0.004; FOL.pitch=clamp(FOL.pitch+dy*0.003,-0.3,1.3); return; } if (mode==='train'){ tYaw=clamp(tYaw-dx*0.0026,-2.6,2.6); tPitch=clamp(tPitch-dy*0.0026,-1,1); return; } if (mode==='above'){ yaw-=dx*0.005; const d=dy*0.004;
     // past the shallowest tilt, the mouse raises the view itself, up to the sky; brought back, it lowers it first
     if (d<0){ const use=Math.min(pitch-0.25,-d); pitch-=use; aerUp=Math.min(1.2,aerUp-d-use); }
     else { const back=Math.min(aerUp,d); aerUp-=back; pitch=Math.min(1.35,pitch+d-back); } } else { const pl=mode==='swim'?1.5:1.2; yaw-=dx*0.0026; fpPitch=clamp(fpPitch-dy*0.0026,-pl,pl); } }
@@ -13004,6 +13038,82 @@ function resize(){ const w=innerWidth, h=innerHeight; renderer.setSize(w,h,false
 addEventListener('resize',resize); resize();
 const camPos=new THREE.Vector3(), camTarget=new THREE.Vector3();
 let crouch=false, crouchK=0;   // Z: crouching at street level, in a coach and aboard the ferry, the eye at 0.95 m instead of 1.62 m and the pace slowed
+/* ---------- the telescope ----------
+   V raises a telescope to the eye at street level, aboard the ferry, in a coach, in the cab and at the dinghy's helm,
+   and lowers it again. It narrows the field of view by its magnification, from 8 to 60 times (20 at first), which
+   + and − and the mouse wheel change, and the frame is seen through a round eyepiece. The fog draws back while it is
+   raised, so that the far shore is clear. What lies at the point it looks at is built as though the player stood
+   there (teleAim): the blocks round the point are given full detail, the people's places round it come to life, the
+   passengers of a ferry or a train within the far terrain are aboard, and the shadow map is centred on the point. The
+   camera raised with a long lens gets the same detail at the point it looks at. A change of view lowers the telescope. */
+const teleEl=document.getElementById('tele'), teleMagEl=document.getElementById('teleMag');
+const teleModes=()=>mode==='street'||mode==='coach'||mode==='train'||(mode==='ferry'&&!feChase)||(mode==='dinghy'&&!dgyChase);
+// how many times the view is magnified, by the telescope or by the camera's lens, against the field of view at street level
+function viewZoom(){
+  if (TELE.on) return TELE.k;
+  if (PHOTO.on){ const s=PHOTO.lookScale(); return s>0?Math.tan(FOV*Math.PI/360)/(s*Math.tan(camera.fov*Math.PI/360)):1; }
+  return 1; }
+function teleRaise(){
+  if (TELE.on || !started || PHOTO.on || !teleModes()) return;
+  Object.assign(TELE,{on:true,mode,k:1,base:camera.fov,fogN:scene.fog.near,fogF:scene.fog.far,fovSet:camera.fov,fogSetF:scene.fog.far,aimT:0});
+  teleEl.classList.add('on'); }
+function teleLower(){
+  if (!TELE.on) return; TELE.on=false; teleEl.classList.remove('on'); teleRing=null;
+  // what the view has set for itself since is kept; what the telescope set is undone
+  if (Math.abs(camera.fov-TELE.fovSet)<1e-6){ camera.fov=TELE.base; camera.updateProjectionMatrix(); glowScale(); }
+  if (scene.fog.far===TELE.fogSetF){ scene.fog.near=TELE.fogN; scene.fog.far=TELE.fogF; } }
+const teleMag=f=>{ TELE.mag=clamp(TELE.mag*f,TELE_MIN,TELE_MAX); };
+// The point the telescope looks at: the nearest ferry within its field, or failing one the first ground or sea that the
+// line of sight meets, out to TELE_RANGE. Its rings of detail (teleRing) reach as far as the field is wide there, up to
+// two blocks for full detail (one on a phone), and move only once the point is three quarters of a block outside the
+// block they are centred on, so that a small movement of the view does not rebuild them. Nearer than the player's own
+// full detail, and with little magnification, there are none
+const _ta=new THREE.Vector3(), _tb=new THREE.Vector3();
+function teleAim(){
+  const Z=viewZoom(); if (Z<3 || !started || mode==='above'){ teleRing=null; return; }
+  const P=camera.position, D=camera.getWorldDirection(_ta), ht=Math.tan(FOV*Math.PI/360)/Z, sea=y=>Math.max(0,y);
+  let d=-1, y=0;
+  COVE_FAST++;
+  try {
+    for (let t=20, t0=0; t<=TELE_RANGE; t0=t, t+=Math.max(3,t*0.015)){
+      const ry=P.y+D.y*t; if (ry>800) break;
+      if (ry<=sea(heightAt(P.x+D.x*t,P.z+D.z*t))){ let a=t0, b=t;
+        for (let i=0;i<6;i++){ const m=(a+b)/2; if (P.y+D.y*m<=sea(heightAt(P.x+D.x*m,P.z+D.z*m))) b=m; else a=m; }
+        d=b; y=P.y+D.y*b; break; }
+    }
+  } finally { COVE_FAST--; }
+  let fd=Infinity, fy=0, off=ht*1.2;
+  for (const F of ferries){ if (!F.R || !F.m.visible || F===ridden) continue;
+    _tb.set(F.m.position.x-P.x,F.m.position.y+3-P.y,F.m.position.z-P.z); const along=_tb.dot(D); if (along<60 || along>TELE_RANGE) continue;
+    const o=Math.sqrt(Math.max(0,_tb.lengthSq()-along*along))/along; if (o<off){ off=o; fd=along; fy=F.m.position.y; } }
+  if (fd<Infinity && (d<0 || fd<d)){ d=fd; y=fy; }
+  if (d<(LOD0+1.5)*C){ teleRing=null; return; }
+  const x=P.x+D.x*d, z=P.z+D.z*d, half=d*ht*Math.max(1,camera.aspect), r0=clamp(Math.round(half/C+0.5),1,MOBILE?1:2), R=teleRing;
+  if (R && R.r0===r0 && Math.abs(x/C-R.cx-0.5)<1.25 && Math.abs(z/C-R.cz-0.5)<1.25){ R.p.x=x; R.p.y=y; R.p.z=z; return; }
+  teleRing={cx:Math.floor(x/C),cz:Math.floor(z/C),r0,r1:r0+3,r2:r0+6,p:{x,y,z}}; }
+function teleFrame(dt){
+  if (TELE.on && (mode!==TELE.mode || !teleModes() || PHOTO.on)) teleLower();
+  if (TELE.on){
+    // a view that sets its own field of view or fog afresh (a tunnel, say) is followed, through the telescope
+    if (Math.abs(camera.fov-TELE.fovSet)>1e-6) TELE.base=camera.fov;
+    if (scene.fog.far!==TELE.fogSetF){ TELE.fogN=scene.fog.near; TELE.fogF=scene.fog.far; }
+    TELE.k*=Math.pow(TELE.mag/TELE.k,1-Math.exp(-dt*12));
+    const f=2*Math.atan(Math.tan(TELE.base*Math.PI/360)/TELE.k)*180/Math.PI;
+    if (Math.abs(camera.fov-f)>1e-6){ camera.fov=f; camera.updateProjectionMatrix(); glowScale(); } TELE.fovSet=camera.fov;
+    const q=clamp((TELE.k-1)/5,0,1); scene.fog.near=lerp(TELE.fogN,Math.max(TELE.fogN,700),q); scene.fog.far=lerp(TELE.fogF,Math.max(TELE.fogF,4200),q); TELE.fogSetF=scene.fog.far;
+    const t=Math.round(TELE.mag)+'×'; if (teleMagEl.textContent!==t) teleMagEl.textContent=t; }
+  TELE.aimT-=dt; if (TELE.aimT<=0){ TELE.aimT=0.15; teleAim(); } }
+// V raises and lowers the telescope; while it is raised + and − (and the controller's bumpers, which press them) change
+// the magnification and the keys that change the view lower it first. Taken before the game's own keys
+addEventListener('keydown',e=>{
+  if (islandShown() || shareShown() || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target&&e.target.tagName||'')) return;
+  if (e.code==='KeyV' && !e.ctrlKey && !e.metaKey && !e.altKey){ e.stopImmediatePropagation(); if (!e.repeat){ if (TELE.on) teleLower(); else teleRaise(); } return; }
+  if (!TELE.on) return;
+  if (['Equal','NumpadAdd','Minus','NumpadSubtract'].includes(e.code)){ e.preventDefault(); e.stopImmediatePropagation(); teleMag(e.code==='Equal'||e.code==='NumpadAdd'?1.08:1/1.08); return; }
+  if (/^(Digit|Numpad)[0-9]$/.test(e.code) || ['KeyC','KeyJ','Escape'].includes(e.code)) teleLower();
+},true);
+canvas.addEventListener('wheel',e=>{ if (!TELE.on) return; e.preventDefault(); e.stopImmediatePropagation();
+  teleMag(Math.exp(-clamp(e.deltaMode===1?e.deltaY*33:e.deltaY,-150,150)*0.002)); },{passive:false,capture:true});
 /* ---------- people ----------
    The townspeople (people/people.js): in the streets and squares, waiting on the platforms and at the ferry landings,
    and passengers on the trains and the ferries. K raises the population level and Shift+K lowers it, from 0 (no
@@ -13013,6 +13123,8 @@ const PEOPLE=createPeople({ world, origin:ORIGIN, camera, C, topAt, heightAt,
   // a place comes to life once its block is built in full and the blocks round it are built
   ready:(cx,cz)=>{ for (let j=-1;j<=1;j++) for (let i=-1;i<=1;i++){ const ch=chunks.get(key(cx+i,cz+j)); if (!ch||(!i&&!j&&ch.lod!==0)) return false; } return true; },
   player:()=>player, hour:()=>hour, night:()=>nightU.value, hidden:()=>PHOTO.on||PHOTO.capturing,
+  // through the telescope or a long lens: the magnification, and the point looked at, round which places come to life
+  zoom:()=>viewZoom(), focus:()=>teleRing?teleRing.p:null,
   seatTaken:s=>(sit&&sit.s===s)||catOnSeat(s),
   // how far a standing person's shadow reaches along the ground, for the people drawn just out of view
   shadowReach:()=>Math.min(40,1.9*Math.hypot(LIGHT_DIR.x,LIGHT_DIR.z)/Math.max(0.05,LIGHT_DIR.y)),
@@ -13304,6 +13416,7 @@ function frame(now){
     const fv=camera.fov; camera.fov=lerp(swoop.fov,fv,kk); camera.updateProjectionMatrix(); camera.fov=fv; sky.position.copy(camera.position);
     if (swoop.t>=swoop.dur){ swoop.t=-1; camera.updateProjectionMatrix(); } }
   if (window.__freeCam){ camera.position.copy(window.__freeCam.p); camLookAt(window.__freeCam.t); sky.position.copy(camera.position); }
+  teleFrame(dt);
   updateBeams(wdt);
   updateDolphins(wdt);
   updateWhales(wdt);
@@ -14258,7 +14371,7 @@ requestAnimationFrame(()=>setTimeout(async ()=>{
   last=performance.now(); requestAnimationFrame(frame);
   requestAnimationFrame(()=>requestAnimationFrame(()=>{ canvas.style.visibility=''; seedEl.hidden=true; }));
 },30));
-window.__village={ get seed(){ return SEED_TEXT; }, get origin(){ return ORIGIN; }, share:{state:sceneState,link:sceneLink,qrEncode,get shared(){ return SCENE; }}, get paused(){ return paused; }, set paused(v){ if (!!v!==paused){ paused=!!v; lastClock=null; } }, goods, glZone, branchesAt, get mantle(){ return mantle; }, get colRoof(){ return colRoof; }, roofAt, roofSlope, topAt, get sit(){ return sit; }, get indoors(){ return indoors; }, roomFns:{flight,localToWorld,obbLocal,roomCeil}, sitKey, sitFind, sitStand, sitSpotOk, beachStretch, BCH_SP, COACH_SEATS, FERRY_SEATS, coachEnter, genChunk, coastRoadZ, brZ, brY, heightAt, player, chunks, rooms, doorMesh, keys, setYaw:v=>{yaw=v;}, get yaw(){return yaw;}, fe, co, lightsNear, beams, ruinIn, cats, catHome, PEOPLE, get ridden(){ return ridden; },
+window.__village={ get seed(){ return SEED_TEXT; }, TELE, teleRaise, teleLower, teleMag, get teleRing(){ return teleRing; }, viewZoom, get origin(){ return ORIGIN; }, share:{state:sceneState,link:sceneLink,qrEncode,get shared(){ return SCENE; }}, get paused(){ return paused; }, set paused(v){ if (!!v!==paused){ paused=!!v; lastClock=null; } }, goods, glZone, branchesAt, get mantle(){ return mantle; }, get colRoof(){ return colRoof; }, roofAt, roofSlope, topAt, get sit(){ return sit; }, get indoors(){ return indoors; }, roomFns:{flight,localToWorld,obbLocal,roomCeil}, sitKey, sitFind, sitStand, sitSpotOk, beachStretch, BCH_SP, COACH_SEATS, FERRY_SEATS, coachEnter, genChunk, coastRoadZ, brZ, brY, heightAt, player, chunks, rooms, doorMesh, keys, setYaw:v=>{yaw=v;}, get yaw(){return yaw;}, fe, co, lightsNear, beams, ruinIn, cats, catHome, PEOPLE, get ridden(){ return ridden; },
   findHarbour(){ for (let d=0;d<12;d++) for (const sd of SIDES) for (const n of [Math.floor(player.x/HARB)+d,Math.floor(player.x/HARB)-d]){ const H=harbourInfo(sd,n); if (H) return {x:H.x,z:coastZ(sd,H.x)+sd*7,W:H.W,sd,qz:coastZ(sd,H.x+H.W/2-1)+sd*2.5}; } return null; },
   findBeach(){ for (let x=player.x; x<player.x+3000; x+=10) for (const sd of SIDES){ const z=coastZ(sd,x)+sd*5; if (heightAt(x,z)<0.6 && heightAt(x,z)>0.1 && !harbourAt(sd,x)) return {x,z,sd}; } return null; },
   ridge(x){ return {x,z:ridgeZ(x)}; },
@@ -14342,7 +14455,7 @@ if (TOUCH){
   item(places,'Whale',()=>press('Digit7')); item(places,'Dolphin',()=>press('Digit8')); item(places,'Shipwreck',()=>press('Digit9'));
   item(places,'Next view',()=>press('Digit0')); item(places,'Jump in the sea',()=>press('KeyJ')); item(places,'Torch',()=>press('KeyF'));
   const pics=sec('Pictures');
-  item(pics,'Camera',()=>PHOTO.api.toggle()); item(pics,'Snapshot',()=>{ closeMenu(); setTimeout(()=>PHOTO.api.quick(),250); },{stay:true}); item(pics,'Gallery and artist mode',()=>PHOTO.api.openGallery());
+  item(pics,'Camera',()=>PHOTO.api.toggle()); item(pics,'Telescope',()=>{ if (TELE.on) teleLower(); else teleRaise(); },{toggle:()=>TELE.on}); item(pics,'Snapshot',()=>{ closeMenu(); setTimeout(()=>PHOTO.api.quick(),250); },{stay:true}); item(pics,'Gallery and artist mode',()=>PHOTO.api.openGallery());
   const timeG=sec('Time');
   const hm=v=>{ const h=Math.floor(v)%24, m=Math.floor((v-Math.floor(v))*60); return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0'); };
   const tSl=slider('Time of day',0,23.95,0.05,()=>hour,v=>{ hour=v; SNDS.hour=Math.floor(hour); updateDaylight(); updateClocks(); },hm);
