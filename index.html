@@ -7920,12 +7920,14 @@ function createWhales(parent, opts={}){
    fall back after a breach is heard (the crash of whale_breach comes 1.25 s into the sample, and the sound is
    started that long before the whale lands) and sends a ring of waves across the sea, which boats ride. A new
    island places them afresh, and the north-south repeat moves them with the player. */
+// whales are heard only close by: at full level within 80 m, fading to nothing at 200 m
+const whNear=(x,z)=>1-smooth((Math.hypot(x-_sl.x,z-_sl.z)-80)/120);
 function whKeepOut(x,z){
   if (seaDist(x,z)>-350) return true;
   for (let k=0;k<8;k++){ const a=k*Math.PI/4; if (heightAt(x+Math.cos(a)*200,z+Math.sin(a)*200)>-4) return true; }
   return false; }
 const whales=createWhales(world,{species:'humpback',count:2,diveSeconds:150,breaths:5,breachesPerHour:6,range:700,ghost:0.5,layer:1,seed:(SEED*104729+7)>>>0,
-  onSound:(kind,x,y,z,st)=>{ if (kind==='breach') sndPlay('whale_breach','world',[x,0,z],{gain:1}); },
+  onSound:(kind,x,y,z,st)=>{ const k=whNear(x,z); if (kind==='breach' && k>0) sndPlay('whale_breach','world',[x,0,z],{gain:k}); },
   onSplash:(x,z,st,L,yaw)=>SEA.addRing(x,z,0.077*L*st,0.9*L,30,yaw,0.42*L)});
 const whFocus={x:0,z:0}, whWindO={x:0,z:0}, whWind=[0,0];
 const whCtx={camera,focus:whFocus,depthAt:(x,z)=>-heightAt(x,z),seaLevel:0,seaAt:(x,z)=>swellH(x,z),bright:1,paused:false,keepOut:whKeepOut,wind:whWind};
@@ -7939,11 +7941,11 @@ function updateWhales(wdt){
   whales.options.ghost=seaHidden?0:0.5*(1-SEA.uniforms.uDetail.value);
   whales.update(wdt,whCtx);
   // under the water the whales are heard singing: each submerged whale sends out a phrase every 5 to 14 s, heard
-  // from where it is and carrying far, as sound does in water; above the water nothing of it is heard
+  // from where it is, but only close by (whNear); above the water nothing of it is heard
   if (!paused && wdt>0) for (const w of whales.whales){ if (w.dormant) continue;
     w.songT=(w.songT??Math.random()*6)-wdt;
     if (w.songT<=0){ w.songT=5+Math.random()*9;
-      if (SNDS.wet>0.5 && w.y<-1.5 && !['flight','sink','charge'].includes(w.phase)) sndPlay('whale_song','player',[w.x,w.y,w.z],{gain:0.8+Math.random()*0.3,rate:0.94+Math.random()*0.12}); } }
+      const k=whNear(w.x,w.z); if (k>0 && SNDS.wet>0.5 && w.y<-1.5 && !['flight','sink','charge'].includes(w.phase)) sndPlay('whale_song','player',[w.x,w.y,w.z],{gain:(0.8+Math.random()*0.3)*k,rate:0.94+Math.random()*0.12}); } }
   // following a whale or a dolphin the water is clearer than a swimmer's, so that the animal can be made out from
   // some way off and at depth: 70 m of visibility instead of 28
   const vis=mode==='follow'&&(FOL.kind==='whale'||FOL.kind==='dolphin')?70:28; if (UW.options.visibility!==vis) UW.setOptions({visibility:vis});
@@ -11450,7 +11452,7 @@ const SOUND_DEF={
   train_doors_open:{g:0.7,ref:3}, train_doors_close:{g:0.7,ref:3},
   ferry_start:{g:1,ref:15}, ferry_run:{g:1,ref:15}, ferry_stop:{g:1,ref:15}, ferry_idle:{g:0.7,ref:8}, ferry_wake:{g:0.9,ref:10},
   ferry_horn:{g:1,ref:35}, ferry_gangway:{g:0.8,ref:5}, ferry_gate:{g:0.6,ref:3}, ferry_fender:{g:0.7,ref:4},
-  bow_wave:{g:0.8}, splash:{g:0.9}, whale_breach:{g:1,ref:60}, whale_song:{g:0.9,ref:120}, sail_flap:{g:0.5}, sail_wind:{g:0.8}, sail_over:{g:0.8}, gybe_bang:{g:0.9}, hull_knock:{g:0.8},
+  bow_wave:{g:0.8}, splash:{g:0.9}, whale_breach:{g:1,ref:30}, whale_song:{g:0.9,ref:30}, sail_flap:{g:0.5}, sail_wind:{g:0.8}, sail_over:{g:0.8}, gybe_bang:{g:0.9}, hull_knock:{g:0.8},
 };
 const SND={asked:{}, ready:false, buf:{}, last:{}, master:null, rev:null, revOut:null, bus:{}, cut:{}, gmul:{}, send:{}, voices:[], t:{}};
 // sounds without recordings of their own borrow those of a like sound until they have them
@@ -11794,9 +11796,11 @@ function sndFerries(dt){
     const m=F.m; m.updateMatrixWorld(); const vk=clamp(F.v/9,0,1);
     const at=(lx,ly,lz)=>{ _sfv.set(lx,ly,lz).applyMatrix4(m.matrix); return [_sfv.x,_sfv.y,_sfv.z]; };
     const st=at(0,1.5,-10), bow=at(0,0.4,12);
-    sndVoice(S.run,dt,F.v>0.2?0.3+0.7*vk:0,...st,0.8+0.3*vk);
-    sndVoice(S.idle,dt,F.v<1?1:0,...st,1);
-    sndVoice(S.wake,dt,vk,...bow,0.85+0.3*vk);
+    // the engine and the wake carry over the water, but not far: they fade from 120 m and are not heard beyond 350 m
+    const far=1-smooth((Math.hypot(st[0]-_sl.x,st[2]-_sl.z)-120)/230);
+    sndVoice(S.run,dt,(F.v>0.2?0.3+0.7*vk:0)*far,...st,0.8+0.3*vk);
+    sndVoice(S.idle,dt,(F.v<1?1:0)*far,...st,1);
+    sndVoice(S.wake,dt,vk*far,...bow,0.85+0.3*vk);
     const vel=[Math.sin(F.head)*F.v,0,Math.cos(F.head)*F.v];
     if (S.wait>3 && F.wait<=3 && F.wait>0) hornWithEchoes(at(0,6,4));
     if (S.wait>0 && F.wait<=0){ sndPlay('ferry_start','ferry',st); S.stopP=false; S.hornIn=false; }
@@ -12601,7 +12605,8 @@ function createCamp(opts={}){
    mountains of the main island, and not within a block of a village, on farmland, by a road, the railway or a
    harbour, within 25 m of a building or a lighthouse, in the water or where anything stands in its
    way (campWhyNot). Otherwise a notice says why not. The camp is built from createCamp with the buildings' own
-   material (matB) and the fire's light (campLight, kept in the scene always); its seats are offered to X with the seats of
+   material for things that are not part of a block (matBL, which the 3D render takes from the scene, while it
+   builds the blocks drawn with matB itself) and the fire's light (campLight, kept in the scene always); its seats are offered to X with the seats of
    the blocks, and its tent, fire and log are colliders. It is drawn within CAMP_SEE m, and the fire is animated and
    lit within CAMP_LIVE m. A new island strikes it. */
 const CAMP={c:null,x:0,y:0,z:0,rot:0,seed:null,seats:[],ch:null}, CAMP_AHEAD=2.6, CAMP_SEE=400, CAMP_LIVE=150, CAMP_KINDS=new Set(['isle','wild','mount','rocky']), CAMP_RISE=1.0, CAMP_BUMP=0.3;
@@ -12676,7 +12681,7 @@ function campBuild(x,z,rot){
   x=sr2(x); z=sr2(z); rot=Math.round(rot*1000)/1000;
   const y=campH(x,z);
   Object.assign(CAMP,{x,y,z,rot,seed:SEED});
-  CAMP.c=createCamp({solid:matB,light:campLight,random:rng(Math.floor(hash(Math.round(x*4),Math.round(z*4),7301)*4294967296)),
+  CAMP.c=createCamp({solid:matBL,light:campLight,random:rng(Math.floor(hash(Math.round(x*4),Math.round(z*4),7301)*4294967296)),
     groundAt:(lx,lz)=>{ const [px,pz]=campW(lx,lz); return campH(px,pz)-y; }});
   const g=CAMP.c.group; g.position.set(x,y,z); g.rotation.y=rot; world.add(g);
   // the seats and colliders in the world
