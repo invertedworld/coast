@@ -1594,18 +1594,20 @@ function cvCapP(cv,G,c){ if (c.capP) return c.capP; const nu=G.NU[c.i], ns=G.NS[
     const nr2=met && cvSdf(G,u,s) && _ci>=0, h=f===0?c.top:Math.min(c.top+0.05,cvCapTop(cv,G,u,s,baseH0(x,z),nr2?_cd:dd,nr2?_ci:c.i))+(met||dd<=G.lz[c.i]+2.5?0.06:f===1?-0.4:-0.15);
     if (f===0){ const q=c.P[c.P.length-1]; P.push([q[0],c.top,q[2]]); } else P.push([x,h,z]); D.push(dd); }
   return (c.capP={P,D,met}); }
-// the caps of rock as they are drawn at a level of detail, as triangles filed by the 4 m square of the world they cross,
-// so that what lies on the clifftop can be set on the rock that is drawn there
-function cvCapGrid(cv,lod){ const G=cv.geo, key='capGrid'+lod; if (G[key]) return G[key];
-  const nr=cvFaceNr(G,lod), M=new Map(), Q=4;
-  for (const CL of cvFaceCols(cv,lod)){ const L=CL.L; let a=cvColumn(cv,L[0],nr);
-    for (let k=0;k<L.length-1;k++){ const b=cvColumn(cv,L[k+1],nr);
+// the caps of rock as they are drawn at a level of detail over a block of the world [x0,z0,x1,z1] and some way round
+// it, as triangles filed by the 4 m square of the world they cross, so that what lies on the clifftop in the block can be
+// set on the rock that is drawn there. Only the columns of the face near the block are made, so that a block built far
+// from the rest of its cove (as through the telescope) costs no more than its share
+function cvCapGrid(cv,lod,R){
+  const G=cv.geo, nr=cvFaceNr(G,lod), M=new Map(), Q=4, pad=20;
+  const near=fi=>{ const i=Math.floor(fi), [x,z]=cvL2W(cv,G.U[i],G.S[i]); return x>R[0]-pad && x<R[2]+pad && z>R[1]-pad && z<R[3]+pad; };
+  for (const CL of cvFaceCols(cv,lod)){ const L=CL.L, col=new Map(), C=k=>{ let c=col.get(k); if (!c){ c=cvColumn(cv,L[k],nr); col.set(k,c); } return c; };
+    for (let k=0;k<L.length-1;k++){ if (!near(L[k]) && !near(L[k+1])) continue; const a=C(k), b=C(k+1);
       if (!(a.small && b.small) && (a.top-a.foot>0.8 || b.top-b.foot>0.8)){ const A=cvCapP(cv,G,a).P, B=cvCapP(cv,G,b).P;
         for (let j=0;j<A.length-1;j++) for (const t of [[A[j],B[j],B[j+1]],[A[j],B[j+1],A[j+1]]]){
           const x0=Math.floor(Math.min(t[0][0],t[1][0],t[2][0])/Q), x1=Math.floor(Math.max(t[0][0],t[1][0],t[2][0])/Q), z0=Math.floor(Math.min(t[0][2],t[1][2],t[2][2])/Q), z1=Math.floor(Math.max(t[0][2],t[1][2],t[2][2])/Q);
-          for (let gx=x0;gx<=x1;gx++) for (let gz=z0;gz<=z1;gz++){ const kk=gx+','+gz; let l=M.get(kk); if (!l) M.set(kk,l=[]); l.push(t); } } }
-      a=b; } }
-  return (G[key]=M); }
+          for (let gx=x0;gx<=x1;gx++) for (let gz=z0;gz<=z1;gz++){ const kk=gx+','+gz; let l=M.get(kk); if (!l) M.set(kk,l=[]); l.push(t); } } } } }
+  return M; }
 // the height of the highest cap drawn over a point, or -Infinity where none is
 function cvCapAt(M,x,z){ const l=M.get(Math.floor(x/4)+','+Math.floor(z/4)); let best=-Infinity; if (!l) return best;
   for (const [p,q,r] of l){ const d=(q[2]-r[2])*(p[0]-r[0])+(r[0]-q[0])*(p[2]-r[2]); if (Math.abs(d)<1e-9) continue;
@@ -1681,7 +1683,7 @@ function buildCoveChunk(gb,ch,cx,cz,lod){
     /* --- boulders, scree and scrub --- */
     // what was set on the clifftop lies on the rock as it is drawn here, the higher of the caps and the ground under them;
     // where neither stands near the height it was set at (a gap between caps, over the low ground behind a face) it is left out
-    const capM=cvCapGrid(cv,lod), onTop=(x,z,y)=>{ const c=cvCapAt(capM,x,z), g=heightAt(x,z); return c===-Infinity && g<y-1.5 ? null : Math.max(c,g); };
+    let capM=null; const onTop=(x,z,y)=>{ if (!capM) capM=cvCapGrid(cv,lod,[x0,z0,x0+C,z0+C]); const c=cvCapAt(capM,x,z), g=heightAt(x,z); return c===-Infinity && g<y-1.5 ? null : Math.max(c,g); };
     for (const B of G.boulders){ const [x,z]=cvL2W(cv,B.u,B.s); if (!own(x,z)) continue;
       if (B.top!==undefined){ const g=heightAt(x,z), h=(B.top-g)/2+0.15, r=B.r;   // a skerry, standing on the bed and breaking the surface
         gb.add(T.sphLo, mat(x,(B.top+g)/2,z,r*(1.2+0.5*R()),h,r*(1+0.4*R()),R()*6.28,(R()-0.5)*0.3,(R()-0.5)*0.3), shade(CV_ROCK[3],R,0.1).multiplyScalar(0.85), null, 12);
