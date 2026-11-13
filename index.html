@@ -12521,7 +12521,7 @@ const campW=(lx,lz,x=CAMP.x,z=CAMP.z,rot=CAMP.rot)=>{ const c=Math.cos(rot), s=M
 // the difference of the plane's height between the lowest and highest corners of that area, and bump the furthest the
 // ground stands above or below the plane
 function campFit(x,z,rot){
-  const S=[]; for (let u=-1.5;u<=1.5;u+=0.5) for (let v=-1.6;v<=CAMP_TENT.z+CAMP_TENT.L/2+1.0;v+=0.5){ const [px,pz]=campW(u,v,x,z,rot); S.push([u,v,heightAt(px,pz)]); }
+  const S=[]; for (let u=-1.5;u<=1.5;u+=0.5) for (let v=-1.6;v<=CAMP_TENT.z+CAMP_TENT.L/2+1.0;v+=0.5){ const [px,pz]=campW(u,v,x,z,rot); S.push([u,v,campH(px,pz)]); }
   let n=S.length, su=0, sv=0, sh=0, suu=0, svv=0, suv=0, suh=0, svh=0;
   for (const [u,v,h] of S){ su+=u; sv+=v; sh+=h; suu+=u*u; svv+=v*v; suv+=u*v; suh+=u*h; svh+=v*h; }
   // the normal equations of h = a + b u + c v, solved by Cramer's rule
@@ -12531,6 +12531,9 @@ function campFit(x,z,rot){
   const v0=-1.6, v1=CAMP_TENT.z+CAMP_TENT.L/2+1.0;
   return {rise:Math.abs(b)*3+Math.abs(c)*(v1-v0),bump,a,b,c}; }
 // the reason a camp may not be pitched with its fire at (x,z), turned by rot, or null where it may
+// the ground a camp stands on: the surface walked on, which on a cove's clifftop is its cap of rock rather than the
+// low ground under it
+const campH=(x,z)=>walkGround(x,z,1e4);
 function campWhyNot(x,z,rot){
   if (mode!=='street' || descent.t>=0 || indoors || colRoof || !player.grounded || sit || coveInCave(player.x,player.z,player.y)) return 'A camp can be pitched only on foot, out of doors, on open ground.';
   const T=CAMP_TENT, fp=[[0,0],[0.6,0],[-0.6,0],[0,-0.6],[-1.15,0.55],[0,T.z]];
@@ -12548,14 +12551,13 @@ function campWhyNot(x,z,rot){
   for (const [px,pz] of pts){
     if (roadDist(px,pz)<6 || railPerp(px,pz)<20) return 'A camp cannot be pitched beside a road or the railway.';
     if (stationNear(px,140) && railPerp(px,pz)<80) return 'A camp cannot be pitched near a station.';
-    for (const sd of SIDES){ const H=harbourAt(sd,px); if (H && Math.abs(hbS(H,px,pz))<120) return 'A camp cannot be pitched near a harbour.'; }
-    if (coveShaped(px,pz) || coveAtXZ(px,pz)) return 'A camp cannot be pitched in a cove.'; }
+    for (const sd of SIDES){ const H=harbourAt(sd,px); if (H && Math.abs(hbS(H,px,pz))<120) return 'A camp cannot be pitched near a harbour.'; } }
   if (lightsNear(x,z,60).length) return 'A camp cannot be pitched near a lighthouse.';
   const near=nearbyChunks();
   for (const ch of near) for (const o of ch.obbs) if ((o.roof || o.room || (o.hw>1.4 && o.hd>1.4)) && Math.hypot(o.x-x,o.z-z)<25+Math.max(o.hw,o.hd)) return 'A camp cannot be pitched near a building.';
   // the ground: dry, level and clear
   let lo=1e9, hi=-1e9;
-  for (const [px,pz] of pts){ const h=heightAt(px,pz); lo=Math.min(lo,h); hi=Math.max(hi,h); }
+  for (const [px,pz] of pts){ const h=campH(px,pz); lo=Math.min(lo,h); hi=Math.max(hi,h); }
   if (lo<0.6) return 'A camp cannot be pitched at the water\'s edge.';
   // gently sloping or slightly uneven ground will do: a plane is fitted to the ground over the footprint, every 0.5 m,
   // and the camp is refused where that plane rises by more than CAMP_RISE m across the footprint or where the ground
@@ -12581,10 +12583,10 @@ function campPitch(){
 function campBuild(x,z,rot){
   if (CAMP.c) campStrike(true);
   x=sr2(x); z=sr2(z); rot=Math.round(rot*1000)/1000;
-  const y=heightAt(x,z);
+  const y=campH(x,z);
   Object.assign(CAMP,{x,y,z,rot,seed:SEED});
   CAMP.c=createCamp({solid:matB,light:campLight,random:rng(Math.floor(hash(Math.round(x*4),Math.round(z*4),7301)*4294967296)),
-    groundAt:(lx,lz)=>{ const [px,pz]=campW(lx,lz); return heightAt(px,pz)-y; }});
+    groundAt:(lx,lz)=>{ const [px,pz]=campW(lx,lz); return campH(px,pz)-y; }});
   const g=CAMP.c.group; g.position.set(x,y,z); g.rotation.y=rot; world.add(g);
   // the seats and colliders in the world
   const c=Math.cos(rot), s=Math.sin(rot);
@@ -12603,7 +12605,7 @@ function campStrike(quiet){
 function campGroundSeat(px,pz){
   const dx=px-CAMP.x, dz=pz-CAMP.z, d=Math.hypot(dx,dz)||1, r=clamp(d,1.3,1.7), x=CAMP.x+dx/d*r, z=CAMP.z+dz/d*r;
   const tent=CAMP.ch&&CAMP.ch.obbs[0]; if (tent){ const [u,v]=obbLocal(tent,x,z); if (Math.abs(u)<tent.hw+0.3 && Math.abs(v)<tent.hd+0.3) return null; }
-  return {x,y:heightAt(x,z)+0.1,z,fx:-dx/d,fz:-dz/d,h:0.1,kind:'ground',back:0.1,camp:true}; }
+  return {x,y:campH(x,z)+0.1,z,fx:-dx/d,fz:-dz/d,h:0.1,kind:'ground',back:0.1,camp:true}; }
 function campKey(){ if (CAMP.c) campStrike(); else campPitch(); }
 // each frame: drawn within CAMP_SEE m of the camera, the fire animated and lit within CAMP_LIVE m
 const _cdb=new THREE.Vector2();
