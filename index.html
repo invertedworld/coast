@@ -114,13 +114,27 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
 .tele{position:fixed;inset:0;z-index:2;pointer-events:none;opacity:0;transition:opacity .18s;
   background:radial-gradient(circle closest-side at 50% 48%,transparent 0,transparent 86%,rgba(4,8,14,.55) 91%,#04080e 94%)}
 .tele.on{opacity:1}
-.tele span{position:absolute;left:50%;bottom:max(10px,1.6vh);transform:translateX(-50%);font-size:.82rem;letter-spacing:.14em;color:var(--plaster-dim);font-variant-numeric:lining-nums tabular-nums}
+.tele .tdial{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:8px;width:220px;padding:10px 14px 14px;box-sizing:border-box;border-radius:14px;background:rgba(10,14,18,.62);box-shadow:0 0 0 1px rgba(245,233,215,.1);color:#f5e9d7}
+.tele.on .tdial{pointer-events:auto}
+.tele .tdial small{font-size:.68rem;letter-spacing:.16em;text-transform:uppercase;color:var(--verdigris)}
+.tele .tdial .row{display:flex;align-items:center;gap:6px}
+.tele .tdial b{min-width:72px;text-align:center;font-weight:500;font-size:1.12rem;letter-spacing:.02em;font-variant-numeric:lining-nums tabular-nums}
+.tele .tdial button{width:34px;height:34px;padding:8px;border:0;border-radius:50%;background:rgba(245,233,215,.1);color:inherit;cursor:pointer}
+.tele .tdial button:hover{background:rgba(245,233,215,.2)}
+.tele .tdial button:active{background:rgba(245,233,215,.3)}
+.tele .tdial svg{display:block;width:100%;height:100%}
+.tele .tdial s{position:relative;display:block;width:100%;height:3px;border-radius:2px;background:rgba(245,233,215,.18);text-decoration:none;cursor:pointer;touch-action:none}
+.tele .tdial s::after{content:"";position:absolute;left:-6px;right:-6px;top:-9px;bottom:-9px}
+.tele .tdial s.drag u,.tele .tdial s:hover u{transform:scaleX(1.6)}
+.tele .tdial s u{position:absolute;top:-3px;width:3px;height:9px;margin-left:-1.5px;border-radius:1.5px;background:#f5e9d7}
 [hidden]{display:none!important}
 </style>
 
 <canvas id="scene" tabindex="0" aria-label="Procedurally generated medieval village"></canvas>
 <div class="vignette"></div>
-<div class="tele" id="tele" aria-hidden="true"><span id="teleMag"></span></div>
+<div class="tele" id="tele"><div class="tdial" role="group" aria-label="Telescope"><small>Magnification</small>
+  <div class="row"><button type="button" data-t="-" title="Less magnification (−)" aria-label="Less magnification"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 12h12"/></svg></button><b id="teleMag"></b><button type="button" data-t="+" title="More magnification (+)" aria-label="More magnification"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 12h12M12 6v12"/></svg></button></div>
+  <s id="teleTrack" role="slider" aria-label="Magnification" aria-valuemin="8" aria-valuemax="60"><u id="teleThumb"></u></s></div></div>
 <div class="loading" id="loading">World building…</div>
 <div class="stats" id="stats" hidden aria-label="Statistics"></div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
@@ -11858,8 +11872,8 @@ function pollPad(dt){
 addEventListener('blur',()=>{ for (const k in keys) keys[k]=false; });
 let dragging=false, lx=0, ly=0;
 function lockPointer(){ if (!helpEl.hidden || !shareEl.hidden) return; try{ const p=canvas.requestPointerLock(); if (p&&p.catch) p.catch(()=>{}); }catch(_){} }
-// with the camera raised the mouse is never captured, so that its controls on the screen can be clicked: a drag turns the view
-canvas.addEventListener('mousedown',e=>{ dragging=true; lx=e.clientX; ly=e.clientY; if (mode!=='above'&&started&&!PHOTO.on&&document.pointerLockElement!==canvas) lockPointer(); });
+// with the camera or the telescope raised the mouse is never captured, so that their controls on the screen can be clicked: a drag turns the view
+canvas.addEventListener('mousedown',e=>{ dragging=true; lx=e.clientX; ly=e.clientY; if (mode!=='above'&&started&&!PHOTO.on&&!TELE.on&&document.pointerLockElement!==canvas) lockPointer(); });
 addEventListener('mouseup',()=>dragging=false);
 /* a double click on the ground in the bird's-eye view goes down to street level at that spot, facing the same way */
 function surfaceTopAt(x,z){ let g=walkGround(x,z,1e4); const cx=Math.floor(x/C), cz=Math.floor(z/C);
@@ -13056,13 +13070,31 @@ function viewZoom(){
 function teleRaise(){
   if (TELE.on || !started || PHOTO.on || !teleModes()) return;
   Object.assign(TELE,{on:true,mode,k:1,base:camera.fov,fogN:scene.fog.near,fogF:scene.fog.far,fovSet:camera.fov,fogSetF:scene.fog.far,aimT:0});
-  teleEl.classList.add('on'); }
+  // as with the camera, the mouse is let go so that the magnification can be set on the screen; a drag turns the view
+  if (document.pointerLockElement) document.exitPointerLock();
+  teleEl.classList.add('on'); teleShow(); }
 function teleLower(){
   if (!TELE.on) return; TELE.on=false; teleEl.classList.remove('on'); teleRing=null;
   // what the view has set for itself since is kept; what the telescope set is undone
   if (Math.abs(camera.fov-TELE.fovSet)<1e-6){ camera.fov=TELE.base; camera.updateProjectionMatrix(); glowScale(); }
   if (scene.fog.far===TELE.fogSetF){ scene.fog.near=TELE.fogN; scene.fog.far=TELE.fogF; } }
-const teleMag=f=>{ TELE.mag=clamp(TELE.mag*f,TELE_MIN,TELE_MAX); };
+const teleMag=f=>{ TELE.mag=clamp(TELE.mag*f,TELE_MIN,TELE_MAX); teleShow(); };
+// the dial beneath the eyepiece: the magnification, steps of + and − (repeated while held) and a track on which the
+// magnification runs evenly in its logarithm from TELE_MIN to TELE_MAX
+const teleTrack=document.getElementById('teleTrack'), teleThumb=document.getElementById('teleThumb');
+function teleShow(){ const t=Math.round(TELE.mag)+'×', f=Math.log(TELE.mag/TELE_MIN)/Math.log(TELE_MAX/TELE_MIN);
+  if (teleMagEl.textContent!==t){ teleMagEl.textContent=t; teleTrack.setAttribute('aria-valuenow',String(Math.round(TELE.mag))); }
+  teleThumb.style.left=(f*100).toFixed(2)+'%'; }
+teleTrack.addEventListener('pointerdown',e=>{ if (e.button>0) return; e.preventDefault(); e.stopPropagation(); const r=teleTrack.getBoundingClientRect();
+  teleTrack.setPointerCapture(e.pointerId); teleTrack.classList.add('drag');
+  const at=ev=>{ TELE.mag=TELE_MIN*Math.pow(TELE_MAX/TELE_MIN,clamp((ev.clientX-r.left)/r.width,0,1)); teleShow(); }; at(e);
+  const up=()=>{ teleTrack.classList.remove('drag'); teleTrack.removeEventListener('pointermove',at); teleTrack.removeEventListener('pointerup',up); teleTrack.removeEventListener('pointercancel',up); };
+  teleTrack.addEventListener('pointermove',at); teleTrack.addEventListener('pointerup',up); teleTrack.addEventListener('pointercancel',up); });
+{ let held=null; const stop=()=>{ if (held){ clearTimeout(held); held=null; } };
+  teleEl.addEventListener('pointerdown',e=>{ const b=e.target.closest('[data-t]'); if (!b || e.button>0) return; e.preventDefault(); e.stopPropagation(); stop();
+    const f=b.dataset.t==='+'?1.08:1/1.08, tick=()=>{ teleMag(f); held=setTimeout(tick,70); }; teleMag(f); held=setTimeout(tick,400); });
+  for (const t of ['pointerup','pointercancel','blur']) addEventListener(t,stop);
+  teleEl.addEventListener('pointerout',e=>{ const b=e.target.closest('[data-t]'); if (b && !b.contains(e.relatedTarget)) stop(); }); }
 // The point the telescope looks at: the nearest ferry within its field, or failing one the first ground or sea that the
 // line of sight meets, out to TELE_RANGE. Its rings of detail (teleRing) reach as far as the field is wide there, up to
 // two blocks for full detail (one on a phone), and move only once the point is three quarters of a block outside the
@@ -13101,7 +13133,7 @@ function teleFrame(dt){
     const f=2*Math.atan(Math.tan(TELE.base*Math.PI/360)/TELE.k)*180/Math.PI;
     if (Math.abs(camera.fov-f)>1e-6){ camera.fov=f; camera.updateProjectionMatrix(); glowScale(); } TELE.fovSet=camera.fov;
     const q=clamp((TELE.k-1)/5,0,1); scene.fog.near=lerp(TELE.fogN,Math.max(TELE.fogN,700),q); scene.fog.far=lerp(TELE.fogF,Math.max(TELE.fogF,4200),q); TELE.fogSetF=scene.fog.far;
-    const t=Math.round(TELE.mag)+'×'; if (teleMagEl.textContent!==t) teleMagEl.textContent=t; }
+    teleShow(); }
   TELE.aimT-=dt; if (TELE.aimT<=0){ TELE.aimT=0.15; teleAim(); } }
 // V raises and lowers the telescope; while it is raised + and − (and the controller's bumpers, which press them) change
 // the magnification and the keys that change the view lower it first. Taken before the game's own keys
