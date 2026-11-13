@@ -11442,7 +11442,7 @@ const SOUND_DEF={
   wind_trees:{g:0.6}, wind_open:{g:0.8}, owl:{g:0.8,ref:12}, gulls:{g:0.7,ref:18},
   water_lap:{g:1,ref:14}, surf:{g:1,ref:14}, waves_rocks:{g:1,ref:10}, hull_slap:{g:0.7,ref:3}, boat_creak:{g:0.6,ref:3}, rigging:{g:0.5,ref:3},
   camera_shutter:{g:0.8}, door_open:{g:0.7,ref:3}, door_close:{g:0.7,ref:3}, sit_down:{g:0.5,ref:2}, stand_up:{g:0.5,ref:2},
-  fountain:{g:0.8,ref:3}, campfire:{g:0.8,ref:3}, cat_mew:{g:0.8,ref:2.5}, clock_bell:{g:1,ref:30}, church_bell:{g:1,ref:45}, cafe:{g:0.7,ref:5},
+  fountain:{g:0.8,ref:3}, campfire:{g:2.4,ref:4}, cat_mew:{g:0.8,ref:2.5}, clock_bell:{g:1,ref:30}, church_bell:{g:1,ref:45}, cafe:{g:0.7,ref:5},
   step_pavement:{g:0.5}, step_sand:{g:0.5}, step_soil:{g:0.5}, step_grass:{g:0.5}, step_wood:{g:0.5}, step_metal:{g:0.5}, land:{g:0.7},
   rail_joint:{g:0.8,ref:5}, train_start:{g:1,ref:15}, train_run:{g:1,ref:15}, train_stop:{g:1,ref:15}, train_idle:{g:0.7,ref:8},
   goods_run:{g:0.75,ref:12}, goods_idle:{g:0.6,ref:8}, goods_start:{g:0.75,ref:12}, goods_stop:{g:0.75,ref:12}, goods_horn:{g:0.8,ref:50}, goods_buffer:{g:0.7,ref:6},
@@ -12599,7 +12599,7 @@ function createCamp(opts={}){
    and R again strikes it, wherever the player is. There is one camp at a time. It may be pitched only on foot, on
    level open ground away from everything built: on an island, or in the wild country, the rocky scrub and the
    mountains of the main island, and not within a block of a village, on farmland, by a road, the railway or a
-   harbour, within 25 m of a building or a lighthouse, in a cove, by the water's edge or where anything stands in its
+   harbour, within 25 m of a building or a lighthouse, in the water or where anything stands in its
    way (campWhyNot). Otherwise a notice says why not. The camp is built from createCamp with the buildings' own
    material (matB) and the fire's light (campLight, kept in the scene always); its seats are offered to X with the seats of
    the blocks, and its tent, fire and log are colliders. It is drawn within CAMP_SEE m, and the fire is animated and
@@ -12646,10 +12646,10 @@ function campWhyNot(x,z,rot){
   if (lightsNear(x,z,60).length) return 'A camp cannot be pitched near a lighthouse.';
   const near=nearbyChunks();
   for (const ch of near) for (const o of ch.obbs) if ((o.roof || o.room || (o.hw>1.4 && o.hd>1.4)) && Math.hypot(o.x-x,o.z-z)<25+Math.max(o.hw,o.hd)) return 'A camp cannot be pitched near a building.';
-  // the ground: dry, level and clear
+  // the ground: above the sea, level and clear
   let lo=1e9, hi=-1e9;
   for (const [px,pz] of pts){ const h=campH(px,pz); lo=Math.min(lo,h); hi=Math.max(hi,h); }
-  if (lo<0.6) return 'A camp cannot be pitched at the water\'s edge.';
+  if (lo<0.05) return 'A camp cannot be pitched in the water.';
   // gently sloping or slightly uneven ground will do: a plane is fitted to the ground over the footprint, every 0.5 m,
   // and the camp is refused where that plane rises by more than CAMP_RISE m across the footprint or where the ground
   // stands off it by more than CAMP_BUMP m, so that small bumps and dips are passed over and hillsides are not
