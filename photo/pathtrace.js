@@ -405,6 +405,9 @@ const isSkyMaterial = m => m && m.uniforms && m.uniforms.uTop && m.uniforms.uRot
 const isSeaMaterial = m => m && m.uniforms && m.uniforms.uW && m.uniforms.uDeep && m.uniforms.uField;
 const isFarMaterial = m => m && typeof m.onBeforeCompile === 'function' && /insideL/.test(String(m.onBeforeCompile));
 // the game's blocks (and the tiles it merges distant blocks into) are drawn with these materials
+// whether a geometry's vertices are still held in memory: the game lets go of those of what it only draws (its blocks
+// at full detail, the tiles of merged simplified blocks) once they are on the graphics card
+const readable = g => !!g && !(g.index && !g.index.array) && !Object.values(g.attributes).some(a => !a.array);
 const isBlockMaterial = m => m && typeof m.customProgramCacheKey === 'function' && /^(buildings|ground)(-fade)?$/.test(m.customProgramCacheKey());
 const SURFACE_TYPES = new Set(['MeshLambertMaterial', 'MeshPhongMaterial', 'MeshToonMaterial', 'MeshBasicMaterial', 'MeshStandardMaterial', 'MeshPhysicalMaterial']);
 
@@ -760,6 +763,10 @@ function collect(scene, cam, opt, info) {
       if (!usable(m)) return;
     }
     const g = o.geometry; if (!g || !g.attributes.position) return;
+    // the game lets go of the vertices of what it only draws once they are on the graphics card (the tiles of merged
+    // simplified blocks, the surf along their shores among them): such a mesh cannot be read, and is left to the
+    // raster passes, which draw it from the graphics card
+    if (!readable(g)) return;
     if (!g.boundingSphere) g.computeBoundingSphere();
     const bs = g.boundingSphere;
     const farTerrain = isFarMaterial(m);
@@ -846,8 +853,9 @@ async function gatherWorld(V, cam, opt, info, budget, W, report, signal) {
     if (!near && farTris > budget.rasterTriangles) { info.blocksCut = cells.length - k; W.reach = c.d; break; }
     let ch = have.get(key);
     // a block the game holds at the detail wanted or finer is taken as it is; so is a simplified one where full detail
-    // is wanted, since the game's boats stand with it and would otherwise be there twice
-    if (!(ch && (ch.lod <= c.want || (c.want === 0 && ch.lod === 1)))) {
+    // is wanted, since the game's boats stand with it and would otherwise be there twice. One whose vertices the game
+    // has let go (a block at full detail, once on the graphics card) is made afresh
+    if (!(ch && readable(ch.geo) && readable(ch.groundGeo) && (ch.lod <= c.want || (c.want === 0 && ch.lod === 1)))) {
       const tg = performance.now();
       ch = V.genChunk(c.cx, c.cz, c.want); (near ? W.generated : W.farChunks).push(ch); made++;
       tGen[c.want] += performance.now() - tg; nGen[c.want]++;
