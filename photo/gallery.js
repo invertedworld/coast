@@ -70,6 +70,7 @@ export const ICON = {
   stop: svg('<rect x="7" y="7" width="10" height="10" rx="1.2"/>'),
   copy: svg('<rect x="8.5" y="8.5" width="11" height="11" rx="1.5"/><path d="M15.5 8.5V6a1.5 1.5 0 0 0-1.5-1.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5"/>'),
   check: svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>'),
+  compass: svg('<circle cx="12" cy="12" r="8.5"/><path d="M15.5 8.5l-2 5-5 2 2-5z"/>'),
 };
 
 // zooming and panning a picture in its frame: a pinch on a trackpad or a touch screen, or the mouse wheel, zooms about
@@ -103,7 +104,7 @@ function zoomPan(box, pick) {
   return { reset() { Z.s = 1; Z.x = Z.y = 0; const c = el(); if (c && !box.classList.contains('stack')) c.style.transform = ''; box.style.cursor = ''; } };
 }
 
-export function createGallery({ renderer, scene, camera, origin, onClose, onLoad }) {
+export function createGallery({ renderer, scene, camera, origin, onClose, onLoad, goTo = null }) {
   const photos = [];
   let count = 0, sel = null;   // sel: { p: photo, w: artwork or null }, the item shown
   // the items selected: the one shown, and more added with Cmd or Ctrl (one at a time) or Shift (a run of them)
@@ -158,6 +159,7 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
 @media (hover:none){.gal .cw button.cp{opacity:1}}
 @media (hover:hover){.gal .cw button.cp:hover{background:rgba(20,30,40,.92)}}
 .gal .cw button.cp.done{color:var(--verdigris,#7cc3ad)}
+.gal .cw button.cp.go{top:44px}
 .gal .card{align-self:flex-start;display:flex;flex-direction:column;align-items:stretch;gap:6px;height:auto;padding:4px;background:transparent;border:1.5px solid transparent;border-radius:4px;flex:none}
 @media (hover:hover){.gal .card:hover:not(.sel){background:rgba(245,233,215,.08)!important}}
 .gal .card img{display:block;align-self:flex-start;height:84px;width:auto;min-width:104px;max-width:180px;object-fit:cover;border-radius:2px;box-shadow:0 2px 8px rgba(0,0,0,.4)}
@@ -245,6 +247,7 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
       <div class="view"><div class="big"></div>
         <div class="foot"><div class="info"></div>
           <button class="pri" data-a="art" title="Artist mode">${ICON.easel}<span>Artist mode</span></button>
+          <button data-a="go" title="Go to the place and time of this picture">${ICON.compass}<span>Go there</span></button>
           <button data-a="dl" title="Download as PNG">${ICON.download}<span>Download PNG</span></button>
           <button class="ib" data-a="del" title="Delete" aria-label="Delete">${ICON.trash}</button></div></div></div>
     <div class="ask" hidden><div role="alertdialog" aria-label="Delete"><h3></h3>
@@ -287,8 +290,15 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
     const cp = document.createElement('button'); cp.type = 'button'; cp.className = 'cp'; cp.title = 'Copy'; cp.setAttribute('aria-label', 'Copy'); cp.innerHTML = ICON.copy;
     cp.addEventListener('click', e => { e.stopPropagation(); copy(item, cp); });
     const wrap = document.createElement('div'); wrap.className = 'cw'; wrap.append(b, cp);
+    // and, beneath it, for a picture that records where and when it was taken (or an artwork made from one), the
+    // compass returns there
+    const sc = sceneOfItem(p, w);
+    if (sc && goTo) { const go = document.createElement('button'); go.type = 'button'; go.className = 'cp go'; go.title = 'Go there'; go.setAttribute('aria-label', 'Go there'); go.innerHTML = ICON.compass;
+      go.addEventListener('click', e => { e.stopPropagation(); goTo(sc); }); wrap.append(go); }
     return wrap;
   }
+  // the scene a picture was taken in: its own, or for an artwork that of its photo
+  const sceneOfItem = (p, w) => (w && w.meta && w.meta.scene) || (p.meta && p.meta.scene) || null;
   function copy(item, btn) {
     // the PNG is given to the clipboard as a promise, so that the write starts within the click (Safari requires it)
     const blob = item.blob ? Promise.resolve(item.blob) : new Promise((ok, no) => item.canvas.toBlob(b => b ? ok(b) : no(new Error('PNG')), 'image/png'));
@@ -332,6 +342,7 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
     $(gal, '[data-a="dl"] span').textContent = n > 1 ? `Download ${n} PNGs` : 'Download PNG';
     $(gal, '[data-a="dl"]').disabled = $(gal, '[data-a="del"]').disabled = !sel;
     $(gal, '[data-a="art"]').disabled = !(sel && !sel.w && n <= 1);
+    $(gal, '[data-a="go"]').hidden = !goTo; $(gal, '[data-a="go"]').disabled = !(sel && n <= 1 && sceneOfItem(sel.p, sel.w));
   }
   // every item in the order of the sheet: each photo, newest first, followed by its artworks
   const order = () => { const L = []; for (let i = photos.length - 1; i >= 0; i--) { L.push([photos[i], null]); for (const w of photos[i].works) L.push([photos[i], w]); } return L; };
@@ -433,6 +444,7 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
       sel = null; picked.clear(); build();
     }
     else if (a === 'art' && sel && !sel.w) openArt(sel.p);
+    else if (a === 'go' && sel && goTo) { const sc = sceneOfItem(sel.p, sel.w); if (sc) goTo(sc); }
   });
 
   /* ---------- artist mode ---------- */

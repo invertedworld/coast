@@ -114,27 +114,13 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
 .tele{position:fixed;inset:0;z-index:2;pointer-events:none;opacity:0;transition:opacity .18s;
   background:radial-gradient(circle closest-side at 50% 48%,transparent 0,transparent 86%,rgba(4,8,14,.55) 91%,#04080e 94%)}
 .tele.on{opacity:1}
-.tele .tdial{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:8px;width:220px;padding:10px 14px 14px;box-sizing:border-box;border-radius:14px;background:rgba(10,14,18,.62);box-shadow:0 0 0 1px rgba(245,233,215,.1);color:#f5e9d7}
-.tele.on .tdial{pointer-events:auto}
-.tele .tdial small{font-size:.68rem;letter-spacing:.16em;text-transform:uppercase;color:var(--verdigris)}
-.tele .tdial .row{display:flex;align-items:center;gap:6px}
-.tele .tdial b{min-width:72px;text-align:center;font-weight:500;font-size:1.12rem;letter-spacing:.02em;font-variant-numeric:lining-nums tabular-nums}
-.tele .tdial button{width:34px;height:34px;padding:8px;border:0;border-radius:50%;background:rgba(245,233,215,.1);color:inherit;cursor:pointer}
-.tele .tdial button:hover{background:rgba(245,233,215,.2)}
-.tele .tdial button:active{background:rgba(245,233,215,.3)}
-.tele .tdial svg{display:block;width:100%;height:100%}
-.tele .tdial s{position:relative;display:block;width:100%;height:3px;border-radius:2px;background:rgba(245,233,215,.18);text-decoration:none;cursor:pointer;touch-action:none}
-.tele .tdial s::after{content:"";position:absolute;left:-6px;right:-6px;top:-9px;bottom:-9px}
-.tele .tdial s.drag u,.tele .tdial s:hover u{transform:scaleX(1.6)}
-.tele .tdial s u{position:absolute;top:-3px;width:3px;height:9px;margin-left:-1.5px;border-radius:1.5px;background:#f5e9d7}
+.tele span{position:absolute;left:50%;bottom:max(10px,1.6vh);transform:translateX(-50%);font-size:.82rem;letter-spacing:.14em;color:var(--plaster-dim);font-variant-numeric:lining-nums tabular-nums}
 [hidden]{display:none!important}
 </style>
 
 <canvas id="scene" tabindex="0" aria-label="Procedurally generated medieval village"></canvas>
 <div class="vignette"></div>
-<div class="tele" id="tele"><div class="tdial" role="group" aria-label="Telescope"><small>Magnification</small>
-  <div class="row"><button type="button" data-t="-" title="Less magnification (−)" aria-label="Less magnification"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 12h12"/></svg></button><b id="teleMag"></b><button type="button" data-t="+" title="More magnification (+)" aria-label="More magnification"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 12h12M12 6v12"/></svg></button></div>
-  <s id="teleTrack" role="slider" aria-label="Magnification" aria-valuemin="8" aria-valuemax="60"><u id="teleThumb"></u></s></div></div>
+<div class="tele" id="tele" aria-hidden="true"><span id="teleMag"></span></div>
 <div class="loading" id="loading">World building…</div>
 <div class="stats" id="stats" hidden aria-label="Statistics"></div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
@@ -184,6 +170,7 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
     </div>
     <div class="group"><h3>Pictures</h3>
       <div class="row"><span><kbd>Enter</kbd></span><span>Take snapshot</span></div>
+      <div class="row"><span><kbd>Shift</kbd><kbd>Enter</kbd></span><span>Copy snapshot</span></div>
       <div class="row"><span><kbd>C</kbd></span><span>Camera mode</span></div>
       <div class="row"><span><kbd>G</kbd></span><span>Gallery</span></div>
     </div>
@@ -405,9 +392,17 @@ const T={
 };
 const _nm=new THREE.Matrix3();
 class GB{
-  constructor(lod=0){ this.p=[]; this.n=[]; this.c=[]; this.s=[]; this.oy=0; this.lod=lod; this.glow=null; }
+  constructor(lod=0){ this.p=[]; this.n=[]; this.c=[]; this.s=[]; this.oy=0; this.lod=lod; this.glow=null; this.tree=null; this.force=false; }
+  // a tree is built between treeBegin and treeEnd. Beyond full detail its wood (the pieces set on the ground, a trunk
+  // or a limb, and those of the trunk's colour) is held back from the dropping of small pieces, and is added whole once
+  // the tree is done if any of its leaves were kept, so that a crown drawn at a distance always stands on its trunk,
+  // and a tree whose crown is left out leaves no bare trunk behind
+  treeBegin(){ if (this.lod===0 || this.tree) return false; this.tree={wood:[],leaf:false}; return true; }
+  treeEnd(){ const T=this.tree; this.tree=null; if (!T || !T.leaf) return; this.force=true;
+    try { for (const a of T.wood) this.add(...a); } finally { this.force=false; } }
   add(t,m,color,aoBase=0,surf=0){
-    if (this.lod>0){ // drop pieces too small to read at this distance; simplify round shapes
+    if (this.tree && (aoBase!==null || color===C_.trunk)){ this.tree.wood.push([t,m.clone(),color.clone(),aoBase,surf]); return; }
+    if (this.lod>0 && !this.force){ // drop pieces too small to read at this distance; simplify round shapes
       const e=m.elements, sx=Math.hypot(e[0],e[1],e[2]), sy=Math.hypot(e[4],e[5],e[6]), sz=Math.hypot(e[8],e[9],e[10]);
       const med=sx+sy+sz-Math.max(sx,sy,sz)-Math.min(sx,sy,sz);
       // at the middle distance the windows keep their panes (glazed, 5, or dark, 10) and their shutters
@@ -418,6 +413,7 @@ class GB{
       if (t===T.sph) t=this.lod===1?T.sphLo:T.ico;
       else if (this.lod>=2 && (t===T.sphLo||t===T.body)) t=T.ico;
       else if (this.lod>=2 && t===T.cyl) t=T.cyl8;
+      if (this.tree) this.tree.leaf=true;
     }
     const P=t.p, N=t.n, e=m.elements, len=P.length, oy=this.oy;
     if (t.smooth) _nm.getNormalMatrix(m);
@@ -1615,8 +1611,9 @@ function cvCapP(cv,G,c){ if (c.capP) return c.capP; const nu=G.NU[c.i], ns=G.NS[
   const P=[], D=[];
   for (const f of CV_CAPF){ const dd=c.to+(dm-c.to)*f, u=c.u-nu*dd, s=c.s-ns*dd, [x,z]=cvL2W(cv,u,s);
     // (each point at the height of the ground there, taken from the part of the line nearest it, so that where the
-    // caps from two sides meet they agree; and never above the brow it runs back from)
-    const nr2=met && cvSdf(G,u,s) && _ci>=0, h=f===0?c.top:Math.min(c.top+0.05,cvCapTop(cv,G,u,s,baseH0(x,z),nr2?_cd:dd,nr2?_ci:c.i))+(met||dd<=G.lz[c.i]+2.5?0.06:f===1?-0.4:-0.15);
+    // caps from two sides meet they agree; where the land rises behind the brow the cap rises with it, so that no step
+    // of the ground stands above it where it ends)
+    const nr2=met && cvSdf(G,u,s) && _ci>=0, h=f===0?c.top:cvCapTop(cv,G,u,s,baseH0(x,z),nr2?_cd:dd,nr2?_ci:c.i)+(met||dd<=G.lz[c.i]+2.5?0.06:f===1?-0.4:-0.15);
     if (f===0){ const q=c.P[c.P.length-1]; P.push([q[0],c.top,q[2]]); } else P.push([x,h,z]); D.push(dd); }
   return (c.capP={P,D,met}); }
 // the caps of rock as they are drawn at a level of detail over a block of the world [x0,z0,x1,z1] and some way round
@@ -1682,9 +1679,13 @@ function buildCoveChunk(gb,ch,cx,cz,lod){
             for (let j=0;j<M-1;j++) gbQuad(gb,Q,QN,QC,j,M+j,M+j+1,j+1,[0,1,0],12);
             // where the cap meets the cap from the other side of an arm of land, a wall of rock falls from its far edge to
             // below the low ground behind the face, so that where the other side's brow is lower no gap opens under the cap
-            if (ca.met || cb.met){ const p=ca.P[M-1], q=cb.P[M-1], lo=Math.min(a.foot,b.foot,0.12)-0.3;
-              if (Math.max(p[1],q[1])>lo+0.5){ let fx=p[0]+q[0]-ca.P[0][0]-cb.P[0][0], fz=p[2]+q[2]-ca.P[0][2]-cb.P[0][2]; const fl=Math.hypot(fx,fz)||1; fx/=fl; fz/=fl;
-                const W=[p,q,[q[0],lo,q[2]],[p[0],lo,p[2]]], WN=[[fx,0,fz],[fx,0,fz],[fx,0,fz],[fx,0,fz]], rk=CV_ROCK[1].clone().multiplyScalar(0.92), c=[rk.r,rk.g,rk.b];
+            if (ca.met || cb.met){ const p=ca.P[M-1], q=cb.P[M-1], lo0=Math.min(a.foot,b.foot,0.12)-0.3;
+              // (over a cave it stops on the cave's roof rather than falling through the cave)
+              const roofAt=(x,z)=>{ const u=cvU(cv,x,z), s=cvS(cv,x,z); let r=lo0; for (const A of G.caves){ const [ca2,cb2]=cvCaveLocal(A,u,s), aa=Math.max(0,ca2);
+                  if (ca2>-2.5 && ca2<A.Lc+1.5 && Math.abs(cb2)<cvCaveWs(A,aa,cb2>=0?1:-1)+Math.abs(A.lean)+2.5) r=Math.max(r,cvCaveF(A,ca2)+cvCaveH(A,aa)+1.0); } return r; };
+              const lm=roofAt((p[0]+q[0])/2,(p[2]+q[2])/2), lp=Math.max(lm,roofAt(p[0],p[2])), lq=Math.max(lm,roofAt(q[0],q[2])), lo=Math.max(lp,lq);
+              if (Math.max(p[1],q[1])>lo+0.5 && p[1]>lp+0.2 && q[1]>lq+0.2){ let fx=p[0]+q[0]-ca.P[0][0]-cb.P[0][0], fz=p[2]+q[2]-ca.P[0][2]-cb.P[0][2]; const fl=Math.hypot(fx,fz)||1; fx/=fl; fz/=fl;
+                const W=[p,q,[q[0],lq,q[2]],[p[0],lp,p[2]]], WN=[[fx,0,fz],[fx,0,fz],[fx,0,fz],[fx,0,fz]], rk=CV_ROCK[1].clone().multiplyScalar(0.92), c=[rk.r,rk.g,rk.b];
                 gbQuad(gb,W,WN,[c,c,c,c],0,1,2,3,[fx,0,fz],12); } } } } } }
     /* --- the caves --- */
     for (const A of G.caves){ const [mx,mz]=cvL2W(cv,A.u,A.s); if (own(mx,mz)) buildCave(gb,ch,cv,A,lod); }
@@ -3000,7 +3001,8 @@ const FLORA={stonepine:1,aleppo:1,holm:1,carob:1,fig:1,almond:1,opuntia:0,agave:
 // original rounded tree, and a shrub is left out. Kinds are added here only once approved in testbench/trees.html.
 const FLORA_OK=new Set(['stonepine','aleppo','holm','carob','fig','almond','agave','opuntia','maquis']);
 const FLORA_SHRUBS=new Set(['agave','opuntia','maquis','oleander']);
-function addFlora(gb,ch,x,z,s=1,base,kind,lean){
+function addFlora(gb,...a){ const own=gb.treeBegin(); try { return addFlora0(gb,...a); } finally { if (own) gb.treeEnd(); } }
+function addFlora0(gb,ch,x,z,s=1,base,kind,lean){
   if (!FLORA_OK.has(kind)){ if (FLORA_SHRUBS.has(kind)) return;
     return addTree(gb,ch,x,z,rng(Math.floor(hash(Math.round(x*16),Math.round(z*16),977)*4294967296)),s,base,'round'); }
   if (base===undefined) base=heightAt(x,z)-gb.oy;
@@ -3147,7 +3149,8 @@ function countryKind(ch,x,z,q){
   if (ch.kind==='isle') return q<0.16?'aleppo':q<0.24?'holm':q<0.38?'agave':q<0.46?'cypress':q<0.56?'opuntia':q<0.9?'maquis':null;
   return q<0.3?'agave':q<0.5?'opuntia':q<0.75?'aleppo':null;
 }
-function addTree(gb,ch,x,z,R,s=1,base,kind){
+function addTree(gb,...a){ const own=gb.treeBegin(); try { return addTree0(gb,...a); } finally { if (own) gb.treeEnd(); } }
+function addTree0(gb,ch,x,z,R,s=1,base,kind){
   if (kind in FLORA) return addFlora(gb,ch,x,z,s,base,kind);
   if (ch) (ch.treeSpots||(ch.treeSpots=[])).push([x,z,s]);
   if (base===undefined) base=heightAt(x,z)-gb.oy;
@@ -5656,35 +5659,43 @@ function createSea(parent, opts={}){
         body+=uThin*thin*0.75;
         body*=1.0-0.18*g;
         // what lies beneath: the sea bed, and near the camera hulls and anything swimming, seen through the water.
-        // Only depths are used, never the colour of the scene, so nothing above the water is seen in it. The depth
-        // comes from the field everywhere, and near the camera from the depth pass, which fades in over tens of metres,
-        // so that the colour follows the depth and never the reach of the pass.
+        // The sea bed is seen in its own colour, drawn unlit by the pass, and lit here; the colour of anything above the
+        // water is never used, so nothing above it is seen in it. The depth comes from the field everywhere, and near
+        // the camera from the depth pass, which fades in over tens of metres, so that the colour follows the depth and
+        // never the reach of the pass.
         float vdF=max(0.0,vDepth+vH), vy=max(V.y,0.12), vd=vdF, path=vdF*(1.0+1.0/vy);
         vec2 bp=q+N.xz*min(vdF,4.0)*0.4;
-        float om=0.0, opath=0.0;
+        float om=0.0, opath=0.0, wbC=0.0; vec3 bedC=vec3(0.0);
         if (uHasScene>0.5){
           vec2 suv=gl_FragCoord.xy/uRes; float d0=texture2D(uSceneDepth,suv).x; vec3 p0=scenePos(suv,d0);
           float dd=distance(p0,vP), vdP=max(0.0,vP.y-p0.y);
           // the pass is not used where what lies behind stands above the surface (a quay, a hull above the water),
           // nor through a raised crest to a thing a little below the mean level, nor where it has nothing within reach.
-          // Light from beneath leaves the surface less and less towards a grazing angle, so nothing beneath is seen
-          // below about 22 degrees, and things are seen best looking straight down
+          // Light from beneath leaves the surface less and less towards a grazing angle: nothing beneath is seen below
+          // about 6 degrees, and it is seen in full from about 24 degrees, the reflection of the sky hiding it the more
+          // the flatter the view
           float sky0=max(step(0.99999,d0),smoothstep(uPassFar*0.45,uPassFar*0.85,cd));
           float above=smoothstep(-0.05,0.3,p0.y-vP.y);
           float crestO=smoothstep(0.1,0.7,vP.y)*(1.0-smoothstep(0.35,0.9,-p0.y/max(vP.y-p0.y,0.01)));
-          float w=(1.0-max(sky0,max(above,crestO)))*uDetail*smoothstep(0.38,0.9,V.y);
+          float w=(1.0-max(sky0,max(above,crestO)))*uDetail*smoothstep(0.1,0.4,V.y);
           // a thing well above the sea bed (a hull, a dolphin) is seen in its own colour; otherwise the pass gives the
           // depth of the sea bed more closely than the field does
           float obj=smoothstep(0.6,1.5,vdF-vdP), lim=vDepth*1.4+1.5, wb=w*(1.0-obj);
           vd=mix(vdF,min(vdP,lim),wb); path=mix(path,min(dd,lim*2.5)+min(vdP,lim),wb);
           bp=mix(bp,p0.xz+uOff.xz+N.xz*min(vdP,4.0)*0.4,wb);
           om=w*obj*0.65; opath=dd+vdP;
+          // the sea bed in its own colour (the sand, the rock), darkened a little as wet ground is
+          bedC=texture2D(uScene,suv).rgb*0.85; wbC=wb;
         }
+        // close to the shore, in the first few metres of depth, the water is all but clear, so that the sand and the
+        // pebbles are seen plainly through it
+        float sh=1.0-smoothstep(0.5,4.0,vd); clar*=1.0+3.0*sh;
         vec3 Tr=exp(-vec3(0.32,0.13,0.10)*path*(10.0/clar));
         vec3 deepT=(uDeep*(0.55+0.45*L)+(body-uDeep*(0.3+0.85*pow(L,1.3)))*0.6)*uBright;
-        vec3 bed=vec3(0.24,0.24,0.19)*(0.55+0.45*L)*uBright;
+        vec3 bed=mix(vec3(0.24,0.24,0.19),bedC,wbC)*(0.55+0.45*L)*uBright;
         if (uDetail>0.0) bed+=vec3(0.8,0.85,0.75)*caustic(bp,t)*0.35*uDetail*exp(-vd*0.35)*clamp(uSunDir.y*2.0,0.0,1.0)*uBright;
         vec3 inS=mix(vec3(0.03,0.13,0.15)*(0.6+0.4*L)*uBright,deepT,smoothstep(1.5,clar*0.8,vd));
+        bed*=1.0+0.35*sh*wbC;   // the sand in the shallows lit nearly as it is out of the water
         vec3 under=bed*Tr+inS*(1.0-Tr.g);
         if (om>0.0){ vec3 TrO=exp(-vec3(0.32,0.13,0.10)*opath*(10.0/clar));
           under=mix(under,vec3(0.04,0.07,0.11)*(0.6+0.4*L)*uBright*TrO+under*(1.0-TrO.g),om); }
@@ -5800,7 +5811,7 @@ const seaGust={uGustTex:{value:null},uGust:{value:new THREE.Vector4(0,1,0,36)},u
    of heightAt, seen into through its depth. Its mesh follows the camera; its positions are given less QORIGIN, with
    origU carrying the rest, so that they stay precise however far one travels. Each wave runs a whole number of times
    over WRAP_Z, so the sea runs on unbroken across the north-south join. */
-const SEA=createSea(world,{wrapZ:WRAP_Z,outside:[0,0.55,20],ease:25,clarity:12,seed:7,rings:250,segs:224,coarse:[120,160]});
+const SEA=createSea(world,{wrapZ:WRAP_Z,outside:[0,0.55,20],ease:25,clarity:14.4,seed:7,rings:250,segs:224,coarse:[120,160]});
 const sea=SEA.mesh;
 /* ---------- the swell ----------
    Long swells rolling in from the open sea, the kind left by wind far away: three long-crested trains on each side of
@@ -6458,8 +6469,9 @@ const lodRing=()=>MOBILE?Math.max(VIEW+2,Math.min(8,VIEW*2+1)):Math.max(VIEW+2,M
 // Page Up and Page Down step to the next fixed draw distance beyond or within the present one; Home restores the automatic one
 // a short note at the top of the screen, which fades after a moment
 let toastT=0;
-function toast(label,text){ const el=document.getElementById('toast'); el.textContent=''; const b=document.createElement('b'); b.textContent=label; el.append(b,text);
-  el.classList.add('on'); clearTimeout(toastT); toastT=setTimeout(()=>el.classList.remove('on'),1600); }
+function toast(label,text,ms=1600){ const el=document.getElementById('toast'); el.textContent=''; if (label){ const b=document.createElement('b'); b.textContent=label; el.append(b); } el.append(text);
+  el.classList.add('on'); clearTimeout(toastT); toastT=setTimeout(()=>el.classList.remove('on'),ms); }
+function toastHide(){ clearTimeout(toastT); document.getElementById('toast').classList.remove('on'); }
 function setDrawLvl(step){
   fillBoost=true;
   if (step===0){ drawLvl=-1; LOD0=LOD0_AUTO; VIEW=Math.min(Math.max(VIEW,VIEW_MIN),VIEW_MAX); }
@@ -6480,11 +6492,17 @@ function wantLod(dx,dz){ const d=Math.max(Math.abs(dx),Math.abs(dz)); return d<=
 let teleRing=null;
 // the telescope's state: whether it is raised, the magnification asked for (mag) and the one shown (k, eased towards
 // it), the view it was raised in, and that view's own field of view and fog, which are restored when it is lowered
-const TELE={on:false,mag:20,k:1,mode:null,base:FOV,fovSet:0,fogN:90,fogF:1500,fogSetF:0,aimT:0};
+const TELE={on:false,mag:20,k:1,mode:null,base:FOV,fovSet:0,fogN:90,fogF:1500,fogSetF:0,aimT:0,near0:0.1,nearSet:0};
 const TELE_MIN=8, TELE_MAX=60, TELE_RANGE=2200;   // the telescope's point is looked for out to TELE_RANGE, within the far terrain and the blocks' mask
 const teleD=(cx,cz)=>teleRing?Math.max(Math.abs(cx-teleRing.cx),Math.abs(cz-teleRing.cz)):1e9;
-function wantAt(cx,cz,pcx,pcz){ const w=wantLod(cx-pcx,cz-pcz); if (!teleRing) return w;
-  const d=teleD(cx,cz), t=d<=teleRing.r0?0:d<=teleRing.r1?1:d<=teleRing.r2?2:-1; return t>=0&&(w<0||t<w)?t:w; }
+// and every block within the telescope's field, out to TELE_RANGE, is built at least simplified within 1,200 m and
+// in outline beyond (teleView, kept by teleAim), so that what is seen through it does not vanish when the point it
+// looks at moves on as the view is turned
+let teleView=null, teleViewVer=0;
+function wantAt(cx,cz,pcx,pcz){ let w=wantLod(cx-pcx,cz-pcz);
+  if (teleRing){ const d=teleD(cx,cz), t=d<=teleRing.r0?0:d<=teleRing.r1?1:d<=teleRing.r2?2:-1; if (t>=0&&(w<0||t<w)) w=t; }
+  if (teleView){ const v=teleView.get(key(cx,cz)); if (v!==undefined && (w<0||v<w)) w=v; }
+  return w; }
 let chunkState='', queueT=0;
 const _vf=new THREE.Frustum(), _vm=new THREE.Matrix4(), _vb=new THREE.Box3(), _vd=new THREE.Vector3(), sortDir=new THREE.Vector3();
 // The player's velocity over the ground, smoothed over about a third of a second, whichever way they travel (on foot,
@@ -6520,7 +6538,7 @@ let ringX=0, ringZ=0;   // the block on which the rings of detail are centred
 function updateChunks(px,pz,budgetMs,loading=budgetMs>=1e8){
   if (window.__holdChunks && !loading) return;   // for automated checks: the blocks held as they are
   const lead=!loading, bx=Math.floor(px/C), bz=Math.floor(pz/C), pcx=bx+(lead?mot.ox:0), pcz=bz+(lead?mot.oz:0);
-  const RR=lodRing(), TR=teleRing, st=pcx+','+pcz+','+VIEW+','+LOD0+(TR?','+TR.cx+','+TR.cz+','+TR.r0:''), now=performance.now();
+  const RR=lodRing(), TR=teleRing, st=pcx+','+pcz+','+VIEW+','+LOD0+(TR?','+TR.cx+','+TR.cz+','+TR.r0:'')+(teleView?','+teleViewVer:''), now=performance.now();
   // the rings only change when the player crosses into another block, the offset ahead changes or the draw distance changes
   if (st===chunkState && !queue.length && !loading) return;
   let turned=false; if (!loading && queue.length && now-queueT>100){ camera.getWorldDirection(_vd); turned=_vd.dot(sortDir)<0.94; }
@@ -6542,7 +6560,7 @@ function updateChunks(px,pz,budgetMs,loading=budgetMs>=1e8){
         const ch=chunks.get(key(cx,cz)), d2=(cx-bx)*(cx-bx)+(cz-bz)*(cz-bz), a2=(cx-qx)*(cx-qx)+(cz-qz)*(cz-qz)+qy2;
         // as [cx, cz, priority, detail wanted, squared distance from the player's block, in blocks]; the blocks round
         // the point the telescope looks at come next after those right round the player, the nearest to it first
-        const tw=w<wantLod(cx-pcx,cz-pcz)||wantLod(cx-pcx,cz-pcz)<0, t2=tw?(cx-TR.cx)*(cx-TR.cx)+(cz-TR.cz)*(cz-TR.cz):0;
+        const tw=w<wantLod(cx-pcx,cz-pcz)||wantLod(cx-pcx,cz-pcz)<0, t2=tw?(TR&&w===0?(cx-TR.cx)*(cx-TR.cx)+(cz-TR.cz)*(cz-TR.cz):4+d2*0.02):0;
         const pr=()=>d2<=2?d2-10:tw?t2*0.5-7:look && d2>8 && !inView(cx,cz)?(a2+2)*8:a2;
         if (!ch) queue.push([cx,cz,pr(),w,d2]);
         else if (ch.lod>w) queue.push([cx,cz,pr(),w,d2]);         // needs more detail
@@ -6552,6 +6570,9 @@ function updateChunks(px,pz,budgetMs,loading=budgetMs>=1e8){
       // and the blocks round the telescope's point that lie beyond the player's own rings
       if (TR) for (let cz=TR.cz-TR.r2;cz<=TR.cz+TR.r2;cz++) for (let cx=TR.cx-TR.r2;cx<=TR.cx+TR.r2;cx++)
         if (Math.max(Math.abs(cx-pcx),Math.abs(cz-pcz))>RR) want(cx,cz);
+      // and those in the telescope's field
+      if (teleView) for (const k of teleView.keys()){ const i=k.indexOf(','), cx=+k.slice(0,i), cz=+k.slice(i+1);
+        if (Math.max(Math.abs(cx-pcx),Math.abs(cz-pcz))>RR && !(TR && Math.max(Math.abs(cx-TR.cx),Math.abs(cz-TR.cz))<=TR.r2)) want(cx,cz); }
     } finally { if (look) COVE_FAST--; }
     queue.sort((a,b)=>a[2]-b[2]);
   }
@@ -9702,6 +9723,7 @@ function dgyFair(H){
   if (Math.abs(off)>=70*Math.PI/180) return;
   WIND.set({dir:out+(off>=0?1:-1)*Math.PI/2}); }
 function dinghyBoard(e){
+  if (dgyHint){ dgyHint=false; toastHide(); }
   dgyFair(e&&e.H);
   sailD=e.D; e.D.setMode(dgyHandling); e.D.board(); mode='dinghy'; dgyChase=false; dgyLook.yaw=0; dgyLook.pitch=-0.1;
   scene.fog.near=90; scene.fog.far=1500; sky.visible=true; descent.t=ascent.t=-1;
@@ -9769,6 +9791,7 @@ function dinghyGo(){
 // the journey to a berth: the blocks within about 200 m of it are built first, a slice a frame behind the same panel
 // as a new island, while the world waits; then the player is set down on dry, open ground of the quay beside the
 // dinghy, on its topmost walkable surface, looking at her. The rest of the view builds in as it does while walking.
+let dgyHint=false;   // the hint shown on arriving beside a dinghy, cleared once she is boarded
 async function dgyTravel(H,B){
   if (seeding) return; seeding=true;
   const what=`Travelling to ${H.name}:`;
@@ -9781,6 +9804,8 @@ async function dgyTravel(H,B){
     const P=dgyArrival(B); player.x=P.x; player.z=P.z; player.y=P.y; player.vy=0; player.grounded=true; player.holdT=3; eyeY=null;
     yaw=Math.atan2(-(B.x-player.x),-(B.z-player.z)); fpPitch=-0.32;
     seedShow(1,what); await nextPaint();
+    // set down beside her: how to take her out
+    toast('',TOUCH?'Tap dinghy to sail':'Press 6 to sail',5000); dgyHint=true;
   } finally { seeding=false; seedEl.hidden=true; last=performance.now(); }
 }
 // the nearest point to the berth's quay point, out to 8 m, that is dry ground or paving no lower than the terrain and
@@ -11598,7 +11623,11 @@ function sndUpdate(dt){
   const atSea=mode==='ferry'||heightAt(player.x,player.z)<-0.5, inland=atSea?0:clamp((shore.dist-25)/90,0,1);
   if (!SNDS.tr || (SNDS.trT=(SNDS.trT??0)-dt)<=0){ SNDS.trT=0.5; SNDS.tr=nearTrees(30); SNDS.src=nearSources(3); SNDS.boats=nearBoats(70); }
   sndVoice(sv('day','amb_day','world',false),dt,easeTo('day',day*(SND.buf.amb_dawn&&SND.buf.amb_dawn.length?1-0.5*dawn:1),dt),0,0,0);
-  sndVoice(sv('night','amb_night','world',false),dt,easeTo('night',night,dt),0,0,0);
+  // at night on an island, or deep inland (from 250 m to 450 m in from the coast), a quieter night without the sea
+  // takes the place of the night by the coast
+  const sdN=seaDist(player.x,player.z), quietN=atSea?0:sdN<-150?1:smooth((sdN-250)/200);
+  sndVoice(sv('night','amb_night','world',false),dt,easeTo('night',night*(1-quietN),dt,0.5),0,0,0);
+  sndVoice(sv('nightQ','amb_night_quiet','world',false),dt,easeTo('nightQ',night*quietN,dt,0.5),0,0,0);
   sndVoice(sv('dawn','amb_dawn','world',false),dt,easeTo('dawn',dawn*(1-0.6*night),dt),0,0,0);
   sndVoice(sv('cicadas','amb_cicadas','world',false),dt,easeTo('cic',day*(0.35+0.65*noon)*inland*(1-dawn),dt,0.8),0,0,0);
   sndVoice(sv('crickets','amb_crickets','world',false),dt,easeTo('cri',night*inland,dt,0.8),0,0,0);
@@ -11872,8 +11901,8 @@ function pollPad(dt){
 addEventListener('blur',()=>{ for (const k in keys) keys[k]=false; });
 let dragging=false, lx=0, ly=0;
 function lockPointer(){ if (!helpEl.hidden || !shareEl.hidden) return; try{ const p=canvas.requestPointerLock(); if (p&&p.catch) p.catch(()=>{}); }catch(_){} }
-// with the camera or the telescope raised the mouse is never captured, so that their controls on the screen can be clicked: a drag turns the view
-canvas.addEventListener('mousedown',e=>{ dragging=true; lx=e.clientX; ly=e.clientY; if (mode!=='above'&&started&&!PHOTO.on&&!TELE.on&&document.pointerLockElement!==canvas) lockPointer(); });
+// with the camera raised the mouse is never captured, so that its controls on the screen can be clicked: a drag turns the view
+canvas.addEventListener('mousedown',e=>{ dragging=true; lx=e.clientX; ly=e.clientY; if (mode!=='above'&&started&&!PHOTO.on&&document.pointerLockElement!==canvas) lockPointer(); });
 addEventListener('mouseup',()=>dragging=false);
 /* a double click on the ground in the bird's-eye view goes down to street level at that spot, facing the same way */
 function surfaceTopAt(x,z){ let g=walkGround(x,z,1e4); const cx=Math.floor(x/C), cz=Math.floor(z/C);
@@ -12216,13 +12245,21 @@ canvas.addEventListener('touchend',e=>{ if (e.touches.length<2) pinch=null; });
 const joyEl=document.getElementById('joy'); const joy={id:null,x:0,y:0,ox:0,oy:0}; let lookTouch=null;
 canvas.addEventListener('touchstart',e=>{ for (const t of e.changedTouches){
   if (t.clientX<innerWidth*0.45&&joy.id===null){ joy.id=t.identifier; joy.ox=t.clientX; joy.oy=t.clientY; joyEl.hidden=false; joyEl.style.left=t.clientX+'px'; joyEl.style.top=t.clientY+'px'; }
-  else if (lookTouch===null) lookTouch={id:t.identifier,x:t.clientX,y:t.clientY}; } e.preventDefault(); },{passive:false});
+  else if (lookTouch===null) lookTouch={id:t.identifier,x:t.clientX,y:t.clientY,sx:t.clientX,sy:t.clientY,t0:performance.now()}; } e.preventDefault(); },{passive:false});
 canvas.addEventListener('touchmove',e=>{ for (const t of e.changedTouches){
   if (t.identifier===joy.id){ let dx=t.clientX-joy.ox, dy=t.clientY-joy.oy; const l=Math.hypot(dx,dy), m=50; if (l>m){dx*=m/l;dy*=m/l;}
     joy.x=dx/m; joy.y=dy/m; joyEl.firstElementChild.style.transform=`translate(${dx}px,${dy}px)`; }
   else if (lookTouch&&t.identifier===lookTouch.id){ look((t.clientX-lookTouch.x)*1.4,(t.clientY-lookTouch.y)*1.4); lookTouch.x=t.clientX; lookTouch.y=t.clientY; } } e.preventDefault(); },{passive:false});
 const endTouch=e=>{ for (const t of e.changedTouches){ if (t.identifier===joy.id){ joy.id=null; joy.x=joy.y=0; joyEl.hidden=true; joyEl.firstElementChild.style.transform=''; }
-  if (lookTouch&&t.identifier===lookTouch.id) lookTouch=null; } };
+  if (lookTouch&&t.identifier===lookTouch.id){
+    // a short tap, hardly moved, on a dinghy within 100 m takes her helm, as 6 does beside her
+    if (performance.now()-lookTouch.t0<350 && Math.hypot(t.clientX-lookTouch.sx,t.clientY-lookTouch.sy)<14) tapDinghy(t.clientX,t.clientY);
+    lookTouch=null; } } };
+function tapDinghy(cx,cy){
+  if (mode!=='street' || sailD || seeding) return;
+  const r=canvas.getBoundingClientRect(); _rp.set((cx-r.left)/r.width*2-1,-(cy-r.top)/r.height*2+1); _ray.setFromCamera(_rp,camera); _ray.far=100;
+  for (const e of dinghies.values()){ if (!e.D || !e.D.mesh) continue;
+    if (_ray.intersectObject(e.D.mesh,true).length){ const N=dgyNearest(player.x,player.z); if (N && N.e===e) dinghyKey(); return; } } }
 canvas.addEventListener('touchend',endTouch); canvas.addEventListener('touchcancel',endTouch);
 
 // cab view from the locomotive
@@ -12517,8 +12554,10 @@ function sceneState(){
   else { o.m='walk'; o.l=A(yaw,fpPitch); seat(); }
   const ph=PHOTO.api.state; if (ph.on) o.c=[sr1(ph.focal),ph.fNumber,ph.autofocus?0:sr2(ph.focus),sr2(ph.ev),ph.ratio];
   return o; }
-async function sceneLink(){
-  const j=JSON.stringify(sceneState()), z=new Blob([j]).stream().pipeThrough(new CompressionStream('deflate-raw'));
+async function sceneLink(){ return sceneLinkOf(sceneState()); }
+// the link to a scene once recorded (as every photo records the scene it was taken in, for Go there in the gallery)
+async function sceneLinkOf(o){
+  const j=JSON.stringify(o), z=new Blob([j]).stream().pipeThrough(new CompressionStream('deflate-raw'));
   const u=new Uint8Array(await new Response(z).arrayBuffer()); let b=''; for (const c of u) b+=String.fromCharCode(c);
   return location.href.split(/[?#]/)[0]+'?s='+btoa(b).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); }
 // the goods line and the ferry's crossing named in a link, found again by where they lie
@@ -12802,10 +12841,12 @@ const _sz=new THREE.Vector2(), _fv=new THREE.Vector3();
 /* ---------- the sea's depth pass ----------
    To show what lies beneath the water, the things that can be under it (the ground and the blocks' buildings, the
    boats, the dinghies and the dolphins, which carry layer 1) are drawn first, without the sea, into a target at half
-   the resolution, seen from the camera but no further than 220 m, and without drawing the shadows again. It is left
+   the resolution, seen from the camera but no further than 220 m, and without drawing the shadows again. Each is
+   drawn in its own colour, unlit, so that the sand and the rock of the sea bed are seen through the water. It is left
    out when the camera is high above the island or far inland, and the sea is then coloured from its depth alone. */
 const seaDepth={on:false,cam:new THREE.PerspectiveCamera(70,1,0.1,170),rt:new THREE.WebGLRenderTarget(1,1,{depthTexture:new THREE.DepthTexture(1,1)}),
-  mat:new THREE.MeshBasicMaterial({colorWrite:false}),
+  // (each surface's own colour, unlit, so that the sea bed can be seen through the water in its own colour)
+  mat:new THREE.MeshBasicMaterial({vertexColors:true}),
   behind:{texture:null,depthTexture:null,width:1,height:1}};
 seaDepth.cam.layers.set(1); world.add(seaDepth.cam);
 seaDepth.behind.texture=seaDepth.rt.texture; seaDepth.behind.depthTexture=seaDepth.rt.depthTexture;
@@ -12850,7 +12891,7 @@ function diveRender(){
   const v=[farMesh.visible,farGlow.visible,outMesh.visible,sky.visible]; farMesh.visible=farGlow.visible=outMesh.visible=sky.visible=false;
   try { return UW.render(renderer,scene,camera,diveAbove); } finally { [farMesh.visible,farGlow.visible,outMesh.visible,sky.visible]=v; } }
 // the camera, while it is raised, draws the frame through its lens instead
-const PHOTO=createPhoto({renderer,scene,camera,canvas,origin:ORIGIN,onFov:()=>glowScale(),allowed:()=>started,onShutter:()=>sndPlay('camera_shutter','player',null),quickOk:()=>!islandShown(),cameraKeyOk:()=>mode!=='swim'});
+const PHOTO=createPhoto({renderer,scene,camera,canvas,origin:ORIGIN,onFov:()=>glowScale(),allowed:()=>started,onShutter:()=>sndPlay('camera_shutter','player',null),quickOk:()=>!islandShown(),cameraKeyOk:()=>mode!=='swim',sceneOf:()=>sceneState(),goTo:o=>{ sceneLinkOf(o).then(u=>location.assign(u)).catch(err=>console.warn('The place could not be returned to:',err)); },onCopy:ok=>toast('Picture',ok?'Copied to the clipboard':'Could not be copied to the clipboard')});
 function renderMain(){
   if (PHOTO.on && PHOTO.renderLens()) return;
   const tilt=tiltShift && (mode==='above'||mode==='chase'), ao=aoDue();
@@ -13068,41 +13109,46 @@ function viewZoom(){
   if (PHOTO.on){ const s=PHOTO.lookScale(); return s>0?Math.tan(FOV*Math.PI/360)/(s*Math.tan(camera.fov*Math.PI/360)):1; }
   return 1; }
 function teleRaise(){
-  if (TELE.on || !started || PHOTO.on || !teleModes()) return;
-  Object.assign(TELE,{on:true,mode,k:1,base:camera.fov,fogN:scene.fog.near,fogF:scene.fog.far,fovSet:camera.fov,fogSetF:scene.fog.far,aimT:0});
-  // as with the camera, the mouse is let go so that the magnification can be set on the screen; a drag turns the view
-  if (document.pointerLockElement) document.exitPointerLock();
-  teleEl.classList.add('on'); teleShow(); }
+  if (TELE.on || !started || !teleModes()) return;
+  // raised from the camera, the camera is lowered first and the mouse captured again, as the telescope is turned by it
+  if (PHOTO.on){ PHOTO.api.exit(); if (document.pointerLockElement!==canvas) lockPointer(); }
+  Object.assign(TELE,{on:true,mode,k:1,mag:TELE_MIN,near0:camera.near,nearSet:camera.near,base:camera.fov,fogN:scene.fog.near,fogF:scene.fog.far,fovSet:camera.fov,fogSetF:scene.fog.far,aimT:0});
+  // it is raised looking straight ahead, level, the way the player faces, at its least magnification
+  if (mode==='coach') co.pitch=0; else if (mode==='ferry') fe.pitch=0; else if (mode==='dinghy') dgyLook.pitch=0; else if (mode==='train') tPitch=0; else fpPitch=0;
+  teleEl.classList.add('on'); }
 function teleLower(){
-  if (!TELE.on) return; TELE.on=false; teleEl.classList.remove('on'); teleRing=null;
+  if (!TELE.on) return; TELE.on=false; teleEl.classList.remove('on'); teleRing=null; teleView=null;
   // what the view has set for itself since is kept; what the telescope set is undone
-  if (Math.abs(camera.fov-TELE.fovSet)<1e-6){ camera.fov=TELE.base; camera.updateProjectionMatrix(); glowScale(); }
+  if (camera.near===TELE.nearSet) camera.near=TELE.near0;
+  if (Math.abs(camera.fov-TELE.fovSet)<1e-6) camera.fov=TELE.base;
+  camera.updateProjectionMatrix(); glowScale();
   if (scene.fog.far===TELE.fogSetF){ scene.fog.near=TELE.fogN; scene.fog.far=TELE.fogF; } }
-const teleMag=f=>{ TELE.mag=clamp(TELE.mag*f,TELE_MIN,TELE_MAX); teleShow(); };
-// the dial beneath the eyepiece: the magnification, steps of + and − (repeated while held) and a track on which the
-// magnification runs evenly in its logarithm from TELE_MIN to TELE_MAX
-const teleTrack=document.getElementById('teleTrack'), teleThumb=document.getElementById('teleThumb');
-function teleShow(){ const t=Math.round(TELE.mag)+'×', f=Math.log(TELE.mag/TELE_MIN)/Math.log(TELE_MAX/TELE_MIN);
-  if (teleMagEl.textContent!==t){ teleMagEl.textContent=t; teleTrack.setAttribute('aria-valuenow',String(Math.round(TELE.mag))); }
-  teleThumb.style.left=(f*100).toFixed(2)+'%'; }
-teleTrack.addEventListener('pointerdown',e=>{ if (e.button>0) return; e.preventDefault(); e.stopPropagation(); const r=teleTrack.getBoundingClientRect();
-  teleTrack.setPointerCapture(e.pointerId); teleTrack.classList.add('drag');
-  const at=ev=>{ TELE.mag=TELE_MIN*Math.pow(TELE_MAX/TELE_MIN,clamp((ev.clientX-r.left)/r.width,0,1)); teleShow(); }; at(e);
-  const up=()=>{ teleTrack.classList.remove('drag'); teleTrack.removeEventListener('pointermove',at); teleTrack.removeEventListener('pointerup',up); teleTrack.removeEventListener('pointercancel',up); };
-  teleTrack.addEventListener('pointermove',at); teleTrack.addEventListener('pointerup',up); teleTrack.addEventListener('pointercancel',up); });
-{ let held=null; const stop=()=>{ if (held){ clearTimeout(held); held=null; } };
-  teleEl.addEventListener('pointerdown',e=>{ const b=e.target.closest('[data-t]'); if (!b || e.button>0) return; e.preventDefault(); e.stopPropagation(); stop();
-    const f=b.dataset.t==='+'?1.08:1/1.08, tick=()=>{ teleMag(f); held=setTimeout(tick,70); }; teleMag(f); held=setTimeout(tick,400); });
-  for (const t of ['pointerup','pointercancel','blur']) addEventListener(t,stop);
-  teleEl.addEventListener('pointerout',e=>{ const b=e.target.closest('[data-t]'); if (b && !b.contains(e.relatedTarget)) stop(); }); }
+const teleMag=f=>{ TELE.mag=clamp(TELE.mag*f,TELE_MIN,TELE_MAX); };
 // The point the telescope looks at: the nearest ferry within its field, or failing one the first ground or sea that the
 // line of sight meets, out to TELE_RANGE. Its rings of detail (teleRing) reach as far as the field is wide there, up to
 // two blocks for full detail (one on a phone), and move only once the point is three quarters of a block outside the
 // block they are centred on, so that a small movement of the view does not rebuild them. Nearer than the player's own
 // full detail, and with little magnification, there are none
 const _ta=new THREE.Vector3(), _tb=new THREE.Vector3();
+// the blocks within the telescope's field (a cone about the line of sight, as wide as the eyepiece), out to
+// TELE_RANGE: simplified within 1,200 m, in outline beyond; the nearest 320 are kept
+function teleFieldUpdate(Z){
+  const P=camera.position, D=camera.getWorldDirection(_tb), half=camera.fov*Math.PI/360*0.97;
+  const hl=Math.hypot(D.x,D.z)||1e-6, hx=D.x/hl, hz=D.z/hl, R=Math.ceil(TELE_RANGE/C), pcx=Math.floor(P.x/C), pcz=Math.floor(P.z/C), L=[];
+  for (let j=-R;j<=R;j++) for (let i=-R;i<=R;i++){ const cx=pcx+i, cz=pcz+j, x=(cx+0.5)*C-P.x, z=(cz+0.5)*C-P.z, dh=Math.hypot(x,z);
+    if (dh>TELE_RANGE || dh<C) continue; const m=Math.atan(C*0.75/dh);
+    // across the view, then up and down it, to the ground in the middle of the block
+    const ah=Math.acos(clamp((x*hx+z*hz)/dh,-1,1)); if (ah>half+m) continue;
+    const y=Math.max(0,heightAt((cx+0.5)*C,(cz+0.5)*C))+4-P.y, d3=Math.hypot(dh,y), cs=(x*D.x+y*D.y+z*D.z)/d3;
+    if (Math.acos(clamp(cs,-1,1))>half+m+Math.atan(12/dh)) continue;
+    L.push([dh,cx,cz]); }
+  L.sort((a,b)=>a[0]-b[0]); if (L.length>320) L.length=320;
+  const V=new Map(); for (const [dh,cx,cz] of L) V.set(key(cx,cz),dh<1200?1:2);
+  let same=!!teleView && teleView.size===V.size; if (same) for (const [k,v] of V) if (teleView.get(k)!==v){ same=false; break; }
+  if (!same){ teleView=V; teleViewVer++; } }
 function teleAim(){
-  const Z=viewZoom(); if (Z<3 || !started || mode==='above'){ teleRing=null; return; }
+  const Z=viewZoom(); if (Z<3 || !started || mode==='above'){ teleRing=null; teleView=null; return; }
+  COVE_FAST++; try { teleFieldUpdate(Z); } finally { COVE_FAST--; }
   const P=camera.position, D=camera.getWorldDirection(_ta), ht=Math.tan(FOV*Math.PI/360)/Z, sea=y=>Math.max(0,y);
   let d=-1, y=0;
   COVE_FAST++;
@@ -13131,9 +13177,14 @@ function teleFrame(dt){
     if (scene.fog.far!==TELE.fogSetF){ TELE.fogN=scene.fog.near; TELE.fogF=scene.fog.far; }
     TELE.k*=Math.pow(TELE.mag/TELE.k,1-Math.exp(-dt*12));
     const f=2*Math.atan(Math.tan(TELE.base*Math.PI/360)/TELE.k)*180/Math.PI;
-    if (Math.abs(camera.fov-f)>1e-6){ camera.fov=f; camera.updateProjectionMatrix(); glowScale(); } TELE.fovSet=camera.fov;
+    // the near plane is drawn out with the magnification (2 m at 8 times, 15 m at 60), so that the depth buffer keeps
+    // a few centimetres' precision a kilometre or two away and no two surfaces there flicker through each other;
+    // nothing so near could be seen through the telescope in any case
+    if (camera.near!==TELE.nearSet) TELE.near0=camera.near;
+    const nr=Math.max(TELE.near0,0.25*TELE.k);
+    if (Math.abs(camera.fov-f)>1e-6 || camera.near!==nr){ camera.fov=f; camera.near=nr; camera.updateProjectionMatrix(); glowScale(); } TELE.fovSet=camera.fov; TELE.nearSet=camera.near;
     const q=clamp((TELE.k-1)/5,0,1); scene.fog.near=lerp(TELE.fogN,Math.max(TELE.fogN,700),q); scene.fog.far=lerp(TELE.fogF,Math.max(TELE.fogF,4200),q); TELE.fogSetF=scene.fog.far;
-    teleShow(); }
+    const t=Math.round(TELE.mag)+'×'; if (teleMagEl.textContent!==t) teleMagEl.textContent=t; }
   TELE.aimT-=dt; if (TELE.aimT<=0){ TELE.aimT=0.15; teleAim(); } }
 // V raises and lowers the telescope; while it is raised + and − (and the controller's bumpers, which press them) change
 // the magnification and the keys that change the view lower it first. Taken before the game's own keys

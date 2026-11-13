@@ -41,7 +41,8 @@
    photo.shoot() -> Promise<HTMLCanvasElement>
        The shutter: a capture with the effect hooks, a flash, and the picture added to the gallery.
        Enter with the camera lowered takes a quick picture of the game's frame in the same way, with the shutter's
-       sound and flash.
+       sound and flash. With Shift held, Enter (raised or lowered) puts the picture on the clipboard as a PNG instead
+       of in the gallery (photo.copy()), with the same sound and flash, and onCopy(ok) is told whether it worked.
    photo.addEffectHook(fn) -> remove()
        fn(canvas, meta) is called on every picture taken with the shutter, in the order added. It may return (or
        resolve to) a canvas, which replaces the picture for the next hook and for the gallery, or nothing to keep it.
@@ -75,7 +76,7 @@ const DEPTH_FN = `
   uniform float uNear, uFar;
   float linZ(float d){ return uNear*uFar/(uFar-d*(uFar-uNear)); }`;
 
-export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, allowed = () => true, onShutter = null, quickOk = null, cameraKeyOk = null }) {
+export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, allowed = () => true, onShutter = null, quickOk = null, cameraKeyOk = null, onCopy = null, sceneOf = null, goTo = null }) {
   const S = { on: false, focal: 35, fNumber: 2.8, focus: 5, autofocus: true, ev: 0, vignette: 0, ratio: 0, afTarget: 5, afT: 0, af: false };
   // the frame within the window, as fractions of its width and height, and the height of its centre above the
   // window's, in the window's device coordinates (-1 to 1); set from the viewfinder's layout
@@ -333,6 +334,8 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
       focusDistance: S.on ? S.focus : null, ev: S.on ? S.ev : 0, vignette: S.on ? S.vignette : 0, fov, aspect, near: camera.near, far: camera.far,
       projectionMatrix: pm, matrixWorld: mw, origin: origin ? { x: origin.x, y: origin.y, z: origin.z } : { x: 0, y: 0, z: 0 },
       hour: window.__village ? window.__village.hour : null };
+    // the scene the picture was taken in, as the share link (L) records it, so that the gallery can return to it
+    if (sceneOf) try { c.photo.scene = sceneOf(); } catch (e) { /* taken without it */ }
     if (depthOut && crop) { const d = new Float32Array(cw * ch); for (let y = 0; y < ch; y++) d.set(depthOut.subarray((y + y0) * W + x0, (y + y0) * W + x0 + cw), y * cw); depthOut = d; }
     if (depthOut) c.photo.depth = depthOut;
     job.resolve(c);
@@ -351,6 +354,16 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
   }
   function quickShot() { flash(); if (onShutter) try { onShutter(); } catch (e) { /* the host's own sound */ } return capture({ effects: true, gallery: true }).then(c => { setRoll(c); return c; }); }
   function shoot() { flash(); if (onShutter) try { onShutter(); } catch (e) { /* the host's own sound */ } return capture({ effects: true, gallery: true }).then(c => { setRoll(c); return c; }); }
+  // a picture taken with Shift held goes to the clipboard as a PNG instead of the gallery, with the same flash and
+  // sound; the clipboard is written within the key press (as the browser asks), with the picture still to come, and
+  // the host is told whether it worked (onCopy(ok))
+  function copyShot() {
+    flash(); if (onShutter) try { onShutter(); } catch (e) { /* the host's own sound */ }
+    const blob = capture({ effects: true }).then(c => new Promise((res, rej) => c.toBlob(b => b ? res(b) : rej(new Error('No picture')), 'image/png')));
+    const done = ok => { if (onCopy) try { onCopy(ok); } catch (e) { /* the host's own notice */ } };
+    try { navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]).then(() => done(true), err => { console.warn('The picture could not be copied:', err); done(false); }); }
+    catch (err) { console.warn('The picture could not be copied:', err); done(false); }
+    return blob; }
 
   /* ---------- the controls on the screen: the lens, the shutter, the pictures and the way out ---------- */
   const css = document.createElement('style');
@@ -455,7 +468,7 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
   const afEl = hud.querySelector('.af'), modeEl = hud.querySelector('.mode'), rollEl = hud.querySelector('.roll'), deckEl = hud.querySelector('.deck');
   const vignette = document.querySelector('.vignette');
 
-  const G = createGallery({ renderer, scene, camera, origin, onClose: () => { canvas.focus && canvas.focus(); }, onLoad: () => setRoll() });
+  const G = createGallery({ renderer, scene, camera, origin, goTo, onClose: () => { canvas.focus && canvas.focus(); }, onLoad: () => setRoll() });
   function setRoll(c) {
     const n = G.photos.length; rollEl.querySelector('b').textContent = n ? String(n) : '';
     const p = G.photos[n - 1]; rollEl.classList.toggle('has', !!p);
@@ -510,6 +523,7 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
   }
   function enter() {
     if (S.on || !allowed()) return; S.on = true; S.afT = 0; S.afTarget = S.focus;
+    S.focal = F_MIN;   // raised at its widest, 16 mm (a shared scene sets its own focal length after this)
     if (document.pointerLockElement) document.exitPointerLock();
     hud.hidden = false; if (vignette) vignette.hidden = true; lastVF = ''; setRoll(); updateViewfinder();
     layoutFrame();
@@ -582,11 +596,11 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
     if (!S.on && (e.code === 'Enter' || e.code === 'NumpadEnter')) {
       const el = document.activeElement, busy = el && /^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(el.tagName) || (quickOk && !quickOk());
       if (busy || !allowed()) return;
-      if (!e.repeat) quickShot(); return stop(e); }
+      if (!e.repeat) (e.shiftKey ? copyShot() : quickShot()); return stop(e); }
     if (!S.on) return;
     const c = e.code;
     if (c === 'Escape') exit();
-    else if (c === 'Enter' || c === 'NumpadEnter') { if (!e.repeat) shoot(); }
+    else if (c === 'Enter' || c === 'NumpadEnter') { if (!e.repeat) (e.shiftKey ? copyShot() : shoot()); }
     else if (c === 'Equal' || c === 'NumpadAdd') zoom(ZOOM);
     else if (c === 'Minus' || c === 'NumpadSubtract') zoom(1 / ZOOM);
     else if (c === 'BracketLeft') stepAperture(-1);
@@ -621,7 +635,7 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
     addEffectHook(fn) { hooks.push(fn); return () => { const i = hooks.indexOf(fn); if (i >= 0) hooks.splice(i, 1); }; },
     removeEffectHook(fn) { const i = hooks.indexOf(fn); if (i >= 0) hooks.splice(i, 1); },
     get state() { return { on: S.on, focal: S.focal, fNumber: S.fNumber, focus: S.focus, autofocus: S.autofocus, ev: S.ev, vignette: S.vignette, ratio: RATIOS[S.ratio][0], focused: S.af }; },
-    quick: () => quickShot(),
+    quick: () => quickShot(), copy: () => copyShot(),
     enter, exit, toggle, setFocal, setAperture, setEV, setFocus, setVignette, setRatio: k => setRatio(typeof k === 'string' ? RATIOS.findIndex(q => q[0] === k) : k),
   };
   return { get on() { return S.on; }, get capturing() { return pending.length > 0; }, frame, renderLens, lookScale, api };
