@@ -10,7 +10,7 @@ This guide describes how the island is explored and how each control behaves. Th
 
 Coast runs in a web browser that supports WebGL 2. The published game may be played at <https://invertedworld.itch.io/coast>. A copy of the repository may also be served from any static web server, as described in `README.md`; it cannot be opened directly from the file system.
 
-The player begins at street level on a square above the sea, facing a point on the shore. A way down to that point by streets, stairs and paths leads to a beach or a quay, without a long detour. A click on the scene captures the mouse, so that moving the mouse turns the view; **Esc** releases it. The help panel, which lists every control by feature, is shown and hidden with **H**; **Esc** also hides it. **Field of view**, at its foot, sets the view's vertical angle at street level, in the water, at the helm and in a coach, from 50° to 100°; the default is 70°, and the setting is remembered.
+The player begins at street level on a square above the sea, facing a point on the shore. A way down to that point by streets, stairs and paths leads to a beach or a quay, without a long detour. A click on the scene captures the mouse, so that moving the mouse turns the view; **Esc** releases it. On a desktop, a notice in the middle of the screen reads "Welcome! Press H for help" for a few seconds once the island first appears. The help panel, which lists every control by feature, is shown and hidden with **H**; **Esc** also hides it. **Field of view**, at its foot, sets the view's vertical angle at street level, in the water, at the helm and in a coach, from 50° to 100°; the default is 70°, and the setting is remembered.
 
 > **Example:** To look about a piazza, click once on the scene, then move the mouse while walking with **W A S D**.
 
@@ -26,7 +26,7 @@ A double click on land in the bird's-eye view brings the camera down to street l
 
 **B** sets tilt-shift on or off in the bird's-eye and chase views. Tilt-shift blurs the top and bottom of the picture so that the island resembles a model.
 
-**Shift+B** sets ambient occlusion on or off. Ambient occlusion darkens creases, the foot of walls, doorways, the undersides of eaves and the ground beneath benches and people slightly. It is on when the game starts; the new setting is shown briefly at the top of the screen.
+**Shift+B** sets ambient occlusion on or off. Ambient occlusion darkens creases, the foot of walls, doorways, the undersides of eaves and the ground beneath benches and people slightly. It is on when the game starts; the new setting is shown briefly in the middle of the screen.
 
 ## Walking
 
@@ -40,7 +40,7 @@ Doors open when they are walked into. A door swings away from the side from whic
 
 **R** pitches a camp: a small ridge tent and a camp fire, with a log to sit on beside the fire. The fire is laid 2.6 m ahead of the player and the tent stands beyond it, its door facing the fire. **R** again strikes the camp, wherever the player then is. Only one camp may stand at a time, and generating a new island strikes it.
 
-A camp may be pitched only on foot, out of doors, in the wild country of the main island (the rocky scrub, the uncultivated hillsides and the mountains) or on one of the offshore islands. It may not be pitched in or near a village, on olive terraces or farmland, beside a road or the railway, near a station, a harbour, a lighthouse or any building, in the water, on a hillside steeper than about one in four, or where trees, shrubs, rocks or walls stand in the way. Sloping or slightly uneven ground is accepted, and the tent, the fire and the logs follow it. Where a camp may not be pitched, a notice at the top of the screen gives the reason.
+A camp may be pitched only on foot, out of doors, in the wild country of the main island (the rocky scrub, the uncultivated hillsides and the mountains) or on one of the offshore islands. It may not be pitched in or near a village, on olive terraces or farmland, beside a road or the railway, near a station, a harbour, a lighthouse or any building, in the water, on a hillside steeper than about one in four, or where trees, shrubs, rocks or walls stand in the way. Sloping or slightly uneven ground is accepted, and the tent, the fire and the logs follow it. Where a camp may not be pitched, a notice in the middle of the screen gives the reason.
 
 **X**, facing the door of the tent from within about 2 m, lies down in the tent, looking out of the door at the fire. **X** facing the log sits on it, and **X** standing close to the fire and facing it sits on the ground there, looking at the flames. **X** again, or a step with **W A S D**, stands the player up. The tent and the fire cannot be walked through.
 
@@ -96,7 +96,7 @@ At night the stars turn slowly across the sky, and while sailing the dinghy or s
 
 ## People
 
-**K** raises the population level and **Shift+K** lowers it, from 0, at which there is no one, to 9, at which the streets are crowded; the new level is shown briefly at the top of the screen. The level is 0 when the game starts. At a level above 0, people go about the streets of the villages near the player, and gather in the squares, on the station platforms and at the ferry landings. More are about in the evening, fewer in the early afternoon and few at night. They walk alone, in couples, with friends or with children, stop to talk, sit on the benches and the café chairs, and look about them; children run ahead, hold a parent's hand or play together. They step aside for one another and for the player.
+**K** raises the population level and **Shift+K** lowers it, from 0, at which there is no one, to 9, at which the streets are crowded; the new level is shown briefly in the middle of the screen. The level is 0 when the game starts. At a level above 0, people go about the streets of the villages near the player, and gather in the squares, on the station platforms and at the ferry landings. More are about in the evening, fewer in the early afternoon and few at night. They walk alone, in couples, with friends or with children, stop to talk, sit on the benches and the café chairs, and look about them; children run ahead, hold a parent's hand or play together. They step aside for one another and for the player.
 
 A change of level takes effect at once: people appear or leave wherever they are. Otherwise people arrive and leave out of the player's sight, so that no one appears or vanishes in view. Passengers sit in the coaches of the train and the saloon of the ferry. When the train stands at a station, some passengers walk out through the doors on the platform side and people waiting on the platform walk aboard; when a ferry lies at a landing, passengers come down the gangway and those waiting on the quay go up it. A seat on which a person is sitting cannot be taken with **X**.
 

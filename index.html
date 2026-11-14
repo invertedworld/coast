@@ -20,9 +20,9 @@ html,body{height:100%;margin:0;overflow:hidden;background:var(--sea);color:var(-
 .help{position:fixed;z-index:4;top:50%;left:50%;transform:translate(-50%,-50%);width:min(1320px,calc(100vw - 32px));max-height:calc(100% - 32px);overflow:auto;box-sizing:border-box;
   background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:18px 22px 20px;backdrop-filter:blur(8px);font-size:clamp(.92rem,.62rem + .4vw,1.08rem);line-height:1.4;
   display:block}
-.toast{position:fixed;z-index:4;top:22px;left:50%;transform:translate(-50%,-6px);padding:9px 16px;background:var(--panel);border:1px solid var(--line);border-radius:4px;backdrop-filter:blur(8px);
+.toast{position:fixed;z-index:4;top:50%;left:50%;transform:translate(-50%,calc(-50% - 6px));padding:9px 16px;background:var(--panel);border:1px solid var(--line);border-radius:4px;backdrop-filter:blur(8px);
   font-size:.92rem;font-variant-numeric:lining-nums tabular-nums;pointer-events:none;opacity:0;transition:opacity .25s,transform .25s}
-.toast.on{opacity:1;transform:translate(-50%,0)}
+.toast.on{opacity:1;transform:translate(-50%,-50%)}
 .toast b{font-weight:500;color:var(--verdigris);margin-right:8px;letter-spacing:.12em;text-transform:uppercase;font-size:.72rem}
 .help .controls{columns:280px;column-gap:28px}
 .help .controls[hidden]{display:none}
@@ -2369,6 +2369,11 @@ function roadArch(type,idx,seg){
   else { const x0=vRoadX(seg,idx*C), x1=vRoadX(seg+1,idx*C); x=lerp(x0,x1,f); z=hRoadZ(idx,x); hw=hRoadW(idx,x); tx=0.5; tz=hRoadZ(idx,x+0.5)-z; }
   if (heightAt(x,z)<1.5 || SIDES.some(sd=>Math.abs(z-coastRoadZ(sd,x))<CR_HW+6) || railPerp(x,z)<hw+16) return null;
   const S=2*hw+0.2, rot=Math.atan2(tx,tz);
+  // no pier stands in the mouth of an alley that comes out on the street
+  const sides=type==='v'?[[idx-1,seg],[idx,seg]]:[[seg,idx-1],[seg,idx]];
+  for (const [bx,bz] of sides) for (const A of alleyInfo(bx,bz)){
+    if (type==='v' && A.dir==='h' && Math.abs(A.f(x)-z)<1.3+A.hw+0.4) return null;
+    if (type==='h' && A.dir==='v' && Math.abs(A.f(z)-x)<1.3+A.hw+0.4) return null; }
   return {x,z,S,rot,D:2.6};
 }
 
@@ -4328,6 +4333,8 @@ function genChunk(cx,cz,lod=0){
         const a=(i+0.5)/nseg*6.283; if (!openAt(a)) continue;
         let da=Math.abs(Math.atan2(Math.sin(a-stairA),Math.cos(a-stairA)));
         const wx=P.x+Math.cos(a)*rw, wz=P.z+Math.sin(a)*rw, rot=Math.atan2(Math.cos(a),Math.sin(a)), seg=2*Math.PI*rw/nseg+0.06;
+        // an alley that runs through the square comes up through an opening in the wall, where its steps meet the paving
+        if (ch.alleys.some(A=>Math.abs(alleyS(A,wx,wz))<A.hw+seg/2)) continue;
         const bot=baseH(P.x+Math.cos(a)*(P.r+2.4),P.z+Math.sin(a)*(P.r+2.4))-0.8-P.level;
         gb.add(T.box, mat(wx,bot,wz,seg,-bot+0.1,0.6,rot), shade(C_.stone,R,0.03), bot, SS);
         if (da<gapHalf) continue;
@@ -13866,6 +13873,9 @@ function frame(now){
   if (indoors && !held){ let cy=Infinity; for (const [a,b] of [[0,0],[0.3,0],[-0.3,0],[0,0.3],[0,-0.3]]) cy=Math.min(cy,roomCeil(indoors,player.x+a,player.z+b,player.y)-HEAD);
     if (player.y>cy){ player.y=Math.max(ground,cy); if (player.vy>0) player.vy=0; } }
   eyeY = (eyeY===null||Math.abs(eyeY-player.y)>3) ? player.y : eyeY+(player.y-eyeY)*(1-Math.exp(-dt*14));
+  // the eye eases up a step, but never trails more than 0.3 m below the feet, so that climbing a steep slope quickly
+  // does not carry it into the hillside ahead
+  eyeY=Math.max(eyeY,player.y-0.3);
   // into the sea: in the air over deep water, the swimmer takes the fall; wading on the seabed, it takes over once the
   // water reaches the thigh
   if (mode==='street' && started){
@@ -15028,7 +15038,9 @@ requestAnimationFrame(()=>setTimeout(async ()=>{
   seedShow(1,W); await nextPaint();
   if (SCENE) try{ sceneRestore(SCENE); }catch(err){ console.warn('The shared scene could not be restored:',err); }
   last=performance.now(); requestAnimationFrame(frame);
-  requestAnimationFrame(()=>requestAnimationFrame(()=>{ canvas.style.visibility=''; seedEl.hidden=true; }));
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{ canvas.style.visibility=''; seedEl.hidden=true;
+    // on a desktop, a greeting naming the help key, once the world is on the screen
+    if (!MOBILE) toast('','Welcome! Press H for help',6000); }));
 },30));
 window.__village={ get seed(){ return SEED_TEXT; }, aerGround:(x,y)=>aerGround(x,y), get aerView(){ return {yaw,pitch,dist,x:player.x,z:player.z,cy:camPos.y,gy:heightAt(camPos.x,camPos.z),lift:aerLift}; }, TELE, teleRaise, teleLower, teleMag, get teleRing(){ return teleRing; }, viewZoom, get origin(){ return ORIGIN; }, share:{state:sceneState,link:sceneLink,qrEncode,get shared(){ return SCENE; }}, get paused(){ return paused; }, set paused(v){ if (!!v!==paused){ paused=!!v; lastClock=null; } }, goods, glZone, branchesAt, get mantle(){ return mantle; }, get colRoof(){ return colRoof; }, roofAt, roofSlope, topAt, get sit(){ return sit; }, get indoors(){ return indoors; }, roomFns:{flight,localToWorld,obbLocal,roomCeil}, sitKey, sitFind, sitStand, sitSpotOk, get camp(){ return CAMP; }, campKey, campPitch, campStrike, campWhyNot, campFit, campBuild, campLight, beachStretch, BCH_SP, COACH_SEATS, FERRY_SEATS, coachEnter, genChunk, coastRoadZ, brZ, brY, heightAt, player, chunks, rooms, doorMesh, keys, setYaw:v=>{yaw=v;}, get yaw(){return yaw;}, fe, co, lightsNear, beams, ruinIn, cats, catHome, PEOPLE, get ridden(){ return ridden; },
   findHarbour(){ for (let d=0;d<12;d++) for (const sd of SIDES) for (const n of [Math.floor(player.x/HARB)+d,Math.floor(player.x/HARB)-d]){ const H=harbourInfo(sd,n); if (H) return {x:H.x,z:coastZ(sd,H.x)+sd*7,W:H.W,sd,qz:coastZ(sd,H.x+H.W/2-1)+sd*2.5}; } return null; },
