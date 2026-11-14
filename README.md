@@ -165,7 +165,7 @@ The user interface follows three rules, which apply to every change.
 
 The help panel is centred on the screen and spans its width, up to 1,320 px. It holds the controls alone, each a key and what it does, with no other text, in groups for each feature (walking, bird's-eye view, passenger train, goods train, ferry, sailing, time, island, draw distance, sound and screen, controller), flowing into as many columns as fit; on a narrow screen it becomes one column. The panel no longer shows the place where the player stands, so `updateHUD` does nothing; the places keep their names, which the travelling panel uses for harbours. Piazzas are named from their feature (Piazza dell'Orologio, Piazza della Fontana and so on), quarters are named after saints and trades, and coves (Cala Azzurra), their caves (Grotta di Nettuno) and their paths (Sentiero della Cala Azzurra) are named from their own lists. The credit for the cats is in `cat/README.md` and `cat/LICENSE`.
 
-A notice (`toast`), such as the greeting at the start, the level of the population or the reason a camp may not be pitched, is shown for a moment in the middle of the screen.
+A notice (`toast`), such as the greeting at the start, the level of the population or the reason a camp may not be pitched, is shown for a moment a third of the way down the screen.
 
 ## Architecture
 
@@ -559,7 +559,7 @@ A walker in a tunnel is not met by a train that was not already on its way (`TUN
 
 The player starts on the seaward edge of a square raised at least 8 m above the sea, facing a point on the shore that can be walked to directly (`spawnPlayer`). The squares of the first stretch of the south shore are tried nearest the middle first (`spawnSquares`), and each is walked by `shoreWalk`, an A* search over a 0.5 m grid in eight directions under the walker's rules: steps up of at most `STEP`, drops of at most 1.4 m, the paths of a cove, no deep water and every collider, with 0.35 m clear either side of the body. The walk ends at a beach at the water's edge or at the edge of a harbour's quay (`shoreGoal`), and the square passes if the walk is no longer than `SPAWN_DETOUR = 1.45` times the straight line to that point. Of the squares that pass, the first from which the sea can be seen in the way faced is taken: at least three of eleven sight lines, fanned 25° either side and ending on the sea 100 m beyond the shore (`SPAWN_SEA`), must clear the ground and the roofs between (`shoreInView`). No more than five squares are tried beyond the first that passes, and if none of them has the view, the first that passed is taken. The blocks the searches cross are built at full detail for them and kept. Where no square of the first fourteen passes, the nearest square is taken, facing the sea. `window.__village.spawnInfo` holds the start chosen, its walk, whether the sea is in view and the time taken, which is between about 0.5 and 3 s.
 
-Once the world is first on the screen, a notice in the middle of the screen, "Welcome! Press H for help", is shown for six seconds on a desktop; it is not shown on a touch screen (`MOBILE`).
+Once the world is first on the screen, a notice a third of the way down the screen, "Welcome! Press H for help", is shown for six seconds on a desktop; it is not shown on a touch screen (`MOBILE`).
 
 ### Buildings that can be entered
 
