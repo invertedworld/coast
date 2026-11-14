@@ -12663,7 +12663,7 @@ function createCamp(opts={}){
    builds the blocks drawn with matB itself) and the fire's light (campLight, kept in the scene always); its seats are offered to X with the seats of
    the blocks, and its tent, fire and log are colliders. It is drawn within CAMP_SEE m, and the fire is animated and
    lit within CAMP_LIVE m. A new island strikes it. */
-const CAMP={c:null,x:0,y:0,z:0,rot:0,seed:null,seats:[],ch:null}, CAMP_AHEAD=2.6, CAMP_SEE=400, CAMP_LIVE=150, CAMP_KINDS=new Set(['isle','wild','mount','rocky']), CAMP_RISE=1.0, CAMP_BUMP=0.3;
+const CAMP={c:null,x:0,y:0,z:0,rot:0,seed:null,seats:[],ch:null}, CAMP_AHEAD=2.6, CAMP_SEE=400, CAMP_LIVE=150, CAMP_KINDS=new Set(['isle','wild','mount','rocky']), CAMP_RISE=1.8, CAMP_BUMP=0.3;
 // a point of the camp's frame in the world
 const campW=(lx,lz,x=CAMP.x,z=CAMP.z,rot=CAMP.rot)=>{ const c=Math.cos(rot), s=Math.sin(rot); return [x+lx*c+lz*s, z-lx*s+lz*c]; };
 // how the ground lies under a camp with its fire at (x,z), turned by rot: the plane that fits it best, by least squares,
