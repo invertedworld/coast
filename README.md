@@ -6,12 +6,40 @@ The program is contained in `index.html`, apart from the cat in `cat/`, the came
 
 Coast may be played at <https://invertedworld.itch.io/coast>. The user guide is in [`docs/user-guide.md`](docs/user-guide.md); this document describes the design of the program.
 
+<table>
+<tr>
+<td><img src="docs/screenshots/harbour.jpg" alt="A village above its harbour in the morning, seen from the aerial view"></td>
+<td><img src="docs/screenshots/countryside.jpg" alt="Olive terraces, pines and cypresses below a village, seen from the aerial view"></td>
+</tr>
+<tr>
+<td align="center">A village and its harbour in the morning.</td>
+<td align="center">Olive terraces and wild country below a village.</td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/square.jpg" alt="A fountain and a market stall in a village square in the afternoon"></td>
+<td><img src="docs/screenshots/night.jpg" alt="The same square at night, lit by a lamp over a door"></td>
+</tr>
+<tr>
+<td align="center">A square with a fountain in the afternoon.</td>
+<td align="center">The same square at night.</td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/dusk.jpg" alt="The waterfront at dusk with its lights coming on, the harbour lighthouse lit and a ferry at its landing"></td>
+<td><img src="docs/screenshots/camp.jpg" alt="A tent and a camp fire on a hillside at night"></td>
+</tr>
+<tr>
+<td align="center">The waterfront at dusk, with the ferry at its landing.</td>
+<td align="center">A camp on a hillside at night.</td>
+</tr>
+</table>
+
 ## Contents of the repository
 
 | Path | Description |
 |---|---|
 | `index.html` | The complete program: markup, styles and one JavaScript module (about 11,000 lines). |
 | `docs/user-guide.md` | The user guide, which describes how the island is explored and how each control behaves. |
+| `docs/screenshots/` | The pictures of the island shown at the head of this document, taken in the game. |
 | `LICENSE` | The MIT licence under which the program, its documentation and its sounds are published. |
 | `CONTRIBUTING.md` | How to run, change and submit changes to the program. |
 | `cat/` | The cat from Michi-Neko: The Cat Philosopher's Path by c1t1zen1, under the MIT licence (`cat/LICENSE`). See `cat/README.md`. |
