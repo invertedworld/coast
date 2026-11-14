@@ -3278,6 +3278,215 @@ function addBougainvillea(gb,H,R,w,fz,top){
     }
   }
 }
+/* ================= small flowers =================
+   Hanging baskets beside the doors of houses, pots on their doorsteps, red valerian at the foot of their walls, and in
+   open country patches of wild flowers and bushes of lavender. Every leaf is drawn on its own, after the real plant's
+   leaf (developed in testbench/flowers.html):
+     zonal geranium   rounded and kidney-shaped, with shallow scalloped lobes, a notch where the stalk joins and a
+                      narrow dark band round it, open on the side of the stalk (the "horseshoe")
+     ivy geranium     shield-shaped, with five shallow pointed lobes, the stalk joining near the middle
+     petunia          oval, soft, in pairs along the trailing stems
+     basil            oval and cupped, in opposite pairs, each pair at right angles to the last
+     valerian         lance-shaped and blue-grey, in pairs on the stems and in a tuft at the base
+     lavender         narrow and grey-green, in whorls on the short shoots that make the cushion under the spikes
+     poppy, daisy     deeply cut leaves, and spoon-shaped ones, in rosettes on the ground
+   Everything is built in a local frame (x across, y up, z out from a wall or anywhere about a point on the ground),
+   carried into the block by the matrix M, and added to the block as single triangles (GB.tri2); petals and leaves
+   that may be seen from either side are added on both faces. Beyond full detail a plant keeps only its pot or its
+   basket and a few masses of its foliage and flowers; at the far level nothing is drawn. */
+GB.prototype.tri2=function(a,b,c,col,both){
+  const ux=b.x-a.x, uy=b.y-a.y, uz=b.z-a.z, vx=c.x-a.x, vy=c.y-a.y, vz=c.z-a.z;
+  let nx=uy*vz-uz*vy, ny=uz*vx-ux*vz, nz=ux*vy-uy*vx; const l=Math.hypot(nx,ny,nz); if (l<1e-10) return; nx/=l; ny/=l; nz/=l;
+  const oy=this.oy, P=this.p, N=this.n, Cc=this.c, S=this.s;
+  P.push(a.x,a.y+oy,a.z,b.x,b.y+oy,b.z,c.x,c.y+oy,c.z);
+  for (let k=0;k<3;k++){ N.push(nx,ny,nz); Cc.push(col.r,col.g,col.b); S.push(0); }
+  if (both){ P.push(a.x,a.y+oy,a.z,c.x,c.y+oy,c.z,b.x,b.y+oy,b.z); for (let k=0;k<3;k++){ N.push(-nx,-ny,-nz); Cc.push(col.r,col.g,col.b); S.push(0); } }
+};
+const FL_STEM=hex('#4f6b2c'), FL_IRON=hex('#2e2a28'), FL_COIR=hex('#6b4f33'), FL_SOIL=hex('#4a3524');
+const FL_LEAF={ zonal:hex('#4d7a32'), zone:hex('#3a3a1e'), ivy:hex('#3f7a2c'), petunia:hex('#5a7c34'), basil:hex('#5aa032'),
+  valerian:hex('#7a9682'), lavender:hex('#8a9c84'), poppy:hex('#6f8f3c'), daisy:hex('#5f8a36') };
+const FL_V=(x,y,z)=>new THREE.Vector3(x,y,z), FL_UP=new THREE.Vector3(0,1,0);
+// the builder for one plant: local points carried by M into the block
+function flB(gb,M,R){
+  const V=FL_V, w=v=>v.clone().applyMatrix4(M);
+  const tri=(a,b,c,col,both=true)=>gb.tri2(w(a),w(b),w(c),col,both);
+  const quad=(a,b,c,d,col,both=true)=>{ const A=w(a), B=w(b), Cq=w(c), D=w(d); gb.tri2(A,B,Cq,col,both); gb.tri2(A,Cq,D,col,both); };
+  // a stalk of three sides from p to q, t thick
+  const rod=(p,q,t,col)=>{ const d=V().subVectors(q,p); if (d.lengthSq()<1e-8) return; d.normalize();
+    const u=Math.abs(d.y)<0.9?FL_UP:V(1,0,0), s=V().crossVectors(d,u).normalize(), r=V().crossVectors(d,s).normalize(), c=[];
+    for (let i=0;i<3;i++){ const a=i*2.094; c.push(V().addScaledVector(s,Math.cos(a)*t*0.58).addScaledVector(r,Math.sin(a)*t*0.58)); }
+    for (let i=0;i<3;i++){ const a=c[i], b=c[(i+1)%3]; quad(V().addVectors(p,a),V().addVectors(q,a),V().addVectors(q,b),V().addVectors(p,b),col,false); } };
+  const across=n=>{ const u=Math.abs(n.y)<0.9?FL_UP:V(1,0,0), a=V().crossVectors(n,u).normalize(); return [a,V().crossVectors(n,a).normalize()]; };
+  // a flower of k petals facing n, each petal a diamond cupped up by cup, round an eye of another colour
+  const flower=(c,n,size,k,col,eye,cup=0.15,thin=0.42,both=true)=>{ n=n.clone().normalize(); const [a,b]=across(n), a0=R()*6.283;
+    for (let i=0;i<k;i++){ const t=a0+i*6.283/k, d=V().addScaledVector(a,Math.cos(t)).addScaledVector(b,Math.sin(t)), s=V().crossVectors(n,d);
+      const tip=V().copy(c).addScaledVector(d,size).addScaledVector(n,size*cup), mid=V().copy(c).addScaledVector(d,size*0.5).addScaledVector(n,size*cup*0.3);
+      quad(c,V().copy(mid).addScaledVector(s,-size*thin*0.5),tip,V().copy(mid).addScaledVector(s,size*thin*0.5),shade(col,R,0.06),both); }
+    if (eye){ const e=size*0.28, p=V().copy(c).addScaledVector(n,size*0.05); for (let i=0;i<4;i++){ const t0=i*1.5708, t1=t0+1.5708;
+      tri(p,V().copy(p).addScaledVector(a,Math.cos(t0)*e).addScaledVector(b,Math.sin(t0)*e),V().copy(p).addScaledVector(a,Math.cos(t1)*e).addScaledVector(b,Math.sin(t1)*e),eye,false); } } };
+  // a round head of small flowers, each of four triangular petals, facing up
+  const head=(c,r,n,col,size)=>{ for (let i=0;i<n;i++){ const u=R()*2-1, t=R()*6.283, s=Math.sqrt(1-u*u)*0.9, d=V(Math.cos(t)*s,Math.abs(u)*0.8+0.35,Math.sin(t)*s).normalize(), p=V().copy(c).addScaledVector(d,r);
+    const [a,b]=across(d), a0=R()*6.283, col2=shade(col,R,0.08), sz=size*(0.8+R()*0.4);
+    for (let k=0;k<4;k++){ const t0=a0+k*1.5708; tri(p,V().copy(p).addScaledVector(a,Math.cos(t0-0.45)*sz).addScaledVector(b,Math.sin(t0-0.45)*sz),V().copy(p).addScaledVector(a,Math.cos(t0+0.45)*sz).addScaledVector(b,Math.sin(t0+0.45)*sz),col2,false); } } };
+  const frame=(d,up)=>{ d=d.clone().normalize(); const s=V().crossVectors(d,up).normalize(); return [d,s,V().crossVectors(s,d).normalize()]; };
+  // a blade leaf from base along dir: as wide as wfn(u) along it, folded on its midrib and bending down to its tip
+  const blade=(base,dir,up,len,wfn,col,o={})=>{ const [d,s,n]=frame(dir,up), m=o.seg||2, fold=o.fold??0.35, droop=o.droop??0.25, both=o.both??true, c=shade(col,R,0.07), c2=c.clone().multiplyScalar(0.9);
+    const P=u=>{ const p=V().copy(base).addScaledVector(d,len*u).addScaledVector(n,-droop*len*u*u), h=wfn(u)*len; return [p,V().copy(p).addScaledVector(s,h).addScaledVector(n,fold*h),V().copy(p).addScaledVector(s,-h).addScaledVector(n,fold*h)]; };
+    let a=P(0); for (let k=1;k<=m;k++){ const b=P(k/m); quad(a[0],a[1],b[1],b[0],c,both); quad(a[0],b[0],b[2],a[2],c2,both); a=b; } };
+  // a round leaf, a fan from its middle as far out as rfn(θ), θ = 0 away from the stalk; with zone, a darker band
+  // round it open on the side of the stalk
+  const round=(mid,dir,up,size,rfn,col,o={})=>{ const [d,s,n]=frame(dir,up), m=o.seg||6, cup=o.cup??0.2, rings=o.zone?[0,0.5,0.68,1]:[0,1], both=o.both??false;
+    const c=shade(col,R,0.06), zc=o.zone?o.zone.clone().lerp(c,0.45):null;
+    const P=(t,q)=>V().copy(mid).addScaledVector(d,Math.cos(t)*rfn(t)*size*q).addScaledVector(s,Math.sin(t)*rfn(t)*size*q).addScaledVector(n,cup*size*q*q);
+    for (let i=0;i<m;i++){ const t0=i/m*6.283, t1=(i+1)/m*6.283, back=Math.abs(Math.PI-(t0+t1)/2)<0.8;
+      for (let j=0;j<rings.length-1;j++){ const q0=rings[j], q1=rings[j+1], k=(o.zone&&j===1&&!back)?zc:c;
+        if (j===0) tri(P(t0,0),P(t1,q1),P(t0,q1),k,both); else quad(P(t0,q0),P(t1,q0),P(t1,q1),P(t0,q1),k,both); } } };
+  // a ring of n sides from radius r0 at y0 to r1 at y1, facing out (or in)
+  const ring=(r0,y0,r1,y1,n,col,inward=false)=>{ for (let i=0;i<n;i++){ const t0=i/n*6.283, t1=(i+1)/n*6.283;
+    const a=V(Math.cos(t0)*r0,y0,Math.sin(t0)*r0), b=V(Math.cos(t1)*r0,y0,Math.sin(t1)*r0), c=V(Math.cos(t1)*r1,y1,Math.sin(t1)*r1), d=V(Math.cos(t0)*r1,y1,Math.sin(t0)*r1);
+    if (inward) quad(a,b,c,d,col,false); else quad(a,d,c,b,col,false); } };
+  const disc=(y,r,n,col,down=false)=>{ const o=V(0,y,0); for (let i=0;i<n;i++){ const t0=i/n*6.283, t1=(i+1)/n*6.283, a=V(Math.cos(t1)*r,y,Math.sin(t1)*r), b=V(Math.cos(t0)*r,y,Math.sin(t0)*r); if (down) tri(o,b,a,col,false); else tri(o,a,b,col,false); } };
+  // a low mass of leaves, standing in for a plant beyond full detail
+  const mass=(x,y,z,r,h,col)=>{ const f=gb.force; gb.force=true; try { gb.add(T.ico, M.clone().multiply(mat(x,y,z,r*2,h*2,r*2)), col, null); } finally { gb.force=f; } };
+  return {V,tri,quad,rod,flower,head,blade,round,ring,disc,mass};
+}
+const FL_W={ ovate:u=>0.32*Math.sin(Math.PI*Math.pow(u,0.75)), lance:u=>0.15*Math.sin(Math.PI*Math.pow(u,0.85)), linear:u=>0.11*Math.sin(Math.PI*Math.pow(u,0.4)),
+  spoon:u=>0.26*Math.sin(Math.PI*Math.pow(u,1.9)), cut:u=>0.24*Math.sin(Math.PI*u)*(0.35+0.65*Math.abs(Math.sin(4.5*Math.PI*u))) };
+const FL_R={ zonal:t=>(1-0.07*Math.abs(Math.sin(3.5*t)))*(0.3+0.7*smooth(Math.abs(t-Math.PI)/0.5)), ivy:t=>0.74+0.26*Math.pow(Math.abs(Math.cos(2.5*t)),2.2) };
+const FL_GER={red:['#d8302e','#c92a2a','#e0413a'],pink:['#e05a84','#d44c78'],white:['#f4f0ea'],coral:['#ef6a4a','#e85c40']};
+// a zonal geranium rooted at base: leaves on long stalks, the inner held higher and turned up, the outer out and a
+// little down, so that they make a mound; and round heads of flowers on stalks standing clear of them
+function flZonal(F,base,rad,hgt,col,nL,nH,R,both,lk=1){ const {V}=F;
+  for (let i=0;i<nL;i++){ const t=i*2.39996+R()*0.3, f=Math.sqrt((i+0.5)/nL), reach=rad*(0.1+0.7*f), ow=V(Math.cos(t),0,Math.sin(t));
+    const tip=V().copy(base).addScaledVector(ow,reach).add(V(0,hgt*(1-f*0.7)*(0.8+R()*0.4)+0.01,0)), size=0.05*lk*(0.85+R()*0.35);
+    F.rod(V().copy(base).addScaledVector(ow,0.01),tip,0.006,FL_STEM);
+    const dir=V().copy(ow).add(V(0,lerp(0.9,-0.25,f)+(R()-0.5)*0.4,0)).normalize(), up=V().crossVectors(V(-ow.z,0,ow.x),dir).normalize();
+    F.round(V().copy(tip).addScaledVector(dir,size*0.32),dir,up,size,FL_R.zonal,FL_LEAF.zonal,{zone:FL_LEAF.zone,cup:0.18,seg:8,both}); }
+  for (let i=0;i<nH;i++){ const t=(i+R()*0.6)/nH*6.283, r=i?rad*(0.3+R()*0.25)*1.6:0, q=V().copy(base).add(V(Math.cos(t)*r,hgt+0.08+R()*0.07,Math.sin(t)*r));
+    F.rod(base,q,0.007,FL_STEM); F.head(q,0.05,13,col,0.03); } }
+
+// a hanging basket on its bracket, in the frame of a wall: the fixing at the origin, the wall the plane z = 0, the
+// basket hanging out along +z. kind: geranium, petunia or ivy (ivy-leaved geraniums)
+function flBasket(gb,M,R,kind){
+  const F=flB(gb,M,R), {V}=F, lod=gb.lod;
+  const cols=(kind==='geranium'?pick(R,[FL_GER.red,FL_GER.pink,FL_GER.coral]):kind==='ivy'?['#e46aa4','#d9579a','#ef8bbb','#c43a78']:pick(R,[['#7a3a9c','#a23f9e','#f3eef2','#c63a8c'],['#c63a8c','#e05a9a','#f3eef2']])).map(hex);
+  // the bracket: a plate on the wall, an arm out to a hook, a stay under it
+  segBoxM(gb,M,[0,-0.16,0.01],[0,0.14,0.01],0.05,0.02,FL_IRON); segBoxM(gb,M,[0,0,0.02],[0,0,0.44],0.022,0.022,FL_IRON); segBoxM(gb,M,[0,-0.14,0.02],[0,-0.005,0.26],0.016,0.016,FL_IRON);
+  const by=-0.62, rr=0.18, B=V(0,by,0.42), Mb=M.clone().multiply(mat(0,by,0.42,1,1,1)), FB=flB(gb,Mb,R);
+  if (lod===0) for (let i=0;i<3;i++){ const t=i/3*6.283+0.5; F.rod(V(0,-0.07,0.42),V(Math.cos(t)*rr*0.95,by,0.42+Math.sin(t)*rr*0.95),0.01,FL_IRON); }
+  // the basket: a wire rim and a bowl lined with coir, filled with compost
+  FB.ring(rr+0.01,0.012,rr+0.01,-0.012,10,FL_IRON); FB.ring(rr,0,rr*0.78,-0.09,10,FL_COIR); FB.ring(rr*0.78,-0.09,rr*0.42,-0.15,10,FL_COIR); FB.disc(-0.15,rr*0.42,8,FL_COIR,true);
+  if (lod>0){ // a mass of foliage and a few of flowers
+    FB.mass(0,0.06,0,rr*1.15,0.09,shade(kind==='ivy'?FL_LEAF.ivy:kind==='petunia'?FL_LEAF.petunia:FL_LEAF.zonal,R,0.05));
+    for (let i=0;i<4;i++){ const t=i*1.57+R(); FB.mass(Math.cos(t)*rr*0.8,0.08+R()*0.04,Math.sin(t)*rr*0.8,0.06,0.04,pick(R,cols)); }
+    if (kind!=='geranium') for (let i=0;i<4;i++){ const t=i*1.57+0.8; FB.mass(Math.cos(t)*(rr+0.05),-0.2,Math.sin(t)*(rr+0.05),0.06,0.18,shade(FL_LEAF.ivy,R,0.06)); }
+    return; }
+  FB.disc(-0.01,rr,8,FL_SOIL);
+  const over=(t,L,out)=>u=>{ const k=Math.min(1,u*3), r=rr*0.3+(rr*0.7+out)*Math.sin(k*Math.PI/2); return V(Math.cos(t)*r,0.06*Math.sin(k*Math.PI)-Math.max(0,u-0.3)/0.7*L,Math.sin(t)*r); };
+  const trail=(at,L,gap,ow,leaf,fl)=>{ const n=Math.max(2,Math.round(L/gap)); let p0=at(0); for (let k=1;k<=n;k++){ const u=k/n, p1=at(u); FB.rod(p0,p1,0.006,FL_STEM); leaf(p1,ow,u,k); fl(p1,ow,u,k); p0=p1; } };
+  if (kind==='geranium'){
+    // one plant in the middle, its leaves making an even dome over the basket, and a ring of leaves spilling over
+    // the rim all the way round, so that the basket is full and balanced from every side
+    const col=pick(R,cols); flZonal(FB,V(0,0,0),0.2,0.12,col,20,6,R,true,1.1);
+    for (let i=0;i<10;i++){ const t=(i+R()*0.3)/10*6.283, ow=V(Math.cos(t),0,Math.sin(t)), p=V().copy(ow).multiplyScalar(rr*0.7).add(V(0,0.03,0)), dir=V().copy(ow).add(V(0,-0.55-R()*0.3,0)).normalize();
+      FB.rod(V().copy(ow).multiplyScalar(0.04),p,0.006,FL_STEM); FB.round(V().copy(p).addScaledVector(dir,0.05),dir,V().crossVectors(V(-ow.z,0,ow.x),dir).normalize(),0.055*(0.9+R()*0.25),FL_R.zonal,FL_LEAF.zonal,{zone:FL_LEAF.zone,cup:0.18,seg:8,both:true}); } }
+  else if (kind==='ivy'){
+    const leaf=(p,ow,u)=>{ const sd=R()<0.5?-1:1, dir=V(-ow.z*sd,0,ow.x*sd).addScaledVector(ow,0.6).add(V(0,-0.2,0)).normalize(), q=V().copy(p).addScaledVector(dir,0.025);
+      FB.round(V().copy(q).addScaledVector(dir,0.006),dir,V().copy(ow).add(V(0,0.8,0)).normalize(),0.032*(1-0.25*u),FL_R.ivy,FL_LEAF.ivy,{cup:0.12,seg:10,both:true}); };
+    const fl=(p,ow,u,k)=>{ FB.head(V().copy(p).addScaledVector(ow,0.04).add(V(0,0.02,0)),0.024,6,pick(R,cols),0.024); };
+    for (let i=0;i<9;i++){ const t=i/9*6.283+R()*0.4; trail(over(t,0.3+R()*0.25,0.03+R()*0.04),0.55,0.09,V(Math.cos(t),0,Math.sin(t)),leaf,fl); }
+    for (let i=0;i<4;i++){ const t=i*1.57+R(); leaf(V(Math.cos(t)*0.07,0.06,Math.sin(t)*0.07),V(Math.cos(t),0,Math.sin(t)),0); FB.head(V(Math.cos(t)*0.05,0.12,Math.sin(t)*0.05),0.026,7,pick(R,cols),0.024); }
+  }
+  else { // petunias
+    const leaf=(p,ow,u)=>{ for (const sd of [-1,1]){ const dir=V(-ow.z*sd,0,ow.x*sd).addScaledVector(ow,0.4+R()*0.4).add(V(0,0.15,0)).normalize(); FB.blade(p,dir,FL_UP,0.07*(1-0.3*u),FL_W.ovate,FL_LEAF.petunia,{fold:0.25,droop:0.3}); } };
+    const fl=(p,ow,u,k)=>{ const n=V().copy(ow).add(V(0,0.3+R()*0.4,0)).normalize(); FB.flower(V().copy(p).addScaledVector(n,0.025),n,0.038,5,pick(R,cols),hex('#f5e070'),0.45,0.95); };
+    for (let i=0;i<11;i++){ const t=i/11*6.283+R()*0.4; trail(over(t,0.1+R()*0.3,0.02+R()*0.05),0.45,0.08,V(Math.cos(t),0,Math.sin(t)),leaf,fl); }
+    for (let i=0;i<6;i++){ const t=R()*6.283, p0=V(Math.cos(t)*0.05,0,Math.sin(t)*0.05), ow=V(Math.cos(t),0,Math.sin(t)); trail(u=>V().copy(p0).addScaledVector(ow,0.06*u).add(V(0,0.12*u,0)),0.12,0.06,ow,leaf,fl); }
+  }
+}
+// a box from p to q in the frame M, w wide and h high
+function segBoxM(gb,M,p,q,w,h,col){ const a=new THREE.Vector3(...p).applyMatrix4(M), b=new THREE.Vector3(...q).applyMatrix4(M), f=gb.force; gb.force=true; try { segBox(gb,[a.x,a.y,a.z],[b.x,b.y,b.z],w,h,col); } finally { gb.force=f; } }
+
+// pots: the shape, its glaze or paint and its plant are drawn from R. Shapes: the common flower pot with a rolled
+// rim, a tall "long tom", a wide low bowl, a bellied jar with a narrow neck, a square planter, and an old olive-oil tin
+const FL_POT_COL={ terra:['#c8714a','#b5603d','#d48a5e','#c06848','#d9a080'], glaze:['#2f5f9a','#3f8f94','#4f7a4a','#efe9df','#d9a63a','#7a4a8a'],
+  wash:['#f2efe8','#e9e4da'], tin:['#3f6f9a','#5a8a4a','#c9473a','#d9b040','#e8e4dc'] };
+const FL_POT_SHAPES=['pot','pot','pot','tom','bowl','jar','square','tin'];
+function flPot(gb,M,R,s=1){
+  const F=flB(gb,M,R), {V}=F, shape=pick(R,FL_POT_SHAPES), q=R(), lod=gb.lod;
+  const fin=shape==='tin'?'tin':q<0.62?'terra':q<0.85?'glaze':'wash', col=shade(hex(pick(R,FL_POT_COL[fin])),R,0.04), rim=col.clone().multiplyScalar(1.07), n=lod>0?6:shape==='square'?4:10;
+  let top=0.3*s, r=0.16*s;
+  if (shape==='pot'){ F.ring(0.12*s,0,0.16*s,0.25*s,n,col); F.ring(0.175*s,0.25*s,0.175*s,0.3*s,n,rim); F.ring(0.16*s,0.25*s,0.175*s,0.25*s,n,rim); F.ring(0.175*s,0.3*s,0.155*s,0.3*s,n,rim); }
+  else if (shape==='tom'){ F.ring(0.1*s,0,0.13*s,0.4*s,n,col); F.ring(0.14*s,0.4*s,0.14*s,0.44*s,n,rim); F.ring(0.14*s,0.44*s,0.125*s,0.44*s,n,rim); top=0.44*s; r=0.125*s; }
+  else if (shape==='bowl'){ F.ring(0.14*s,0,0.22*s,0.08*s,n,col); F.ring(0.22*s,0.08*s,0.24*s,0.16*s,n,col); F.ring(0.24*s,0.16*s,0.22*s,0.16*s,n,rim); top=0.16*s; r=0.22*s; }
+  else if (shape==='jar'){ F.ring(0.1*s,0,0.2*s,0.14*s,n,col); F.ring(0.2*s,0.14*s,0.17*s,0.3*s,n,col); F.ring(0.17*s,0.3*s,0.12*s,0.36*s,n,col); F.ring(0.14*s,0.36*s,0.14*s,0.4*s,n,rim); F.ring(0.14*s,0.4*s,0.11*s,0.4*s,n,rim); top=0.4*s; r=0.11*s; }
+  else if (shape==='square'){ const H=M.clone().multiply(mat(0,0,0,1,1,1,Math.PI/4)), G=flB(gb,H,R); G.ring(0.2*s,0,0.24*s,0.3*s,4,col); G.ring(0.25*s,0.3*s,0.25*s,0.33*s,4,rim); G.ring(0.25*s,0.33*s,0.22*s,0.33*s,4,rim); top=0.33*s; r=0.15*s; }
+  else { F.ring(0.13*s,0,0.13*s,0.32*s,n,col); F.ring(0.13*s,0.32*s,0.12*s,0.32*s,n,col.clone().multiplyScalar(0.8)); top=0.32*s; r=0.12*s; }
+  F.disc(top-0.02*s,r,n,FL_SOIL);
+  // the plant
+  const p=R(), base=V(0,top-0.02*s,0), kind=p<0.62?'geranium':p<0.8?'basil':'lavender';
+  if (lod>0){ if (kind==='lavender') F.mass(0,top+0.12*s,0,r*1.2,0.12*s,hex('#7f6bb0')); else { F.mass(0,top+0.08*s,0,r*1.4,0.09*s,kind==='basil'?FL_LEAF.basil:FL_LEAF.zonal);
+      if (kind==='geranium') F.mass(0,top+0.2*s,0,r*0.8,0.05*s,hex(pick(R,FL_GER[pick(R,['red','red','pink','white','coral'])]))); } return {top,r}; }
+  if (kind==='geranium') flZonal(F,base,0.22*s+r*0.3,0.16*s,hex(pick(R,FL_GER[pick(R,['red','red','pink','white','coral'])])),Math.round(15*s),Math.max(3,Math.round(4*s)),R,false,1.2);
+  else if (kind==='basil'){ for (let i=0;i<5;i++){ const t=i/5*6.283+R(), p0=V(Math.cos(t)*0.04,top-0.02*s,Math.sin(t)*0.04), L=(0.12+R()*0.08)*s, lean=V(Math.cos(t)*0.35,1,Math.sin(t)*0.35).normalize();
+      let rot=R()*3.14; for (let k=1;k<=3;k++){ const u=k/3, q2=V().copy(p0).addScaledVector(lean,L*u); F.rod(V().copy(p0).addScaledVector(lean,L*(k-1)/3),q2,0.005,hex('#4f8a2c'));
+        for (const sd of [0,Math.PI]){ const a=rot+sd; F.blade(q2,V(Math.cos(a),0.25,Math.sin(a)),FL_UP,0.075*s*(1.1-0.3*u),FL_W.ovate,FL_LEAF.basil,{fold:0.45,droop:0.15,both:false}); } rot+=Math.PI/2; } } }
+  else flLavender(F,base,0.6*s,R);
+  return {top,r};
+}
+// lavender of scale k at base: short shoots of narrow leaves make the cushion, and the spikes rise out of it
+function flLavender(F,base,k,R){ const {V}=F, r=0.34*k, spike=['#7b62b5','#8a6fc2','#6d55a6','#9479cc'].map(hex), stalk=hex('#8e9a74');
+  for (let i=0;i<Math.round(48*k*k+8);i++){ const t=R()*6.283, q=Math.sqrt(R())*r*0.5, p0=V(base.x+Math.cos(t)*q,base.y,base.z+Math.sin(t)*q), lean=0.35+0.9*q/r;
+    const d=V(Math.cos(t)*lean,1,Math.sin(t)*lean).normalize(), L=(0.1+R()*0.08)*k, a0=R()*6.283; F.rod(p0,V().copy(p0).addScaledVector(d,L),0.006,stalk);
+    for (let j=1;j<=2;j++){ const p=V().copy(p0).addScaledVector(d,L*j/2); for (let m=0;m<3;m++){ const a=a0+m*2.094+j; F.blade(p,V(Math.cos(a),0,Math.sin(a)).addScaledVector(d,0.7),d,0.085*k,u=>0.15*Math.sin(Math.PI*Math.pow(u,0.4)),shade(FL_LEAF.lavender,R,0.07),{seg:2,fold:0.2,droop:0.2}); } } }
+  for (let i=0;i<Math.round(40*k*k+4);i++){ const t=R()*6.283, q=Math.sqrt(R())*r*0.7, p=V(base.x+Math.cos(t)*q,base.y+0.1*k,base.z+Math.sin(t)*q), lean=0.15+0.9*q/r, L=0.36*k*(0.8+R()*0.4);
+    const d=V(Math.cos(t)*lean,1,Math.sin(t)*lean).normalize(), s0=V().copy(p).addScaledVector(d,L*0.6), top=V().copy(p).addScaledVector(d,L);
+    F.rod(p,s0,0.005,stalk); F.rod(s0,top,0.026,shade(pick(R,spike),R,0.08)); } }
+// red valerian at a point on the ground
+function flValerian(gb,M,R){ const F=flB(gb,M,R), {V}=F, col=hex(pick(R,['#c8344a','#d24058','#d6607a','#b8304a'])), lf=FL_LEAF.valerian;
+  if (gb.lod>0){ F.mass(0,0.12,0,0.15,0.12,lf); F.mass(0,0.4,0,0.14,0.08,col); return; }
+  for (let i=0;i<6;i++){ const t=i/6*6.283+R()*0.4; F.blade(V(Math.cos(t)*0.03,0.01,Math.sin(t)*0.03),V(Math.cos(t),0.55,Math.sin(t)),FL_UP,0.09+R()*0.04,FL_W.lance,lf,{fold:0.3,droop:0.5}); }
+  for (let i=0;i<6;i++){ const t=R()*6.283, r=R()*0.1, L=0.3+R()*0.25, lean=0.1+R()*0.3, p=V(Math.cos(t)*r,0.02,Math.sin(t)*r), at=u=>V(p.x+Math.cos(t)*lean*L*u*u,p.y+L*u,p.z+Math.sin(t)*lean*L*u*u);
+    let p0=p, rot=R()*3; for (let k=1;k<=3;k++){ const p1=at(k/3); F.rod(p0,p1,0.007,lf); if (k<3) for (const sd of [0,Math.PI]) F.blade(p1,V(Math.cos(rot+sd),0.4,Math.sin(rot+sd)),FL_UP,0.08,FL_W.lance,lf,{seg:2,fold:0.3,droop:0.3}); rot+=Math.PI/2; p0=p1; }
+    F.head(at(1),0.03,9,col,0.018); } }
+// a patch of wild flowers r metres across at a point on the ground: poppies, white and yellow daisies, borage, grass
+function flWild(gb,M,R,r,hAt){ const F=flB(gb,M,R), {V}=F, grass=[hex('#7f9445'),hex('#8f9a53'),hex('#6f8a3c')];
+  const at=()=>{ const t=R()*6.283, q=Math.sqrt(R())*r, x=Math.cos(t)*q, z=Math.sin(t)*q; return [x,hAt(x,z),z,q/r]; };
+  if (gb.lod>0) return;
+  for (let i=0;i<Math.round(r*r*12);i++){ const [x,y,z]=at(), col=pick(R,grass); for (let k=0;k<4;k++){ const a=R()*6.283, l=0.08+R()*0.14, lean=0.3+R()*0.5, w=0.012, s=V(-Math.sin(a)*w,0,Math.cos(a)*w);
+    F.tri(V(x,y,z).add(s),V(x,y,z).sub(s),V(x+Math.cos(a)*lean*l,y+l,z+Math.sin(a)*lean*l),shade(col,R,0.1)); } }
+  const N=Math.round(r*r*26);
+  for (let i=0;i<N;i++){ const [x,y,z,e]=at(); if (R()<e*e*0.6) continue; const q=R(), tilt=()=>V((R()-0.5)*0.6,1,(R()-0.5)*0.6), h=q<0.34?0.14+R()*0.14:q<0.62?0.08+R()*0.1:0.15+R()*0.12, top=V(x+(R()-0.5)*0.08,y+h,z+(R()-0.5)*0.08);
+    F.rod(V(x,y,z),top,0.006,FL_STEM);
+    if (q<0.34){ if (R()<0.4){ const a=R()*6.283; for (let k=0;k<3;k++) F.blade(V(x,y+0.01,z),V(Math.cos(a+k*2.1),0.25,Math.sin(a+k*2.1)),FL_UP,0.09,FL_W.cut,FL_LEAF.poppy,{seg:3,fold:0.2,droop:0.15}); }
+      F.flower(top,tilt(),0.042,4,hex('#d6281f'),hex('#1c1714'),0.6,1.15,false); }
+    else if (q<0.62){ if (R()<0.4){ const a=R()*6.283; for (let k=0;k<4;k++) F.blade(V(x,y+0.01,z),V(Math.cos(a+k*1.57),0.1,Math.sin(a+k*1.57)),FL_UP,0.045,FL_W.spoon,FL_LEAF.daisy,{seg:2,fold:0.2,droop:0.1}); }
+      F.flower(top,tilt(),0.03,8,hex('#f6f3ea'),hex('#f0c020'),0.08,0.32,false); }
+    else if (q<0.86) F.flower(top,tilt(),0.034,8,hex('#f2c62a'),hex('#d89a10'),0.06,0.34,false);
+    else F.flower(top,V((R()-0.5)*1.2,0.3,(R()-0.5)*1.2),0.026,5,hex('#4a6fd0'),hex('#1d1d2a'),-0.1,0.6); } }
+// the plants at a house's front door: baskets on the wall beside it, pots on the ground beside it, valerian at a
+// corner. H is the house's frame (its front the plane z = fz, its door at x = dx), base its floor's height; they draw
+// on their own random sequence, so that the rest of the town is unchanged
+function addDoorPlants(gb,ch,H,R,o,w,fz,dx,h,lampSide,climber){
+  if (gb.lod>=2) return;
+  const sd=dx>0?1:-1, L=(x,y,z)=>new THREE.Vector3(x,y,z).applyMatrix4(H), q=R();
+  // a hanging basket on the side of the door away from its lamp, below the first floor's windows; none where a
+  // bougainvillea covers the front
+  if (!climber && h>3.2 && q<0.22){ for (const bx of [dx+sd*1.15,dx-sd*1.6]){ if (Math.abs(bx)>w/2-0.45 || (lampSide && Math.abs(bx-lampSide)<0.6)) continue;
+      const kind=pick(R,['geranium','geranium','petunia','ivy']), P=L(bx,2.8,fz); flBasket(gb,H.clone().multiply(mat(bx,2.8,fz,1.2,1.2,1.2)),R,kind);
+      if (gb.lod===0) (ch.plants||(ch.plants=[])).push({kind,x:P.x,y:P.y+gb.oy,z:P.z}); break; } }
+  // pots on the ground beside the door, against the wall, where the ground there is the house's own level
+  if (R()<0.3){ const n=1+Math.floor(R()*R()*3.2), side=R()<0.5?1:-1;
+    for (let i=0;i<n;i++){ const s=0.75+R()*0.5, px=dx+side*(0.9+i*0.42+R()*0.08)*(i===2?-1:1), pz=fz+0.2+R()*0.08;
+      if (Math.abs(px)>w/2-0.2) continue;
+      const P=L(px,0,pz), g=heightAt(P.x,P.z), fl=P.y+gb.oy;
+      if (Math.abs(g-fl)>0.35 || roadDist(P.x,P.z)<-0.6 || Math.max(...[[0.5,0],[-0.5,0],[0,0.5],[0,-0.5]].map(([a,b])=>Math.abs(heightAt(P.x+a,P.z+b)-g)))>0.12 || ch.obbs.some(b=>!(b.top===Infinity&&b.hw>1.2&&b.hd>1.2)&&obbCircleDist(b,P.x,P.z)<0.35) || ch.circles.some(c=>Math.hypot(c.x-P.x,c.z-P.z)<c.r+0.25)) continue;
+      const M=new THREE.Matrix4().makeTranslation(P.x,g-gb.oy,P.z).multiply(new THREE.Matrix4().makeRotationY(R()*6.283)), r=flPot(gb,M,R,s);
+      if (gb.lod===0){ ch.circles.push({x:P.x,z:P.z,r:r.r+0.05,top:Infinity}); (ch.plants||(ch.plants=[])).push({kind:'pot',x:P.x,y:g,z:P.z}); } } }
+  // red valerian at the foot of a front corner
+  if (R()<0.12){ const cx=(R()<0.5?-1:1)*(w/2-0.15), P=L(cx,0,fz+0.12), g=heightAt(P.x,P.z);
+    if (Math.abs(g-(P.y+gb.oy))<0.4) flValerian(gb,new THREE.Matrix4().makeTranslation(P.x,g-gb.oy,P.z),R); }
+}
 function addHouse(gb,ch,R,o){
   const w=o.w, d=o.d, h=o.h;
   let base=o.base;
@@ -3319,10 +3528,11 @@ function addHouse(gb,ch,R,o){
       gb.add(T.boxC, mm(H,mat(0.55,h+2.8,0,1.0,0.6,0.04)), C_.white, null); }
   }
   const floorH=2.6, floors=Math.max(1,Math.floor(h/floorH));
-  if (!o.noDoor){ const dx=(R()-0.5)*Math.max(0,w-2.6);
+  let doorX=null, lampX=null, climber=false;
+  if (!o.noDoor){ const dx=(R()-0.5)*Math.max(0,w-2.6); doorX=dx;
     room=gb.lod===0?doorwayFor(ch,o,base,dx,w,h,d,floors):null;
     if (room) addDoorFrame(gb,H,dx,d/2); else addDoor(gb,H,dx,fz-0.06);
-    if (R()<0.3){ const lx=dx+(dx>0?-0.9:0.9);
+    if (R()<0.3){ const lx=dx+(dx>0?-0.9:0.9); lampX=lx;
       gb.add(T.boxC, mm(H,mat(lx,2.62,fz+0.15,0.06,0.06,0.32)), WIRE, null);
       gb.add(T.boxC, mm(H,mat(lx,2.42,fz+0.3,0.22,0.3,0.22)), BULB, null, 6);
       gb.add(T.pyr, mm(H,mat(lx,2.57,fz+0.3,0.3,0.16,0.3)), WIRE, null);
@@ -3336,7 +3546,9 @@ function addHouse(gb,ch,R,o){
     if (room) addDoorFrame(gb,H,dx,d/2); else addDoor(gb,H,dx,fz-0.06); }
   // the climber draws on its own random sequence so that it leaves the layout of the town unchanged
   if (!o.tower && !o.noDoor){ const RB=rng(Math.floor(hash(Math.round(o.x*8),Math.round(o.z*8),4401)*4294967296));
-    if (RB()<0.3) addBougainvillea(gb,H,RB,w,fz,Math.min(h-0.4,floors>1?4.4:h-0.3)); }
+    if (RB()<0.3){ climber=true; addBougainvillea(gb,H,RB,w,fz,Math.min(h-0.4,floors>1?4.4:h-0.3)); } }
+  // hanging baskets, pots and valerian at the front door, on their own random sequence
+  if (!o.tower && doorX!==null) addDoorPlants(gb,ch,H,rng(Math.floor(hash(Math.round(o.x*8),Math.round(o.z*8),4461)*4294967296)),o,w,fz,doorX,h,lampX,climber);
   for (let f=1; f<floors; f++){
     if (o.tower && f%2===1 && f<floors-1) continue;
     const y=f*floorH+0.95, n=w>4.8&&R()<0.6?2:1;
@@ -4651,6 +4863,20 @@ function genChunk(cx,cz,lod=0){
     }
   }
 
+  /* --- wild flowers and lavender in open country, on their own random sequence --- */
+  if (COUNTRY.has(ch.kind) && ch.kind!=='farm' && gb.lod===0){
+    const RF=rng(Math.floor(hash(cx,cz,9301)*4294967296)), want=ch.kind==='olives'?1:ch.kind==='mount'?2:3;
+    let made=0;
+    for (let t=0;t<14 && made<want;t++){ const lav=RF()<0.35, r=lav?0.45:0.9+RF()*0.9, x=x0+r+RF()*(C-2*r), z=z0+r+RF()*(C-2*r), h=heightAt(x,z);
+      if (h<1.2 || (ch.kind==='mount' && h>320) || coveShaped(x,z) || roadDist(x,z)<r+0.8 || railPerp(x,z)<r+8) continue;
+      if (Math.abs(heightAt(x+r,z)-heightAt(x-r,z))>r*0.9 || Math.abs(heightAt(x,z+r)-heightAt(x,z-r))>r*0.9) continue;
+      if (ch.place.some(o=>obbCircleDist(o,x,z)<r+0.2) || ch.obbs.some(o=>obbCircleDist(o,x,z)<r+0.3) || ch.circles.some(c=>Math.hypot(c.x-x,c.z-z)<c.r+r)) continue;
+      if (ch.ruin && Math.hypot(x-ch.ruin.x,z-ch.ruin.z)<ch.ruin.r+r) continue;
+      const M=new THREE.Matrix4().makeTranslation(x,h-gb.oy,z);
+      if (lav){ const k=0.85+RF()*0.4; flLavender(flB(gb,M,RF),FL_V(0,0,0),k,RF); (ch.shrubSpots||(ch.shrubSpots=[])).push([x,z,k]); }
+      else flWild(gb,M,RF,r,(lx,lz)=>heightAt(x+lx,z+lz)-h);
+      (ch.plants||(ch.plants=[])).push({kind:lav?'lavender':'wild',x,y:h,z}); made++; }
+  }
   /* --- seaward parapet along the coastal road --- */
   for (const sd of SIDES) for (let x=x0+0.75; x<x0+C; x+=1.5){
     const zr=coastRoadZ(sd,x); if (zr<z0||zr>=z0+C) continue;
