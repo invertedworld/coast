@@ -2080,7 +2080,10 @@ function railCross(i){
     if (ok) X={i,x,z,ry,rot,sinT,flat,deck,rN,rS}; }
   if (rxCache.size>20000) rxCache.clear(); rxCache.set(i,X); return X;
 }
-function vRoadCenterH(i,xr,z){ const h=baseH(xr,z), X=railCross(i); if (!X) return h; const d=Math.abs(z-X.z), rl=z<X.z?X.rN:X.rS; if (d>X.flat+rl) return h; return lerp(X.deck,h,clamp((d-X.flat)/rl,0,1)); }
+function vRoadCenterH(i,xr,z){ const h=baseH(xr,z), X=railCross(i); if (!X) return h; const d=Math.abs(z-X.z), rl=z<X.z?X.rN:X.rS; if (d>X.flat+rl) return h; if (d<X.flat) return X.deck-BR_SINK; return lerp(X.deck,h,clamp((d-X.flat)/rl,0,1)); }
+// under a bridge's deck the ground is kept a little below it, so that the two never flicker through each other; the
+// deck itself is walked on
+const BR_SINK=0.12;
 function roadDist(x,z){
   if (seaDist(x,z)<-150) return 99;
   let d=Math.min(Math.abs(z-coastRoadZ(1,x)),Math.abs(z-coastRoadZ(-1,x)))-CR_HW;
@@ -2339,8 +2342,11 @@ function heightAtExact(x,z){
   // the line runs on a level bed 8 m wide, cut into the hill or built up on an embankment;
   // over a tunnel the ground is kept level with the portal parapets so the lined bore is always covered
   { const S=stationNear(x,40), hwL=S?15:4.0, d=mainPerp(x,z); if (d<hwL+4.6){ const sl=(railZ(x+1)-railZ(x-1))/2, xp=x+sl*(z-railZ(x))/(1+sl*sl), st=railState(xp), ry=railY(xp);
-      if (st==='open'){ const w=1-smooth((d-hwL)/4.5); h=lerp(h,ry-0.2,w); }
-      else if (st==='tunnel'){ const w=1-smooth((d-4)/5); h=Math.max(h,lerp(h,ry+8.6,w)); } } }
+      // the cover over a bore begins 3.5 m in from the portal, within the depth of its masonry, so that on a curve, where
+      // the line's state is projected across at a slant, its edge never stands out in front of the wing walls
+      const deep=st==='tunnel' && railState(xp-3.5)==='tunnel' && railState(xp+3.5)==='tunnel';
+      if (st==='open' || (st==='tunnel' && !deep)){ const w=1-smooth((d-hwL)/4.5); h=lerp(h,ry-0.2,w); }
+      else if (deep){ const w=1-smooth((d-4)/5); h=Math.max(h,lerp(h,ry+8.6,w)); } } }
   // a goods line's bed likewise, wider along the sidings
   // but the coast road beside it keeps its own level, the slope between them held up by the road's sea wall
   for (const B of branchesAt(x)){ if (!brIn(B,x,2)) continue; const d=brPerp(B,x,z), hw=brTerm(B,x)?5:4.0;
@@ -3745,6 +3751,8 @@ function buildBridge(gb,ch,R,X){
   const H=mat(xc,0,zc,1,1,1,rot), n=40;
   archFill(gb,mm(H,mat(0,spring,0,1,1,1,Math.PI/2)),r,rise,W,deck-0.9-spring,stone,SS,stone,SS);
   gb.add(T.box, mm(H,mat(0,deck-0.9,0,W+0.3,0.9,2*F)), stone, null, SS);
+  // the deck may be walked on, and walked or ridden under: only within 1.75 m below its underside does it stand in the way
+  ch.obbs.push({x:xc,z:zc,hw:(W+0.3)/2,hd:F,rot,top:deck,bot:deck-0.9});
   for (const sg of [-1,1]){
     const al=F-r, ac=sg*(r+al/2);
     gb.add(T.box, mm(H,mat(0,X.ry-1.5,ac,W+0.6,deck-0.9-X.ry+1.5,al)), stone, X.ry-1.5, SS);
@@ -4742,7 +4750,7 @@ function genChunk(cx,cz,lod=0){
             ch.circles.push({x:px,z:pz,r:1.1,top:Infinity}); } } } } }
   /* --- railway: ballast, sleepers and rails; viaducts over valleys; portals where it enters the hill --- */
   { const step=2, ballast=hex('#9b8f7f'), sleeper=hex('#4a3a2c'), steel=hex('#7d8086'), stoneR=shade(C_.stone,R,0.04), lining=hex('#3a332c'), brick=shade(hex('#8a5a42'),R,0.05);
-    const PA=2.6, PS=4.6, PT=8.8; // opening half-width, springing height and parapet top of a portal
+    const PA=2.6, PS=4.6, PT=8.8, PW=6.7; // opening half-width, springing height, parapet top and wing width of a portal
     let prev=railState(x0-step/2);
     for (let x=x0; x<x0+C-0.01; x+=step){
       const xm=x+step/2, zr=railZ(xm), st=railState(xm), mine=zr>=z0&&zr<z0+C;
@@ -4750,13 +4758,15 @@ function genChunk(cx,cz,lod=0){
         // an open archway: piers either side, masonry above the arch, a ring of voussoirs, and a lined bore behind
         const into=st==='tunnel'?1:-1, xb=x, zb=railZ(xb), yb=railY(xb), rot=Math.atan2(2,railZ(xb+1)-railZ(xb-1));
         const Hp=mat(xb,yb,zb,1,1,1,rot), PD=4.15, zc=into*(PD/2-0.15), zf=-into*0.17;
-        for (const sg of [-1,1]) gb.add(T.box, mm(Hp,mat(sg*(PA+1.85),-1.5,zc,3.7,PT+1.5,PD)), stoneR, -1.5, SS);
+        // the wing walls reach 9.3 m either side of the line, past the edge of the hill's cover over the bore, so that
+        // the step in the ground where the cutting meets the cover is hidden behind them
+        for (const sg of [-1,1]) gb.add(T.box, mm(Hp,mat(sg*(PA+PW/2),-1.5,zc,PW,PT+1.5,PD)), stoneR, -1.5, SS);
         const ns=14;
         archFill(gb,mm(Hp,mat(0,PS,zc)),PA,PA,PD,PT-PS,stoneR,SS,stoneR,SS);
-        gb.add(T.box, mm(Hp,mat(0,PT,zc,2*PA+7.8,0.4,PD+0.4)), C_.trim, null, SS);
+        gb.add(T.box, mm(Hp,mat(0,PT,zc,2*PA+2*PW+0.4,0.4,PD+0.4)), C_.trim, null, SS);
         gb.add(T.box, mm(Hp,mat(0,-1.5,zc,2*PA+0.2,1.25,PD)), lining, null);
         for (let k=0;k<13;k++){ const ang=Math.PI*(k+0.5)/13; gb.add(T.boxC, mm(Hp,mat(Math.cos(ang)*(PA+0.22),PS+Math.sin(ang)*(PA+0.22),zf-into*0.02,0.85,0.6,0.14,0,0,ang)), k===6?C_.trim:vsTone(C_.stone,k), null); }
-        for (const sg of [-1,1]){ const [px,pz]=localToWorld({x:xb,z:zb,rot},sg*(PA+1.85),zc); ch.obbs.push({x:px,z:pz,hw:1.85,hd:PD/2,rot,top:Infinity}); }
+        for (const sg of [-1,1]){ const [px,pz]=localToWorld({x:xb,z:zb,rot},sg*(PA+PW/2),zc); ch.obbs.push({x:px,z:pz,hw:PW/2,hd:PD/2,rot,top:Infinity}); }
       }
       prev=st;
       if (!mine) continue;
@@ -4769,7 +4779,9 @@ function genChunk(cx,cz,lod=0){
         // the bore is lined throughout: side walls, a floor and a vault of stone (distant blocks only near the portals)
         if (lod>=2 && railState(xm-40)==='tunnel' && railState(xm+40)==='tunnel') continue;
         // the first 4 m behind each portal lie within its masonry, which already lines the opening
-        if (railState(xm-3.5)!=='tunnel' || railState(xm+3.5)!=='tunnel') continue;
+        // (measured along the track, which may cross the x axis at a slant, and kept short enough that the lining
+        // starts inside the masonry, with no gap open to the sky between them)
+        { const ins=2.5*step/len; if (railState(xm-ins)!=='tunnel' || railState(xm+ins)!=='tunnel') continue; }
         const l3=Math.hypot(xb-xa,yb-ya,zb-za), Hs=mat((xa+xb)/2,(ya+yb)/2,(za+zb)/2,1,1,1,Math.atan2(xb-xa,zb-za),-Math.atan2(yb-ya,len)), RV=PA+0.25, nv=12;
         for (const sg of [-1,1]) gb.add(T.boxC, mm(Hs,mat(sg*RV,(PS-0.6)/2,0,0.5,PS+0.6,l3+0.04)), brick, null, SB);
         gb.add(T.boxC, mm(Hs,mat(0,-0.55,0,2*PA+0.2,0.6,l3+0.04)), lining, null);
