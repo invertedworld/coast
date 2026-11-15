@@ -26,9 +26,12 @@ if ! command -v "$BUTLER" >/dev/null 2>&1; then
 fi
 [ -d "$SITE/vendor/three" ] && [ -f "$SITE/fonts/fonts.css" ] || { echo "deploy-itch: $SITE lacks vendor/three or fonts/" >&2; exit 1; }
 
-build="$(mktemp -d)"; trap 'rm -rf "$build"' EXIT
+build="$(mktemp -d)"; trap 'rm -rf "$build" "$build.tar"' EXIT
 chmod 755 "$build"
-git archive "$REV" -- index.html sounds.json sounds cat photo people | tar -x -C "$build"
+# written to a file first: bsdtar stops reading at the end-of-archive marker, and git archive, still writing its
+# padding, would then be stopped by SIGPIPE and fail the script without a word
+git archive -o "$build.tar" "$REV" -- index.html sounds.json sounds cat photo people
+tar -x -C "$build" -f "$build.tar"; rm -f "$build.tar"
 cp -R "$SITE/vendor" "$SITE/fonts" "$build/"
 
 # the same replacements as publish-site.sh: the build number, and the fonts and three.js from the local copies
