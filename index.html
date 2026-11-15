@@ -1514,7 +1514,13 @@ const TUN_HW=2.2, TUN_VAULT=4.6;
 // or the walker coming out would be set on the cover for a step and drop from it
 const tunCell=x=>railState(x)==='tunnel' || railState(x-2)==='tunnel' || railState(x+2)==='tunnel';
 function tunFloor(x,z,y){ if (!tunCell(x) || mainPerp(x,z)>TUN_HW) return null; const ry=railY(x); return y<ry+TUN_VAULT?ry+0.25:null; }
-function tunMoveOk(x,z,y){ if (!tunCell(x) || mainPerp(x,z)<=TUN_HW || y>railY(x)+TUN_VAULT) return true; return heightAt(x,z)<y+1; }
+function tunMoveOk(x,z,y){ if (!tunCell(x) || mainPerp(x,z)<=TUN_HW || y>railY(x)+TUN_VAULT) return true; return heightAt(x,z)<y+1 || onRoomFloor(x,z,y); }
+// whether (x,z) lies on the floor of a room at the height y of the feet: there the floor is the ground, however high the
+// hillside under the building rises
+function onRoomFloor(x,z,y){
+  for (const ch of nearbyChunks()) for (const o of ch.obbs){ if (!o.room || Math.abs(o.x-x)>o.hw+o.hd+1 || Math.abs(o.z-z)>o.hw+o.hd+1) continue;
+    const A=o.room.area||o, [au,av]=obbLocal(A,x,z); if (Math.abs(au)<=A.hw && Math.abs(av)<=A.hd && y>o.room.fl-1.2 && y<o.room.fl+1.2) return true; }
+  return false; }
 function inTunnel(x,z,y){ return tunFloor(x,z,y)!==null; }
 function walkGround(x,z,y){
   { const f=tunFloor(x,z,y); if (f!==null) return f; }
@@ -4658,7 +4664,7 @@ function genChunk(cx,cz,lod=0){
       const open=GAL_ON;
       for (const ob of gallerySites(cx,cz)){ const {W,L}=ob;
           if (canPlace(ob,0.04,{ignorePiazza:true,maxRange:6})){ const CR=addGallery(gb,ch,ob,P.level,open);
-            ch.obbs.push({x:ob.x,z:ob.z,hw:W/2,hd:L/2,rot:ob.rot,top:Infinity,roof:true,room:CR||undefined}); ch.place.push(ob); ch.galleryOb=ob; break; } } }
+            ch.obbs.push({x:ob.x,z:ob.z,hw:W/2,hd:L/2,rot:ob.rot,top:Infinity,roof:{kind:'front',y0:P.level+GAL.h,rise:W/2*Math.tan(GAL.pitch),w:W,d:L},room:CR||undefined}); ch.place.push(ob); ch.galleryOb=ob; break; } } }
     // a summit whose village has its church on a higher one keeps a plain square with a market cross
     const feat = P.peak ? (ch.kind==='church'?'none':'cross') : P.small ? pick(R,['small','small','small','well','tree'])
       : ch.kind==='church' ? (R()<0.5?'well':(R()<0.5?'tree':'cross')) : pick(R,['clock','clock','fountain','fountain','well','cross','tree']);
@@ -15802,7 +15808,7 @@ if (TOUCH){
   },250);
 }
 // the shape of the land, for tests: the mountains, the islands and how each block is used
-window.__village.terrain={isGalleryBlock,gallerySites,get galSpawn(){ return galSpawn; },baseH,mtnH,mtLevel,mtSpine,mtCrest,halfW,ridgeZ,coastZ,highGround,isVillage,chunkKind,villageOf,islandInfo,islandRoute,islandLight,ISL,WRAP_Z,railZ,railY,railState,stationInfo,ST_SP};
+window.__village.terrain={tunMoveOk,onRoomFloor,isGalleryBlock,gallerySites,get galSpawn(){ return galSpawn; },baseH,mtnH,mtLevel,mtSpine,mtCrest,halfW,ridgeZ,coastZ,highGround,isVillage,chunkKind,villageOf,islandInfo,islandRoute,islandLight,ISL,WRAP_Z,railZ,railY,railState,stationInfo,ST_SP};
 // the boats' footprints, for tests: no two moored or anchored boats may overlap, nor lie off a beach with sunbeds
 window.__village.boats={BOATS,boatBox,fishBoats,nearSunbeds,obbOverlap,beachStretch,BCH_SP,harbourInfo,HARB};
 </script>
