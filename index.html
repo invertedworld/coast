@@ -3197,6 +3197,11 @@ function addFlora0(gb,ch,x,z,s=1,base,kind,lean){
 }
 // which plant grows where: in a village, on a wild hillside (stone pines only on a crest, and few), and in open
 // country, on the coast and on the islands; q is a random number from the block
+// how far a tree's crown reaches out from its trunk, for a scale of 1 (the most its clumps reach, with a little over
+// for the eaves of a house beside it): a tree in a village or in the wild is planted only where its crown is clear of
+// every building, and a house built there afterwards keeps clear of the crowns already planted
+const TREE_REACH={fig:4.2,almond:2.9,holm:3.6,carob:4.2,aleppo:4.5,stonepine:4.3,olive:1.6,cypress:1,round:1.9};
+const treeReach=(k,s)=>(TREE_REACH[k]||TREE_REACH.round)*s+0.4;
 function villageKind(ch,x,z,q){
   if (ch.kind==='shore') return q<0.25?'fig':q<0.5?'cypress':undefined;
   return q<0.34?'cypress':q<0.46?'fig':q<0.5?'almond':undefined;
@@ -4381,9 +4386,19 @@ function genChunk(cx,cz,lod=0){
   const alleyS=(A,x,z)=>A.dir==='h'?z-A.f(x):x-A.f(z);
   function canPlace(o,pad=0.04,opt={}){
     if (!blockSiteOk(cx,cz,o,ch.alleys,ch.placeCircles,opt.ignorePiazza?null:ch.piazza,heightAt,opt.maxRange||MR,0.9)) return false;
-    for (const q of ch.place) if (obbOverlap(o,q,pad)) return false;
+    // a building keeps clear of the crowns of the trees beside it, which are wider than the ground kept by their trunks
+    for (const q of ch.place) if (obbOverlap(o,opt.building&&q.reach?{...q,hw:q.reach,hd:q.reach}:q,pad)) return false;
     return true;
   }
+  // a tree that fits beside the buildings (each with a roof or a room): the kind and scale chosen when its crown is
+  // clear of them; else the same tree smaller, down to seven tenths of its size; else a cypress, slender enough to
+  // stand close to a wall; else none. Returns [kind, scale, reach] or null.
+  const treeFit=(x,z,k,s2,sc)=>{ let d=Infinity; for (const q of ch.obbs) if (q.roof||q.room) d=Math.min(d,obbCircleDist(q,x,z));
+    const R0=TREE_REACH[k]||TREE_REACH.round, fit=(d-0.4)/R0;
+    if (fit>=s2) return [k,s2,treeReach(k,s2)];
+    if (fit>=s2*0.7) return [k,fit,d];
+    if (k!=='cypress' && d>=treeReach('cypress',sc)) return ['cypress',sc,treeReach('cypress',sc)];
+    return null; };
   const roofKind=()=>{ const r=R(); return r<0.6?'front':r<0.86?'side':'hip'; };
   const house=o=>addHouse(gb,ch,R,o);
   const P=piazzaInfo(cx,cz);
@@ -4868,18 +4883,20 @@ function genChunk(cx,cz,lod=0){
       continue;
     }
     if (ch.kind==='wild'){
-      if (r<0.5){ if (canPlace({x,z,hw:0.7,hd:0.7,rot:0},0,{maxRange:9})){ const sc=0.7+R()*0.5, k=wildKind(ch,x,z,R()); addTree(gb,ch,x,z,R,k in FLORA?sc*1.15:sc,undefined,k); ch.place.push({x,z,hw:1.2,hd:1.2,rot:0}); } }
+      if (r<0.5){ if (canPlace({x,z,hw:0.7,hd:0.7,rot:0},0,{maxRange:9})){ const sc=0.7+R()*0.5, k=wildKind(ch,x,z,R()), f=treeFit(x,z,k,k in FLORA?sc*1.15:sc,sc);
+        if (f){ addTree(gb,ch,x,z,R,f[1],undefined,f[0]); ch.place.push({x,z,hw:1.2,hd:1.2,rot:0,reach:f[2]}); } } }
       else if (r<0.76){ const s=0.8+R()*1.8, h=heightAt(x,z), rp=railPerp(x,z); if (h>1 && rp>6+s*1.6*(railState(x)==='tunnel'?2:1) && !coveCore(x,z) && !(ch.ruin && Math.hypot(x-ch.ruin.x,z-ch.ruin.z)<ch.ruin.r)){ gb.add(T.sphLo, mat(x,h-s*0.25,z,s*1.6,s,s*1.3,rot), shade(C_.rock,R,0.08), null, 12); ch.circles.push({x,z,r:s*0.6,top:h+s*0.25}); } }
-      else if (r<0.79){ const w=3.6, d=5.5; if (canPlace({x,z,hw:w/2,hd:d/2,rot},0.04,{maxRange:5})) house({x,z,rot,w,d,h:4.2,roof:'front',stoneWalls:R()<0.6}); }
+      else if (r<0.79){ const w=3.6, d=5.5; if (canPlace({x,z,hw:w/2,hd:d/2,rot},0.04,{maxRange:5,building:true})) house({x,z,rot,w,d,h:4.2,roof:'front',stoneWalls:R()<0.6}); }
       else if (heightAt(x,z)>1 && !coveCore(x,z) && roadDist(x,z)>1 && !(ch.ruin && Math.hypot(x-ch.ruin.x,z-ch.ruin.z)<ch.ruin.r) && !ch.place.some(o=>obbCircleDist(o,x,z)<1.2)){
         addFlora(gb,ch,x,z,0.8+R()*0.6,undefined,'maquis'); ch.place.push({x,z,hw:0.8,hd:0.8,rot:0}); }
       continue;
     }
     if (r<0.45){
-      if (canPlace({x,z,hw:0.7,hd:0.7,rot:0},0)){ const sc=0.7+R()*0.45, k=villageKind(ch,x,z,R()); addTree(gb,ch,x,z,R,k in FLORA?sc*1.25:sc,undefined,k); ch.place.push({x,z,hw:1.3,hd:1.3,rot:0}); }
+      if (canPlace({x,z,hw:0.7,hd:0.7,rot:0},0)){ const sc=0.7+R()*0.45, k=villageKind(ch,x,z,R()), f=treeFit(x,z,k,k in FLORA?sc*1.25:sc,sc);
+        if (f){ addTree(gb,ch,x,z,R,f[1],undefined,f[0]); ch.place.push({x,z,hw:1.3,hd:1.3,rot:0,reach:f[2]}); } }
     } else {
       const w=3+R()*2, d=3+R()*2.2;
-      if (canPlace({x,z,hw:w/2,hd:d/2,rot},0.04)) house({x,z,rot,w,d,h:(3.2+R()*2.6)*hMul,roof:R()<0.5?'hip':'side',noDoor:R()<0.4,stoneWalls:R()<0.3});
+      if (canPlace({x,z,hw:w/2,hd:d/2,rot},0.04,{building:true})) house({x,z,rot,w,d,h:(3.2+R()*2.6)*hMul,roof:R()<0.5?'hip':'side',noDoor:R()<0.4,stoneWalls:R()<0.3});
     }
   }
 
