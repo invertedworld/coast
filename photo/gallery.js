@@ -1,15 +1,15 @@
-/* ================= the gallery and artist mode =================
+/* ================= the gallery and the Art Studio =================
    The gallery (G) keeps the photographs taken with the camera, each with the artworks made from it. It lists them
    newest first, one row to a photo: the photo, then its artworks, each labelled with its style. A click on any item
-   selects it and shows it large; Download PNG and Delete act on the item selected. Artist mode opens for a selected
+   selects it and shows it large; Download PNG and Delete act on the item selected. The Art Studio opens for a selected
    photo.
 
-   Artist mode makes artworks from one photo. A style is chosen (Watercolour, Oil, Van Gogh, Woodcut or
+   The Art Studio makes artworks from one photo. A style is chosen (Watercolour, Oil, Van Gogh, Woodcut or
    3D render), then its settings, which are kept in the browser's local storage (key coast.pictureSettings) as soon as
    they change. Render paints the photo in the style chosen, or path-traces the scene again from the photo's own
    camera, and shows it being made; a render in progress is stopped by another render, by a change of style or by
    leaving. Save keeps the finished artwork in the gallery under its photo; it is available exactly while there is a
-   finished render that has not been saved. Leaving artist mode with such a render asks whether to save it.
+   finished render that has not been saved. Leaving the Art Studio with such a render asks whether to save it.
 
    createGallery({ renderer, scene, camera, origin, onClose }) -> { add(canvas), open(), close(), get isOpen,
      photos, download(item), handleKey(e) }
@@ -187,7 +187,7 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
   .gal .card img{height:64px;min-width:104px} .gal .card.wk img{height:52px;min-width:86px}
   .gal .foot{flex-wrap:wrap} .gal .info{flex-basis:100%}
 }
-/* artist mode */
+/* the Art Studio */
 .art .body{flex:1;min-height:0;display:grid;grid-template-columns:340px 1fr}
 .art aside{display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--g-line);background:rgba(245,233,215,.025)}
 .art .scroll{flex:1;min-height:0;overflow-y:auto;padding:16px 18px;display:flex;flex-direction:column;gap:18px}
@@ -246,7 +246,7 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
     <div class="body"><div class="sheet"></div><div class="split" role="separator" aria-orientation="vertical" aria-label="Resize"></div>
       <div class="view"><div class="big"></div>
         <div class="foot"><div class="info"></div>
-          <button class="pri" data-a="art" title="Artist mode">${ICON.easel}<span>Artist mode</span></button>
+          <button class="pri" data-a="art" title="Art Studio">${ICON.easel}<span>Art Studio</span></button>
           <button data-a="go" title="Go to the place and time of this picture">${ICON.compass}<span>Go there</span></button>
           <button data-a="dl" title="Download as PNG">${ICON.download}<span>Download PNG</span></button>
           <button class="ib" data-a="del" title="Delete" aria-label="Delete">${ICON.trash}</button></div></div></div>
@@ -294,11 +294,36 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
     // compass returns there
     const sc = sceneOfItem(p, w);
     if (sc && goTo) { const go = document.createElement('button'); go.type = 'button'; go.className = 'cp go'; go.title = 'Go there'; go.setAttribute('aria-label', 'Go there'); go.innerHTML = ICON.compass;
-      go.addEventListener('click', e => { e.stopPropagation(); goTo(sc); }); wrap.append(go); }
+      go.addEventListener('click', e => { e.stopPropagation(); goThere(p, w, im); }); wrap.append(go); }
     return wrap;
   }
   // the scene a picture was taken in: its own, or for an artwork that of its photo
   const sceneOfItem = (p, w) => (w && w.meta && w.meta.scene) || (p.meta && p.meta.scene) || null;
+  // Go there: the picture grows from where it lies to its place in a white mount, not quite filling the screen, over a
+  // ground that darkens, and the game is then given the scene with the picture and the field of view it was taken
+  // with. The page that shows the place begins with the picture in the same place (goThereFrame in index.html, which
+  // this matches), so that nothing moves as the page is loaded again.
+  const GO_GROUND = '#05080c', GO_BORDER = 6;
+  const goFrame = (W, H, a) => { const M = Math.round(Math.min(W, H) * 0.07), b = GO_BORDER;
+    const iw = Math.min(W - 2 * M - 2 * b, (H - 2 * M - 2 * b) * a), ih = iw / a, w = iw + 2 * b, h = ih + 2 * b;
+    return { left: (W - w) / 2, top: (H - h) / 2, width: w, height: h }; };
+  let going = false;
+  function goThere(p, w, from) {
+    const sc = sceneOfItem(p, w); if (!sc || !goTo || going) return; going = true;
+    const item = w || p, src = item.canvas, m = p.meta || {}, a = src.width / src.height;
+    const r = from.getBoundingClientRect(), f = goFrame(innerWidth, innerHeight, a);
+    const ov = document.createElement('div');
+    ov.style.cssText = `position:fixed;inset:0;z-index:1000;background:${GO_GROUND};opacity:0;pointer-events:auto`;
+    const c = document.createElement('canvas'); c.width = src.width; c.height = src.height; c.getContext('2d').drawImage(src, 0, 0);
+    c.style.cssText = `position:fixed;z-index:1001;object-fit:cover;box-sizing:border-box;border:${GO_BORDER}px solid #f4efe6;box-shadow:0 6px 26px rgba(0,0,0,.55);left:${r.left}px;top:${r.top}px;width:${r.width}px;height:${r.height}px`;
+    document.body.append(ov, c);
+    const px = v => v + 'px', T = 800;
+    ov.animate([{ opacity: 0 }, { opacity: 1 }], { duration: T, easing: 'ease-in-out', fill: 'forwards' });
+    const zoom = c.animate([{}, { left: px(f.left), top: px(f.top), width: px(f.width), height: px(f.height) }], { duration: T, easing: 'cubic-bezier(.55,0,.2,1)', fill: 'forwards' });
+    const undo = () => { ov.remove(); c.remove(); going = false; };
+    Promise.resolve(goTo(sc, { canvas: src, fov: m.fov, aspect: a, ready: zoom.finished }))
+      .then(ok => { if (ok === false) undo(); }, undo);
+  }
   function copy(item, btn) {
     // the PNG is given to the clipboard as a promise, so that the write starts within the click (Safari requires it)
     const blob = item.blob ? Promise.resolve(item.blob) : new Promise((ok, no) => item.canvas.toBlob(b => b ? ok(b) : no(new Error('PNG')), 'image/png'));
@@ -444,13 +469,13 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
       sel = null; picked.clear(); build();
     }
     else if (a === 'art' && sel && !sel.w) openArt(sel.p);
-    else if (a === 'go' && sel && goTo) { const sc = sceneOfItem(sel.p, sel.w); if (sc) goTo(sc); }
+    else if (a === 'go' && sel && goTo) { const it = sel.w || sel.p; if (sceneOfItem(sel.p, sel.w)) goThere(sel.p, sel.w, big.contains(it.canvas) ? it.canvas : big); }
   });
 
-  /* ---------- artist mode ---------- */
+  /* ---------- the Art Studio ---------- */
   const art = document.createElement('div'); art.className = 'art'; art.hidden = true;
-  art.setAttribute('role', 'dialog'); art.setAttribute('aria-label', 'Artist mode');
-  art.innerHTML = `<header><button class="ib" data-a="back" title="Back to the pictures (Esc)" aria-label="Back">${ICON.back}</button><h2>Artist mode</h2><span class="src"></span></header>
+  art.setAttribute('role', 'dialog'); art.setAttribute('aria-label', 'Art Studio');
+  art.innerHTML = `<header><button class="ib" data-a="back" title="Back to the pictures (Esc)" aria-label="Back">${ICON.back}</button><h2>Art Studio</h2><span class="src"></span></header>
     <div class="body"><aside><div class="scroll">
         <section><h3>Style</h3><div class="tiles">${STYLES.filter(([id]) => !(id === 'render3d' && NO_TRACE)).map(([id, name]) => `<button type="button" data-style="${id}" aria-pressed="false">${ICON[id]}${name}</button>`).join('')}</div></section>
         <section class="opts" hidden><h3></h3><form></form><button type="button" class="reset" data-a="reset">Reset to default</button></section></div>
@@ -596,7 +621,7 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
     let first = true;
     setState(phases.world, 0);
     const { pathTrace } = ptModule = await import('./pathtrace.js');
-    // artist mode covers the game, so the game draws nothing while the picture is traced and leaves the GPU to it; the
+    // the Art Studio covers the game, so the game draws nothing while the picture is traced and leaves the GPU to it; the
     // world also stands still, so that what moves in it (the trains, the boats, the people) stands where it stood in
     // every pass of the picture, and the game leaves the page's time to the picture
     const draw = renderer.render; renderer.render = () => {};
@@ -618,7 +643,7 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
     r.p.works.push({ canvas: r.canvas, meta: r.canvas.photo, time: r.canvas.photo.time, style: r.style }); store.put(r.p);
     A.saved = true; setState('Saved', 1, true); syncButtons(); build();
   }
-  // leaving artist mode: an unsaved finished render is offered to be saved first; then() runs once it has closed
+  // leaving the Art Studio: an unsaved finished render is offered to be saved first; then() runs once it has closed
   function leaveArt(then) {
     if (A.result && !A.saved && !A.job) { A.after = then || null; ask.hidden = false; $(ask, '[data-a="ask-save"]').focus(); return; }
     shutArt(); then && then();

@@ -115,10 +115,30 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
   background:radial-gradient(circle closest-side at 50% 48%,transparent 0,transparent 86%,rgba(4,8,14,.55) 91%,#04080e 94%)}
 .tele.on{opacity:1}
 .tele span{position:absolute;left:50%;bottom:max(10px,1.6vh);transform:translateX(-50%);font-size:.82rem;letter-spacing:.14em;color:var(--plaster-dim);font-variant-numeric:lining-nums tabular-nums}
+/* Go there in the gallery: the picture fills the screen while the world is built, below the bar that shows its progress */
+.gothere{position:fixed;inset:0;z-index:19;background:#05080c;overflow:hidden;pointer-events:none}
+.gothere img{position:absolute;display:block;box-sizing:border-box;border:6px solid #f4efe6;box-shadow:0 6px 26px rgba(0,0,0,.55)}
 [hidden]{display:none!important}
 </style>
 
 <canvas id="scene" tabindex="0" aria-label="Procedurally generated medieval village"></canvas>
+<script>
+// Go there in the gallery: the picture that the page before left behind (coast.goThere) is shown in its white mount on
+// the dark ground, in the same place as the gallery left it, while the world it was taken in is built; goThereReveal
+// then turns it into the live view. It is put in place here, while the page is read and before anything is drawn,
+// and is decoded at once (a data: image loads at once, and decoding 'sync' draws no frame without it), so that the
+// first frame of the page already shows it and nothing blinks. goThereFrame matches goFrame in photo/gallery.js.
+function goThereFrame(W,H,a){ const M=Math.round(Math.min(W,H)*0.07), b=6;
+  const iw=Math.min(W-2*M-2*b,(H-2*M-2*b)*a), ih=iw/a, w=iw+2*b, h=ih+2*b; return {left:(W-w)/2,top:(H-h)/2,width:w,height:h}; }
+(()=>{ let g=null; try{ g=JSON.parse(sessionStorage.getItem('coast.goThere')||'null'); sessionStorage.removeItem('coast.goThere'); }catch(_){ return; }
+  if (!g || typeof g.src!=='string' || Date.now()-g.t>60000 || !new URLSearchParams(location.search).has('s')) return;
+  const im=new Image(); im.alt=''; im.decoding='sync'; im.src=g.src;
+  const G=window.__goThere={im,fov:+g.fov||0,aspect:+g.aspect||0};
+  const el=document.createElement('div'); el.className='gothere'; el.append(im); document.body.prepend(el); G.el=el;
+  const place=()=>{ if (G.zooming) return; const a=G.aspect||im.naturalWidth/Math.max(1,im.naturalHeight)||1, f=goThereFrame(innerWidth,innerHeight,a);
+    for (const k in f) im.style[k]=f[k]+'px'; };
+  place(); addEventListener('resize',place); G.place=place; })();
+</script>
 <div class="vignette"></div>
 <div class="tele" id="tele" aria-hidden="true"><span id="teleMag"></span></div>
 <div class="loading" id="loading">World building…</div>
@@ -11900,7 +11920,7 @@ const SNDS={prevX:null,prevZ:null,grounded:true,vy:0,hour:null,scan:0,trainWait:
 const _bv=new THREE.Vector3();
 
 function sndUpdate(dt){
-  // the island falls silent while the gallery or artist mode covers it, and is heard again when they close
+  // the island falls silent while the gallery or the Art Studio covers it, and is heard again when they close
   { const G=PHOTO.api.studio, h=!!(G && (G.isOpen || G.artOpen));
     if (h!==!!SND.hushed){ SND.hushed=h; if (SND.master) SND.master.gain.setTargetAtTime(muted||h?0:1,audioCtx.currentTime,0.12); } }
   if (!SND.ready) return;
@@ -13196,7 +13216,7 @@ function toggleView(){
 let seeding=false;
 const seedEl=document.getElementById('seeding'), seedBar=seedEl.querySelector('i'), seedTxt=seedEl.querySelector('span');
 const nextPaint=()=>new Promise(r=>requestAnimationFrame(()=>setTimeout(r,0)));
-function seedShow(k,what){ seedEl.hidden=false; seedBar.style.width=(k*100).toFixed(1)+'%'; seedTxt.textContent=`${what} ${Math.round(k*100)}%`; }
+function seedShow(k,what,pct=true){ seedEl.hidden=false; seedBar.style.width=(k*100).toFixed(1)+'%'; seedTxt.textContent=pct?`${what} ${Math.round(k*100)}%`:what; }
 async function newIsland(text){ if (seeding) return; seeding=true; PEOPLE.reset();
   try{
     seedShow(0,'Generating a new island:'); await nextPaint();
@@ -13373,6 +13393,57 @@ async function sceneLinkOf(o){
   const j=JSON.stringify(o), z=new Blob([j]).stream().pipeThrough(new CompressionStream('deflate-raw'));
   const u=new Uint8Array(await new Response(z).arrayBuffer()); let b=''; for (const c of u) b+=String.fromCharCode(c);
   return location.href.split(/[?#]/)[0]+'?s='+btoa(b).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); }
+/* Go there in the gallery: the scene a picture was taken in is opened by its link, without the camera, which is left
+   lowered whether or not it was raised for the picture or when the gallery was opened. The gallery has by then grown
+   the picture to fill the screen; it is handed to the page that follows in the session's storage (coast.goThere) as a
+   JPEG no larger than the screen, with the vertical field of view and the shape of its frame, and is shown there at
+   once, until goThereReveal turns it into the live view. pic is { canvas, fov, aspect, ready }; the promise resolves
+   false when the place could not be opened. */
+async function goThere(o,pic){
+  try{
+    const sc={...o}; delete sc.c;
+    const link=sceneLinkOf(sc);
+    // a painting, being full of detail, makes a far larger JPEG than a photograph: should it not fit in the session's
+    // storage it is kept again smaller and more compressed
+    if (pic && pic.canvas){ const c=pic.canvas, k0=Math.min(1,Math.min(2560,Math.max(innerWidth,innerHeight)*Math.min(2,devicePixelRatio||1))/Math.max(c.width,c.height));
+      for (const [f,q] of [[1,0.88],[0.75,0.8],[0.5,0.75],[0.35,0.7]]) try{
+        const k=k0*f, t=document.createElement('canvas'); t.width=Math.max(1,Math.round(c.width*k)); t.height=Math.max(1,Math.round(c.height*k));
+        t.getContext('2d').drawImage(c,0,0,t.width,t.height);
+        sessionStorage.setItem('coast.goThere',JSON.stringify({t:Date.now(),src:t.toDataURL('image/jpeg',q),fov:pic.fov||0,aspect:pic.aspect||c.width/c.height}));
+        break; }catch(err){ /* too large: tried again smaller; failing that, the place is opened without its picture */ } }
+    const u=await link; if (pic && pic.ready) await pic.ready.catch(()=>{});
+    location.assign(u); return true;
+  }catch(err){ console.warn('The place could not be returned to:',err); try{ sessionStorage.removeItem('coast.goThere'); }catch(_){} return false; }
+}
+// once the world is on the screen, the picture left by Go there becomes the live view: it grows out of its mount until
+// it fills the screen, then settles to the size at which it lies over the view (its own field of view against the
+// game's) while its edges soften into the world behind it and what remains of it fades
+function goThereReveal(){
+  const G=window.__goThere; if (!G || !G.el) return; window.__goThere=null; G.zooming=true; removeEventListener('resize',G.place);
+  const {el,im}=G, W=innerWidth, H=innerHeight, a=G.aspect||(im.naturalWidth/Math.max(1,im.naturalHeight))||W/H;
+  const f=goThereFrame(W,H,a);
+  // the picture's height on the screen, covering it, and lying over the view
+  const h0=Math.max(H,W/a), tv=Math.tan(camera.fov*Math.PI/360), h1=G.fov>0&&tv>0 ? H*Math.tan(G.fov*Math.PI/360)/tv : h0;
+  const io=x=>x<0.5?4*x*x*x:1-Math.pow(-2*x+2,3)/2;
+  const box=(l,t,w,h)=>{ im.style.left=l+'px'; im.style.top=t+'px'; im.style.width=w+'px'; im.style.height=h+'px'; };
+  const centred=h=>box((W-h*a)/2,(H-h)/2,h*a,h);
+  im.style.webkitMaskComposite='source-in'; im.style.maskComposite='intersect';
+  const PAUSE=250, ZOOM=1200, GAP=150, DUR=3000, t0=performance.now()+PAUSE, t1=t0+ZOOM+GAP;
+  const step=now=>{
+    if (now<t1){
+      // out of the mount: the frame grows to cover the screen as the white border and its shadow go
+      const k=io(clamp((now-t0)/ZOOM,0,1)), b=6*(1-k);
+      box(lerp(f.left,(W-h0*a)/2,k),lerp(f.top,(H-h0)/2,k),lerp(f.width,h0*a,k),lerp(f.height,h0,k));
+      im.style.borderWidth=b+'px'; im.style.boxShadow=`0 6px 26px rgba(0,0,0,${(0.55*(1-k)).toFixed(3)})`;
+      return requestAnimationFrame(step); }
+    if (!G.live){ G.live=true; im.style.border='0'; im.style.boxShadow='none'; el.style.background='transparent'; }
+    const t=clamp((now-t1)/DUR,0,1), e=(io(clamp(t/0.7,0,1))*32).toFixed(2);
+    centred(lerp(h0,h1,io(clamp(t/0.55,0,1))));
+    const g=d=>`linear-gradient(${d},transparent 0%,#000 ${e}%,#000 ${100-e}%,transparent 100%)`;
+    im.style.webkitMaskImage=im.style.maskImage=`${g('to right')},${g('to bottom')}`;
+    el.style.opacity=String(1-smooth((t-0.35)/0.65));
+    if (t<1) requestAnimationFrame(step); else el.remove(); };
+  requestAnimationFrame(step); }
 // the goods line and the ferry's crossing named in a link, found again by where they lie
 function sceneGoodsLine(sd,x0){ for (let zi=Math.floor(x0/GL_ZONE)-1; zi<=Math.floor(x0/GL_ZONE)+1; zi++) for (const B of glZone(sd,zi)) if (Math.abs(B.x0-x0)<1) return B; return null; }
 function sceneRoute(ix,iz){ const m0=Math.floor(ix/ISL);
@@ -13708,7 +13779,7 @@ function diveRender(){
   const v=[farMesh.visible,farGlow.visible,outMesh.visible,sky.visible]; farMesh.visible=farGlow.visible=outMesh.visible=sky.visible=false;
   try { return UW.render(renderer,scene,camera,diveAbove); } finally { [farMesh.visible,farGlow.visible,outMesh.visible,sky.visible]=v; } }
 // the camera, while it is raised, draws the frame through its lens instead
-const PHOTO=createPhoto({renderer,scene,camera,canvas,origin:ORIGIN,onFov:()=>glowScale(),allowed:()=>started,onShutter:()=>sndPlay('camera_shutter','player',null),quickOk:()=>!islandShown(),cameraKeyOk:()=>mode!=='swim',sceneOf:()=>sceneState(),goTo:o=>{ sceneLinkOf(o).then(u=>location.assign(u)).catch(err=>console.warn('The place could not be returned to:',err)); },onCopy:ok=>toast('Picture',ok?'Copied to the clipboard':'Could not be copied to the clipboard')});
+const PHOTO=createPhoto({renderer,scene,camera,canvas,origin:ORIGIN,onFov:()=>glowScale(),allowed:()=>started,onShutter:()=>sndPlay('camera_shutter','player',null),quickOk:()=>!islandShown(),cameraKeyOk:()=>mode!=='swim',sceneOf:()=>sceneState(),goTo:goThere,onCopy:ok=>toast('Picture',ok?'Copied to the clipboard':'Could not be copied to the clipboard')});
 function renderMain(){
   if (PHOTO.on && PHOTO.renderLens()) return;
   const tilt=tiltShift && (mode==='above'||mode==='chase'), ao=aoDue();
@@ -15253,26 +15324,27 @@ if (new URLSearchParams(location.search).has('perf')){
 // round the player (for 400 ms, as before), the tiles, the distant land and the water. The bar goes as soon as the
 // world can be explored; the rest of the blocks build in as the player moves about.
 requestAnimationFrame(()=>setTimeout(async ()=>{
-  const W='Building the world:', ld=document.getElementById('loading'); if (ld) ld.remove();
-  seedShow(0.03,W); await nextPaint();
+  // arriving by Go there, the bar says where the player is going rather than what is being done
+  const GO=!!window.__goThere, W=GO?'Travelling back…':'Building the world:', show=(k,w)=>seedShow(k,w,!GO), ld=document.getElementById('loading'); if (ld) ld.remove();
+  show(0.03,W); await nextPaint();
   spawnPlayer();
   // a shared scene (L) puts the player where it was before the first blocks are built round them
   if (SCENE) try{ scenePlace(SCENE); }catch(err){ console.warn('The shared scene could not be placed:',err); }
   const t0=performance.now();
-  do { updateChunks(player.x,player.z,50); seedShow(0.03+0.5*Math.min(1,(performance.now()-t0)/400),W); await nextPaint(); } while (queue.length && performance.now()-t0<400);
-  seedShow(0.58,W); await nextPaint(); updateTiles(1e9);
-  seedShow(0.68,W); await nextPaint(); rebuildFar(player.x,player.z); farDirty=true;
-  seedShow(0.78,W); await nextPaint();
+  do { updateChunks(player.x,player.z,50); show(0.03+0.5*Math.min(1,(performance.now()-t0)/400),W); await nextPaint(); } while (queue.length && performance.now()-t0<400);
+  show(0.58,W); await nextPaint(); updateTiles(1e9);
+  show(0.68,W); await nextPaint(); rebuildFar(player.x,player.z); farDirty=true;
+  show(0.78,W); await nextPaint();
   // the water's programs are compiled by drawing it once, from wherever the camera stands before the first frame: the
   // canvas is hidden until the first frame has replaced that drawing
   canvas.style.visibility='hidden';
   try { divePrewarm(); } catch(err){ console.warn('The water could not be prepared:',err); }
-  seedShow(1,W); await nextPaint();
+  show(1,W); await nextPaint();
   if (SCENE) try{ sceneRestore(SCENE); }catch(err){ console.warn('The shared scene could not be restored:',err); }
   last=performance.now(); requestAnimationFrame(frame);
-  requestAnimationFrame(()=>requestAnimationFrame(()=>{ canvas.style.visibility=''; seedEl.hidden=true;
-    // on a desktop, a greeting naming the help key, once the world is on the screen
-    if (!MOBILE) toast('','Welcome! Press H for help',6000); }));
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{ canvas.style.visibility=''; seedEl.hidden=true; const went=!!window.__goThere; goThereReveal();
+    // on a desktop, a greeting naming the help key, once the world is on the screen (not on arriving by Go there)
+    if (!MOBILE && !went) toast('','Welcome! Press H for help',6000); }));
 },30));
 window.__village={ get seed(){ return SEED_TEXT; }, aerGround:(x,y)=>aerGround(x,y), get aerView(){ return {yaw,pitch,dist,x:player.x,z:player.z,cy:camPos.y,gy:heightAt(camPos.x,camPos.z),lift:aerLift}; }, TELE, teleRaise, teleLower, teleMag, get teleRing(){ return teleRing; }, viewZoom, get origin(){ return ORIGIN; }, share:{state:sceneState,link:sceneLink,qrEncode,get shared(){ return SCENE; }}, get paused(){ return paused; }, set paused(v){ if (!!v!==paused){ paused=!!v; lastClock=null; } }, goods, glZone, branchesAt, get mantle(){ return mantle; }, get colRoof(){ return colRoof; }, roofAt, roofSlope, topAt, get sit(){ return sit; }, get indoors(){ return indoors; }, roomFns:{flight,localToWorld,obbLocal,roomCeil}, sitKey, sitFind, sitStand, sitSpotOk, get camp(){ return CAMP; }, campKey, campPitch, campStrike, campWhyNot, campFit, campBuild, campLight, beachStretch, BCH_SP, COACH_SEATS, FERRY_SEATS, coachEnter, genChunk, coastRoadZ, brZ, brY, heightAt, player, chunks, rooms, doorMesh, keys, setYaw:v=>{yaw=v;}, get yaw(){return yaw;}, fe, co, lightsNear, beams, ruinIn, cats, catHome, PEOPLE, get ridden(){ return ridden; },
   findHarbour(){ for (let d=0;d<12;d++) for (const sd of SIDES) for (const n of [Math.floor(player.x/HARB)+d,Math.floor(player.x/HARB)-d]){ const H=harbourInfo(sd,n); if (H) return {x:H.x,z:coastZ(sd,H.x)+sd*7,W:H.W,sd,qz:coastZ(sd,H.x+H.W/2-1)+sd*2.5}; } return null; },
@@ -15320,7 +15392,7 @@ window.__village={ get seed(){ return SEED_TEXT; }, aerGround:(x,y)=>aerGround(x
 /* ================= touch screens: the menu and the buttons for the actions of the moment =================
    On a touch screen (or with ?touch in the address) a menu button stands at the top right. Its menu takes the player to
    each of the scenes the number keys reach, raises the camera, takes a snapshot and opens the gallery (and from it the
-   artist mode), sets the time of day, pauses, and sets the view, the sound and the number of people. Beside the left
+   the Art Studio), sets the time of day, pauses, and sets the view, the sound and the number of people. Beside the left
    thumb's stick, a row of buttons at the foot of the screen does what the moment calls for: jump, crouch and sit on foot; rise, dive and
    the torch in the water; nearer and further when following or watching from afar. Each button acts as its key does,
    by pressing that key or holding it while it is held. Everything is hidden while the camera, the gallery or a panel
@@ -15359,7 +15431,7 @@ if (TOUCH){
   item(places,'Next view',()=>press('Digit0')); item(places,'Jump in the sea',()=>press('KeyJ')); item(places,'Torch',()=>press('KeyF'));
   item(places,'Camp',()=>campKey(),{toggle:()=>!!CAMP.c});
   const pics=sec('Pictures');
-  item(pics,'Camera',()=>PHOTO.api.toggle()); item(pics,'Telescope',()=>{ if (TELE.on) teleLower(); else teleRaise(); },{toggle:()=>TELE.on}); item(pics,'Snapshot',()=>{ closeMenu(); setTimeout(()=>PHOTO.api.quick(),250); },{stay:true}); item(pics,'Gallery and artist mode',()=>PHOTO.api.openGallery());
+  item(pics,'Camera',()=>PHOTO.api.toggle()); item(pics,'Telescope',()=>{ if (TELE.on) teleLower(); else teleRaise(); },{toggle:()=>TELE.on}); item(pics,'Snapshot',()=>{ closeMenu(); setTimeout(()=>PHOTO.api.quick(),250); },{stay:true}); item(pics,'Gallery and Art Studio',()=>PHOTO.api.openGallery());
   const timeG=sec('Time');
   const hm=v=>{ const h=Math.floor(v)%24, m=Math.floor((v-Math.floor(v))*60); return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0'); };
   const tSl=slider('Time of day',0,23.95,0.05,()=>hour,v=>{ hour=v; SNDS.hour=Math.floor(hour); updateDaylight(); updateClocks(); },hm);

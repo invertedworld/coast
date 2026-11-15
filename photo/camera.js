@@ -22,7 +22,7 @@
    While the camera is raised its controls are on the screen: the zoom, the focus (autofocus or manual, and the
    distance), the aperture and the exposure, each stepped with − and + buttons that repeat while held, the shutter, the
    pictures taken and a button that lowers the camera. The mouse is not captured, so that they can be clicked; a drag
-   on the scene turns the view, and the player walks with the usual keys. The gallery and artist mode are in
+   on the scene turns the view, and the player walks with the usual keys. The gallery and the Art Studio are in
    photo/gallery.js.
 
    When the camera is lowered none of these passes runs, the field of view and the exposure are the game's own and
@@ -48,7 +48,7 @@
        resolve to) a canvas, which replaces the picture for the next hook and for the gallery, or nothing to keep it.
    photo.gallery
        The photos kept, oldest first (at most 24): { n, canvas, meta, time, works }, where works holds the artworks
-       made from the photo in artist mode, { canvas, meta, time, style }, meta.effect naming the style and
+       made from the photo in the Art Studio, { canvas, meta, time, style }, meta.effect naming the style and
        meta.settings its settings. photo.download(i, j?) saves photo i, or its artwork j, as PNG;
        photo.openGallery() and photo.closeGallery() show and hide the gallery; photo.studio is the gallery itself.
    photo.renderer, photo.scene, photo.camera
