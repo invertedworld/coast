@@ -1245,8 +1245,23 @@ export function createPeople(ctx){
       if (!frustum.intersectsSphere(_sph)||_sph.center.distanceTo(cam.position)>PAX_R+500){ p.unposed=true; p.needStep=p.inSwing=false; continue; }
       if (p.unposed){ p.unposed=false; if (p.lockFeet){ p.pinL=p.pinR=null; p.hipW=null; } }
       buildPose(p,simT,POSE); body.write(r++,p.look,POSE); }
+    // the dinghy's sailor, seated at the helm: posed where the game puts the seat, leaning with the boat's heel
+    if (helm.on && helm.p && r<MAXP){ const p=helm.p, h=helm.at;
+      p.x=h.x; p.y=h.y; p.z=h.z; p.yaw=h.yaw; p.speedSm=0; p.walkW=0; p.turnStep=0; p.sitW=1; p.mode='sit'; p.seat=helm.seat; helm.seat.h=h.seatH;
+      p.hY=h.look||0; p.hP=0.05;
+      buildPose(p,simT,POSE); POSE.pelRoll+=h.roll||0; POSE.lean+=0.12; body.write(r++,p.look,POSE); }
     body.setCount(r); body.mesh.position.copy(O); body.mesh.visible=r>0;
   }
+  /* the sailor of the dinghy: setSailor(at, trip) seats someone at the helm, at {x, y (the floor under the feet), z,
+     yaw (the way they face), seatH (the seat's height above the floor), roll (the boat's heel), look (the turn of the
+     head)}; a new trip brings a new sailor, an adult chosen at random. setSailor(null) takes them away. Only while the
+     population is above 0 */
+  const helm={on:false,p:null,trip:null,at:null,seat:{h:0.35}};
+  function setSailor(at,trip){
+    if (!at || !on){ helm.on=false; return; }
+    if (!helm.p || helm.trip!==trip){ const q=rnd(); helm.p=makePerson(q<0.5?'man':'woman',q<0.12?66+Math.floor(rand(0,14)):18+Math.floor(rand(0,46)),null);
+      helm.p.sitLean=false; helm.p.sitCross=false; helm.p.sitHands=false; helm.trip=trip; }
+    helm.at=at; helm.on=true; }
   /* a new level takes effect at once: people are added at any spot, or the ones over the new number are let go,
      wherever they are; at level 0 everyone goes */
   function setLevel(n){
@@ -1260,6 +1275,6 @@ export function createPeople(ctx){
   // when the world repeats from north to south, or a new island is made, everyone is let go; the places fill again
   // out of view
   function reset(){ clearAll(); places.clear(); }
-  return { update, setLevel, reset, get on(){ return on; }, get level(){ return level; }, people, pax, places, groups, inView,
+  return { update, setLevel, reset, setSailor, get on(){ return on; }, get level(){ return level; }, people, pax, places, groups, inView,
     stats(){ return {people:people.length, passengers:pax.length, places:places.size, ways:WAY.n, wayCells:WAY.cells, drawn:body.mesh.count}; } };
 }

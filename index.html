@@ -10083,7 +10083,7 @@ const DGY_COLS=[['#f2ede4','#2f5f8f','#b5473a','#2f5f8f'],['#2f5f8f','#f2ede4','
 const dinghies=new Map();   // harbour key -> {H,B,D}
 let sailD=null, dgyScan=0, dgySeed=SEED, dgyHandling='assisted';
 const dgyLook={yaw:0,pitch:-0.1};
-let dgyChase=false, dgyChaseD=11;   // sailing, viewed from astern (0) instead of from the helm
+let dgyChase=false, dgyChaseD=11, dgyTrip=0;   // sailing, viewed from astern (0) instead of from the helm
 // aboard a ferry, viewed from astern (0) instead of from the deck, the mouse carrying the camera round her
 let feChase=false, feSnap=false, feChaseD=70; const feLook={yaw:0,pitch:0.3};
 const dgyCtx={wind:WIND,depthAt:(x,z)=>-heightAt(x,z),surfaceAt:dgySea,obstacles:{obbs:[],circles:[]},boats:[],input:{steer:0,trim:0,paddle:0},walkAt:dgyWalkAt,paused:false};
@@ -10252,10 +10252,19 @@ function dgyFair(H){
   const off=Math.atan2(Math.sin(from-out),Math.cos(from-out));   // the wind's bearing from the heading out, -PI..PI
   if (Math.abs(off)>=70*Math.PI/180) return;
   WIND.set({dir:out+(off>=0?1:-1)*Math.PI/2}); }
+// Experimental: seen from astern, with the population above 0, the dinghy is sailed by one of the townspeople, an adult
+// chosen afresh for each trip, sitting on the windward side by the tiller with the feet in the bottom of the boat
+const _hs=new THREE.Vector3(), _hd=new THREE.Vector3();
+function dgySailor(){
+  const D=sailD; if (!D || mode!=='dinghy' || !dgyChase || !PEOPLE.on){ PEOPLE.setSailor(null); return; }
+  const S=D.state, m=D.mesh, side=S.eyeSide||1; m.updateMatrix();
+  _hs.set(side*0.46,-0.13,-1.3).applyMatrix4(m.matrix);
+  _hd.set(-side*0.55,0,0.84).applyQuaternion(m.quaternion);
+  PEOPLE.setSailor({x:_hs.x,y:_hs.y,z:_hs.z,yaw:Math.atan2(_hd.x,_hd.z),seatH:0.5,roll:m.rotation.z*side*0,look:side*0.35},dgyTrip); }
 function dinghyBoard(e){
   if (dgyHint){ dgyHint=false; toastHide(); }
   dgyFair(e&&e.H);
-  sailD=e.D; e.D.setMode(dgyHandling); e.D.board(); mode='dinghy'; dgyChase=false; dgyLook.yaw=0; dgyLook.pitch=-0.1;
+  sailD=e.D; dgyTrip++; e.D.setMode(dgyHandling); e.D.board(); mode='dinghy'; dgyChase=false; dgyLook.yaw=0; dgyLook.pitch=-0.1;
   scene.fog.near=90; scene.fog.far=1500; sky.visible=true; descent.t=ascent.t=-1;
   camera.fov=FOV; camera.near=0.1; camera.far=3600; camera.updateProjectionMatrix(); glowScale();
   sea.scale.setScalar(1); islandMesh.visible=false; farMesh.visible=farGlow.visible=true; }
@@ -14785,7 +14794,7 @@ function frame0(now){
   updateDolphins(wdt);
   updateWhales(wdt);
   updateCats(wdt);
-  PEOPLE.update(wdt);
+  dgySailor(); PEOPLE.update(wdt);
   updateFleet(dt);
   updateGulls(dt);
   updateShadowFrame(); shadowDue();
