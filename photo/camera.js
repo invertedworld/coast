@@ -51,6 +51,9 @@
        made from the photo in the Art Studio, { canvas, meta, time, style }, meta.effect naming the style and
        meta.settings its settings. photo.download(i, j?) saves photo i, or its artwork j, as PNG;
        photo.openGallery() and photo.closeGallery() show and hide the gallery; photo.studio is the gallery itself.
+       The option onChange() is called whenever the pictures kept change: loaded, taken, deleted or painted.
+       photo.studio.goThere(p, w, from) goes to the scene of photo p (or of its artwork w), the picture growing from
+       from, an element or a rectangle on the screen ({ left, top, width, height }), as Go there in the gallery does.
    photo.renderer, photo.scene, photo.camera
        The game's renderer, scene and camera. The camera hangs in a group shifted by the floating origin, so its
        world position is camera.position plus meta.origin.
@@ -76,7 +79,7 @@ const DEPTH_FN = `
   uniform float uNear, uFar;
   float linZ(float d){ return uNear*uFar/(uFar-d*(uFar-uNear)); }`;
 
-export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, allowed = () => true, onShutter = null, quickOk = null, cameraKeyOk = null, onCopy = null, sceneOf = null, goTo = null }) {
+export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, allowed = () => true, onShutter = null, quickOk = null, cameraKeyOk = null, onCopy = null, sceneOf = null, goTo = null, onChange = null }) {
   const S = { on: false, focal: 35, fNumber: 2.8, focus: 5, autofocus: true, ev: 0, vignette: 0, ratio: 0, afTarget: 5, afT: 0, af: false };
   // the frame within the window, as fractions of its width and height, and the height of its centre above the
   // window's, in the window's device coordinates (-1 to 1); set from the viewfinder's layout
@@ -468,7 +471,7 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
   const afEl = hud.querySelector('.af'), modeEl = hud.querySelector('.mode'), rollEl = hud.querySelector('.roll'), deckEl = hud.querySelector('.deck');
   const vignette = document.querySelector('.vignette');
 
-  const G = createGallery({ renderer, scene, camera, origin, goTo, onClose: () => { canvas.focus && canvas.focus(); }, onLoad: () => setRoll() });
+  const G = createGallery({ renderer, scene, camera, origin, goTo, onChange, onClose: () => { canvas.focus && canvas.focus(); }, onLoad: () => setRoll() });
   function setRoll(c) {
     const n = G.photos.length; rollEl.querySelector('b').textContent = n ? String(n) : '';
     const p = G.photos[n - 1]; rollEl.classList.toggle('has', !!p);

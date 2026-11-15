@@ -231,6 +231,7 @@ function goThereFrame(W,H,a){ const M=Math.round(Math.min(W,H)*0.07), b=6;
       <div class="row"><span><kbd>T</kbd></span><span>Advance time</span></div>
       <div class="row"><span><kbd>Shift</kbd>+<kbd>T</kbd></span><span>Reverse time</span></div>
       <div class="row"><span><kbd>N</kbd></span><span>Toggle night time</span></div>
+      <div class="row"><span><kbd>Shift</kbd>+<kbd>N</kbd></span><span>Crescent or full moon</span></div>
       <div class="row"><span><kbd>L</kbd></span><span>Generate a sharing link</span></div>
       <div class="row"><span><kbd>I</kbd></span><span>Generate new world seed</span></div>
       <div class="row"><span><kbd>Page Up</kbd><kbd>Page Down</kbd></span><span>Adjust draw distance</span></div>
@@ -297,6 +298,7 @@ import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.m
 import { Cat, catRimUniforms } from './cat/cat.js';
 // the camera for taking pictures (C): lens, depth of field, exposure, viewfinder and gallery; its API is window.__village.photo
 import { createPhoto } from './photo/camera.js';
+import { pickPictures } from './photo/artgallery.js';
 import { createPeople } from './people/people.js';
 
 /* ================= random & noise ================= */
@@ -2671,6 +2673,164 @@ function churchRoom(ch,cx,cz,rot,base,W,L,h,wz,seed){
     (ch.doors||(ch.doors=[])).push(lf); (C.leaves||(C.leaves=[])).push(lf); }
   return C;
 }
+/* ---------- art galleries ----------
+   A town of some size may have an art gallery beside one of its squares, in which the player's own pictures are hung:
+   their paintings, or their photographs where they have made no paintings. While no picture is kept its doors are shut
+   and it cannot be entered. The gallery is a single tall room under a gabled roof of clay tiles with three skylights in each slope, its
+   walls whitewashed pure white inside and out, with a pair of blue doors in an arched doorway facing the square, a
+   hanging basket either side of it, a signboard of an easel hung from an iron bracket above it, and bougainvillea on
+   each side wall. It was developed in testbench/art-gallery.html (photo/artgallery.js). Inside, a pale limestone
+   floor, the room open to the roof, a bench down the middle, and up to eight pictures at eye level, each lit by a
+   picture light; a click on one while the pointer is free goes there, as Go there in the gallery does. */
+const GAL={W:8.4,L:11,h:4.8,pitch:0.44}, GAL_SIZES=[[8.4,11],[7.4,9.6],[6.8,8.6]];
+const GAL_WHITE=hex('#fbfaf7'), GAL_BLUE=hex('#24578f'), GAL_IRON=hex('#1f1f21'), GAL_SKY=[-3.4,0,3.4];
+// the gallery's footprint beside the square, in direction a from its middle, the front towards the square; hw and hd
+// take in the eaves and the step
+function galleryOb(P,a,W,L){ const dx=Math.cos(a), dz=Math.sin(a), rot=Math.atan2(-dx,-dz), d=P.r+L/2+0.8;
+  return {x:P.x+dx*d,z:P.z+dz*d,hw:W/2+0.3,hd:L/2+0.7,rot,dx,dz,W,L}; }
+// whether any picture is kept, so that the galleries are open (GAL_ON is set as the pictures load and change)
+let GAL_ON=false, galOpenT=-1e9;
+// the angle at which a gallery's doors stand open, and the doors swinging open now
+const GAL_OPEN=DOOR_MAX*0.95, galSwing=new Set();
+// the block of a village that holds its gallery: of its squares (not the church's) on which a gallery fits, the first
+// in the order of the blocks' own hashes, in a village of at least GAL_MIN blocks; null for a smaller village, or one
+// with no square that will take it
+const GAL_MIN=40;
+function galleryBlock(V){
+  if (V.gal!==undefined) return V.gal; const list=[];
+  if (V.n>=GAL_MIN) for (let q=0;q<V.cells.length;q+=2){ const a=V.cells[q], b=V.cells[q+1]; if (chunkKind(a,b)==='piazza') list.push([hash(a,b,9101),a,b]); }
+  list.sort((u,v)=>u[0]-v[0]); V.gal=null;
+  for (const [,a,b] of list) if (gallerySites(a,b).length){ V.gal=a*1048576+b; break; }
+  return V.gal; }
+// the footprints a gallery could take beside the square of block (cx,cz), in the order they are tried, the largest
+// first; the same tests as the block's own (blockSiteOk), with its alleys and circles, before anything else is built
+const galSites=new Map();
+function gallerySites(cx,cz){
+  const key=cx*1048576+cz+(galSpawn&&galSpawn.cx===cx&&galSpawn.cz===cz?0.5:0); { const v=galSites.get(key); if (v) return v; }
+  if (galSites.size>4000) galSites.clear();
+  const out=[]; galSites.set(key,out); const P=piazzaInfo(cx,cz); if (!P || P.peak || P.small) return out;
+  // on the square where the player is first put, not on the side they face, so that the way to the shore stays open
+  const sp=galSpawn && galSpawn.cx===cx && galSpawn.cz===cz ? galSpawn : null;
+  const xc=cx*C+C/2, zc=cz*C+C/2, al=alleyInfo(cx,cz), circles=lightsNear(xc,zc,C*0.71+11).map(L=>({x:L.x,z:L.z,r:L.foot})), a0=hash(cx,cz,9102)*Math.PI*2;
+  for (const [W,L] of GAL_SIZES) for (let i=0;i<24;i++){ const ob=galleryOb(P,a0+i/24*Math.PI*2,W,L);
+    if (sp && ob.dx*sp.dx+ob.dz*sp.dz>0.4) continue;
+    if (blockSiteOk(cx,cz,ob,al,circles,null,heightAt,6,0.9)) out.push(ob); }
+  return out; }
+// the square on which the player is first put (spawnPlayer) always has its town's gallery, whatever the town's size,
+// unless none will fit beside it; galSpawn is that square's block and the way the player faces from it
+let galSpawn=null;
+// the block of that square was built while the start was being chosen (spawnBlock), before it was known to hold the
+// gallery: it is built again
+function setGalSpawn(g){ galSpawn=g; const ch=chunks.get(key(g.cx,g.cz)); if (ch) ch.redo=true; }
+function isGalleryBlock(cx,cz){ const V=villageOf(cx,cz); if (!V || V.pending) return false;
+  if (galSpawn && villageOf(galSpawn.cx,galSpawn.cz)===V && gallerySites(galSpawn.cx,galSpawn.cz).length) return cx===galSpawn.cx && cz===galSpawn.cz;
+  return galleryBlock(V)===cx*1048576+cz; }
+// the pictures kept have changed: the galleries' blocks are built again where the galleries open or shut, and
+// the rooms of those standing are built again with the pictures now kept
+let galSig=null;
+function galleryChanged(){
+  const pics=galleryPictures(), on=pics.length>0, sig=pics.map(p=>p.item.p.n+'.'+(p.item.w?p.item.w.time:'')).join(',');
+  // nothing to do where what is hung is as it was (the camera's notice and the check once a second both come here)
+  if (on===GAL_ON && sig===galSig) return; galSig=sig;
+  if (on!==GAL_ON){ GAL_ON=on; if (on && started) galOpenT=performance.now(); for (const ch of chunks.values()) if (ch.galBlock) ch.redo=true; chunkState=''; }
+  // each gallery's room standing now is built again with the pictures kept now, and put in place of the old one at
+  // once, so that no frame passes without it
+  for (const D of [...rooms]) if (D.kind==='gallery' && D.room){ const old=D.room, texs=D.texs;
+    const m=buildGallery(D); m.position.set(D.x,0,D.z); m.updateMatrix(); m.matrixAutoUpdate=false; world.add(m); D.room=m; setRoomLights(D);
+    world.remove(old); old.geometry.dispose(); old.material.dispose(); for (const c of old.children){ c.geometry.dispose(); if (!c.userData.shared) c.material.dispose(); }
+    for (const t of texs||[]) t.dispose(); }
+  // the textures of pictures no longer hung are let go
+  const live=new Set(pics.map(p=>p.image)); for (const [img,t] of galTex) if (!live.has(img)){ t.dispose(); galTex.delete(img); }
+}
+// the outside of the gallery, in the frame of its footprint ob on the square's level; at full detail, when open, it can
+// be entered; when not, its doors are shut
+function addGallery(gb,ch,ob,base,open=true){
+  const {W,L}=ob, h=GAL.h, hw=W/2, hl=L/2, rise=hw*Math.tan(GAL.pitch), {x,z,rot}=ob, R=rng(Math.floor(hash(Math.round(x*8),Math.round(z*8),9203)*4294967296));
+  const H=mat(x,0,z,1,1,1,rot), LP=(a,b,c)=>new THREE.Vector3(a,b,c).applyMatrix4(H).toArray(), roofC=shade(pick(R,C_.roofs),R,0.04);
+  let hmin=1e9; for (const p of obbSamples({x,z,hw,hd:hl,rot})) hmin=Math.min(hmin,heightAt(p[0],p[1]));
+  const fb=Math.min(-0.3,hmin-base-0.8);
+  gb.add(T.box, mm(H,mat(0,fb,0,W+0.1,-fb-0.03,L+0.1)), GAL_WHITE, fb, SP);
+  const CR=gb.lod===0&&open?galleryRoom(ch,x,z,rot,base,W,L):null, {r:dr,s:ds,f:df}=CHURCH_DOOR, fz=hl+0.02;
+  if (CR){ const A=[];
+    for (const sx of [-1,1]) faceHoles(A,(u,y)=>[sx*hw,y,u],[sx,0,0],-hl,hl,0,h,[],[]);
+    faceHoles(A,(u,y)=>[u,y,hl],[0,0,1],-hw,hw,0,h,[],[CHURCH_DOOR]); faceHoles(A,(u,y)=>[u,y,-hl],[0,0,-1],-hw,hw,0,h,[],[]);
+    archReveal(A,(u,y)=>[u,y,hl],(u,y)=>[u,y,hl-WTC],CHURCH_DOOR); q3n(A,[-hw,h,-hl],[hw,h,-hl],[hw,h,hl],[-hw,h,hl],[0,1,0]);
+    gb.add(triTpl(A),H,GAL_WHITE,0,SP);
+    const S=[]; q3n(S,[-dr,df,hl-WTC],[dr,df,hl-WTC],[dr,df,hl],[-dr,df,hl],[0,1,0]); gb.add(triTpl(S),H,C_.stone,null,SS); }
+  else { gb.add(T.box, mm(H,mat(0,0,0,W,h,L)), GAL_WHITE, 0, SP);
+    gb.add(T.box, mm(H,mat(0,0,fz,2*dr,ds,0.12)), GAL_BLUE, null, SW); gb.add(T.cylC, mm(H,mat(0,ds,fz,2*dr,0.12,2*dr,0,Math.PI/2)), GAL_BLUE, null, SW); }
+  if (CR && gb.lod<=1) galleryRoof(gb,H,W,L,h,rise,roofC); else gableRoof(gb,H,W,L,h,rise,GAL_WHITE,roofC);
+  // a stone step before the doorway
+  gb.add(T.box, mm(H,mat(0,-0.3,hl+0.32,2*dr+0.7,0.42,0.64)), C_.stone, null, SS);
+  if (gb.lod>=2) return CR;
+  // the skylights of a gallery that is shut or far away: a pane in a lead frame, three in each slope, lying on the
+  // tiles (an open gallery near by has real openings in its roof, with glass in them)
+  if (!CR) { const a=Math.atan2(rise,hw);
+    for (const sd of [1,-1]) for (const zz of GAL_SKY.map(z=>z*L/11)){ const u=0.5, nx=sd*Math.sin(a), ny=Math.cos(a), mx=sd*hw*(1-u), my=h+rise*u;
+      gb.add(T.boxC, mm(H,mat(mx+nx*0.2,my+ny*0.2,zz,1.6,0.08,1.2,0,0,-sd*a)), hex('#5f6468'), null);
+      gb.add(T.boxC, mm(H,mat(mx+nx*0.25,my+ny*0.25,zz,1.42,0.04,1.02,0,0,-sd*a)), C_.win, null, 5); } }
+  // the signboard of an easel, hung at right angles to the front from an iron arm above the doorway
+  { const S=0.8, top=ds+dr, y=top+0.8, arm=top+1.6, z0=hl+0.2, z1=hl+1.15, zc=(z0+z1)/2;
+    gb.add(T.boxC, mm(H,mat(0,arm-0.03,hl+0.675,0.06,0.06,1.35)), GAL_IRON, null);
+    gb.add(T.boxC, mm(H,mat(0,arm-0.18,hl+0.02,0.12,0.3,0.04)), GAL_IRON, null);
+    for (const zz of [z0+0.1,z1-0.1]) gb.add(T.boxC, mm(H,mat(0,(arm-0.03+y+S/2)/2,zz,0.015,arm-0.03-(y+S/2),0.015)), GAL_IRON, null);
+    gb.add(T.boxC, mm(H,mat(0,y,zc,0.045,S,S)), GAL_WHITE, null);
+    // on each face: the black border, the ring, and the easel with its canvas on the ledge
+    const nW=new THREE.Vector3(...LP(1,0,0)).sub(new THREE.Vector3(...LP(0,0,0)));
+    for (const sx of [-1,1]){ const fx=sx*0.026, seg=(a,b,w)=>{ const P0=new THREE.Vector3(...LP(fx,y+a[1],zc+a[0])), P1=new THREE.Vector3(...LP(fx,y+b[1],zc+b[0]));
+        const al=P1.clone().sub(P0), len=al.length()+w*0.9; if (len<1e-4) return; al.normalize(); const sd=new THREE.Vector3().crossVectors(al,nW).normalize();
+        const M=new THREE.Matrix4().makeBasis(sd.multiplyScalar(w),al.multiplyScalar(len),nW.clone().multiplyScalar(0.008)).setPosition(P0.add(P1).multiplyScalar(0.5));
+        gb.add(T.boxC,M,GAL_IRON,null); };
+      const e=S/2-0.04; seg([-e,-e],[e,-e],0.025); seg([e,-e],[e,e],0.025); seg([e,e],[-e,e],0.025); seg([-e,e],[-e,-e],0.025);
+      const rr=0.28, n=20; for (let i=0;i<n;i++){ const t0=i/n*6.283, t1=(i+1)/n*6.283; seg([Math.cos(t0)*rr,Math.sin(t0)*rr],[Math.cos(t1)*rr,Math.sin(t1)*rr],0.018); }
+      // the easel, plainly: two legs splayed from the top, and a canvas standing on them
+      const k=S/512, P2=(px,py)=>[(px-256)*k*-sx,(256-py)*k];
+      seg(P2(256,140),P2(186,380),0.026); seg(P2(256,140),P2(326,380),0.026);
+      gb.add(T.boxC, mm(H,mat(fx,y+(256-212)*k,zc,0.01,112*k,140*k)), GAL_IRON, null); } }
+  // a hanging basket either side of the doorway
+  for (const sx of [-1,1]){ const bx=sx*(dr+0.95), kind=pick(R,['geranium','geranium','petunia','ivy']), P=new THREE.Vector3(bx,2.8,fz).applyMatrix4(H);
+    flBasket(gb,H.clone().multiply(mat(bx,2.8,fz,1.2,1.2,1.2)),R,kind);
+    if (gb.lod===0) (ch.plants||(ch.plants=[])).push({kind,x:P.x,y:P.y+gb.oy,z:P.z}); }
+  // bougainvillea trained up each side wall
+  for (const sx of [-1,1]) addBougainvillea(gb,H.clone().multiply(mat(0,0,0,1,1,1,sx*Math.PI/2)),R,L,hw+0.02,h-0.3);
+  return CR;
+}
+// the skylights of a gallery, in the frame of its roof slope sd (1 to the right, -1 to the left): each as [z0, z1, x0,
+// x1], x the horizontal distance from the ridge; they lie half way down the slope, 1.42 m down it by 1.02 m across
+function gallerySkylights(W,L){ const hw=W/2, a=Math.atan2(hw*Math.tan(GAL.pitch),hw), d=0.71*Math.cos(a);
+  return GAL_SKY.map(z=>z*L/11).map(z=>[z-0.51,z+0.51,hw/2-d,hw/2+d]); }
+// the roof of an open gallery near by: the gables, and each slope as the tiles' face and the underside, with an
+// opening through both for each skylight, its sides, the eave and the verges, and the ridge tiles over the top
+function galleryRoof(gb,H,W,L,h,rise,roofC){
+  const hw=W/2, hl=L/2, oh=0.28, a=Math.atan2(rise,hw), ta=Math.tan(a), run=hw+oh, sky=gallerySkylights(W,L);
+  gb.add(T.prism, mm(H,mat(0,h,0,W,rise,L)), GAL_WHITE, null, SP);
+  const top=[], bot=[], side=[];
+  for (const s of [1,-1]){ const N=[s*Math.sin(a),Math.cos(a),0], P=off=>(z,X)=>[s*X+N[0]*off,h+(hw-X)*ta+N[1]*off,z], T0=P(0.19), B0=P(0.02);
+    faceHoles(top,T0,N,-hl-oh,hl+oh,0,run,sky,[]); faceHoles(bot,B0,[-N[0],-N[1],0],-hl-oh,hl+oh,0,run,sky,[]);
+    for (const r of sky) rectReveal(side,T0,B0,r);
+    q3n(side,B0(-hl-oh,run),B0(hl+oh,run),T0(hl+oh,run),T0(-hl-oh,run),[s*Math.cos(a),-Math.sin(a),0]);
+    for (const zz of [-hl-oh,hl+oh]) q3n(side,B0(zz,0),B0(zz,run),T0(zz,run),T0(zz,0),[0,0,Math.sign(zz)]); }
+  gb.add(triTpl(top),H,roofC,null,SR); gb.add(triTpl(bot),H,C_.trim,null); gb.add(triTpl(side),H,C_.trim,null);
+  gb.add(T.boxC, mm(H,mat(0,h+rise+0.17*0.75,0,0.26,0.14,L+2*oh)), roofC.clone().multiplyScalar(0.9), null, SR);
+}
+// the gallery as a room: its walls with the doorway, and the pair of blue doors
+function galleryRoom(ch,cx,cz,rot,base,W,L){
+  const h=GAL.h, hw=W/2, hl=L/2, iw=hw-WTC, rise=hw*Math.tan(GAL.pitch);
+  const C={kind:'gallery',x:cx,z:cz,rot,base,fl:base+CF,W,L,h,rise,w:W,d:L,iw,zb:-hl+WTC,zf:hl-WTC,top:h+rise,walls:[],room:null,dx:0,
+    seed:hash(Math.round(cx),Math.round(cz),9207)};
+  const Wb=(u0,u1,v0,v1)=>{ const [x,z]=localToWorld(C,(u0+u1)/2,(v0+v1)/2); return {x,z,hw:(u1-u0)/2,hd:(v1-v0)/2,rot,top:Infinity}; };
+  C.walls.push(Wb(-hw,-iw,-hl,hl),Wb(iw,hw,-hl,hl),Wb(-hw,-0.85,hl-WTC,hl),Wb(0.85,hw,hl-WTC,hl),Wb(-hw,hw,-hl,-hl+WTC));
+  C.clip=[[0,0,iw,hl-WTC,h-0.3,WTC]]; C.top=h-0.3;
+  (ch.rooms||(ch.rooms=[])).push(C);
+  for (const sg of [1,-1]){ const [hx,hz]=localToWorld(C,-sg*CHURCH_DOOR.r,hl-WTC/2);
+    // the doors stand open, folded back into the room; a gallery opened a moment ago, by the first picture kept,
+    // swings them open (doorsStep)
+    const swing=performance.now()-galOpenT<6000;
+    const lf={x:cx,z:cz,rot,w:W,d:L,hx,hz,y:base+CF,fl:base+CF,s:sg,lw:CHURCH_DOOR.r,leaf:'church',owner:C,a:swing?0:GAL_OPEN,av:0,idle:9,col:GAL_BLUE.clone(),idx:-1,stay:GAL_OPEN};
+    if (swing) galSwing.add(lf);
+    (ch.doors||(ch.doors=[])).push(lf); (C.leaves||(C.leaves=[])).push(lf); }
+  return C;
+}
 // A tower's stair winds up round its walls in a band 80 cm wide, from the ground floor to the floor of the top
 // room (the belfry, if it has one), as treads cantilevered from the walls with a rail along their inner edge. It
 // starts along the left wall, clear of the door, and ends at the top room's floor, which covers the middle and the
@@ -3397,6 +3557,8 @@ function flBasket(gb,M,R,kind){
   const cols=(kind==='geranium'?pick(R,[FL_GER.red,FL_GER.pink,FL_GER.coral]):kind==='ivy'?['#e46aa4','#d9579a','#ef8bbb','#c43a78']:pick(R,[['#7a3a9c','#a23f9e','#f3eef2','#c63a8c'],['#c63a8c','#e05a9a','#f3eef2']])).map(hex);
   // the bracket: a plate on the wall, an arm out to a hook, a stay under it
   segBoxM(gb,M,[0,-0.16,0.01],[0,0.14,0.01],0.05,0.02,FL_IRON); segBoxM(gb,M,[0,0,0.02],[0,0,0.44],0.022,0.022,FL_IRON); segBoxM(gb,M,[0,-0.14,0.02],[0,-0.005,0.26],0.016,0.016,FL_IRON);
+  // the hook at the arm's end, from which the chains hang
+  segBoxM(gb,M,[0,0.005,0.43],[0,-0.075,0.42],0.014,0.014,FL_IRON);
   const by=-0.62, rr=0.18, B=V(0,by,0.42), Mb=M.clone().multiply(mat(0,by,0.42,1,1,1)), FB=flB(gb,Mb,R);
   if (lod===0) for (let i=0;i<3;i++){ const t=i/3*6.283+0.5; F.rod(V(0,-0.07,0.42),V(Math.cos(t)*rr*0.95,by,0.42+Math.sin(t)*rr*0.95),0.01,FL_IRON); }
   // the basket: a wire rim and a bowl lined with coir, filled with compost
@@ -4490,6 +4652,13 @@ function genChunk(cx,cz,lod=0){
       if (!placed) ch.kind='piazza';
       ch.name='Chiesa di '+saint; ch.label=P.peak?'Hilltop church':'Parish church'; ch.desc=P.peak?'Parish church and campanile on the summit of a steep hill town, with views to both seas.':'Church square with a campanile beside the facade.';
     }
+    // the town's art gallery, beside its square: its doors shut, and it cannot be entered, until a picture is kept. Its
+    // sites are tried in turn without the block's random sequence, so that the rest of the square is laid out as before.
+    if ((ch.kind==='piazza' || (ch.kind==='church' && galSpawn && galSpawn.cx===cx && galSpawn.cz===cz)) && !P.peak && !P.small && isGalleryBlock(cx,cz)){ ch.galBlock=true;
+      const open=GAL_ON;
+      for (const ob of gallerySites(cx,cz)){ const {W,L}=ob;
+          if (canPlace(ob,0.04,{ignorePiazza:true,maxRange:6})){ const CR=addGallery(gb,ch,ob,P.level,open);
+            ch.obbs.push({x:ob.x,z:ob.z,hw:W/2,hd:L/2,rot:ob.rot,top:Infinity,roof:true,room:CR||undefined}); ch.place.push(ob); ch.galleryOb=ob; break; } } }
     // a summit whose village has its church on a higher one keeps a plain square with a market cross
     const feat = P.peak ? (ch.kind==='church'?'none':'cross') : P.small ? pick(R,['small','small','small','well','tree'])
       : ch.kind==='church' ? (R()<0.5?'well':(R()<0.5?'tree':'cross')) : pick(R,['clock','clock','fountain','fountain','well','cross','tree']);
@@ -4568,7 +4737,12 @@ function genChunk(cx,cz,lod=0){
     if (stairA!==null){ const dx=Math.cos(stairA), dz=Math.sin(stairA);
       for (const [ri,go] of [[0.24,0.42],[0.27,0.36],[0.3,0.32]]){ const steps=[];
         for (let kk=0; kk<48; kk++){ const dd=P.r+0.95+kk*go+go/2, x=P.x+dx*dd, z=P.z+dz*dd, top=P.level-(kk+1)*ri, g=baseH(x,z);
-          if (top<=g+0.05){ stairPlan={steps,go}; break; }
+          if (top<=g+0.05){ stairPlan={steps,go};
+            // where the ground at the foot lies lower than the hillside (a street levelled into it), further steps carry
+            // the flight down to it, so that its last step meets the ground; the flight above is as planned
+            for (let k2=kk; k2<kk+8; k2++){ const d2=P.r+0.95+k2*go+go/2, x2=P.x+dx*d2, z2=P.z+dz*d2, t2=P.level-(k2+1)*ri, ga=heightAt(x2,z2);
+              if (t2<=ga+0.05 || ga<0.2) break; steps.push({x:x2,z:z2,top:t2,g:Math.min(baseH(x2,z2),ga)}); }
+            break; }
           if (roadDist(x,z)<0) break;
           if (heightAt(x,z)<0.2) break;   // no stair runs down into a harbour's basin or the sea
           steps.push({x,z,top,g}); }
@@ -5295,10 +5469,10 @@ const camera=new THREE.PerspectiveCamera(FOV,1,0.3,3600); world.add(camera);
 const torch=new THREE.SpotLight(0xfff1dc,0,32,0.42,0.55,1.4), torchAim=new THREE.Object3D();
 torchAim.position.set(0,0,-1); camera.add(torch,torchAim); torch.target=torchAim; torch.position.set(0.15,-0.1,0);
 let torchOn=false;
-const skyU={uTop:{value:new THREE.Color()},uMid:{value:new THREE.Color()},uHor:{value:new THREE.Color()},uSun:{value:new THREE.Vector3(0,1,0)},uSunCol:{value:new THREE.Color()},uNight:{value:0},uDay:{value:1},uRot:{value:0},uMetA:{value:new THREE.Vector3(0,1,0)},uMetB:{value:new THREE.Vector3(0,1,0)},uMet:{value:new THREE.Vector3()}};
+const skyU={uTop:{value:new THREE.Color()},uMid:{value:new THREE.Color()},uHor:{value:new THREE.Color()},uSun:{value:new THREE.Vector3(0,1,0)},uSunCol:{value:new THREE.Color()},uNight:{value:0},uDay:{value:1},uRot:{value:0},uCres:{value:0},uMetA:{value:new THREE.Vector3(0,1,0)},uMetB:{value:new THREE.Vector3(0,1,0)},uMet:{value:new THREE.Vector3()}};
 const sky=new THREE.Mesh(new THREE.SphereGeometry(500,48,24),new THREE.ShaderMaterial({uniforms:skyU,side:THREE.BackSide,depthWrite:false,fog:false,
   vertexShader:`varying vec3 vDir; void main(){ vDir=normalize(position); gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
-  fragmentShader:`uniform vec3 uTop,uMid,uHor,uSun,uSunCol,uMetA,uMetB,uMet; uniform float uNight,uDay,uRot; varying vec3 vDir;
+  fragmentShader:`uniform vec3 uTop,uMid,uHor,uSun,uSunCol,uMetA,uMetB,uMet; uniform float uNight,uDay,uRot,uCres; varying vec3 vDir;
     float h3(vec3 p){ return fract(sin(dot(p,vec3(12.9898,78.233,37.719)))*43758.5453); }
     void main(){
       vec3 d=normalize(vDir); float y=d.y;
@@ -5308,7 +5482,12 @@ const sky=new THREE.Mesh(new THREE.SphereGeometry(500,48,24),new THREE.ShaderMat
       vec3 m=-uSun; float md=max(dot(d,m),0.0);
       float disc=smoothstep(0.99955,0.99975,md);
       float crater=0.85+0.15*sin(d.x*900.0)*sin(d.z*800.0);
-      c += vec3(0.92,0.94,1.0)*disc*crater*1.6*uNight + vec3(0.35,0.42,0.6)*pow(md,40.0)*0.35*uNight;
+      // the phase (uCres 0 full, 1 a crescent): the disc in its own frame, across (e1) and up (e2), in moon radii; the
+      // dark part is a circle of the same size set off up and to the left, so that a thin crescent is left lit on the side
+      // towards the sun, below the horizon; the part in shadow is not seen
+      vec3 e1=normalize(cross(m,vec3(0.0,1.0,0.0))+vec3(1e-5,0.0,0.0)), e2=cross(e1,m); vec2 q=vec2(dot(d,e1),dot(d,e2))/0.0265;
+      float lit=mix(1.0,smoothstep(0.97,1.03,length(q-vec2(-0.21,0.29))),uCres);
+      c += vec3(0.92,0.94,1.0)*disc*uNight*crater*1.6*lit + vec3(0.35,0.42,0.6)*pow(md,40.0)*0.35*uNight*(1.0-0.75*uCres);
       // the star field turns about the same axis as the sun and moon
       float cr=cos(uRot), sr=sin(uRot); vec3 ds=vec3(d.x, d.y*cr+d.z*sr, -d.y*sr+d.z*cr);
       vec3 g=ds*190.0, cell=floor(g); float st=h3(cell);
@@ -5332,6 +5511,8 @@ const sky=new THREE.Mesh(new THREE.SphereGeometry(500,48,24),new THREE.ShaderMat
       #include <colorspace_fragment>
     }`}));
 sky.renderOrder=-1; world.add(sky);
+// the moon's phase, as last chosen (Shift+N), kept in the browser
+try{ if (localStorage.getItem('coast.moon')==='crescent') skyU.uCres.value=1; }catch(_){}
 const hemi=new THREE.HemisphereLight(hex('#d8cde0'),hex('#f0c49a'),2.3); world.add(hemi);
 const sun=new THREE.DirectionalLight(hex('#fff1dc'),2.6);
 const SUN_DIR=new THREE.Vector3(-0.35,0.62,-0.7).normalize(), LIGHT_DIR=new THREE.Vector3();
@@ -5358,7 +5539,7 @@ function updateDaylight(){
   // one shadow-casting light: the sun by day, the moon (opposite the sun) by night
   const sunUp=smooth((e+0.02)/0.12), moonUp=smooth((-e-0.04)/0.12);
   if (sunUp>0.01){ LIGHT_DIR.copy(SUN_DIR); sun.color.set('#ff9a5a').lerp(_c2.set('#fff1dc'),wd); sun.intensity=sunUp*(1.1+1.5*wd); }
-  else { LIGHT_DIR.copy(SUN_DIR).multiplyScalar(-1); sun.color.set('#9fb3ff'); sun.intensity=moonUp*1.0; }
+  else { LIGHT_DIR.copy(SUN_DIR).multiplyScalar(-1); sun.color.set('#9fb3ff'); sun.intensity=moonUp*(1.0-0.65*skyU.uCres.value); }
   if (LIGHT_DIR.y<0.05) LIGHT_DIR.y=0.05;
   nightU.value=smooth((0.1-e)/0.22); glowU.uNight.value=nightU.value;
   churchU.uSunL.value.copy(SUN_DIR); churchU.uSunK.value=smooth((e-0.02)/0.15); churchU.uGlass.value=0.12+1.05*Math.max(wd,wk*0.6);
@@ -6885,7 +7066,7 @@ function updateChunks(px,pz,budgetMs,loading=budgetMs>=1e8){
         // the point the telescope looks at come next after those right round the player, the nearest to it first
         const tw=w<wantLod(cx-pcx,cz-pcz)||wantLod(cx-pcx,cz-pcz)<0, t2=tw?(TR&&w===0?(cx-TR.cx)*(cx-TR.cx)+(cz-TR.cz)*(cz-TR.cz):4+d2*0.02):0;
         const pr=()=>d2<=2?d2-10:tw?t2*0.5-7:look && d2>8 && !inView(cx,cz)?(a2+2)*8:a2;
-        if (!ch) queue.push([cx,cz,pr(),w,d2]);
+        if (!ch || ch.redo) queue.push([cx,cz,pr(),w,d2]);         // missing, or to be built again (a gallery's block)
         else if (ch.lod>w) queue.push([cx,cz,pr(),w,d2]);         // needs more detail
         else if (ch.lod<w) queue.push([cx,cz,1e6+d2,w,d2]);       // can shed detail, low priority
       };
@@ -6902,7 +7083,7 @@ function updateChunks(px,pz,budgetMs,loading=budgetMs>=1e8){
   const t0=performance.now();
   while (queue.length && (performance.now()-t0<budgetMs || queue[0][4]<=2)){
     const [cx,cz,,w,d2]=queue.shift(), k=key(cx,cz), old=chunks.get(k);
-    if (old && old.lod===w) continue;   // built meanwhile by another way (a block called for at once, at full detail)
+    if (old && old.lod===w && !old.redo) continue;   // built meanwhile by another way (a block called for at once, at full detail)
     // blocks fade in as they arrive; one that changes detail dissolves into its replacement
     // nothing fades while the island first loads, nor a block appearing right around the player
     const ch=genChunk(cx,cz,w), fadeIn=!loading && time>2.5 && (old || d2>2);
@@ -11170,7 +11351,7 @@ function spawnSquares(){ const out=[];
     for (let j=Math.floor(zc/C); j<Math.floor(zc/C)+4; j++){
       const P=piazzaInfo(i,j); if (!P||P.small||P.level<8) continue;
       if (baseH(P.x,P.z-P.r-3)>P.level-1) continue;
-      out.push({x:P.x,z:P.z-P.r+4.5,y:P.level}); } }
+      out.push({x:P.x,z:P.z-P.r+4.5,y:P.level,cx:i,cz:j}); } }
   return out; }
 // whether the point (x1,y1,z1) can be seen from the eye standing at (x0,y0,z0), over the ground, the walls and the
 // roofs between (a wall that may not be climbed is held as standing without end, and is passed over): the start asks for the sea SPAWN_SEA m beyond the point on the shore it faces
@@ -11202,9 +11383,10 @@ function spawnPlayer(){
     if (C1.view){ first=C1; break; } }
   if (first){ const {S,W,D,t,view}=first;
     player.x=S.x; player.z=S.z; player.y=S.y; yaw=Math.atan2(-(W.x-S.x),-(W.z-S.z)); fpPitch=-0.1;
+    setGalSpawn({cx:S.cx,cz:S.cz,dx:(W.x-S.x)/(D||1),dz:(W.z-S.z)/(D||1)});
     spawnInfo={...S,tried:t+1,walk:W,ratio:W.L/D,view,ms:performance.now()-t0}; return; }
   spawnInfo={fallback:true,squares:sq.length,ms:performance.now()-t0};
-  if (sq.length){ const S=sq[0]; player.x=S.x; player.z=S.z; player.y=S.y; yaw=0; fpPitch=-0.1; return; }
+  if (sq.length){ const S=sq[0]; player.x=S.x; player.z=S.z; player.y=S.y; yaw=0; fpPitch=-0.1; setGalSpawn({cx:S.cx,cz:S.cz,dx:0,dz:-1}); return; }
   for (let r=0;r<10;r++) for (const i of (r?[-r,r]:[0])){
     const zt=coastOff(i*C)+60, j=Math.floor(zt/C);
     if (!vSegOn(i,j)) continue;
@@ -11368,13 +11550,16 @@ function nearDoors(rad){ const out=[]; for (const ch of nearbyChunks()) if (ch.d
 function doorsStep(dt){
   const r=player.r+0.04;
   for (const D of nearDoors(3)){
-    if (!(D.owner||D).room || Math.abs(player.y-D.fl)>1.2) continue;
+    if (D.stay || !(D.owner||D).room || Math.abs(player.y-D.fl)>1.2) continue;
     let d=leafDist(D,D.a,player.x,player.z); if (d>=r) continue;
     const t=leafAng(D,D.a), px=player.ox-D.hx, pz=player.oz-D.hz, dLx=-Math.sin(t)*D.s, dLz=-Math.cos(t)*D.s;
     const dir=(px*dLx+pz*dLz)>0?-1:1, lim=clamp(D.a+dir*4*dt,-DOOR_MAX,DOOR_MAX); let a=D.a;
     while (d<r && (dir>0?a<lim:a>lim)){ a=dir>0?Math.min(lim,a+0.01):Math.max(lim,a-0.01); d=leafDist(D,a,player.x,player.z); }
     if (a!==D.a){ if (D.a===0) sndPlay('door_open','world',[D.hx,D.y+1,D.hz]); D.av=(a-D.a)/dt*0.5; D.a=a; D.idle=0; doorsMoving.add(D); doorSet(D); }
   }
+  // a gallery's doors swinging open: eased out to the angle at which they stand, with the sound of a door opening
+  for (const D of galSwing){ if (D.idx<0 || !D.owner.room) continue; if (D.a===0) sndPlay('door_open','world',[D.hx,D.y+1,D.hz]);
+    D.a=Math.min(D.stay,D.a+Math.max(0.02,(D.stay-D.a)*2.2*dt)); doorSet(D); if (D.a>=D.stay) galSwing.delete(D); }
   for (const D of doorsMoving){
     D.idle+=dt;
     const hold=Math.hypot(player.x-D.hx,player.z-D.hz)<D.lw+player.r+0.15;
@@ -11411,7 +11596,8 @@ function playerRadius(dt){
 /* ---------- rooms ---------- */
 // built for the nearest enterable houses, a few at a time, and taken down again as the player moves away
 const rooms=new Set(); let roomScan=0;
-function disposeRoom(D){ if (!D.room) return; world.remove(D.room); D.room.geometry.dispose(); if (D.room.material!==matR) D.room.material.dispose(); for (const c of D.room.children) c.geometry.dispose(); D.room=null; D.flames=null; rooms.delete(D); }
+function disposeRoom(D){ if (!D.room) return; world.remove(D.room); D.room.geometry.dispose(); if (D.room.material!==matR) D.room.material.dispose(); for (const c of D.room.children){ c.geometry.dispose(); if (D.texs && !c.userData.shared) c.material.dispose(); }
+  if (D.texs){ for (const t of D.texs) t.dispose(); D.texs=null; D.pics=null; } D.room=null; D.flames=null; rooms.delete(D); }
 function roomsUpdate(dt){
   if (doorsDirty) doorsRebuild();
   for (const D of rooms){ const U=D.room.material.userData.U; if (!U || !D.lights) continue;
@@ -11424,7 +11610,7 @@ function roomsUpdate(dt){
   cand.sort((a,b)=>a[0]-b[0]); const want=new Set(cand.filter(c=>c[0]<26).slice(0,ROOM_MAX).map(c=>c[1]));
   const short=[...want].some(D=>!D.room);
   for (const D of rooms) if (!live.has(D) || (!want.has(D) && (short || Math.hypot(D.x-player.x,D.z-player.z)>30))) disposeRoom(D);
-  for (const D of want) if (!D.room && rooms.size<ROOM_MAX-1){ D.room=D.kind==='church'?buildChurch(D):new THREE.Mesh(buildRoomGeo(D),makeRoomMaterial(false)); setRoomLights(D); D.room.position.set(D.x,0,D.z); D.room.updateMatrix(); D.room.matrixAutoUpdate=false;
+  for (const D of want) if (!D.room && rooms.size<ROOM_MAX-1){ D.room=D.kind==='church'?buildChurch(D):D.kind==='gallery'?buildGallery(D):new THREE.Mesh(buildRoomGeo(D),makeRoomMaterial(false)); setRoomLights(D); D.room.position.set(D.x,0,D.z); D.room.updateMatrix(); D.room.matrixAutoUpdate=false;
     if (D.glassGB && D.glassGB.p.length){ const g=new THREE.Mesh(D.glassGB.geometry(D.x,D.z),glassMat); g.renderOrder=5; D.room.add(g); } D.glassGB=null;
     world.add(D.room); rooms.add(D); break; }
   // each box is [u,v,half width,half depth,top,wall]: the ground is cut away a further 'wall' beyond it, 2 cm short
@@ -11435,7 +11621,7 @@ function roomsUpdate(dt){
   roomClip.uRoomN.value=n;
   let m=0; for (const D of rooms){ if (m>=ROOM_MAX) continue; const [cx,cz]=[D.x,D.z];
     winClip.uWinA.value[m].set(cx-ORIGIN.x,cz-ORIGIN.z,Math.cos(D.rot),Math.sin(D.rot));
-    winClip.uWinB.value[m].set(D.w/2+0.3,D.d/2+0.3,D.base-0.5,D.kind==='church'?D.base+D.h:D.kind==='lighthouse'?D.base+D.H-0.5:D.base+D.top+0.1); m++; }
+    winClip.uWinB.value[m].set(D.w/2+0.3,D.d/2+0.3,D.base-0.5,D.kind==='church'||D.kind==='gallery'?D.base+D.h:D.kind==='lighthouse'?D.base+D.H-0.5:D.base+D.top+0.1); m++; }
   winClip.uWinN.value=m;
 }
 const ROOM_WALLS=['#f2ece2','#efe6d6','#f4efe6','#ece3d3','#f1e7d8'].map(hex), ROOM_DADO=['#b9a27e','#8fa79a','#9fb0bf','#c39a7a','#a8a08a'].map(hex);
@@ -11635,6 +11821,83 @@ function buildRoomGeo(D){
 /* ---------- the inside of a church ---------- */
 let churchLit=null;
 const setChurchU=()=>{ const C=churchLit; if (C) churchU.uCh.value.set(C.x-QORIGIN.x,C.z-QORIGIN.z,Math.cos(C.rot),Math.sin(C.rot)); };
+// the inside of a gallery: whitewashed walls and gables, a floor of pale limestone, the room open to the roof (boarding
+// on a ridge beam and tie beams) with the skylights' panes in it, an oak bench down the middle, and the pictures, each
+// in a black frame (a photograph in a white mount within it) with a brass picture light above it. The pictures are
+// meshes of their own (C.pics), each knowing the photo or artwork it shows.
+function buildGallery(C){
+  const gb=new GB(0), H=mat(C.x,C.base,C.z,1,1,1,C.rot), ao=C.base; C.seats=[];
+  const {W,L,h,iw,rise}=C, hw=W/2, hl=L/2, zf=hl-WTC, zb=-hl+WTC, F=CF, sky=GAL_SKY.map(z=>z*L/11);
+  const white=hex('#f8f7f3'), floorC=hex('#ddd3c1'), boards=hex('#efe9de'), wood=hex('#6e4e33'), black=hex('#1b1b1d'), brass=hex('#9a7a3c'), oak=hex('#9a7550');
+  const quads=(fn,col,surf,aob=ao)=>{ const A=[]; fn(A); gb.add(triTpl(A),H,col,aob,surf); };
+  const B=(x,y,z,sx,sy,sz,col,surf=0,ry=0)=>gb.add(T.box, mm(H,mat(x,y,z,sx,sy,sz,ry)), col, ao, surf);
+  const BC=(x,y,z,sx,sy,sz,col,ry=0,rx=0,rz=0)=>gb.add(T.boxC, mm(H,mat(x,y,z,sx,sy,sz,ry,rx,rz)), col, null);
+  const a=Math.atan2(rise,hw), yE=h+(WTC)*Math.tan(a)-0.12, yA=h+rise-0.14/Math.cos(a)-0.02, ix=x=>yE+(iw-Math.abs(x))*Math.tan(a);
+  quads(A=>q3n(A,[-iw,F,zb],[iw,F,zb],[iw,F,zf],[-iw,F,zf],[0,1,0]), floorC, SS);
+  // the walls up to the eaves, and the gables under the open roof
+  quads(A=>{ for (const sx of [-1,1]) faceHoles(A,(u,y)=>[sx*iw,y,u],[-sx,0,0],zb,zf,F,yE,[],[]);
+    faceHoles(A,(u,y)=>[u,y,zf],[0,0,-1],-iw,iw,F,yE,[],[CHURCH_DOOR]); faceHoles(A,(u,y)=>[u,y,zb],[0,0,1],-iw,iw,F,yE,[],[]);
+    for (const [z,nz] of [[zf,-1],[zb,1]]) q3n(A,[-iw,yE,z],[iw,yE,z],[0,yA,z],[-0.0001,yA,z],[0,0,nz]); }, white, 0, null);
+  // the boarding under the tiles, with an opening under each skylight, the sides of the opening up to the roof, and
+  // the glass in the roof
+  const su=(u,y,sx)=>[sx*(iw-u*iw),yE+u*(yA-yE),y], skw=gallerySkylights(W,L), ta=Math.tan(a);   // u from the eave (0) to the ridge (1)
+  quads(A=>{ for (const sx of [-1,1]) faceHoles(A,(v,u)=>su(u,v,sx),[-sx*rise,-hw,0],zb,zf,0,1,skw.map(([z0,z1,x0,x1])=>[z0,z1,1-x1/iw,1-x0/iw]),[]); }, boards, SW);
+  quads(A=>{ for (const sx of [-1,1]){ const yb=x=>yE+(iw-x)/iw*(yA-yE), yr=x=>h+(hw-x)*ta+0.02;
+    for (const r of skw) rectReveal(A,(z,x)=>[sx*x,yb(x),z],(z,x)=>[sx*x,yr(x),z],r); } }, white, 0);
+  { const P=[], LPw=(x,y,z)=>new THREE.Vector3(x,y,z).applyMatrix4(H);
+    for (const sx of [-1,1]){ const N=[sx*Math.sin(a),Math.cos(a)], at=(z,X)=>LPw(sx*X+N[0]*0.1,h+(hw-X)*ta+N[1]*0.1,z);
+      for (const [z0,z1,x0,x1] of skw){ const v=[at(z0,x0),at(z1,x0),at(z1,x1),at(z0,x1)]; for (const k of [0,1,2,0,2,3]) P.push(v[k].x-C.x,v[k].y,v[k].z-C.z); } }
+    const gg=new THREE.BufferGeometry(); gg.setAttribute('position',new THREE.Float32BufferAttribute(P,3)); gg.computeVertexNormals();
+    C.glass=new THREE.Mesh(gg,glassMat); C.glass.renderOrder=5; C.glass.userData.shared=true; }
+  // the ridge beam and the tie beams
+  B(0,yA-0.3,0,0.2,0.26,zf-zb,wood,SW); for (const z of [-3.3,0,3.3]) B(0,h-0.24,z,2*iw,0.22,0.2,wood,SW);
+  // the bench down the middle, on iron ends; a seat along each side of it
+  B(0,F+0.42,-0.3,0.55,0.06,2.6,oak,SW); for (const z of [-1.4,0.8]) B(0,F,z,0.45,0.42,0.08,black);
+  for (const sx of [-1,1]) for (const z of [-1.0,-0.3,0.4]) C.seats.push(seatOf(mm(H,mat(sx*0.12,F+0.48,z,1,1,1,sx*Math.PI/2)),0,0,0,0,0.48,'bench',0));
+  // the pictures: up to two on the back wall, and the rest shared between the side walls, up to three on each, the
+  // right-hand wall taking the odd one; each wall's pictures are spaced evenly along it, so that one alone hangs in
+  // the middle
+  C.pics=[]; C.texs=[]; const pics=galleryPictures().slice(0,8), lights=[], slots=[];
+  { const n=pics.length, nb=Math.min(2,n), nr=Math.min(3,Math.ceil((n-nb)/2)), nl=Math.min(3,n-nb-nr);
+    for (let i=0;i<nb;i++) slots.push({x:-iw+2*iw*(i+0.5)/nb,z:zb,ry:0,wmax:Math.min(2.1,2*iw/nb-0.5)});
+    for (let i=0;i<Math.max(nr,nl);i++) for (const [sx,k] of [[1,nr],[-1,nl]]) if (i<k)
+      slots.push({x:sx*iw,z:zb+(zf-zb)*(i+0.5)/k,ry:-sx*Math.PI/2,wmax:Math.min(2.0,(zf-zb)/k-0.5)}); }
+  pics.forEach((pic,k)=>{ const S=slots[k], img=pic.image, ar=(img.width||4)/(img.height||3); if (!S) return;
+    let ph=1.3, pw=ph*ar; if (pw>S.wmax){ pw=S.wmax; ph=pw/ar; }
+    const m=pic.painting?0:Math.min(pw,ph)*0.12, fw=pic.painting?0.07:0.025, ow=pw+2*(m+fw), oh=ph+2*(m+fw), y0=F+1.6;
+    const Mf=mm(H,mat(S.x,y0,S.z,1,1,1,S.ry)), P=(x,y,z)=>mm(Mf,mat(x,y,z,1,1,1));
+    for (const [sx2,sy2,x,y] of [[ow,fw,0,oh/2-fw/2],[ow,fw,0,-oh/2+fw/2],[fw,oh-2*fw,ow/2-fw/2,0],[fw,oh-2*fw,-ow/2+fw/2,0]]) gb.add(T.boxC, mm(P(x,y,0.028),mat(0,0,0,sx2,sy2,0.045)), black, null);
+    gb.add(T.boxC, mm(P(0,0,0.006),mat(0,0,0,ow,oh,0.012)), m?hex('#fbfaf6'):black, null);
+    // the picture light: a plate, an arm and a hood
+    const ly=oh/2+0.16; gb.add(T.boxC, mm(P(0,ly,0.01),mat(0,0,0,0.1,0.07,0.02)), brass, null);
+    gb.add(T.boxC, mm(P(0,ly+0.05,0.14),mat(0,0,0,0.02,0.02,0.28,0,-0.35)), brass, null);
+    gb.add(T.boxC, mm(P(0,ly+0.1,0.27),mat(0,0,0,Math.min(0.9,ow*0.55),0.05,0.09,0,0.6)), brass, null);
+    // the picture itself, as a mesh of its own on the face of the mount
+    const tex=galleryTexture(img);
+    const pm=new THREE.Mesh(new THREE.PlaneGeometry(pw,ph),new THREE.MeshBasicMaterial({map:tex,color:new THREE.Color(0.92,0.92,0.92)}));
+    const Mw=P(0,0,0.0135); Mw.decompose(pm.position,pm.quaternion,pm.scale); pm.position.x-=C.x; pm.position.z-=C.z; pm.position.y+=0;
+    pm.userData.picture=pic.item; pm.userData.size=[pw,ph]; C.pics.push(pm);
+    lights.push([S,y0+ly]); });
+  // the gallery's light: the doorway, the skylights and the picture lights
+  C.lights=[]; const yl=-1, yh=h+rise+2;
+  roomLightAt(C,1,0,1.6,zf,[0,0,-1],4.5,yl,yh);
+  for (const sx of [-1,1]) for (const [z0,z1,x0,x1] of skw){ const x=(x0+x1)/2; roomLightAt(C,0,sx*x,h+(hw-x)*ta,(z0+z1)/2,[0,-1,0],1.3,yl,yh,0.9); }
+  for (const [S,y] of lights){ const n=S.ry===0?[0,0,1]:[Math.sign(-S.x),0,0]; roomLightAt(C,2,S.x+n[0]*0.35,y,S.z+n[2]*0.35,null,2.2,yl,yh,0.75); }
+  if (!C.furn){ C.furn=true; const [wx,wz]=localToWorld(C,0,-0.3); C.walls.push({x:wx,z:wz,hw:0.3,hd:1.35,rot:C.rot,top:C.base+F+0.48}); }
+  const mesh=new THREE.Mesh(gb.geometry(C.x,C.z),makeRoomMaterial(false));
+  for (const pm of C.pics) mesh.add(pm);
+  mesh.add(C.glass);
+  return mesh;
+}
+// each picture's texture for the galleries: made once, no larger than 1024 pixels across, and kept for as long as the
+// picture is hung, however often the rooms are built again
+const galTex=new Map();
+function galleryTexture(img){ let t=galTex.get(img); if (t) return t;
+  const k=Math.min(1,1024/Math.max(img.width||1,img.height||1)), c=document.createElement('canvas');
+  c.width=Math.max(1,Math.round((img.width||1)*k)); c.height=Math.max(1,Math.round((img.height||1)*k)); c.getContext('2d').drawImage(img,0,0,c.width,c.height);
+  t=new THREE.CanvasTexture(c); t.colorSpace=THREE.SRGBColorSpace; t.anisotropy=4; galTex.set(img,t); return t; }
+// the pictures a gallery hangs, best first: the paintings kept, newest first, or the photographs where there are none
+function galleryPictures(){ let ph=[]; try{ ph=PHOTO.api.gallery; }catch(_){ return []; } return pickPictures(ph); }
 function buildChurch(C){
   const R=rng(Math.floor(C.seed*4294967296)), gb=new GB(0), H=mat(C.x,C.base,C.z,1,1,1,C.rot), ao=C.base; C.seats=[];
   const {W,L,h,iw,ra}=C, hw=W/2, hl=L/2, zf=hl-WTC, zb=-hl+WTC, F=CF, ar=C.ar, r=ar.r, rise=W*0.42;
@@ -11950,7 +12213,7 @@ function sndUpdate(dt){
   const open=room&&room.kind!=='church'?Math.min(1,Math.abs(room.a||0)):0;
   SNDS.inK=(SNDS.inK??0)+(((room||cabin)?1:0)-(SNDS.inK??0))*(1-Math.exp(-dt*4)); const iK=SNDS.inK*(1-0.6*open);
   // the reverb follows whether the listener is inside the bore, eased so it swells and dies away at the portals
-  const inCave=mode==='street'&&coveInCave(player.x,player.z,player.y), inBore=(inside&&railState(camera.position.x)==='tunnel')||(mode==='street'&&inTunnel(player.x,player.z,player.y))||(room&&room.kind==='church')||inCave?1:0; SNDS.tun=(SNDS.tun??0)+(inBore-(SNDS.tun??0))*(1-Math.exp(-dt*2.5)); const tK=SNDS.tun;
+  const inCave=mode==='street'&&coveInCave(player.x,player.z,player.y), inBore=(inside&&railState(camera.position.x)==='tunnel')||(mode==='street'&&inTunnel(player.x,player.z,player.y))||(room&&(room.kind==='church'||room.kind==='gallery'))||inCave?1:0; SNDS.tun=(SNDS.tun??0)+(inBore-(SNDS.tun??0))*(1-Math.exp(-dt*2.5)); const tK=SNDS.tun;
   // the listener is the camera
   _sl.copy(camera.position); camera.getWorldDirection(_sf);
   const L=ctx.listener;
@@ -12182,7 +12445,10 @@ addEventListener('keydown',e=>{ keys[e.code]=true;
   if (code==='PageDown'||(e.key==='PageDown'&&code!=='PageDown')){ e.preventDefault(); if (!e.repeat) setDrawLvl(-1); }
   if (code==='Home'||(e.key==='Home'&&code!=='Home')){ e.preventDefault(); if (!e.repeat) setDrawLvl(0); }
   if (code==='KeyO' && !e.repeat){ statsEl.hidden=!statsEl.hidden; statsT=0; }
-  if (code==='KeyN' && !e.repeat){ hour=nightU.value>0.5?10:22; SNDS.hour=Math.floor(hour); }   // to night, or back to day, without the bells striking the jump
+  // Shift and N: the moon a crescent, or full again
+  if (code==='KeyN' && e.shiftKey && !e.repeat){ skyU.uCres.value=skyU.uCres.value>0.5?0:1; updateDaylight(); toast('Moon',skyU.uCres.value>0.5?'Crescent':'Full');
+    try{ localStorage.setItem('coast.moon',skyU.uCres.value>0.5?'crescent':'full'); }catch(_){} }
+  else if (code==='KeyN' && !e.repeat){ hour=nightU.value>0.5?10:22; SNDS.hour=Math.floor(hour); }   // to night, or back to day, without the bells striking the jump
   if (code==='KeyM' && !e.repeat) setMuted(!muted);
   if (code==='KeyK' && !e.repeat){ PEOPLE.setLevel(PEOPLE.level+(e.shiftKey?-1:1)); toast('Population level',`${PEOPLE.level}`); }   // 0, no one, to 9
   // Tab sets full screen
@@ -12264,7 +12530,25 @@ addEventListener('pointerdown',e=>{ if (helpEl.hidden || helpEl.contains(e.targe
 for (const t of ['mousedown','click','touchstart']) addEventListener(t,e=>{ if (performance.now()-helpShutT<600){ e.stopPropagation(); if (t!=='touchstart') e.preventDefault(); } },true);
 function lockPointer(){ if (!helpEl.hidden || !shareEl.hidden) return; try{ const p=canvas.requestPointerLock(); if (p&&p.catch) p.catch(()=>{}); }catch(_){} }
 // with the camera raised the mouse is never captured, so that its controls on the screen can be clicked: a drag turns the view
-canvas.addEventListener('mousedown',e=>{ dragging=true; lx=e.clientX; ly=e.clientY; if (mode!=='above'&&started&&!PHOTO.on&&document.pointerLockElement!==canvas) lockPointer(); });
+// in a gallery, with the pointer free, a click on a picture goes to the place and time it was taken (as Go there in the
+// gallery does), the picture growing from where it hangs on the screen; the pointer over a picture shows a hand
+const galRay=new THREE.Raycaster(), galNdc=new THREE.Vector2();
+function galleryPick(e){
+  const D=indoors; if (!D || D.kind!=='gallery' || !D.pics || !D.pics.length || document.pointerLockElement===canvas) return null;
+  const r=canvas.getBoundingClientRect(); galNdc.set((e.clientX-r.left)/r.width*2-1,-((e.clientY-r.top)/r.height)*2+1);
+  galRay.setFromCamera(galNdc,camera); galRay.far=14; const hit=galRay.intersectObjects(D.pics)[0]; return hit?hit.object:null; }
+function galleryClick(e){
+  const m=galleryPick(e); if (!m) return false;
+  const [pw,ph]=m.userData.size, r=canvas.getBoundingClientRect(); let x0=1e9, y0=1e9, x1=-1e9, y1=-1e9;
+  for (const [u,v] of [[-1,-1],[1,-1],[1,1],[-1,1]]){ const q=m.localToWorld(new THREE.Vector3(u*pw/2,v*ph/2,0)).project(camera);
+    const sx=r.left+(q.x+1)/2*r.width, sy=r.top+(1-q.y)/2*r.height; x0=Math.min(x0,sx); y0=Math.min(y0,sy); x1=Math.max(x1,sx); y1=Math.max(y1,sy); }
+  const it=m.userData.picture, St=PHOTO.api.studio;
+  if (St && typeof St.goThere==='function') St.goThere(it.p,it.w,{left:x0,top:y0,width:x1-x0,height:y1-y0});
+  else { const sc=(it.w&&it.w.meta&&it.w.meta.scene)||(it.p.meta&&it.p.meta.scene); if (sc) goThere(sc,null); }   // a gallery module from before goThere
+  return true; }
+canvas.addEventListener('mousemove',e=>{ if (document.pointerLockElement===canvas){ if (canvas.style.cursor) canvas.style.cursor=''; return; }
+  const c=galleryPick(e)?'pointer':''; if (canvas.style.cursor!==c) canvas.style.cursor=c; });
+canvas.addEventListener('mousedown',e=>{ if (e.button===0 && galleryClick(e)) return; dragging=true; lx=e.clientX; ly=e.clientY; if (mode!=='above'&&started&&!PHOTO.on&&document.pointerLockElement!==canvas) lockPointer(); });
 addEventListener('mouseup',()=>dragging=false);
 /* a double click on the ground in the bird's-eye view goes down to street level at that spot, facing the same way */
 function surfaceTopAt(x,z){ let g=walkGround(x,z,1e4); const cx=Math.floor(x/C), cz=Math.floor(z/C);
@@ -13796,7 +14080,12 @@ function diveRender(){
   const v=[farMesh.visible,farGlow.visible,outMesh.visible,sky.visible]; farMesh.visible=farGlow.visible=outMesh.visible=sky.visible=false;
   try { return UW.render(renderer,scene,camera,diveAbove); } finally { [farMesh.visible,farGlow.visible,outMesh.visible,sky.visible]=v; } }
 // the camera, while it is raised, draws the frame through its lens instead
-const PHOTO=createPhoto({renderer,scene,camera,canvas,origin:ORIGIN,onFov:()=>glowScale(),allowed:()=>started,onShutter:()=>sndPlay('camera_shutter','player',null),quickOk:()=>!islandShown(),cameraKeyOk:()=>mode!=='swim',sceneOf:()=>sceneState(),goTo:goThere,onCopy:ok=>toast('Picture',ok?'Copied to the clipboard':'Could not be copied to the clipboard')});
+const PHOTO=createPhoto({renderer,scene,camera,canvas,origin:ORIGIN,onFov:()=>glowScale(),allowed:()=>started,onShutter:()=>sndPlay('camera_shutter','player',null),quickOk:()=>!islandShown(),cameraKeyOk:()=>mode!=='swim',sceneOf:()=>sceneState(),goTo:goThere,onChange:()=>galleryChanged(),onCopy:ok=>toast('Picture',ok?'Copied to the clipboard':'Could not be copied to the clipboard')});
+// the galleries also look at the pictures kept once a second, so that they follow them even where the camera's
+// notice of a change does not come (a camera module kept by the browser from before it gave one)
+{ let sig=''; setInterval(()=>{ let g=[]; try{ g=PHOTO.api.gallery; }catch(_){ return; }
+    const k=g.length+':'+g.reduce((n,p)=>n+p.works.length,0)+':'+(g.length?g[g.length-1].time:0);
+    if (k!==sig){ const first=sig===''; sig=k; if (!first || g.length) galleryChanged(); } },1000); }
 function renderMain(){
   if (PHOTO.on && PHOTO.renderLens()) return;
   const tilt=tiltShift && (mode==='above'||mode==='chase'), ao=aoDue();
@@ -14135,7 +14424,14 @@ const PEOPLE=createPeople({ world, origin:ORIGIN, camera, C, topAt, heightAt,
 wrapHooks.push(()=>PEOPLE.reset());
 const mobPerf={t:0,n:0,sum:0,good:0};
 let paused=false, last=performance.now(), time=0, firstCam=true, eyeY=null, aboveY=null; const perf={t:0,n:0,sum:0,good:0};
+// a frame that fails part way is reported once and the next frame still comes, so that one fault does not stop the
+// world for good
+let frameFault=null;
 function frame(now){
+  try { frame0(now); }
+  catch(err){ if (!frameFault){ frameFault=err; console.error('[frame] a frame failed:',err); } requestAnimationFrame(frame); }
+}
+function frame0(now){
   // P pauses the world (trains, ferries, boats, the sea, the lighthouses, the cats and the time of day) while the
   // player still walks, flies and looks about; wdt is the world's step
   if (seeding){ requestAnimationFrame(frame); return; }
@@ -15506,7 +15802,7 @@ if (TOUCH){
   },250);
 }
 // the shape of the land, for tests: the mountains, the islands and how each block is used
-window.__village.terrain={baseH,mtnH,mtLevel,mtSpine,mtCrest,halfW,ridgeZ,coastZ,highGround,isVillage,chunkKind,villageOf,islandInfo,islandRoute,islandLight,ISL,WRAP_Z,railZ,railY,railState,stationInfo,ST_SP};
+window.__village.terrain={isGalleryBlock,gallerySites,get galSpawn(){ return galSpawn; },baseH,mtnH,mtLevel,mtSpine,mtCrest,halfW,ridgeZ,coastZ,highGround,isVillage,chunkKind,villageOf,islandInfo,islandRoute,islandLight,ISL,WRAP_Z,railZ,railY,railState,stationInfo,ST_SP};
 // the boats' footprints, for tests: no two moored or anchored boats may overlap, nor lie off a beach with sunbeds
 window.__village.boats={BOATS,boatBox,fishBoats,nearSunbeds,obbOverlap,beachStretch,BCH_SP,harbourInfo,HARB};
 </script>

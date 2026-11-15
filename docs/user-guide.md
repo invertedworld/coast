@@ -90,7 +90,7 @@ When **7** follows a whale that is about to breach, the camera comes up above th
 
 ## Time
 
-The clock runs continuously. **T** held speeds time forty times; **Shift** and **T** held run it backwards at the same rate. **N** changes to 22:00, or to 10:00 if it is already night, and the clock runs on from there. **P** pauses the world: trains, ferries, boats, whales, dolphins, the sea, the lighthouse beams, cats, gulls and the time of day stand still, while the player may still move and look about. **P** again resumes.
+The clock runs continuously. **T** held speeds time forty times; **Shift** and **T** held run it backwards at the same rate. **N** changes to 22:00, or to 10:00 if it is already night, and the clock runs on from there. **Shift** and **N** make the moon a thin crescent, and pressing them again makes it full; a crescent moon gives less light. The choice is remembered by the browser. **P** pauses the world: trains, ferries, boats, whales, dolphins, the sea, the lighthouse beams, cats, gulls and the time of day stand still, while the player may still move and look about. **P** again resumes.
 
 At night the stars turn slowly across the sky, and while sailing the dinghy or staying at a camp a shooting star now and then streaks across it, about every 6 to 20 seconds.
 
@@ -173,6 +173,12 @@ The woodcut is printed as from a carved block of wood, in black ink on off-white
 **Create** makes the artwork, which is shown being made in the large preview, with its progress beneath the settings. The style and the settings may be changed and the artwork rendered again as often as required; a new render, a change of style or leaving the Art Studio stops a render in progress, and the square button beside the progress bar stops it directly. **Save** keeps the finished artwork in the gallery beside its photograph. It is available only while a finished artwork has not yet been saved.
 
 The arrow at the top left returns to the gallery, as does **Esc**. If the finished artwork has not been saved, a choice is offered first: **Save** keeps it, **Delete** discards it and **Cancel** remains in the Art Studio.
+
+### Art galleries
+
+Some of the larger towns have an art gallery beside one of their squares, no more than one to a town. The town in which the game begins always has one, beside the square on which the player starts. The gallery is whitewashed and has a tiled roof with skylights; its arched doorway, with blue doors, faces the square, with a hanging basket on either side and a signboard of an easel above it. Inside, the pictures kept are hung on the walls: the paintings, the newest first, or the photographs where no painting has been made. Up to eight are hung, each lit by a picture light, and there is a bench in the middle of the room. While the pointer is not captured, a click on a picture travels to the place and time at which it was taken, as **Go there** does in the gallery.
+
+While no picture is kept, the doors of the galleries are shut and they cannot be entered; they open as soon as the first picture is taken.
 
 > **Note:** Photographs and artworks are kept in the browser's own storage. Clearing the browser's data for the site removes them; any that are to be kept for certain should be downloaded.
 

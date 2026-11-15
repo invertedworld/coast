@@ -104,7 +104,9 @@ function zoomPan(box, pick) {
   return { reset() { Z.s = 1; Z.x = Z.y = 0; const c = el(); if (c && !box.classList.contains('stack')) c.style.transform = ''; box.style.cursor = ''; } };
 }
 
-export function createGallery({ renderer, scene, camera, origin, onClose, onLoad, goTo = null }) {
+export function createGallery({ renderer, scene, camera, origin, onClose, onLoad, onChange = null, goTo = null }) {
+  // the pictures kept have changed: loaded, taken, deleted or painted
+  const changed = () => { if (onChange) try { onChange(); } catch (e) { console.warn(e); } };
   const photos = [];
   let count = 0, sel = null;   // sel: { p: photo, w: artwork or null }, the item shown
   // the items selected: the one shown, and more added with Cmd or Ctrl (one at a time) or Shift (a run of them)
@@ -308,10 +310,11 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
     const iw = Math.min(W - 2 * M - 2 * b, (H - 2 * M - 2 * b) * a), ih = iw / a, w = iw + 2 * b, h = ih + 2 * b;
     return { left: (W - w) / 2, top: (H - h) / 2, width: w, height: h }; };
   let going = false;
+  // from is the element the picture lies in, or the rectangle on the screen it covers ({ left, top, width, height })
   function goThere(p, w, from) {
     const sc = sceneOfItem(p, w); if (!sc || !goTo || going) return; going = true;
     const item = w || p, src = item.canvas, m = p.meta || {}, a = src.width / src.height;
-    const r = from.getBoundingClientRect(), f = goFrame(innerWidth, innerHeight, a);
+    const r = from.getBoundingClientRect ? from.getBoundingClientRect() : from, f = goFrame(innerWidth, innerHeight, a);
     const ov = document.createElement('div');
     ov.style.cssText = `position:fixed;inset:0;z-index:1000;background:${GO_GROUND};opacity:0;pointer-events:auto`;
     const c = document.createElement('canvas'); c.width = src.width; c.height = src.height; c.getContext('2d').drawImage(src, 0, 0);
@@ -390,6 +393,7 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
     const p = { n: ++count, canvas: c, meta, time: meta.time || Date.now(), works: [] };
     photos.push(p); store.put(p);
     while (photos.length > KEEP) store.del(photos.shift());
+    changed();
     if (!gal.hidden) build();
   }
 
@@ -428,7 +432,7 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
         }
         photos.sort((a, b) => a.time - b.time);
         if (!gal.hidden) build();
-        onLoad && onLoad();
+        onLoad && onLoad(); changed();
       } catch (e) { console.warn('The pictures kept could not be read:', e); }
     }
     return { put, del, load };
@@ -466,7 +470,7 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
         if (i >= 0){ photos.splice(i, 1); store.del(it); continue; }
         const p = photos.find(q => q.works.includes(it)); if (p){ p.works.splice(p.works.indexOf(it), 1); touched.add(p); } }
       for (const p of touched) if (photos.includes(p)) store.put(p);
-      sel = null; picked.clear(); build();
+      sel = null; picked.clear(); build(); changed();
     }
     else if (a === 'art' && sel && !sel.w) openArt(sel.p);
     else if (a === 'go' && sel && goTo) { const it = sel.w || sel.p; if (sceneOfItem(sel.p, sel.w)) goThere(sel.p, sel.w, big.contains(it.canvas) ? it.canvas : big); }
@@ -640,7 +644,7 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
   }
   function save() {
     const r = A.result; if (!r || A.saved || A.job) return;
-    r.p.works.push({ canvas: r.canvas, meta: r.canvas.photo, time: r.canvas.photo.time, style: r.style }); store.put(r.p);
+    r.p.works.push({ canvas: r.canvas, meta: r.canvas.photo, time: r.canvas.photo.time, style: r.style }); store.put(r.p); changed();
     A.saved = true; setState('Saved', 1, true); syncButtons(); build();
   }
   // leaving the Art Studio: an unsaved finished render is offered to be saved first; then() runs once it has closed
@@ -685,6 +689,6 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
     return true;
   }
 
-  return { add, open, close, download, handleKey, photos, get isOpen() { return !gal.hidden; }, get artOpen() { return !art.hidden; },
+  return { add, open, close, download, handleKey, photos, goThere, get isOpen() { return !gal.hidden; }, get artOpen() { return !art.hidden; },
     get settings() { return QS; }, openArt: i => openArt(photos[i]), select: (i, j) => select(photos[i], j == null ? null : photos[i].works[j]) };
 }
