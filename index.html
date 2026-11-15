@@ -199,6 +199,7 @@ function goThereFrame(W,H,a){ const M=Math.round(Math.min(W,H)*0.07), b=6;
     </div>
     <div class="group"><h3>Camera</h3>
       <div class="row"><span><kbd>+</kbd><kbd>−</kbd></span><span>Zoom in and out</span></div>
+      <div class="row"><span><kbd>Shift</kbd>+<kbd>+</kbd><kbd>−</kbd></span><span>Field of view</span></div>
       <div class="row"><span><kbd>B</kbd></span><span>Tilt-shift effect</span></div>
       <div class="row"><span><kbd>Shift</kbd>+<kbd>B</kbd></span><span>Ambient occlusion</span></div>
     </div>
@@ -269,7 +270,7 @@ function goThereFrame(W,H,a){ const M=Math.round(Math.min(W,H)*0.07), b=6;
       <div class="row"><label for="padSens">Sensitivity</label><span><input type="range" id="padSens" min="0.25" max="3" step="0.05"> <output id="padSensV"></output></span></div>
     </div>
   </div>
-  <div class="foot"><label class="fov">Field of view <input type="range" id="fovIn" min="50" max="100" step="1"> <output id="fovOut"></output></label><button type="button" class="about-btn" data-a="about">About</button><button type="button" data-a="help-close">Close</button></div>
+  <div class="foot"><label class="fov">Field of view <input type="range" id="fovIn" min="50" max="125" step="1"> <output id="fovOut"></output></label><button type="button" class="about-btn" data-a="about">About</button><button type="button" data-a="help-close">Close</button></div>
 </aside>
 <aside class="about" id="about" hidden role="dialog" aria-label="About">
   <h2>Coast</h2>
@@ -2174,7 +2175,7 @@ function kind0(cx,cz){
    is divided at fixed lines VG_W blocks apart, so that the result never depends on the block it was reached from.
    While a village's churches are being chosen its blocks report the kind they would have without them (V.pending),
    and anything cached for the chosen blocks in that time is forgotten afterwards. */
-const HAMLET=6, TOWN=150, PARISH=100, CH_APART=8.5, VG_MAX=8000, VG_W=120, vmCache=new Map(), ckCache=new Map(), TOWN_TIER={church:2,piazza:1,quarter:0};
+const HAMLET=6, TOWN=60, PARISH=40, CH_APART=8.5, VG_MAX=8000, VG_W=120, vmCache=new Map(), ckCache=new Map(), TOWN_TIER={church:2,piazza:1,quarter:0};
 let vgPend=0;
 // the deterministic places tried for a church once the block's own random tries have failed: the nave set beside the
 // square in each of 24 directions, at five lengths from 16 m down to the 10.5 m of the shortest random try
@@ -2744,9 +2745,11 @@ function galleryChanged(){
   for (const D of [...rooms]) if (D.kind==='gallery' && D.room){ const old=D.room, texs=D.texs;
     const m=buildGallery(D); m.position.set(D.x,0,D.z); m.updateMatrix(); m.matrixAutoUpdate=false; world.add(m); D.room=m; setRoomLights(D);
     world.remove(old); old.geometry.dispose(); old.material.dispose(); for (const c of old.children){ c.geometry.dispose(); if (!c.userData.shared) c.material.dispose(); }
-    for (const t of texs||[]) t.dispose(); }
-  // the textures of pictures no longer hung are let go
+    for (const t of texs||[]) if (![...galTex.values()].includes(t)) t.dispose(); }
+  // the textures of pictures no longer hung are let go, and those of the pictures hung now are made and sent to the
+  // graphics card at once, so that a gallery is ready with its pictures whenever it is built
   const live=new Set(pics.map(p=>p.image)); for (const [img,t] of galTex) if (!live.has(img)){ t.dispose(); galTex.delete(img); }
+  for (const p of pics.slice(0,8)) try { renderer.initTexture(galleryTexture(p.image)); } catch(e){ console.warn('A picture for the galleries could not be prepared:',e); }
 }
 // the outside of the gallery, in the frame of its footprint ob on the square's level; at full detail, when open, it can
 // be entered; when not, its doors are shut
@@ -3710,7 +3713,7 @@ function addHouse(gb,ch,R,o){
   if (roof==='front') gableRoof(gb,H,w,d,h,rise=w*(0.36+R()*0.12),wall,roofC);
   else if (roof==='side') gableRoof(gb,mm(H,mat(0,0,0,1,1,1,Math.PI/2)),d,w,h,rise=d*(0.32+R()*0.1),wall,roofC);
   else if (roof==='hip') hipRoof(gb,H,w,d,h,rise=Math.min(w,d)*(0.45+R()*0.2),roofC);
-  else if (roof==='spire') hipRoof(gb,H,w,d,h,rise=Math.min(w,d)*(1.3+R()*0.6),o.spireCol||C_.teal);
+  else if (roof==='spire') hipRoof(gb,H,w,d,h,rise=Math.min(w,d)*(1.3+R()*0.6),o.spireCol||roofC);
   else if (roof==='flat'){
     gb.add(T.boxC, mm(H,mat(0,h,0,w+0.25,0.3,d+0.25)), C_.trim, null);
     if (o.crenel){ const n=Math.max(2,Math.round(w/0.9));
@@ -4652,8 +4655,8 @@ function genChunk(cx,cz,lod=0){
         ch.obbs.push({x:cxp,z:czp,hw:W/2,hd:L/2,rot,top:Infinity,room:CR||undefined}); ch.place.push(ob); ch.churchOb=ob;
         if (!CR) ch.circles.push({x:cxp+dx*(L/2),z:czp+dz*(L/2),r:W*0.35,top:Infinity});   // the apse, behind the altar end
         if (tower){ const th=17+R()*6, top=R(); (ch.snd||(ch.snd=[])).push({id:'church_bell',x:tower.x,y:heightAt(tower.x,tower.z)+th-2,z:tower.z});
-          house({x:tower.x,z:tower.z,rot,w:S,d:S,h:th,wall:shade(C_.stone,R,0.04),stoneWalls:true,roof:top<0.4?'flat':'spire',crenel:top<0.2,flag:top<0.4,
-            spireCol:R()<0.55?C_.teal:roofC,tower:true,belfry:true,noDoor:true}); }
+          house({x:tower.x,z:tower.z,rot,w:S,d:S,h:th,wall:shade(C_.stone,R,0.04),stoneWalls:true,roof:'spire',crenel:false,flag:false,
+            spireCol:(R(),C_.teal),tower:true,belfry:true,noDoor:true}); }
       }
       if (!placed) ch.kind='piazza';
       ch.name='Chiesa di '+saint; ch.label=P.peak?'Hilltop church':'Parish church'; ch.desc=P.peak?'Parish church and campanile on the summit of a steep hill town, with views to both seas.':'Church square with a campanile beside the facade.';
@@ -4913,7 +4916,7 @@ function genChunk(cx,cz,lod=0){
       let adv;
       if (canPlace({x:ox,z:oz,hw:w/2,hd:d/2,rot})){
         const tower=!rd.alley && R()<0.05+k*0.04;
-        if (tower){ const S=Math.min(w,4.2); house({x:ox,z:oz,rot,w:S,d:S,h:(11+R()*5)*hMul,roof:R()<0.5?'flat':'spire',crenel:R()<0.5,tower:true,belfry:R()<0.4,spireCol:R()<0.5?C_.teal:null}); adv=S; }
+        if (tower){ const S=Math.min(w,4.2); house({x:ox,z:oz,rot,w:S,d:S,h:(11+R()*5)*hMul,roof:R()<0.5?'flat':'spire',crenel:R()<0.5,tower:true,belfry:R()<0.4,spireCol:(R(),undefined)}); adv=S; }   // its spire red: a blue roof is a church's
         else { house({x:ox,z:oz,rot,w,d,h:(rd.alley?4.2+Math.floor(R()*2)*2.4:4.3+Math.floor(R()*2.6)*2.4+R()*0.5)*hMul,roof:roofKind()}); adv=w; }
         const g=R(); adv+=g<0.1?1.7+R()*0.8:g<0.3?R()*0.35:0.02;
       } else adv=0.9;
@@ -5468,7 +5471,7 @@ function wrapWorld(){
 const FOG=hex('#9fc0dc');
 scene.fog=new THREE.Fog(FOG,90,1500); scene.background=FOG.clone();
 // the field of view at street level, in the water, at the helm and in a coach (vertical, in degrees), set on the help panel
-let FOV=70; try{ const v=+localStorage.getItem('coast.fov'); if (v>=50&&v<=100) FOV=v; }catch(_){}
+let FOV=70; try{ const v=+localStorage.getItem('coast.fov'); if (v>=50&&v<=125) FOV=v; }catch(_){}
 const camera=new THREE.PerspectiveCamera(FOV,1,0.3,3600); world.add(camera);
 // the torch (F, under the water or on foot): a spot carried with the eye, pointing where it looks. It stays in the scene
 // at nothing while off, so that turning it on does not make every material compile again
@@ -7009,7 +7012,19 @@ const teleD=(cx,cz)=>teleRing?Math.max(Math.abs(cx-teleRing.cx),Math.abs(cz-tele
 // in outline beyond (teleView, kept by teleAim), so that what is seen through it does not vanish when the point it
 // looks at moves on as the view is turned
 let teleView=null, teleViewVer=0;
+// In the bird's-eye view the blocks round the ground under the camera have rings of detail of their own as well (camRing),
+// widened by the camera's height above the ground, so that the houses between the camera and the point it looks at
+// keep their detail, and do not vanish, as the view draws back from that point
+let camRing=null;
+function camRingSet(){
+  if (mode!=='above'){ camRing=null; return; }
+  const cx=Math.floor(camera.position.x/C), cz=Math.floor(camera.position.z/C), h=Math.floor(Math.max(0,camera.position.y-Math.max(0,heightAt(camera.position.x,camera.position.z)))/C*0.75);
+  // only the blocks before the camera, towards the point it looks at, the way it faces taken to the nearest sixteenth of
+  // a turn
+  const s16=Math.round(Math.atan2(player.x-camera.position.x,player.z-camera.position.z)/(Math.PI/8));
+  if (!camRing || camRing.cx!==cx || camRing.cz!==cz || camRing.h!==h || camRing.s!==s16) camRing={cx,cz,h,s:s16,fx:Math.sin(s16*Math.PI/8),fz:Math.cos(s16*Math.PI/8)}; }
 function wantAt(cx,cz,pcx,pcz){ let w=wantLod(cx-pcx,cz-pcz);
+  if (camRing && (cx-camRing.cx)*camRing.fx+(cz-camRing.cz)*camRing.fz>=-1.5){ const d=Math.max(Math.abs(cx-camRing.cx),Math.abs(cz-camRing.cz),camRing.h), t=d<=LOD0?0:d<=VIEW?1:d<=lodRing()?2:-1; if (t>=0&&(w<0||t<w)) w=t; }
   if (teleRing){ const d=teleD(cx,cz), t=d<=teleRing.r0?0:d<=teleRing.r1?1:d<=teleRing.r2?2:-1; if (t>=0&&(w<0||t<w)) w=t; }
   if (teleView){ const v=teleView.get(key(cx,cz)); if (v!==undefined && (w<0||v<w)) w=v; }
   return w; }
@@ -7048,7 +7063,7 @@ let ringX=0, ringZ=0;   // the block on which the rings of detail are centred
 function updateChunks(px,pz,budgetMs,loading=budgetMs>=1e8){
   if (window.__holdChunks && !loading) return;   // for automated checks: the blocks held as they are
   const lead=!loading, bx=Math.floor(px/C), bz=Math.floor(pz/C), pcx=bx+(lead?mot.ox:0), pcz=bz+(lead?mot.oz:0);
-  const RR=lodRing(), TR=teleRing, st=pcx+','+pcz+','+VIEW+','+LOD0+(TR?','+TR.cx+','+TR.cz+','+TR.r0:'')+(teleView?','+teleViewVer:''), now=performance.now();
+  const RR=lodRing(), TR=teleRing, st=pcx+','+pcz+','+VIEW+','+LOD0+(TR?','+TR.cx+','+TR.cz+','+TR.r0:'')+(teleView?','+teleViewVer:'')+(camRing?','+camRing.cx+','+camRing.cz+','+camRing.h+','+camRing.s:''), now=performance.now();
   // the rings only change when the player crosses into another block, the offset ahead changes or the draw distance changes
   if (st===chunkState && !queue.length && !loading) return;
   let turned=false; if (!loading && queue.length && now-queueT>100){ camera.getWorldDirection(_vd); turned=_vd.dot(sortDir)<0.94; }
@@ -7077,6 +7092,9 @@ function updateChunks(px,pz,budgetMs,loading=budgetMs>=1e8){
         else if (ch.lod<w) queue.push([cx,cz,1e6+d2,w,d2]);       // can shed detail, low priority
       };
       for (let dz=-RR;dz<=RR;dz++) for (let dx=-RR;dx<=RR;dx++) want(pcx+dx,pcz+dz);
+      // and the blocks round the ground under the camera, in the bird's-eye view, beyond the player's own rings
+      if (camRing){ const CR=camRing, n=lodRing(); if (CR.h<=n) for (let cz=CR.cz-n;cz<=CR.cz+n;cz++) for (let cx=CR.cx-n;cx<=CR.cx+n;cx++)
+        if (Math.max(Math.abs(cx-pcx),Math.abs(cz-pcz))>RR) want(cx,cz); }
       // and the blocks round the telescope's point that lie beyond the player's own rings
       if (TR) for (let cz=TR.cz-TR.r2;cz<=TR.cz+TR.r2;cz++) for (let cx=TR.cx-TR.r2;cx<=TR.cx+TR.r2;cx++)
         if (Math.max(Math.abs(cx-pcx),Math.abs(cz-pcz))>RR) want(cx,cz);
@@ -11596,6 +11614,15 @@ function playerRadius(dt){
     for (const D of ch.doors){ if (Math.hypot(D.hx-player.x,D.hz-player.z)<3.5){ want=0.3; break; }
       const [lu,lv]=obbLocal(D,player.x,player.z); if (Math.abs(lu)<D.w/2+0.3 && Math.abs(lv)<D.d/2+0.3){ want=0.3; break; } }
     if (want<0.6) break; }
+  // beside the furniture of the streets and squares (a post, a bench, a table, a stall), so that a gap between it and a
+  // fountain, another bench or a wall can be passed where it looks wide enough to walk through
+  if (want>0.3){ const py=player.y+STEP;
+    for (const ch of nearbyChunks()){
+      for (const c of ch.circles) if (c.r<=0.8 && c.top>py && Math.abs(c.x-player.x)<c.r+2 && Math.abs(c.z-player.z)<c.r+2 && Math.hypot(c.x-player.x,c.z-player.z)<c.r+2){ want=0.3; break; }
+      if (want<0.6) break;
+      for (const o of ch.obbs) if (!o.room && !o.roof && o.hw<=1.2 && o.hd<=1.2 && !(o.top<=py) && Math.abs(o.x-player.x)<3.7 && Math.abs(o.z-player.z)<3.7){ const [lu,lv]=obbLocal(o,player.x,player.z);
+        if (Math.hypot(Math.max(0,Math.abs(lu)-o.hw),Math.max(0,Math.abs(lv)-o.hd))<2){ want=0.3; break; } }
+      if (want<0.6) break; } }
   player.r+=clamp(want-player.r,-0.5*dt,0.5*dt);
 }
 
@@ -11603,7 +11630,7 @@ function playerRadius(dt){
 // built for the nearest enterable houses, a few at a time, and taken down again as the player moves away
 const rooms=new Set(); let roomScan=0;
 function disposeRoom(D){ if (!D.room) return; world.remove(D.room); D.room.geometry.dispose(); if (D.room.material!==matR) D.room.material.dispose(); for (const c of D.room.children){ c.geometry.dispose(); if (D.texs && !c.userData.shared) c.material.dispose(); }
-  if (D.texs){ for (const t of D.texs) t.dispose(); D.texs=null; D.pics=null; } D.room=null; D.flames=null; rooms.delete(D); }
+  if (D.texs){ for (const t of D.texs) if (![...galTex.values()].includes(t)) t.dispose(); D.texs=null; D.pics=null; } D.room=null; D.flames=null; rooms.delete(D); }
 function roomsUpdate(dt){
   if (doorsDirty) doorsRebuild();
   for (const D of rooms){ const U=D.room.material.userData.U; if (!U || !D.lights) continue;
@@ -11612,10 +11639,12 @@ function roomsUpdate(dt){
   roomScan-=dt; if (roomScan>0) return; roomScan=0.2;
   const cand=[], live=new Set();
   for (const ch of chunks.values()) if (ch.lod===0 && ch.rooms) for (const D of ch.rooms){ live.add(D);
-    const dd=Math.hypot(D.x-player.x,D.z-player.z); if (dd<30) cand.push([dd,D]); }
+    // a gallery's room stands wherever its block has full detail, so that it is seen through its open doors from
+    // across the square; it comes first
+    const dd=D.kind==='gallery'?-1:Math.hypot(D.x-player.x,D.z-player.z); if (dd<30) cand.push([dd,D]); }
   cand.sort((a,b)=>a[0]-b[0]); const want=new Set(cand.filter(c=>c[0]<26).slice(0,ROOM_MAX).map(c=>c[1]));
   const short=[...want].some(D=>!D.room);
-  for (const D of rooms) if (!live.has(D) || (!want.has(D) && (short || Math.hypot(D.x-player.x,D.z-player.z)>30))) disposeRoom(D);
+  for (const D of rooms) if (!live.has(D) || (!want.has(D) && (short || D.kind==='gallery' || Math.hypot(D.x-player.x,D.z-player.z)>30))) disposeRoom(D);
   for (const D of want) if (!D.room && rooms.size<ROOM_MAX-1){ D.room=D.kind==='church'?buildChurch(D):D.kind==='gallery'?buildGallery(D):new THREE.Mesh(buildRoomGeo(D),makeRoomMaterial(false)); setRoomLights(D); D.room.position.set(D.x,0,D.z); D.room.updateMatrix(); D.room.matrixAutoUpdate=false;
     if (D.glassGB && D.glassGB.p.length){ const g=new THREE.Mesh(D.glassGB.geometry(D.x,D.z),glassMat); g.renderOrder=5; D.room.add(g); } D.glassGB=null;
     world.add(D.room); rooms.add(D); break; }
@@ -12014,11 +12043,19 @@ const aboutEl=document.getElementById('about');
 { const B='__COAST_BUILD__'; document.getElementById('buildNo').textContent=B.startsWith('__')?'Development build':'Build '+B; }
 helpEl.querySelector('[data-a="about"]').addEventListener('click',()=>{ aboutEl.hidden=false; aboutEl.querySelector('[data-a="about-close"]').focus(); });
 aboutEl.querySelector('[data-a="about-close"]').addEventListener('click',()=>{ aboutEl.hidden=true; });
+// the field of view at street level, 50 to 125 degrees, set in the help's slider or with Shift and + or −, five degrees
+// at a time (+ narrows it, closer as with a zoom, and − widens it); it is kept in the browser
 { const fi=document.getElementById('fovIn'), fo=document.getElementById('fovOut');
   fi.value=FOV; fo.textContent=FOV+'°';
-  fi.addEventListener('input',()=>{ const old=FOV; FOV=+fi.value; fo.textContent=FOV+'°'; try{ localStorage.setItem('coast.fov',String(FOV)); }catch(_){}
-    if (Math.abs(camera.fov-old)<0.01){ camera.fov=FOV; camera.updateProjectionMatrix(); glowScale(); } });
-  fi.addEventListener('keydown',e=>e.stopPropagation()); }
+  const setFov=v=>{ const old=FOV; FOV=clamp(Math.round(v),50,125); fi.value=FOV; fo.textContent=FOV+'°'; try{ localStorage.setItem('coast.fov',String(FOV)); }catch(_){}
+    if (Math.abs(camera.fov-old)<0.01){ camera.fov=FOV; camera.updateProjectionMatrix(); glowScale(); } };
+  fi.addEventListener('input',()=>setFov(+fi.value));
+  fi.addEventListener('keydown',e=>e.stopPropagation());
+  // taken before the telescope's and the camera's own + and −
+  addEventListener('keydown',e=>{ if (!e.shiftKey || e.ctrlKey || e.metaKey || e.altKey || !['Equal','NumpadAdd','Minus','NumpadSubtract'].includes(e.code)) return;
+    if (islandShown() || shareShown() || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target&&e.target.tagName||'')) return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    setFov(FOV+(e.code==='Equal'||e.code==='NumpadAdd'?-5:5)); toast('Field of view',FOV+'°'); },true); }
 helpEl.querySelector('[data-a="help-close"]').addEventListener('click',()=>{ helpEl.hidden=true; aboutEl.hidden=true; lastCell=null; });
 /* ---------- sound ----------
    Sound files are listed in sounds.json as {"id": "path"} or {"id": ["path", ...]}; several files for one id are
@@ -12067,8 +12104,9 @@ async function startAudio(){
     const ctx=audioCtx=new (window.AudioContext||window.webkitAudioContext)();
     const lim=ctx.createDynamicsCompressor(); lim.threshold.value=-6; lim.ratio.value=12; lim.connect(ctx.destination);
     SND.master=ctx.createGain(); SND.master.gain.value=muted?0:1; SND.master.connect(lim);
-    // one bus per group, each behind a low-pass filter: the world outside, the train, the ferry, and the player
-    for (const g of ['world','train','ferry','player']){ const f=ctx.createBiquadFilter(); f.type='lowpass'; f.frequency.value=20000; f.Q.value=0.5; f.connect(SND.master);
+    // one bus per group, each behind a low-pass filter: the world outside, the train, the ferry, the player, and the
+    // footsteps and the camera's shutter (held), which alone are heard while the world is paused
+    for (const g of ['world','train','ferry','player','held']){ const f=ctx.createBiquadFilter(); f.type='lowpass'; f.frequency.value=20000; f.Q.value=0.5; f.connect(SND.master);
       const b=ctx.createGain(); b.connect(f); SND.bus[g]={in:b,lp:f}; }
     SND.rev=ctx.createConvolver(); SND.rev.buffer=tunnelIR(ctx); SND.revOut=ctx.createGain(); SND.revOut.gain.value=0; SND.rev.connect(SND.revOut); SND.revOut.connect(SND.master);
     let man={}; try{ const r=await fetch('sounds.json',{cache:'no-cache'}); if (r.ok) man=await r.json(); }catch(_){}
@@ -12211,8 +12249,8 @@ function sndUpdate(dt){
     if (h!==!!SND.hushed){ SND.hushed=h; if (SND.master) SND.master.gain.setTargetAtTime(muted||h?0:1,audioCtx.currentTime,0.12); } }
   if (!SND.ready) return;
   const ctx=audioCtx, inCoach=mode==='coach', inCab=mode==='train', inside=inCoach||inCab;
-  // while the world is paused the trains and the ferries fall silent, engines and all
-  for (const g of ['train','ferry']) sndParam(SND.bus[g].in.gain,paused?0:1,0.12);
+  // while the world is paused everything falls silent but the footsteps and the camera's shutter
+  for (const g of ['world','train','ferry','player']) sndParam(SND.bus[g].in.gain,paused?0:1,0.12);
   // indoors the world outside is muffled, less so with the door open; a church, like a tunnel, has its reverb.
   // In the ferry's saloon or wheelhouse the sea and the town ashore are muffled too
   const room=mode==='street'?indoors:null, cabin=mode==='ferry'&&((fe.lv===0&&Math.abs(fe.lx)<FSW/2&&fe.lz>FSZ0&&fe.lz<FSZ1)||(fe.lv===2&&Math.abs(fe.lx)<FWH/2&&Math.abs(fe.lz-FWZ)<1.4));
@@ -12226,15 +12264,15 @@ function sndUpdate(dt){
   if (L.positionX){ L.positionX.value=_sl.x; L.positionY.value=_sl.y; L.positionZ.value=_sl.z; L.forwardX.value=_sf.x; L.forwardY.value=_sf.y; L.forwardZ.value=_sf.z; L.upX.value=0; L.upY.value=1; L.upZ.value=0; }
   else { L.setPosition(_sl.x,_sl.y,_sl.z); L.setOrientation(_sf.x,_sf.y,_sf.z,0,1,0); }
   // group treatment: inside the train the world outside is muffled and the train's own sound low-passed
-  SND.cut.world=inCoach?900:inCab?1400:iK>0.02?20000*Math.pow(1200/20000,iK):20000; SND.cut.train=inCoach?1100:inCab?1800:20000; SND.cut.ferry=cabin?1800:20000; SND.cut.player=20000;
-  SND.gmul.world=(inside?0.7:1-0.45*iK)*(1-0.92*(room||inCave?0:tK)); SND.gmul.train=1; SND.gmul.ferry=1; SND.gmul.player=1;
-  SND.send.world=0; SND.send.train=0.8*tK; SND.send.ferry=0; SND.send.player=0.8*tK;
+  SND.cut.world=inCoach?900:inCab?1400:iK>0.02?20000*Math.pow(1200/20000,iK):20000; SND.cut.train=inCoach?1100:inCab?1800:20000; SND.cut.ferry=cabin?1800:20000; SND.cut.player=SND.cut.held=20000;
+  SND.gmul.world=(inside?0.7:1-0.45*iK)*(1-0.92*(room||inCave?0:tK)); SND.gmul.train=1; SND.gmul.ferry=1; SND.gmul.player=SND.gmul.held=1;
+  SND.send.world=0; SND.send.train=0.8*tK; SND.send.ferry=0; SND.send.player=SND.send.held=0.8*tK;
   // with the ears under the water (swimming, or the camera following a dolphin or a whale under) the sounds of the
   // air are muffled and all but silenced, as far as the lens is under (UW.wet), and the water is heard instead
   SNDS.wet=(SNDS.wet??0)+((wetView()?UW.wet:0)-(SNDS.wet??0))*(1-Math.exp(-dt*10));
   if (SNDS.wet>0.001){ const w=SNDS.wet; for (const g of ['world','train','ferry']){ SND.cut[g]=Math.min(SND.cut[g],20000*Math.pow(500/20000,w)); SND.gmul[g]*=1-0.92*w; } }
   for (const g in SND.bus) sndParam(SND.bus[g].lp.frequency,SND.cut[g],0.15);
-  sndParam(SND.revOut.gain,tK>0.01?1:0,0.2);
+  sndParam(SND.revOut.gain,tK>0.01&&!paused?1:0,0.2);
 
   /* ambience */
   const night=nightU.value, day=1-night, dawn=clamp(1-Math.abs(hour-6.2)/1.3,0,1), noon=clamp(1-Math.abs(hour-13.5)/5,0,1);
@@ -12292,7 +12330,7 @@ function sndUpdate(dt){
   let spd=0; if (fx!==null && SNDS.prevX!==null && dt>0){ const dd=Math.hypot(fx-SNDS.prevX,fz-SNDS.prevZ); if (dd<3) spd=dd/dt; }
   SNDS.prevX=fx; SNDS.prevZ=fz; SNDS.spd=(SNDS.spd??0)+(spd-(SNDS.spd??0))*(1-Math.exp(-dt*8));
   const walking=ground && SNDS.spd>0.6, run=keys.ShiftLeft||keys.ShiftRight, stepId=surf==='sand'?'sand':surf==='pavement'?'pavement':'soil';
-  for (const k of ['pavement','sand','soil']) sndVoice(sv('step_'+k,'step_'+k,'player',false),dt,easeTo('step_'+k,walking&&k===stepId?quiet*(run?1.2:1):0,dt,10),0,0,0,run?1.3:1);
+  for (const k of ['pavement','sand','soil']) sndVoice(sv('step_'+k,'step_'+k,'held',false),dt,easeTo('step_'+k,walking&&k===stepId?quiet*(run?1.2:1):0,dt,10),0,0,0,run?1.3:1);
   if (player.grounded && !SNDS.grounded && SNDS.vy<-4 && fx===player.x) sndPlay('land','player',null,{gain:quiet*clamp(-SNDS.vy/8,0.5,1.4)});
   SNDS.grounded=player.grounded; SNDS.vy=player.vy;
 
@@ -12456,7 +12494,7 @@ addEventListener('keydown',e=>{ keys[e.code]=true;
     try{ localStorage.setItem('coast.moon',skyU.uCres.value>0.5?'crescent':'full'); }catch(_){} }
   else if (code==='KeyN' && !e.repeat){ hour=nightU.value>0.5?10:22; SNDS.hour=Math.floor(hour); }   // to night, or back to day, without the bells striking the jump
   if (code==='KeyM' && !e.repeat) setMuted(!muted);
-  if (code==='KeyK' && !e.repeat){ PEOPLE.setLevel(PEOPLE.level+(e.shiftKey?-1:1)); toast('Population level',`${PEOPLE.level}`); }   // 0, no one, to 9
+  if (code==='KeyK' && !e.repeat){ setPeopleLevel(PEOPLE.level+(e.shiftKey?-1:1)); }   // 0, no one, to 9
   // Tab sets full screen
   if (e.code==='Tab'){ e.preventDefault(); if (!e.repeat) try{ if (document.fullscreenElement) document.exitFullscreen(); else { const q=document.documentElement.requestFullscreen(); if (q&&q.catch) q.catch(()=>{}); } }catch(_){} }
   if ((code==='Minus'||code==='NumpadSubtract') && (mode==='street'||(mode==='ferry'&&!feChase)) && !e.repeat) toggleView();
@@ -12572,6 +12610,10 @@ let aerUp=0;   // how far the bird's-eye view is raised above the player, lookin
 function startAscent(tilt){ pitch=0.25; aerUp=0;   // the bird's-eye view opens at its shallowest tilt, looking out ahead rather than down
   Object.assign(ascent,{t:0,fov:camera.fov,fogN:scene.fog.near,fogF:scene.fog.far}); ascent.p.copy(camera.position); ascent.q.copy(camera.quaternion); }
 canvas.addEventListener('dblclick',e=>{ if (mode==='above') aerGoDown(e.clientX,e.clientY); });
+// through the telescope the mouse is captured, so the double click is taken from two presses of its left button
+let teleClickT=0;
+canvas.addEventListener('mousedown',e=>{ if (e.button!==0 || !TELE.on) return; const now=performance.now();
+  if (now-teleClickT<400){ teleClickT=0; if (teleGoThere()) e.stopImmediatePropagation(); } else teleClickT=now; },true);
 // the camera of the bird's-eye view, set from the point it looks at (the player), its heading, tilt and distance; it is
 // called each frame, and at once whenever the view is moved by the pointer or the fingers (dt 0)
 let aerLift=0;   // how far the bird's-eye view is lifted to glide over higher ground near the camera
@@ -12655,20 +12697,49 @@ function aerGoDown(cx,cy){
   let a=0, b=-1; for (let t=st;t<camera.far;t+=st) if (above(t)<=0){ a=t-st; b=t; break; }
   if (b<0) return;
   for (let k=0;k<12;k++){ const m=(a+b)/2; if (above(m)>0) a=m; else b=m; }
-  let x=o.x+d.x*b, z=o.z+d.z*b, top=surfaceTopAt(x,z);
+  goDownAt(o.x+d.x*b,o.z+d.z*b,d,1.5); }
+// The player is brought to the ground at (x, z), seen along the direction d, from the bird's-eye view or through the
+// telescope: the camera flies from where it is to the eye of the player standing there, over dur seconds
+function goDownAt(x,z,d,dur){
+  const from={p:camera.position.clone(),q:camera.quaternion.clone(),fov:camera.fov,far:camera.far,fogN:scene.fog.near,fogF:scene.fog.far};
+  let top=surfaceTopAt(x,z);
+  // through the telescope from a train, a coach, the ferry or the dinghy, the player first leaves it
+  const leave=()=>{ if (TELE.on) teleLower(); if (sit) sit=null; if (mode!=='above' && mode!=='street') leaveModes(); };
   // on open water at least 1.5 m deep, the nearest harbour's dinghy is brought there, heading the way the view looks,
   // and the player takes the helm
-  if (top<0.1){ if (sailD || heightAt(x,z)>-1.5) return;
+  if (top<0.1){ if ((sailD && mode==='above') || heightAt(x,z)>-1.5) return;
+    leave(); if (sailD) return;
     const H=dgyHarbourNear(x,z), e=H&&dgyMake(H); if (!e) return;
     e.D.moor({x,z,head:Math.atan2(d.x,d.z)}); e.D.moor(null);
     ridden=null; player.x=x; player.z=z; player.y=0; player.vy=0; eyeY=null; startSwoop(camera); dinghyBoard(e); return; }
   // never inside a building: the nearest open ground outside its walls, within 25 m
   { const o=openSpotNear(x,z); if (o){ x=o.x; z=o.z; top=o.y; } }
+  if (mode!=='above') leave();
   ridden=null;
   player.x=x; player.z=z; player.y=top; player.vy=0; player.grounded=true; player.holdT=2; eyeY=null; fpPitch=0;
-  const from={p:camera.position.clone(),q:camera.quaternion.clone(),fov:camera.fov,far:camera.far,fogN:scene.fog.near,fogF:scene.fog.far};
-  toggleView(); Object.assign(descent,{t:0,fov:from.fov,far:from.far,fogN:from.fogN,fogF:from.fogF}); descent.p.copy(from.p); descent.q.copy(from.q);
+  if (mode==='above') toggleView(); else yaw=Math.atan2(-d.x,-d.z);
+  Object.assign(descent,{t:0,dur,fov:from.fov,far:from.far,fogN:from.fogN,fogF:from.fogF}); descent.p.copy(from.p); descent.q.copy(from.q);
   if (started) lockPointer(); }
+// a double click through the telescope, wherever it is raised, takes the player to the ground or the sea at the middle of its view, as a
+// double click does from the bird's-eye view; the flight there takes longer the further it is, up to four seconds
+function teleGoThere(){
+  if (!TELE.on || !started) return false;
+  const P=camera.position, D=camera.getWorldDirection(new THREE.Vector3()), near={k:Infinity,s:0}; let t=-1;
+  COVE_FAST++;
+  // the line of sight is followed to the ground, a quay, a terrace or the sea, whichever it meets first
+  const below=m=>P.y+D.y*m<=Math.max(0,walkGround(P.x+D.x*m,P.z+D.z*m,1e4));
+  // where it meets nothing, the land it passes closest over, within a twentieth of the field of view, is taken: a far
+  // island is drawn more coarsely than it is
+  // out to 20 km, so that an island far off, seen only as a faint shape in the haze, can be gone to as well; the steps
+  // lengthen with the distance, to 80 m at the furthest, less than the width of the smallest island
+  try { for (let s=4, s0=0; s<=20000; s0=s, s+=Math.max(2,s*0.004)){ if (P.y+D.y*s>800) break;
+      if (below(s)){ let a=s0, b=s; for (let i=0;i<12;i++){ const m=(a+b)/2; if (below(m)) b=m; else a=m; } t=b; break; }
+      if (s>300){ const g=heightAt(P.x+D.x*s,P.z+D.z*s); if (g>0){ const k=(P.y+D.y*s-g)/s; if (k<near.k){ near.k=k; near.s=s; } } } } }
+  finally { COVE_FAST--; }
+  if (t<0 && near.k<camera.fov*Math.PI/180*0.05) t=near.s;
+  if (t<0) return false;
+  goDownAt(P.x+D.x*t,P.z+D.z*t,D,clamp(1.2+t/700,1.5,4));
+  return true; }
 canvas.addEventListener('contextmenu',e=>{ if (mode==='above') e.preventDefault(); });
 addEventListener('mousemove',e=>{
   const locked=document.pointerLockElement===canvas; if (!locked&&!dragging) return;
@@ -13225,8 +13296,7 @@ function createCamp(opts={}){
    mountains of the main island, and not within a block of a village, on farmland, by a road, the railway or a
    harbour, within 25 m of a building or a lighthouse, in the water or where anything stands in its
    way (campWhyNot). Otherwise a notice says why not. The camp is built from createCamp with the buildings' own
-   material for things that are not part of a block (matBL, which the 3D render takes from the scene, while it
-   builds the blocks drawn with matB itself) and the fire's light (campLight, kept in the scene always); its seats are offered to X with the seats of
+   material for things that are not part of a block (matBL) and the fire's light (campLight, kept in the scene always); its seats are offered to X with the seats of
    the blocks, and its tent, fire and log are colliders. It is drawn within CAMP_SEE m, and the fire is animated and
    lit within CAMP_LIVE m. A new island strikes it. */
 const CAMP={c:null,x:0,y:0,z:0,rot:0,seed:null,seats:[],ch:null}, CAMP_AHEAD=2.6, CAMP_SEE=400, CAMP_LIVE=150, CAMP_KINDS=new Set(['isle','wild','mount','rocky']), CAMP_RISE=1.8, CAMP_BUMP=0.3;
@@ -14086,7 +14156,7 @@ function diveRender(){
   const v=[farMesh.visible,farGlow.visible,outMesh.visible,sky.visible]; farMesh.visible=farGlow.visible=outMesh.visible=sky.visible=false;
   try { return UW.render(renderer,scene,camera,diveAbove); } finally { [farMesh.visible,farGlow.visible,outMesh.visible,sky.visible]=v; } }
 // the camera, while it is raised, draws the frame through its lens instead
-const PHOTO=createPhoto({renderer,scene,camera,canvas,origin:ORIGIN,onFov:()=>glowScale(),allowed:()=>started,onShutter:()=>sndPlay('camera_shutter','player',null),quickOk:()=>!islandShown(),cameraKeyOk:()=>mode!=='swim',sceneOf:()=>sceneState(),goTo:goThere,onChange:()=>galleryChanged(),onCopy:ok=>toast('Picture',ok?'Copied to the clipboard':'Could not be copied to the clipboard')});
+const PHOTO=createPhoto({renderer,scene,camera,canvas,origin:ORIGIN,onFov:()=>glowScale(),allowed:()=>started,onShutter:()=>sndPlay('camera_shutter','held',null),quickOk:()=>!islandShown(),cameraKeyOk:()=>mode!=='swim',sceneOf:()=>sceneState(),goTo:goThere,onChange:()=>galleryChanged(),onCopy:ok=>toast('Picture',ok?'Copied to the clipboard':'Could not be copied to the clipboard')});
 // the galleries also look at the pictures kept once a second, so that they follow them even where the camera's
 // notice of a change does not come (a camera module kept by the browser from before it gave one)
 { let sig=''; setInterval(()=>{ let g=[]; try{ g=PHOTO.api.gallery; }catch(_){ return; }
@@ -14419,7 +14489,7 @@ const PEOPLE=createPeople({ world, origin:ORIGIN, camera, C, topAt, heightAt,
   block:(cx,cz)=>chunks.get(key(cx,cz))||null,
   // a place comes to life once its block is built in full and the blocks round it are built
   ready:(cx,cz)=>{ for (let j=-1;j<=1;j++) for (let i=-1;i<=1;i++){ const ch=chunks.get(key(cx+i,cz+j)); if (!ch||(!i&&!j&&ch.lod!==0)) return false; } return true; },
-  player:()=>player, hour:()=>hour, night:()=>nightU.value, hidden:()=>PHOTO.on||PHOTO.capturing,
+  player:()=>player, hour:()=>hour, night:()=>nightU.value,
   // through the telescope or a long lens: the magnification, and the point looked at, round which places come to life
   zoom:()=>viewZoom(), focus:()=>teleRing?teleRing.p:null,
   seatTaken:s=>(sit&&sit.s===s)||catOnSeat(s),
@@ -14427,6 +14497,9 @@ const PEOPLE=createPeople({ world, origin:ORIGIN, camera, C, topAt, heightAt,
   shadowReach:()=>Math.min(40,1.9*Math.hypot(LIGHT_DIR.x,LIGHT_DIR.z)/Math.max(0.05,LIGHT_DIR.y)),
   train:{ cars:()=>train.cars, obj:()=>train, wait:()=>train.wait, doorOpen:()=>doorOpen, stationNear, railZ, CDX, CDZ, seats:COACH_SEATS, playerCar:()=>mode==='coach'?co.car:-1 },
   ferry:{ list:()=>ferries, quay:ferryQuay, FB, FPL, FGZ, FD0, FSZ0, seats:FERRY_SEATS, ridden:()=>ridden } });
+// the population level, 0 to 9, is kept in the browser and restored at the start
+function setPeopleLevel(v){ PEOPLE.setLevel(v); try{ localStorage.setItem('coast.people',String(PEOPLE.level)); }catch(_){} toast('Population level',`${PEOPLE.level}`); }
+try{ const v=parseInt(localStorage.getItem('coast.people'),10); if (v>0 && v<=9) PEOPLE.setLevel(v); }catch(_){}
 wrapHooks.push(()=>PEOPLE.reset());
 const mobPerf={t:0,n:0,sum:0,good:0};
 let paused=false, last=performance.now(), time=0, firstCam=true, eyeY=null, aboveY=null; const perf={t:0,n:0,sum:0,good:0};
@@ -14516,7 +14589,7 @@ function frame0(now){
   { const q=camera.quaternion, P=camStill.p, Q=camStill.q;
     if (Math.abs(camera.position.x-P.x)+Math.abs(camera.position.y-P.y)+Math.abs(camera.position.z-P.z)>0.02 || Math.abs(q.dot(Q))<0.999999) camStill.t=0; else camStill.t+=dt;
     P.copy(camera.position); Q.copy(q); }
-  trackMotion(dt); updateChunks(player.x,player.z,fillBoost?(camStill.t>0.25?24:12):6); if (fillBoost && !queue.length) fillBoost=false; updateFades(dt); updateTiles(fillBoost?6:2); roomsUpdate(dt);
+  trackMotion(dt); camRingSet(); updateChunks(player.x,player.z,fillBoost?(camStill.t>0.25?24:12):6); if (fillBoost && !queue.length) fillBoost=false; updateFades(dt); updateTiles(fillBoost?6:2); roomsUpdate(dt);
   // dynamic draw distance: frames spent building blocks are ignored; slow frames shrink the view, sustained headroom grows it
   // a draw distance fixed with Page Up or Page Down is left as it is
   // (with the eye in the water the draw distance is left as it was: under the water the land beyond reach is not drawn,
@@ -15581,6 +15654,8 @@ function updateStats(){
     ['Memory',(performance.memory?`${Math.round(performance.memory.usedJSHeapSize/1048576)} of ${Math.round(performance.memory.jsHeapSizeLimit/1048576)} MB, `:'')+`${info.memory.geometries} geometries, ${info.memory.textures} textures`],
     ['People',PEOPLE.on?(q=>`level ${PEOPLE.level}: ${q.people} about, ${q.passengers} travelling, in ${q.places} places`)(PEOPLE.stats()):'level 0'],
     ['Position',`${player.x.toFixed(0)}, ${player.z.toFixed(0)}, height ${player.y.toFixed(1)} m`],
+    // across the ground from the world's origin (0, 0)
+    ['From the origin',(d=>d<1000?`${Math.round(d)} m`:`${(d/1000).toFixed(2)} km`)(Math.hypot(player.x,player.z))],
     ['Seed',SEED_TEXT]];
   statsEl.innerHTML=rows.map(([k,v])=>`<span>${k}</span><span>${v}</span>`).join('');
   statsEl.dataset.ready='1'; statsT=statsN=statsSum=statsWorst=0;
@@ -15699,7 +15774,7 @@ window.__village={ get seed(){ return SEED_TEXT; }, aerGround:(x,y)=>aerGround(x
   coveLanding, coveFns:{baseH0,cvOnPath,cvLand,cvU,cvS,cvL2W,cvAxis,cvBuild,coveAtXZ,coveCaveCell,cvCaveLocal,coveNoWalk},
   coveInfo, walkGround, coveMoveOk, standableAt, get spawnInfo(){ return spawnInfo; }, shoreWalk, spawnPlayer, get holdT(){ return player.holdT; },
   findIsland(){ const m0=Math.floor(player.x/ISL); for (let k=0;k<20;k++) for (const m of [m0+k,m0-k]) for (const sd of SIDES){ const I=islandInfo(sd,m); if (I) return I; } return null; },
-  player,chunks,get mode(){return mode},toggleView,setYaw:v=>yaw=v,setPitch:v=>pitch=v,setFpPitch:v=>fpPitch=v,setDist:v=>dist=v,keys,heightAt,
+  player,chunks,get mode(){return mode},toggleView,teleGoThere,setYaw:v=>yaw=v,setPitch:v=>pitch=v,setFpPitch:v=>fpPitch=v,setDist:v=>dist=v,keys,heightAt,
   // swimming and diving: the swimmer, the water, the seabed's life; swimAt puts the player in the water at (x,z), at the
   // surface or at depth y, under (true) the swimmer's state
   swimmer,UW,get uwWarmMs(){ return uwWarmMs; },get seabedLife(){ return seabedLife; },jumpKey,diveProps,swimLeaveHere,SEA,
@@ -15765,11 +15840,11 @@ if (TOUCH){
   item(viewG,'Draw nearer',()=>setDrawLvl(-1),{stay:true}); item(viewG,'Draw further',()=>setDrawLvl(1),{stay:true}); item(viewG,'Automatic distance',()=>setDrawLvl(0),{stay:true});
   item(viewG,'Performance',()=>{ statsEl.hidden=!statsEl.hidden; statsT=0; },{toggle:()=>!statsEl.hidden});
   const fovIn=document.getElementById('fovIn');
-  const fSl=slider('Field of view',fovIn?+fovIn.min:50,fovIn?+fovIn.max:100,1,()=>fovIn?+fovIn.value:FOV,v=>{ if (fovIn){ fovIn.value=v; fovIn.dispatchEvent(new Event('input')); } },v=>Math.round(v)+'°');
+  const fSl=slider('Field of view',fovIn?+fovIn.min:50,fovIn?+fovIn.max:125,1,()=>fovIn?+fovIn.value:FOV,v=>{ if (fovIn){ fovIn.value=v; fovIn.dispatchEvent(new Event('input')); } },v=>Math.round(v)+'°');
   const sndG=sec('Sound and people');
   item(sndG,'Sound',()=>setMuted(!muted),{toggle:()=>!muted});
-  item(sndG,'Fewer people',()=>{ PEOPLE.setLevel(PEOPLE.level-1); toast('Population level',`${PEOPLE.level}`); },{stay:true});
-  item(sndG,'More people',()=>{ PEOPLE.setLevel(PEOPLE.level+1); toast('Population level',`${PEOPLE.level}`); },{stay:true});
+  item(sndG,'Fewer people',()=>{ setPeopleLevel(PEOPLE.level-1); },{stay:true});
+  item(sndG,'More people',()=>{ setPeopleLevel(PEOPLE.level+1); },{stay:true});
   const worldG=sec('World');
   item(worldG,'New island',()=>openIsland()); item(worldG,'Share',()=>openShare()); item(worldG,'Help',()=>press('KeyH')); item(worldG,'About',()=>{ aboutEl.hidden=false; });
   function refresh(){ for (const b of menu.querySelectorAll('button[data-t]')) b.setAttribute('aria-pressed',b._t()?'true':'false'); tSl.sync(); fSl.sync(); }

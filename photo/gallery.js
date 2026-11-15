@@ -4,45 +4,34 @@
    selects it and shows it large; Download PNG and Delete act on the item selected. The Art Studio opens for a selected
    photo.
 
-   The Art Studio makes artworks from one photo. A style is chosen (Watercolour, Oil, Van Gogh, Woodcut or
-   3D render), then its settings, which are kept in the browser's local storage (key coast.pictureSettings) as soon as
-   they change. Render paints the photo in the style chosen, or path-traces the scene again from the photo's own
-   camera, and shows it being made; a render in progress is stopped by another render, by a change of style or by
+   The Art Studio makes artworks from one photo. A style is chosen (Watercolour, Oil, Van Gogh or Woodcut), then its
+   settings, which are kept in the browser's local storage (key coast.pictureSettings) as soon as they change. Render
+   paints the photo in the style chosen and shows it being made; a render in progress is stopped by another render, by a change of style or by
    leaving. Save keeps the finished artwork in the gallery under its photo; it is available exactly while there is a
    finished render that has not been saved. Leaving the Art Studio with such a render asks whether to save it.
 
+   Back up saves every photo and artwork, with their details, in one zip file; Restore adds those of a backup that the
+   gallery does not hold.
+
    createGallery({ renderer, scene, camera, origin, onClose }) -> { add(canvas), open(), close(), get isOpen,
-     photos, download(item), handleKey(e) }
+     photos, download(item), handleKey(e), backupBlob() -> Promise<Blob>, readBackup(file), restoreConfirmed() }
    photos: [{ n, canvas, meta, time, works: [{ canvas, meta, time, style }] }], oldest first, at most 24 photos.
 */
-import * as THREE from 'three';
 
 const KEEP = 24;
 const Q_KEY = 'coast.pictureSettings';
-// the version of the stored settings: version 2 lowered the 3D render's default samples and bounces, version 3
-// gave the 3D render a time limit, with the samples per pixel its upper bound, and version 4 replaced the charcoal
-// style with the woodcut, and version 5 replaced the impressionist style with the Van Gogh style; the values kept from an earlier version give way to the new defaults
-const Q_VERSION = 5;
+// the version of the stored settings: version 4 replaced the charcoal style with the woodcut, version 5 replaced the
+// impressionist style with the Van Gogh style, version 6 removed the 3D render and version 7 the oil style's optical mixing; the settings of a style that no
+// longer exists are dropped from the stored copy
+const Q_VERSION = 7;
 const sl = (k, label, def, min, max, step, fmt = v => '× ' + v.toFixed(2)) => ({ k, label, def, min, max, step, fmt });
 // a slider's value is a multiple of the style's own amount (1 is as designed)
 export const Q_GROUPS = [
-  { id: 'render3d', title: '3D render', fields: [
-    { k: 'timeBudget', label: 'Time limit', opts: [[15, '15 s'], [30, '30 s'], [60, '1 min'], [120, '2 min'], [300, '5 min'], [0, 'None']], def: 30 },
-    { k: 'samples', label: 'Maximum samples per pixel', opts: [32, 64, 128, 256, 512, 1024, 2048, 4096], def: 512 },
-    { k: 'scale', label: 'Resolution', opts: [0.5, 0.75, 1, 1.5, 2], def: 1, size: true },
-    { k: 'bounces', label: 'Bounces of light', opts: [2, 3, 4, 5, 6, 8, 10], def: 3 },
-    { k: 'ptReach', label: 'Path-traced distance', opts: [[250, '250 m'], [500, '500 m'], [1000, '1 km'], [2000, '2 km']], def: 500 },
-    { k: 'horizonReach', label: 'Draw distance', opts: [[1500, '1.5 km'], [3000, '3 km'], [5000, '5 km'], [8000, '8 km'], [12000, '12 km']], def: 5000 },
-    { k: 'hazeVisibility', label: 'Visibility in the haze', opts: [[8000, '8 km'], [15000, '15 km'], [28000, '28 km'], [50000, '50 km'], [100000, '100 km']], def: 28000 },
-    { k: 'denoise', label: 'Noise filter', opts: [[0, 'Off'], [2, 'Light'], [5, 'Normal'], [8, 'Strong']], def: 5 },
-    { k: 'materials', label: 'Glass and metal', check: true, def: true },
-    { k: 'reflectivity', label: 'Reflectivity of glass and metal', opts: [[0, 'None'], [0.5, 'Low'], [1, 'Normal'], [1.5, 'High'], [2, 'Very high']], def: 1 },
-    { k: 'haze', label: 'Haze', check: true, def: true } ] },
   { id: 'all', title: 'Painting', fields: [ sl('duration', 'Time to paint', 6, 0, 30, 1, v => v ? v + ' s' : 'At once') ] },
   { id: 'watercolour', title: 'Watercolour', fields: [
     sl('abstraction', 'Simplification', 8, 2, 16, 1, v => v + ' px'), sl('washes', 'Washes', 1, 0, 2, 0.05), sl('bleed', 'Bleeding', 1, 0, 2, 0.05),
     sl('edge', 'Dark edges', 1, 0, 2, 0.05), sl('granulation', 'Granulation', 1, 0, 2, 0.05), sl('pencil', 'Pencil', 1, 0, 2, 0.05), sl('margin', 'Paper margin', 1, 0, 2, 0.05) ] },
-  { id: 'oil', title: 'Oil', fields: [ { k: 'mixing', label: 'Colour mixing', opts: [[0, 'On the palette'], [1, 'Optical']], def: 0 }, sl('radius', 'Brush size', 6, 2, 14, 1, v => v + ' px'), sl('stroke', 'Stroke length', 1, 0.25, 2, 0.05), sl('impasto', 'Impasto', 1, 0, 2, 0.05) ] },
+  { id: 'oil', title: 'Oil', fields: [ sl('radius', 'Brush size', 6, 2, 14, 1, v => v + ' px'), sl('stroke', 'Stroke length', 1, 0.25, 2, 0.05), sl('impasto', 'Impasto', 1, 0, 2, 0.05) ] },
   { id: 'vangogh', title: 'Van Gogh', fields: [ sl('size', 'Stroke size', 1, 0.5, 2, 0.05), sl('swirl', 'Eddies in the sky', 1, 0, 2, 0.05), sl('stars', 'Stars', 1, 0, 2, 0.05),
     sl('colour', 'Colour intensity', 1, 0, 2, 0.05), sl('outline', 'Outlines', 1, 0, 2, 0.05), sl('impasto', 'Impasto', 1, 0, 2, 0.05),
     sl('distort', 'Distortion', 0, 0, 2, 0.05) ] },
@@ -50,10 +39,10 @@ export const Q_GROUPS = [
     sl('contrast', 'Contrast', 1, 0, 2, 0.05), sl('outline', 'Outlines', 1, 0, 2, 0.05), sl('grain', 'Wood grain', 1, 0, 2, 0.05),
     sl('colours', 'Colour blocks', 0, 0, 4, 1, v => v ? String(v) : 'None') ] },
 ];
-export const STYLES = [['watercolour', 'Watercolour'], ['oil', 'Oil'], ['vangogh', 'Van Gogh'], ['woodcut', 'Woodcut'], ['render3d', '3D render']];
-// a phone or a tablet is not offered the 3D render, whose path tracing needs more memory than its browser allows
-const NO_TRACE = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
-const styleName = id => (STYLES.find(s => s[0] === id) || [id, id])[1];
+export const STYLES = [['watercolour', 'Watercolour'], ['oil', 'Oil'], ['vangogh', 'Van Gogh'], ['woodcut', 'Woodcut']];
+// the name of a style, including one no longer offered, for the artworks already made in it
+const OLD_STYLES = { render3d: '3D render' };
+const styleName = id => (STYLES.find(s => s[0] === id) || [id, OLD_STYLES[id] || id])[1];
 
 const svg = (d, extra = '') => `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" ${extra}>${d}</svg>`;
 export const ICON = {
@@ -66,11 +55,12 @@ export const ICON = {
   oil: svg('<path d="M20.5 3.5l-7.2 7.8"/><path d="M11.4 10.2l2.4 2.4"/><path d="M10.6 11.2c-2.2-.1-3.8 1.2-4.2 3.2-.3 1.7-.9 3.4-2.4 4.9 2.6.5 5.5 0 7.1-1.7 1.4-1.4 1.8-3.2 1.4-4.5z"/>'),
   vangogh: svg('<path d="M4 9c2-3 6-3 7 0s-2 5-4 3 0-4 2-3"/><path d="M13 7c2-2 5-2 7 0"/><path d="M3 15c3-1.5 6 1.5 9 0s6-1.5 9 0"/><path d="M3 19c3-1.5 6 1.5 9 0s6-1.5 9 0"/>'),
   woodcut: svg('<path d="M3.5 20.5l7-7"/><path d="M9 12l3 3 2.5-2.5L20.5 6.5 17.5 3.5 11.5 9.5z"/><path d="M14 20.5h6.5M16 17.5h4.5"/>'),
-  render3d: svg('<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/>'),
   stop: svg('<rect x="7" y="7" width="10" height="10" rx="1.2"/>'),
   copy: svg('<rect x="8.5" y="8.5" width="11" height="11" rx="1.5"/><path d="M15.5 8.5V6a1.5 1.5 0 0 0-1.5-1.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5"/>'),
   check: svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>'),
   compass: svg('<circle cx="12" cy="12" r="8.5"/><path d="M15.5 8.5l-2 5-5 2 2-5z"/>'),
+  backup: svg('<path d="M4.5 8.5h15v11h-15zM3.5 4.5h17v4h-17zM10 12h4"/>'),
+  restore: svg('<path d="M12 20V9M7.5 13.5L12 9l4.5 4.5M5 4.5h14"/>'),
 };
 
 // zooming and panning a picture in its frame: a pinch on a trackpad or a touch screen, or the mouse wheel, zooms about
@@ -116,8 +106,6 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
   /* ---------- settings, kept in the browser ---------- */
   const QS = Object.fromEntries(Q_GROUPS.map(g => [g.id, Object.fromEntries(g.fields.map(f => [f.k, f.def]))]));
   try { const v = JSON.parse(localStorage.getItem(Q_KEY) || 'null');
-    if (v && !(v.v >= 2) && v.render3d) delete v.render3d.bounces;
-    if (v && !(v.v >= 3) && v.render3d) delete v.render3d.samples;
     if (v) for (const g of Q_GROUPS) for (const f of g.fields) if (v[g.id] && typeof v[g.id][f.k] === typeof f.def) QS[g.id][f.k] = v[g.id][f.k];
     // settings of a style that no longer exists, such as the charcoal, are dropped from the stored copy
     if (v && !(v.v >= Q_VERSION)) localStorage.setItem(Q_KEY, JSON.stringify({ ...QS, v: Q_VERSION })); } catch (e) { /* storage unavailable */ }
@@ -134,6 +122,8 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
 .gal header,.art header{display:flex;align-items:center;gap:14px;padding:12px 14px 12px 20px;border-bottom:1px solid var(--g-line);min-height:58px}
 .gal h2,.art h2{margin:0;font:400 1.3rem/1 var(--font-display,serif);letter-spacing:.05em}
 .gal header .sum,.art header .src{color:var(--plaster-dim,#d9c8b0);font-size:.9rem;margin-right:auto}
+.gal header .bk{background:transparent;border-color:var(--g-line)}
+@media (max-width:640px){.gal header .bk span{display:none}.gal header .bk{width:40px;padding:0}}
 .gal button,.art button{font:500 .95rem/1 var(--font-body,system-ui);color:var(--plaster,#f5e9d7);background:var(--g-raise2);border:1px solid transparent;border-radius:4px;
   padding:0 14px;height:38px;display:inline-flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;white-space:nowrap;transition:background .12s,border-color .12s,opacity .12s}
 @media (hover:hover){.gal button:hover:not(:disabled),.art button:hover:not(:disabled){background:rgba(245,233,215,.18)}}
@@ -166,6 +156,8 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
 @media (hover:hover){.gal .card:hover:not(.sel){background:rgba(245,233,215,.08)!important}}
 .gal .card img{display:block;align-self:flex-start;height:84px;width:auto;min-width:104px;max-width:180px;object-fit:cover;border-radius:2px;box-shadow:0 2px 8px rgba(0,0,0,.4)}
 .gal .card.wk img{height:62px;min-width:92px;max-width:132px}
+/* a photo's thumbnail is shown as a frame of 35 mm film, with the sprocket holes along its top and bottom edges */
+.gal .card.ph img{height:100px;padding:8px 0;border-radius:1px;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='9' height='8'%3E%3Crect x='2' y='2' width='5' height='4' rx='1' fill='%238a8275'/%3E%3C/svg%3E") 0 0/9px 8px repeat-x,url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='9' height='8'%3E%3Crect x='2' y='2' width='5' height='4' rx='1' fill='%238a8275'/%3E%3C/svg%3E") 0 100%/9px 8px repeat-x,#17120d}
 .gal .card span{width:0;min-width:100%;overflow:hidden;white-space:nowrap;display:flex;justify-content:space-between;gap:8px;font:500 .78rem/1 var(--font-body,system-ui);letter-spacing:.04em;color:var(--plaster-dim,#d9c8b0)}
 .gal .card span em{font-style:normal;opacity:.7}
 .gal .card.ph span{color:var(--plaster,#f5e9d7)}
@@ -186,7 +178,7 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
   .gal .split{display:none}
   .gal .view{order:-1;padding:10px 12px;border-bottom:1px solid var(--g-line)}
   .gal .sheet{border-right:0;padding:10px 12px}
-  .gal .card img{height:64px;min-width:104px} .gal .card.wk img{height:52px;min-width:86px}
+  .gal .card img{height:64px;min-width:104px} .gal .card.wk img{height:52px;min-width:86px} .gal .card.ph img{height:80px}
   .gal .foot{flex-wrap:wrap} .gal .info{flex-basis:100%}
 }
 /* the Art Studio */
@@ -199,7 +191,6 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
 .art .tiles button svg{width:24px;height:24px;opacity:.85}
 .art .tiles button[aria-pressed=true]{background:rgba(124,195,173,.16);border-color:var(--verdigris,#7cc3ad);color:#fff}
 .art .tiles button[aria-pressed=true] svg{color:var(--verdigris,#7cc3ad);opacity:1}
-.art .tiles button:last-child{grid-column:1/-1;flex-direction:row;min-height:48px}
 .art form{display:flex;flex-direction:column;gap:14px;margin:0}
 .art form:empty{display:none}
 .art .opts .reset{margin-top:16px;width:100%}
@@ -231,11 +222,13 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
 .gal .ask h3,.art .ask h3{font:400 1.2rem/1.2 var(--font-display,serif);letter-spacing:.04em;text-transform:none;color:var(--plaster,#f5e9d7);margin:0 0 18px}
 .art .ask .btns{grid-template-columns:repeat(3,1fr)}
 .gal .ask .btns{display:grid;gap:8px;grid-template-columns:repeat(2,1fr)}
+.gal .ask p{margin:-8px 0 18px;color:var(--plaster-dim,#d9c8b0)}.gal .ask p:empty{display:none}
+.gal .ask.one .btns{grid-template-columns:1fr}.gal .ask.one [data-a="rs-yes"]{display:none}
 @media (max-width:820px){
   .art .body{grid-template-columns:1fr;grid-template-rows:minmax(180px,42%) 1fr}
   .art .stage{order:-1;padding:10px}
   .art aside{border-right:0;border-top:1px solid var(--g-line)}
-  .art .tiles{grid-template-columns:repeat(3,1fr)} .art .tiles button:last-child{grid-column:auto;flex-direction:column;min-height:62px}
+  .art .tiles{grid-template-columns:repeat(4,1fr)}
   .art header{padding-left:10px}
 }
 `;
@@ -244,7 +237,10 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
   /* ---------- the gallery ---------- */
   const gal = document.createElement('div'); gal.className = 'gal'; gal.hidden = true;
   gal.setAttribute('role', 'dialog'); gal.setAttribute('aria-label', 'Gallery');
-  gal.innerHTML = `<header><h2>Gallery</h2><span class="sum"></span><button class="ib" data-a="close" title="Close (G)" aria-label="Close">${ICON.close}</button></header>
+  gal.innerHTML = `<header><h2>Gallery</h2><span class="sum"></span>
+      <button class="bk" data-a="backup" title="Save every picture and its details in a zip file">${ICON.backup}<span>Back up</span></button>
+      <button class="bk" data-a="restore" title="Add the pictures from a backup">${ICON.restore}<span>Restore</span></button>
+      <button class="ib" data-a="close" title="Close (G)" aria-label="Close">${ICON.close}</button></header>
     <div class="body"><div class="sheet"></div><div class="split" role="separator" aria-orientation="vertical" aria-label="Resize"></div>
       <div class="view"><div class="big"></div>
         <div class="foot"><div class="info"></div>
@@ -253,9 +249,11 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
           <button data-a="dl" title="Download as PNG">${ICON.download}<span>Download PNG</span></button>
           <button class="ib" data-a="del" title="Delete" aria-label="Delete">${ICON.trash}</button></div></div></div>
     <div class="ask" hidden><div role="alertdialog" aria-label="Delete"><h3></h3>
-      <div class="btns"><button class="pri" data-a="del-yes">Delete</button><button data-a="del-no">Cancel</button></div></div></div>`;
+      <div class="btns"><button class="pri" data-a="del-yes">Delete</button><button data-a="del-no">Cancel</button></div></div></div>
+    <div class="ask rs" hidden><div role="alertdialog" aria-label="Restore"><h3></h3><p></p>
+      <div class="btns"><button class="pri" data-a="rs-yes">Restore</button><button data-a="rs-no">Cancel</button></div></div></div>`;
   const $ = (root, q) => root.querySelector(q);
-  const sheet = $(gal, '.sheet'), big = $(gal, '.big'), info = $(gal, '.info'), gask = $(gal, '.ask');
+  const sheet = $(gal, '.sheet'), big = $(gal, '.big'), info = $(gal, '.info'), gask = $(gal, '.ask'), rask = $(gal, '.ask.rs');
   const bigZoom = zoomPan(big, () => big.querySelector('canvas'));
   // the divider between the pictures and the preview is dragged to resize them; its place is kept in the browser
   { const SPLIT_KEY = 'coast.gallerySplit', body = $(gal, '.body'), sp = $(gal, '.split');
@@ -435,7 +433,7 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
         onLoad && onLoad(); changed();
       } catch (e) { console.warn('The pictures kept could not be read:', e); }
     }
-    return { put, del, load };
+    return { put, del, load, toCanvas };
   })();
   store.load();
   function open() { if (document.pointerLockElement) document.exitPointerLock(); sel = null; picked.clear(); build(); gal.hidden = false; }
@@ -473,15 +471,119 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
       sel = null; picked.clear(); build(); changed();
     }
     else if (a === 'art' && sel && !sel.w) openArt(sel.p);
+    else if (a === 'backup') backup();
+    else if (a === 'restore') pickBackup();
+    else if (a === 'rs-yes') restoreConfirmed();
+    else if (a === 'rs-no') { rask.hidden = true; pendingRestore = null; }
     else if (a === 'go' && sel && goTo) { const it = sel.w || sel.p; if (sceneOfItem(sel.p, sel.w)) goThere(sel.p, sel.w, big.contains(it.canvas) ? it.canvas : big); }
   });
+
+  /* ---------- backing up and restoring: every photo and its artworks, with their details, in one zip file ----------
+     The archive holds gallery.json, which lists the photos oldest first, each with its number, time and details and
+     its artworks with theirs, and names the PNG image of each in the folder pictures/. A restore adds the photos of a
+     backup that the gallery does not hold, and the artworks it does not hold of those it does; the gallery then keeps
+     its newest KEEP photos. */
+  const BK_FORMAT = 'coast-gallery';
+  const stamp = t => { const d = new Date(t), p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`; };
+  const pngOf = it => it.blob ? Promise.resolve(it.blob) : new Promise((ok, no) => it.canvas.toBlob(b => b ? ok(b) : no(new Error('PNG')), 'image/png'));
+  const cleanMeta = m => { const o = { ...(m || {}) }; delete o.depth; return JSON.parse(JSON.stringify(o)); };
+  const workKey = w => `${w.time}-${w.style}`;
+  async function backupBlob() {
+    const { zip } = await import('./zip.js');
+    const files = [], list = [];
+    for (const p of photos) {
+      const id = p.id || (p.id = `${p.time}-${p.n}`), file = `pictures/${id}.png`;
+      files.push({ name: file, data: await pngOf(p), time: p.time });
+      const works = [];
+      for (let k = 0; k < p.works.length; k++) { const w = p.works[k], wf = `pictures/${id}-${k + 1}-${w.style}.png`;
+        files.push({ name: wf, data: await pngOf(w), time: w.time }); works.push({ time: w.time, style: w.style, meta: cleanMeta(w.meta), file: wf }); }
+      list.push({ id, n: p.n, time: p.time, meta: cleanMeta(p.meta), file, works });
+    }
+    const manifest = { format: BK_FORMAT, version: 1, made: Date.now(), photos: list };
+    files.unshift({ name: 'gallery.json', data: new TextEncoder().encode(JSON.stringify(manifest, null, 1)), time: Date.now() });
+    return zip(files);
+  }
+  async function backup() {
+    const b = $(gal, '[data-a="backup"]'); b.disabled = true;
+    try { const blob = await backupBlob(), a = document.createElement('a');
+      a.href = URL.createObjectURL(blob); a.download = `coast-gallery-${stamp(Date.now())}.zip`; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 4000); }
+    catch (e) { console.warn('The backup could not be made:', e); showRestoreNote('The backup could not be made.', String(e.message || e)); }
+    finally { b.disabled = false; }
+  }
+  function pickBackup() {
+    // the chooser is kept in the page until a file is chosen, since Safari may otherwise let it go before it reports one
+    const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.zip,application/zip'; inp.hidden = true;
+    gal.querySelectorAll('input[type=file]').forEach(x => x.remove()); gal.append(inp);
+    inp.addEventListener('change', () => { const f = inp.files && inp.files[0]; inp.remove(); if (f) readBackup(f); });
+    inp.click();
+  }
+  let pendingRestore = null;
+  function showRestoreNote(title, text) { rask.classList.add('one'); $(rask, 'h3').textContent = title; $(rask, 'p').textContent = text || '';
+    $(rask, '[data-a="rs-no"]').textContent = 'Close'; rask.hidden = false; $(rask, '[data-a="rs-no"]').focus(); }
+  // reads a backup and asks whether to restore what it holds that the gallery does not
+  async function readBackup(file) {
+    let plan;
+    try {
+      const { unzip } = await import('./zip.js'), files = await unzip(file), j = files.get('gallery.json');
+      const m = j && JSON.parse(new TextDecoder().decode(j));
+      if (!m || m.format !== BK_FORMAT || !Array.isArray(m.photos)) throw new Error('This zip file is not a backup of the gallery.');
+      plan = { photos: [], works: [] };
+      for (const r of m.photos) { if (!r || !files.has(r.file)) continue;
+        const have = photos.find(p => (p.id || `${p.time}-${p.n}`) === r.id);
+        const ws = (r.works || []).filter(w => files.has(w.file) && !(have && have.works.some(x => workKey(x) === workKey(w))));
+        if (!have) plan.photos.push({ r, works: ws }); else for (const w of ws) plan.works.push({ p: have, w }); }
+      plan.files = files;
+    } catch (e) { return showRestoreNote('The backup could not be read.', String(e.message || e)); }
+    const nW = plan.works.length + plan.photos.reduce((k, x) => k + x.works.length, 0), nP = plan.photos.length;
+    if (!nP && !nW) return showRestoreNote('Nothing to restore', 'Every picture in this backup is already in the gallery.');
+    const parts = []; if (nP) parts.push(`${nP} ${nP === 1 ? 'photo' : 'photos'}`); if (nW) parts.push(`${nW} ${nW === 1 ? 'artwork' : 'artworks'}`);
+    // the gallery keeps its newest KEEP photos: those that would go, of its own and of the backup's
+    const all = [...photos.map(p => ({ t: p.time, mine: true })), ...plan.photos.map(x => ({ t: x.r.time, mine: false }))].sort((a, b) => a.t - b.t);
+    const gone = all.slice(0, Math.max(0, all.length - KEEP)), goneMine = gone.filter(x => x.mine).length, goneNew = gone.length - goneMine;
+    const ph = n => `${n} ${n === 1 ? 'photo' : 'photos'}`, notes = [];
+    if (goneNew) notes.push(`The gallery keeps ${KEEP} photos, and ${goneNew === nP && !nW ? (nP === 1 ? 'this photo is' : 'these photos are') : ph(goneNew) + ' of the backup ' + (goneNew === 1 ? 'is' : 'are')} older than those it keeps, so ${goneNew === 1 ? 'it' : 'they'} cannot be restored until some are deleted.`);
+    if (goneMine) notes.push(`The ${goneMine === 1 ? 'oldest photo' : goneMine + ' oldest photos'} in the gallery, with ${goneMine === 1 ? 'its' : 'their'} artworks, will be removed to make room.`);
+    if (goneNew === nP && !nW) return showRestoreNote('Nothing can be restored', notes[0]);
+    pendingRestore = plan; rask.classList.remove('one'); $(rask, '[data-a="rs-no"]').textContent = 'Cancel';
+    $(rask, 'h3').textContent = `Restore ${parts.join(' and ')}?`;
+    $(rask, 'p').textContent = notes.join(' ');
+    rask.hidden = false; $(rask, '[data-a="rs-yes"]').focus();
+  }
+  async function restoreConfirmed() {
+    const plan = pendingRestore; pendingRestore = null; rask.hidden = true; if (!plan) return;
+    const blobOf = name => new Blob([plan.files.get(name)], { type: 'image/png' });
+    const work = async w => { const blob = blobOf(w.file), c = await store.toCanvas(blob); c.photo = w.meta; return { canvas: c, meta: w.meta, time: w.time, style: w.style, blob }; };
+    const touched = new Set(), added = new Set();
+    let nW = 0;
+    try {
+      for (const { r, works } of plan.photos) {
+        const blob = blobOf(r.file), c = await store.toCanvas(blob); c.photo = r.meta;
+        const p = { id: r.id, n: r.n, canvas: c, meta: r.meta, time: r.time, works: [], blob };
+        for (const w of works) p.works.push(await work(w));
+        photos.push(p); touched.add(p); added.add(p); count = Math.max(count, r.n || 0);
+      }
+      for (const { p, w } of plan.works) { p.works.push(await work(w)); touched.add(p); nW++; }
+      for (const p of touched) p.works.sort((a, b) => a.time - b.time);
+      photos.sort((a, b) => a.time - b.time);
+      while (photos.length > KEEP) { const p = photos.shift(); touched.delete(p); store.del(p); }
+      for (const p of touched) await store.put(p);
+      // what was done: the photos and artworks added and kept
+      const kept = [...added].filter(p => photos.includes(p)), nk = kept.length; nW += kept.reduce((k, p) => k + p.works.length, 0);
+      const parts = []; if (nk) parts.push(`${nk} ${nk === 1 ? 'photo' : 'photos'}`); if (nW) parts.push(`${nW} ${nW === 1 ? 'artwork' : 'artworks'}`);
+      build(); changed();
+      showRestoreNote(parts.length ? `Restored ${parts.join(' and ')}` : 'Nothing was restored', `The gallery now holds ${photos.length} ${photos.length === 1 ? 'photo' : 'photos'}.`);
+      return;
+    } catch (e) { console.warn('The backup could not be restored:', e); showRestoreNote('The backup could not be restored.', String(e.message || e)); }
+    build(); changed();
+  }
 
   /* ---------- the Art Studio ---------- */
   const art = document.createElement('div'); art.className = 'art'; art.hidden = true;
   art.setAttribute('role', 'dialog'); art.setAttribute('aria-label', 'Art Studio');
   art.innerHTML = `<header><button class="ib" data-a="back" title="Back to the pictures (Esc)" aria-label="Back">${ICON.back}</button><h2>Art Studio</h2><span class="src"></span></header>
     <div class="body"><aside><div class="scroll">
-        <section><h3>Style</h3><div class="tiles">${STYLES.filter(([id]) => !(id === 'render3d' && NO_TRACE)).map(([id, name]) => `<button type="button" data-style="${id}" aria-pressed="false">${ICON[id]}${name}</button>`).join('')}</div></section>
+        <section><h3>Style</h3><div class="tiles">${STYLES.map(([id, name]) => `<button type="button" data-style="${id}" aria-pressed="false">${ICON[id]}${name}</button>`).join('')}</div></section>
         <section class="opts" hidden><h3></h3><form></form><button type="button" class="reset" data-a="reset">Reset to default</button></section></div>
       <div class="dock"><div class="state"><span class="st"></span><span class="bar"><i></i></span></div>
         <div class="btns"><button class="pri" data-a="render" disabled>Create</button><button class="ok" data-a="save" disabled>Save</button></div></div></aside>
@@ -492,7 +594,6 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
   const stage = $(art, '.stage canvas'), g2 = stage.getContext('2d'), form = $(art, 'form'), stateEl = $(art, '.state'), ask = $(art, '.ask');
   // A: the photo, its style, the job in progress and the finished render, and whether it has been saved
   const A = { p: null, style: null, job: null, run: 0, result: null, saved: false, after: null };
-  let ptModule = null;
 
   function setState(text, frac, done) {
     $(stateEl, '.st').textContent = text; $(stateEl, '.bar i').style.width = (frac == null ? 0 : Math.round(frac * 100)) + '%';
@@ -514,8 +615,8 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
   const sizeStage = (w, h) => { if (stage.width !== w || stage.height !== h) { stage.width = w; stage.height = h; fitStage(); } };
   function showSource() { stageZoom.reset(); sizeStage(A.p.canvas.width, A.p.canvas.height); g2.drawImage(A.p.canvas, 0, 0); }
 
-  // the settings groups shown for the chosen style: the 3D render's own, or the painting time and the style's own
-  const formGroups = () => A.style === 'render3d' ? ['render3d'] : ['all', A.style];
+  // the settings groups shown for the chosen style: the painting time and the style's own
+  const formGroups = () => ['all', A.style];
   const atDefault = () => formGroups().every(gid => Q_GROUPS.find(x => x.id === gid).fields.every(f => QS[gid][f.k] === f.def));
   function syncReset() { const b = $(art, '[data-a="reset"]'); if (b) b.disabled = !A.style || atDefault(); }
   function resetSettings() {
@@ -584,22 +685,17 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
     const live = () => A.run === run && !ctl.signal.aborted;
     const t0 = performance.now();
     job.done = (async () => {
-      let out;
-      if (style === 'render3d') out = await trace(p, ctl.signal, live, t0);
-      else {
-        const { applyEffect } = await import('./effects.js');
-        const dur = QS.all.duration * 1000;
-        setState('Painting', 0);
-        out = await applyEffect(style, p.canvas, { ...QS[style], seed: (Date.now() & 0xffff), duration: dur, signal: ctl.signal,
-          onFrame: (c, k) => { if (!live()) return; sizeStage(c.width, c.height);
-            g2.drawImage(c, 0, 0); setState(`Painting ${Math.round(k * 100)} %`, k); } });
-      }
-      return out;
+      const { applyEffect } = await import('./effects.js');
+      const dur = QS.all.duration * 1000;
+      setState('Painting', 0);
+      return await applyEffect(style, p.canvas, { ...QS[style], seed: (Date.now() & 0xffff), duration: dur, signal: ctl.signal,
+        onFrame: (c, k) => { if (!live()) return; sizeStage(c.width, c.height);
+          g2.drawImage(c, 0, 0); setState(`Painting ${Math.round(k * 100)} %`, k); } });
     })();
     try {
       const out = await job.done;
       if (!live()) return;
-      out.photo = { ...p.meta, width: out.width, height: out.height, effect: style, settings: style === 'render3d' ? { ...QS.render3d } : { ...QS.all, ...QS[style] }, time: Date.now() };
+      out.photo = { ...p.meta, width: out.width, height: out.height, effect: style, settings: { ...QS.all, ...QS[style] }, time: Date.now() };
       A.result = { canvas: out, style, p };
       sizeStage(out.width, out.height); g2.drawImage(out, 0, 0);
       const s = (performance.now() - t0) / 1000;
@@ -611,37 +707,6 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
       if (A.run === run) syncButtons();
     }
   }
-  // the path tracer, from the camera the photo was taken with: its matrices are in the scene's frame of the time,
-  // which the floating origin has moved by (origin then - origin now) since
-  async function trace(p, signal, live, t0) {
-    const m = p.meta, Q = QS.render3d;
-    const cam = new THREE.PerspectiveCamera(m.fov, m.aspect, m.near, m.far);
-    const mw = new THREE.Matrix4().fromArray(m.matrixWorld), o0 = m.origin || { x: 0, y: 0, z: 0 };
-    mw.elements[12] += o0.x - origin.x; mw.elements[13] += o0.y - origin.y; mw.elements[14] += o0.z - origin.z;
-    cam.matrixAutoUpdate = false; cam.matrix.copy(mw); cam.matrix.decompose(cam.position, cam.quaternion, cam.scale); cam.updateMatrixWorld(true);
-    cam.projectionMatrix.fromArray(m.projectionMatrix); cam.projectionMatrixInverse.copy(cam.projectionMatrix).invert();
-    const W = Math.round(p.canvas.width * Q.scale), H = Math.round(p.canvas.height * Q.scale);
-    const phases = { world: 'Loading the world', scene: 'Gathering the scene', albedo: 'Colours', bvh: 'Building', trace: 'Tracing', denoise: 'Filtering', done: 'Finished' };
-    let first = true;
-    setState(phases.world, 0);
-    const { pathTrace } = ptModule = await import('./pathtrace.js');
-    // the Art Studio covers the game, so the game draws nothing while the picture is traced and leaves the GPU to it; the
-    // world also stands still, so that what moves in it (the trains, the boats, the people) stands where it stood in
-    // every pass of the picture, and the game leaves the page's time to the picture
-    const draw = renderer.render; renderer.render = () => {};
-    // the scene is lit as it was at the hour the photo was taken, and the game's own hour is restored afterwards
-    const V = window.__village, wasPaused = V ? V.paused : true, h0 = V && V.hour, lit = V && V.lightHour && typeof m.hour === 'number';
-    if (V) V.paused = true;
-    if (lit) V.lightHour(m.hour);
-    try {
-      return await pathTrace({ renderer, scene, camera: cam, signal, width: W, height: H,
-        timeBudget: Q.timeBudget, startTime: t0,
-        samples: Q.samples, bounces: Q.bounces, horizonReach: Q.horizonReach, ptReach: Q.ptReach, hazeVisibility: Q.hazeVisibility, denoise: Q.denoise, materials: Q.materials, reflectivity: Q.reflectivity, haze: Q.haze,
-        onProgress: ({ phase, fraction }) => { if (live() && (phase !== 'trace' || first)) setState(phases[phase] || phase, fraction || 0); },
-        // the first picture, shown before the tracing begins, leaves the phase as it is
-        onFrame: (c, k) => { if (!live()) return; if (first) { sizeStage(W, H); first = false; } g2.drawImage(c, 0, 0, W, H); if (k > 0) setState(`Tracing ${Math.round(k * 100)} %`, k); } });
-    } finally { renderer.render = draw; if (lit) V.lightHour(h0); if (V) V.paused = wasPaused; }
-  }
   function save() {
     const r = A.result; if (!r || A.saved || A.job) return;
     r.p.works.push({ canvas: r.canvas, meta: r.canvas.photo, time: r.canvas.photo.time, style: r.style }); store.put(r.p); changed();
@@ -652,9 +717,8 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
     if (A.result && !A.saved && !A.job) { A.after = then || null; ask.hidden = false; $(ask, '[data-a="ask-save"]').focus(); return; }
     shutArt(); then && then();
   }
-  // the path tracer keeps the scene of the last view it traced, for another render of it; it is let go on leaving
   function shutArt() {
-    (A.job ? stopJob() : Promise.resolve()).then(() => { if (ptModule && art.hidden) ptModule.releasePathTrace(); });
+    if (A.job) stopJob();
     A.result = null; ask.hidden = true; art.hidden = true; A.after = null; build(); }
   art.addEventListener('click', e => {
     const s = e.target.closest('[data-style]'); if (s) return pickStyle(s.dataset.style);
@@ -677,6 +741,7 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
       return true;
     }
     if (!gask.hidden){ if (e.code === 'Escape'){ e.preventDefault(); gask.hidden = true; } return true; }
+    if (!rask.hidden){ if (e.code === 'Escape'){ e.preventDefault(); rask.hidden = true; pendingRestore = null; } return true; }
     if (e.code === 'Escape' || (e.code === 'KeyG' && !e.repeat)) { e.preventDefault(); close(); return true; }
     if (!field && (e.code === 'ArrowLeft' || e.code === 'ArrowRight')) {
       e.preventDefault();
@@ -689,6 +754,6 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
     return true;
   }
 
-  return { add, open, close, download, handleKey, photos, goThere, get isOpen() { return !gal.hidden; }, get artOpen() { return !art.hidden; },
+  return { add, open, close, download, handleKey, photos, goThere, backupBlob, readBackup, restoreConfirmed, get isOpen() { return !gal.hidden; }, get artOpen() { return !art.hidden; },
     get settings() { return QS; }, openArt: i => openArt(photos[i]), select: (i, j) => select(photos[i], j == null ? null : photos[i].works[j]) };
 }

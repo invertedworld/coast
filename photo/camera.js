@@ -590,7 +590,7 @@ export function createPhoto({ renderer, scene, camera, canvas, origin, onFov, al
 
   const stop = e => { e.preventDefault(); e.stopImmediatePropagation(); };
   addEventListener('keydown', e => {
-    if (!e.isTrusted) return;   // keys the program presses for itself (the path tracer's draw distance) pass through
+    if (!e.isTrusted) return;   // keys the program presses for itself pass through
     if (G.handleKey(e)) return;
     if (e.code === 'KeyC' && (!cameraKeyOk || cameraKeyOk() || S.on)) { if (!e.repeat) toggle(); return stop(e); }
     if (e.code === 'KeyG') { if (!e.repeat) openGallery(); return stop(e); }

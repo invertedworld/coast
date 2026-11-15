@@ -515,7 +515,7 @@ function buildPose(p, t, Q){
    ctx: { world, origin, camera, C,
           heightAt(x,z): the ground, topAt(x,z,yhi): the highest surface at (x,z) no higher than yhi, or null where something higher stands,
           block(cx,cz): the block record, or null; ready(cx,cz): whether it and its neighbours are built in full,
-          player(): {x,y,z,vx,vz}, hour(), night() (0 by day to 1 at night), hidden(): true while a picture is made,
+          player(): {x,y,z,vx,vz}, hour(), night() (0 by day to 1 at night),
           zoom(): how many times the view is magnified (1 to the naked eye), focus(): the point {x,y,z} looked at
             through a telescope or a long lens, or null; the places round it come to life as round the player,
           seatTaken(seat): whether the player or a cat is on one of a block's seats,
@@ -1245,7 +1245,7 @@ export function createPeople(ctx){
       if (!frustum.intersectsSphere(_sph)||_sph.center.distanceTo(cam.position)>PAX_R+500){ p.unposed=true; p.needStep=p.inSwing=false; continue; }
       if (p.unposed){ p.unposed=false; if (p.lockFeet){ p.pinL=p.pinR=null; p.hipW=null; } }
       buildPose(p,simT,POSE); body.write(r++,p.look,POSE); }
-    body.setCount(r); body.mesh.position.copy(O); body.mesh.visible=r>0&&!ctx.hidden();
+    body.setCount(r); body.mesh.position.copy(O); body.mesh.visible=r>0;
   }
   /* a new level takes effect at once: people are added at any spot, or the ones over the new number are let go,
      wherever they are; at level 0 everyone goes */
