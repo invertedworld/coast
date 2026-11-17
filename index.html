@@ -2422,7 +2422,7 @@ function roadArch(type,idx,seg){
    east and west where a street crosses the wall that way: a tower over an arched passage, the gate on the side
    towards the nearer coast carrying a clock. The wall runs on across the other streets, which end against it. A
    walk runs along the top of the wall behind a parapet 0.75 m high, and a stair against the inside of the wall
-   climbs to it on each stretch between two gates. A height is given
+   climbs to it at each end of each stretch between two gates. A height is given
    up where its wall would come near the railway outside a tunnel, the coast road or a station, or where two gates
    would stand close together, and the next is tried; a hill where none will do has no wall. Houses, squares,
    alleys and archways keep off the wall, its stairs and gates, and off a strip of open ground 5 m wide outside it. */
@@ -2536,9 +2536,9 @@ function citRing(P,h0,f){
   for (let pass=0;pass<2;pass++){ const o=pts.map(p=>p.top);
     for (let k=0;k<N;k++){ let s=0; for (let d=-4;d<=4;d++) s+=o[(k+d+N)%N]; pts[k].top=Math.max(s/9,pts[k].hi+2.3); } }
   for (const p of pts) p.walk=p.top-CIT_PH;
-  // a stair up to the walk of each stretch between gates, against the inside of the wall: a landing
-  // level with the walk at one end of the stretch, then steps running down along the wall until they meet the
-  // ground, from whichever end needs fewer that fit within the stretch
+  // a stair up to the walk at each end of each stretch between gates, against the inside of the wall: a landing
+  // level with the walk at the end of the stretch, then steps running down along the wall towards its middle until
+  // they meet the ground; on a stretch too short for both, the one that needs fewer steps
   const stairs=[];
   { const blocked=pts.map(p=>gates.some(g=>obbIn({...g.ob,hw:g.ob.hw+0.4,hd:g.ob.hd+0.4},p.x,p.z)));
     const k0=blocked.indexOf(true), runs=[]; let run=null;
@@ -2548,7 +2548,7 @@ function citRing(P,h0,f){
       const Lr=cu[cu.length-1];
       const at=u=>{ let i=0; while (i<R.length-2 && cu[i+1]<u) i++; const A=R[i], B=R[i+1], t=clamp((u-cu[i])/((cu[i+1]-cu[i])||1),0,1);
         return {x:lerp(A.x,B.x,t),z:lerp(A.z,B.z,t),nx:lerp(A.nx,B.nx,t),nz:lerp(A.nz,B.nz,t),walk:lerp(A.walk,B.walk,t),ux:B.x-A.x,uz:B.z-A.z}; };
-      let best=null;
+      const got=[];
       for (const d of [1,-1]){ const u0=d>0?0.3:Lr-0.3, top0=at(u0).walk, steps=[]; let ok=true, u=u0;
         const put=(len,top)=>{ const q=at(u+d*len/2), off=CIT_TH/2+CIT_SW/2, x=q.x-q.nx*off, z=q.z-q.nz*off, l=Math.hypot(q.ux,q.uz)||1;
           steps.push({x,z,top,len,rot:Math.atan2(-q.uz/l,q.ux/l)}); u+=d*len;
@@ -2558,8 +2558,10 @@ function citRing(P,h0,f){
           if (top-g<CIT_RISE*0.6) break;
           if (j>60 || (d>0?u+CIT_GO>Lr-0.4:u-CIT_GO<0.4)){ ok=false; break; }
           put(CIT_GO,top); }
-        if (ok && (!best || steps.length<best.length)) best=steps; }
-      if (best) stairs.push(best); } }
+        if (ok) got.push({steps,len:Math.abs(u-u0)}); }
+      // both where they fit side by side with room between them, otherwise the shorter
+      if (got.length===2 && got[0].len+got[1].len<Lr-2) stairs.push(got[0].steps,got[1].steps);
+      else if (got.length) stairs.push(got.reduce((a,b)=>a.len<=b.len?a:b).steps); } }
   // the ground the wall, its stairs and its gates stand on, kept from everything else
   const foot=[];
   for (let k=0;k<N;k++){ const A=pts[k], B=pts[(k+1)%N], l=Math.hypot(B.x-A.x,B.z-A.z);
