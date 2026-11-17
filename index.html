@@ -2262,6 +2262,7 @@ function churchSite(cx,cz){
 function blockSiteOk(cx,cz,o,alleys,circles,piazza,hAt,maxRange,hMin){
   const pts=obbSamples(o);
   for (const p of pts) if (!insideCell(cx,cz,p[0],p[1],-0.35) || coveShaped(p[0],p[1])) return false;
+  if (citHit(o)) return false;
   for (const A of alleys){ let sg=0;
     for (const p of pts){ const s=A.dir==='h'?p[1]-A.f(p[0]):p[0]-A.f(p[1]); if (Math.abs(s)<A.hw-0.2) return false; const g=Math.sign(s); if (sg&&g!==sg) return false; sg=g; } }
   if (piazza){ const P=piazza; for (const p of pts) if (Math.hypot(p[0]-P.x,p[1]-P.z)<P.r) return false; if (obbCircleDist(o,P.x,P.z)<P.r) return false; }
@@ -2309,6 +2310,7 @@ function piazzaFor(cx,cz,kind){
       for (let s=0;s<16;s++){ const a=s/16*6.283; if (roadDist(p.x+Math.cos(a)*(p.r+2.6),p.z+Math.sin(a)*(p.r+2.6))<0.2){ bad=true; break; } }
       if (!bad) break; p.r-=0.5; }
     if (p.r<(p.small?3.2:(p.peak?10:6))) p=null; }
+  if (p && !p.peak && citNear(p.x,p.z,p.r+8)) p=null;   // no square on a citadel's wall
   if (p){ p.outer=Math.min(p.r+6.5,C/2-Math.max(Math.abs(p.x-xc),Math.abs(p.z-zc))-0.01); p.level=baseH(p.x,p.z); if (p.level<1.2) p=null; }
   // no square where levelling it would leave a cliff: the downhill drop and the uphill cut stay modest
   if (p && !p.peak){ let lo=1e9, hi=-1e9; for (let s2=0;s2<16;s2++){ const a=s2/16*6.283, h=baseH(p.x+Math.cos(a)*(p.r+2.6),p.z+Math.sin(a)*(p.r+2.6)); lo=Math.min(lo,h); hi=Math.max(hi,h); }
@@ -2328,10 +2330,11 @@ function alleysFor(cx,cz,kind){
   const xc=cx*C+C/2, zc=cz*C+C/2, list=[];
   const want = kind==='quarter' ? (hash(cx,cz,701)<0.85?(hash(cx,cz,702)<0.45?2:1):0) : (kind==='piazza'||kind==='church'||kind==='shore') ? (hash(cx,cz,703)<0.4?1:0) : 0;
   const dirs = hash(cx,cz,704)<0.5?['h','v']:['v','h'];
+  const cut=(dir,f)=>{ for (let u=0;u<=C;u+=2){ const x=dir==='h'?cx*C+u:f(cz*C+u), z=dir==='h'?f(cx*C+u):cz*C+u; if (citNear(x,z,3.5)) return true; } return false; };
   for (let q=0;q<want;q++){
     const dir=dirs[q], ph=hash(cx,cz,710+q)*6.28, amp=0.8+hash(cx,cz,720+q)*1.6, hw=0.85+hash(cx,cz,730+q)*0.4, off=(hash(cx,cz,740+q)-0.5)*14;
-    if (dir==='h' && vSegOn(cx,cz) && vSegOn(cx+1,cz)){ const za=zc+off; list.push({dir,hw,f:x=>za+amp*Math.sin(x*0.15+ph)}); }
-    else if (dir==='v' && hSegOn(cx,cz) && hSegOn(cx,cz+1)){ const xa=xc+off; list.push({dir,hw,f:z=>xa+amp*Math.sin(z*0.15+ph)}); }
+    if (dir==='h' && vSegOn(cx,cz) && vSegOn(cx+1,cz)){ const za=zc+off; const f=x=>za+amp*Math.sin(x*0.15+ph); if (!cut(dir,f)) list.push({dir,hw,f}); }
+    else if (dir==='v' && hSegOn(cx,cz) && hSegOn(cx,cz+1)){ const xa=xc+off; const f=z=>xa+amp*Math.sin(z*0.15+ph); if (!cut(dir,f)) list.push({dir,hw,f}); }
   }
   return list;
 }
@@ -2399,6 +2402,7 @@ function roadArch(type,idx,seg){
   if (type==='v'){ const z0=hRoadZ(seg,idx*C), z1=hRoadZ(seg+1,idx*C); z=lerp(z0,z1,f); x=vRoadX(idx,z); hw=vRoadW(idx,z); tx=vRoadX(idx,z+0.5)-x; tz=0.5; }
   else { const x0=vRoadX(seg,idx*C), x1=vRoadX(seg+1,idx*C); x=lerp(x0,x1,f); z=hRoadZ(idx,x); hw=hRoadW(idx,x); tx=0.5; tz=hRoadZ(idx,x+0.5)-z; }
   if (heightAt(x,z)<1.5 || SIDES.some(sd=>Math.abs(z-coastRoadZ(sd,x))<CR_HW+6) || railPerp(x,z)<hw+16) return null;
+  if (citNear(x,z,10)) return null;
   const S=2*hw+0.2, rot=Math.atan2(tx,tz);
   // no pier stands in the mouth of an alley that comes out on the street
   const sides=type==='v'?[[idx-1,seg],[idx,seg]]:[[seg,idx-1],[seg,idx]];
@@ -2406,6 +2410,218 @@ function roadArch(type,idx,seg){
     if (type==='v' && A.dir==='h' && Math.abs(A.f(x)-z)<1.3+A.hw+0.4) return null;
     if (type==='h' && A.dir==='v' && Math.abs(A.f(z)-x)<1.3+A.hw+0.4) return null; }
   return {x,z,S,rot,D:2.6};
+}
+
+/* ---------- citadels ----------
+   About half the hill towns are walled. The wall encloses the upper town: the crossroads that stand above a chosen
+   height on the hill, joined to the one nearest the summit, each taken with the square of ground a block wide
+   centred on it. The outline of those squares, its corners rounded off, is the wall's line, so that its corners
+   fall in the middles of blocks and its sides cross each street square, halfway between two crossroads. It is
+   worked out from the hill and the streets alone, so that every block it crosses agrees where it runs, and each
+   block builds the stretch whose middle lies in it. Wherever a street crosses the wall there is a gate, a tower
+   over an arched passage; the gate on the side towards the nearer coast carries a clock. Square towers with tiled
+   roofs stand on the wall about every 30 m, and the wall is crowned with swallow-tailed merlons. A height is given
+   up where its wall would come near the railway outside a tunnel, the coast road or a station, or where two gates
+   would stand close together, and the next is tried; a hill where none will do has no wall. Houses, squares,
+   alleys and archways keep off the wall, its towers and gates, and off a strip of open ground 5 m wide outside it. */
+const CIT_TH=1.8, CIT_TW=5.2, CIT_GD=6.5, CIT_PW=1.6, CIT_TS=30;
+function citadelOf(P){
+  if (P.cit!==undefined) return P.cit;
+  P.cit=null;
+  if (hash(P.cx,P.cz,1209)<0.5){ const h0=baseH(P.x,P.z);
+    for (const f of [0.3,0.33,0.27,0.36,0.24,0.4,0.44]){ const c=citRing(P,h0,f); if (c){ P.cit=c; break; } } }
+  return P.cit;
+}
+// the citadel whose hill holds (x,z), if any
+function citAt(x,z){ const i=Math.floor(x/PEAK), j=Math.floor(z/PEAK);
+  for (let dj=-1;dj<=1;dj++) for (let di=-1;di<=1;di++){ const P=peakInfo(i+di,j+dj);
+    if (P && Math.abs(x-P.x)<P.R*1.25 && Math.abs(z-P.z)<P.R*1.25){ const c=citadelOf(P); if (c) return c; } }
+  return null; }
+// whether a footprint comes within m of the wall, its towers or its gates
+function citHit(o,m=0.3){ const c=citAt(o.x,o.z); if (!c) return false; const e=o.hw+o.hd;
+  if (o.x<c.x0-e-6 || o.x>c.x1+e+6 || o.z<c.z0-e-6 || o.z>c.z1+e+6) return false;
+  for (const q of c.foot){ const f=e+q.hw+q.hd+m; if (Math.abs(q.x-o.x)<f && Math.abs(q.z-o.z)<f && obbOverlap(o,q,-m)) return true; }
+  return false; }
+// whether a point lies within d of the wall's line
+function citNear(x,z,d){ const c=citAt(x,z); if (!c) return false;
+  if (x<c.x0-d || x>c.x1+d || z<c.z0-d || z>c.z1+d) return false;
+  for (const p of c.pts) if (Math.abs(p.x-x)<d && Math.abs(p.z-z)<d && Math.hypot(p.x-x,p.z-z)<d) return true;
+  return false; }
+const obbIn=(o,x,z)=>{ const u=obbU(o,x,z); return Math.abs(u)<o.hw && Math.abs(obbV)<o.hd; };
+function citRing(P,h0,f){
+  // the crossroads above the contour, those joined to the one nearest the summit, with any hollow filled and any
+  // two that touch only at a corner joined, so that the ring round their squares is a single loop
+  const target=h0-f*P.H, a0=Math.round(P.x/C), b0=Math.round(P.z/C), G=Math.ceil(P.R*1.1/C)+1, Wd=2*G+3;
+  const id=(a,b)=>(b-b0+G+1)*Wd+(a-a0+G+1), S=new Uint8Array(Wd*Wd);
+  const up=(a,b)=>Math.abs(a-a0)<=G && Math.abs(b-b0)<=G && Math.hypot(a*C-P.x,b*C-P.z)<P.R*1.05 && baseH(vRoadX(a,b*C),hRoadZ(b,a*C))>=target;
+  { const st=[a0,b0]; if (!up(a0,b0)) return null; S[id(a0,b0)]=1;
+    while (st.length){ const b=st.pop(), a=st.pop();
+      for (const [da,db] of [[1,0],[-1,0],[0,1],[0,-1]]){ const A=a+da, B=b+db; if (!S[id(A,B)] && up(A,B)){ S[id(A,B)]=1; st.push(A,B); } } } }
+  const inS=(a,b)=>Math.abs(a-a0)<=G+1 && Math.abs(b-b0)<=G+1 && S[id(a,b)]===1;
+  for (let it=0, ch=true; ch && it<20; it++){ ch=false;
+    for (let b=b0-G-1;b<=b0+G;b++) for (let a=a0-G-1;a<=a0+G;a++){ const q=[inS(a,b),inS(a+1,b),inS(a,b+1),inS(a+1,b+1)];
+      if (q[0]===q[3] && q[1]===q[2] && q[0]!==q[1]){ for (const [A,B] of [[a,b],[a+1,b],[a,b+1],[a+1,b+1]]) S[id(A,B)]=1; ch=true; } }
+    const out=new Uint8Array(Wd*Wd), st=[0]; out[0]=1;
+    while (st.length){ const k=st.pop(), x=k%Wd, y=(k-x)/Wd;
+      for (const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){ const X=x+dx, Y=y+dy; if (X<0||Y<0||X>=Wd||Y>=Wd) continue; const q=Y*Wd+X; if (!out[q] && !S[q]){ out[q]=1; st.push(q); } } }
+    for (let k=0;k<Wd*Wd;k++) if (!out[k] && !S[k]){ S[k]=1; ch=true; } }
+  let n=0; for (let k=0;k<Wd*Wd;k++) n+=S[k]; if (n<4) return null;
+  // the outline of their squares, each square a block wide centred on its crossroads, so that its corners are the
+  // middles of blocks and its sides cross the streets square, halfway between crossroads
+  const next=new Map(), key=(p,q)=>p*4096+q;
+  for (let b=b0-G-1;b<=b0+G+1;b++) for (let a=a0-G-1;a<=a0+G+1;a++){ if (!inS(a,b)) continue;
+    if (!inS(a,b-1)) next.set(key(a,b),[a+1,b]);
+    if (!inS(a+1,b)) next.set(key(a+1,b),[a+1,b+1]);
+    if (!inS(a,b+1)) next.set(key(a+1,b+1),[a,b+1]);
+    if (!inS(a-1,b)) next.set(key(a,b+1),[a,b]); }
+  let poly=[]; { const start=next.keys().next().value; let cur=start, guard=0;
+    do { const pq=next.get(cur); if (!pq || ++guard>4000) return null; poly.push([(pq[0]-0.5)*C,(pq[1]-0.5)*C]); cur=key(pq[0],pq[1]); } while (cur!==start);
+    if (poly.length!==next.size) return null; }
+  // the corners rounded off, three times over
+  for (let it=0;it<3;it++){ const o=[]; for (let k=0;k<poly.length;k++){ const A=poly[k], B=poly[(k+1)%poly.length];
+      o.push([lerp(A[0],B[0],0.25),lerp(A[1],B[1],0.25)],[lerp(A[0],B[0],0.75),lerp(A[1],B[1],0.75)]); } poly=o; }
+  // points along it about 2.4 m apart
+  const pts=[]; let tot=0; for (let k=0;k<poly.length;k++){ const A=poly[k], B=poly[(k+1)%poly.length]; tot+=Math.hypot(B[0]-A[0],B[1]-A[1]); }
+  const N=Math.max(48,Math.round(tot/2.4)), step=tot/N;
+  { let k=0, acc=0; for (let m=0;m<N;m++){ const s=m*step;
+      for (;;){ const A=poly[k], B=poly[(k+1)%poly.length], l=Math.hypot(B[0]-A[0],B[1]-A[1]); if (s<=acc+l || k===poly.length-1){ const t=l?(s-acc)/l:0; pts.push({x:lerp(A[0],B[0],t),z:lerp(A[1],B[1],t)}); break; } acc+=l; k++; } } }
+  // each point's outward normal, square to the ring
+  let area=0; for (let k=0;k<N;k++){ const A=pts[k], B=pts[(k+1)%N]; area+=A.x*B.z-B.x*A.z; }
+  for (let k=0;k<N;k++){ const A=pts[(k+N-1)%N], B=pts[(k+1)%N], p=pts[k], l=Math.hypot(B.x-A.x,B.z-A.z), ux=(B.x-A.x)/l, uz=(B.z-A.z)/l;
+    p.nx=area>0?uz:-uz; p.nz=area>0?-ux:ux; p.ux=ux; p.uz=uz; }
+  for (const p of pts){
+    if (!isVillage(Math.floor(p.x/C),Math.floor(p.z/C)) || seaDist(p.x,p.z)<40) return null;
+    if (railPerp(p.x,p.z)<18 && !(railState(p.x)==='tunnel' && railState(p.x-24)==='tunnel' && railState(p.x+24)==='tunnel')) return null;
+    if (stationNear(p.x,70) && railPerp(p.x,p.z)<45) return null;
+    for (const sd of SIDES) if (Math.abs(p.z-coastRoadZ(sd,p.x))<CR_HW+12) return null; }
+  // the gates, where the streets cross the ring
+  const gates=[], D=CIT_GD;
+  const addGate=(k,x,z,tx,tz,hwAt,junction)=>{
+    const A=pts[k], B=pts[(k+1)%N], l=Math.hypot(tx,tz), lr=Math.hypot(B.x-A.x,B.z-A.z);
+    if (Math.abs(((B.x-A.x)*tz-(B.z-A.z)*tx)/(l*lr))<0.82 || junction) return false;
+    let hw=0; for (let q=-D/2;q<=D/2;q+=D/4) hw=Math.max(hw,hwAt(q));
+    const r=hw+0.15, rot=Math.atan2(tx,tz);
+    gates.push({k,x,z,r,rot,ob:{x,z,hw:r+CIT_PW,hd:D/2,rot}}); return true; };
+  for (let k=0;k<N;k++){ const A=pts[k], B=pts[(k+1)%N];
+    for (let i=Math.floor(Math.min(A.x,B.x)/C); i<=Math.ceil(Math.max(A.x,B.x)/C); i++){
+      const fa=A.x-vRoadX(i,A.z), fb=B.x-vRoadX(i,B.z); if ((fa<0)===(fb<0)) continue;
+      const t=fa/(fa-fb), z=lerp(A.z,B.z,t), x=vRoadX(i,z); if (!vSegOn(i,vSegAt(x,z))) continue;
+      const jj=Math.round(z/C), junction=Math.abs(z-hRoadZ(jj,x))<13 && (hSegOn(i-1,jj)||hSegOn(i,jj));
+      if (!addGate(k,x,z,vRoadX(i,z+0.5)-x,0.5,q=>vRoadW(i,z+q),junction)) return null; }
+    for (let j=Math.floor(Math.min(A.z,B.z)/C); j<=Math.ceil(Math.max(A.z,B.z)/C); j++){
+      const fa=A.z-hRoadZ(j,A.x), fb=B.z-hRoadZ(j,B.x); if ((fa<0)===(fb<0)) continue;
+      const t=fa/(fa-fb), x=lerp(A.x,B.x,t), z=hRoadZ(j,x); if (!hSegOn(hSegAt(x,z),j)) continue;
+      const ii=Math.round(x/C), junction=Math.abs(x-vRoadX(ii,z))<13 && (vSegOn(ii,j-1)||vSegOn(ii,j));
+      if (!addGate(k,x,z,0.5,hRoadZ(j,x+0.5)-z,q=>hRoadW(j,x+q),junction)) return null; } }
+  if (gates.length<2) return null;
+  for (let a=0;a<gates.length;a++) for (let b=a+1;b<gates.length;b++) if (Math.hypot(gates[a].x-gates[b].x,gates[a].z-gates[b].z)<24) return null;
+  // the wall itself keeps off the streets
+  for (const p of pts) if (!gates.some(g=>obbCircleDist(g.ob,p.x,p.z)<0.6) && roadDist(p.x,p.z)<1.5) return null;
+  // the main gate faces the nearer coast
+  { const s=P.z-coastZ(1,P.x), n=coastZ(-1,P.x)-P.z, dz=s<n?-1:1; let best=null, bv=-1e9;
+    for (const g of gates){ const v=(g.z-P.z)*dz/Math.hypot(g.x-P.x,g.z-P.z); if (v>bv){ bv=v; best=g; } } best.main=true; }
+  // the towers, evenly along the wall from the main gate, none near a gate or a street
+  const sAt=[0]; for (let k=1;k<=N;k++) sAt.push(sAt[k-1]+Math.hypot(pts[k%N].x-pts[k-1].x,pts[k%N].z-pts[k-1].z));
+  const L=sAt[N], nT=Math.max(4,Math.round(L/CIT_TS)), sp=L/nT, g0=gates.find(g=>g.main), s0=sAt[g0.k], towers=[];
+  for (let m=0;m<nT;m++){ const s=(s0+(m+0.5)*sp)%L; let k=0; while (k<N-1 && sAt[k+1]<s) k++;
+    const p=pts[k], w=CIT_TW, off=w/2-CIT_TH/2, x=p.x+p.nx*off, z=p.z+p.nz*off, rot=Math.atan2(-p.uz,p.ux), ob={x,z,hw:w/2,hd:w/2,rot};
+    if (gates.some(g=>Math.hypot(g.x-x,g.z-z)<14)) continue;
+    if (obbSamples(ob).some(q=>roadDist(q[0],q[1])<0.6)) continue;
+    towers.push({k,x,z,rot,ob}); }
+  // the ground the wall, its towers and its gates stand on, kept from everything else
+  const foot=[];
+  for (let k=0;k<N;k++){ const A=pts[k], B=pts[(k+1)%N], l=Math.hypot(B.x-A.x,B.z-A.z);
+    // the wall's own width, and a strip of open ground 5 m wide along its outside
+    foot.push({x:(A.x+B.x)/2+A.nx*2.5,z:(A.z+B.z)/2+A.nz*2.5,hw:l/2+0.1,hd:CIT_TH/2+2.8,rot:Math.atan2(-(B.z-A.z),B.x-A.x)}); }
+  for (const t of towers) foot.push({...t.ob,hw:t.ob.hw+0.2,hd:t.ob.hd+0.2});
+  for (const g of gates) foot.push({...g.ob,hw:g.ob.hw+0.2,hd:g.ob.hd+0.3});
+  let x0=1e9,x1=-1e9,z0=1e9,z1=-1e9; for (const p of pts){ x0=Math.min(x0,p.x); x1=Math.max(x1,p.x); z0=Math.min(z0,p.z); z1=Math.max(z1,p.z); }
+  return {P,N,pts,gates,towers,foot,x0:x0-8,x1:x1+8,z0:z0-8,z1:z1+8,f};
+}
+// the heights of the wall, its towers and gates, worked out from the ground once its streets and squares are known
+function citHeights(c){
+  if (c.hDone) return; c.hDone=true; const N=c.N, H=heightAtExact;
+  for (const p of c.pts){ const hc=H(p.x,p.z), hi=H(p.x-p.nx*2.6,p.z-p.nz*2.6), ho=H(p.x+p.nx*2.6,p.z+p.nz*2.6);
+    p.hi=hi; p.top=Math.max(ho+6.2,hi+2.6,hc+3.2); p.bot=Math.min(hc,hi,ho)-1.5; }
+  for (let pass=0;pass<2;pass++){ const o=c.pts.map(p=>p.top);
+    for (let k=0;k<N;k++){ let s=0; for (let d=-4;d<=4;d++) s+=o[(k+d+N)%N]; c.pts[k].top=Math.max(s/9,c.pts[k].hi+2.3); } }
+  const wallTop=(x,z)=>{ let t=-1e9; for (const p of c.pts) if (Math.hypot(p.x-x,p.z-z)<12) t=Math.max(t,p.top); return t; };
+  for (const g of c.gates){ let yR=-1e9, lo=1e9;
+    for (let q=-CIT_GD/2;q<=CIT_GD/2;q+=CIT_GD/4){ const [x,z]=localToWorld(g.ob,0,q); yR=Math.max(yR,H(x,z)); }
+    for (const q of obbSamples(g.ob)) lo=Math.min(lo,H(q[0],q[1]));
+    g.yR=yR; g.bot=lo-1.5; g.top=Math.max(yR+3.6+g.r+3.4,wallTop(g.x,g.z)+4.5); }
+  for (const t of c.towers){ let lo=1e9; for (const q of obbSamples(t.ob)) lo=Math.min(lo,H(q[0],q[1]));
+    t.bot=lo-1.5; t.top=c.pts[t.k].top+4.3; }
+}
+// a box whose top edge runs from (ax,ay,az) to (bx,by,bz), hgt deep and th thick, square to its length
+function shearBox(gb,ax,az,ay,bx,bz,by,hgt,th,col,surf){
+  const L=Math.hypot(bx-ax,bz-az), nx=-(bz-az)/L*th, nz=(bx-ax)/L*th, m=new THREE.Matrix4();
+  m.set(bx-ax,0,nx,(ax+bx)/2, by-ay,hgt,0,(ay+by)/2-hgt, bz-az,0,nz,(az+bz)/2, 0,0,0,1);
+  gb.add(T.box,m,col,null,surf); }
+// the stretches of the wall, the towers and the gates that block (cx,cz) builds, and the footprint it keeps clear
+function buildCitadel(gb,ch,cx,cz){
+  const xc=cx*C+C/2, zc=cz*C+C/2, c=citAt(xc,zc); if (!c) return;
+  if (xc<c.x0-C/2 || xc>c.x1+C/2 || zc<c.z0-C/2 || zc>c.z1+C/2) return;
+  for (const q of c.foot){ const f=C/2+q.hw+q.hd; if (Math.abs(q.x-xc)<f && Math.abs(q.z-zc)<f) ch.place.push(q); }
+  citHeights(c);
+  const own=(x,z)=>Math.floor(x/C)===cx && Math.floor(z/C)===cz, oy0=gb.oy; gb.oy=0;
+  const rr=rng(Math.floor(hash(c.P.cx,c.P.cz,1210)*4294967296)), stone=shade(C_.stone,rr,0.04), roofC=pick(rr,C_.roofs), P=c.P;
+  // the curtain, cut back where it meets a gate's tower
+  for (let k=0;k<c.N;k++){ const A=c.pts[k], B=c.pts[(k+1)%c.N];
+    let ta=0, tb=1, skip=false;
+    for (const g of c.gates){ const ia=obbIn(g.ob,A.x,A.z), ib=obbIn(g.ob,B.x,B.z); if (!ia && !ib) continue;
+      if (ia && ib){ skip=true; break; }
+      let lo=0, hi=1; for (let it=0;it<14;it++){ const m=(lo+hi)/2, inside=obbIn(g.ob,lerp(A.x,B.x,m),lerp(A.z,B.z,m)); if (inside===ia) lo=m; else hi=m; }
+      const l=Math.hypot(B.x-A.x,B.z-A.z), e=0.35/l;
+      if (ia) ta=Math.max(ta,hi-e); else tb=Math.min(tb,lo+e); }
+    if (skip || tb-ta<0.02) continue;
+    let ax=lerp(A.x,B.x,ta), az=lerp(A.z,B.z,ta), bx=lerp(A.x,B.x,tb), bz=lerp(A.z,B.z,tb);
+    const at=lerp(A.top,B.top,ta), bt=lerp(A.top,B.top,tb), ab=lerp(A.bot,B.bot,ta), bb=lerp(A.bot,B.bot,tb);
+    if (!own((ax+bx)/2,(az+bz)/2)) continue;
+    const L=Math.hypot(bx-ax,bz-az), ux=(bx-ax)/L, uz=(bz-az)/L, ry=Math.atan2(-uz,ux);
+    let nx=-uz, nz=ux; if (nx*A.nx+nz*A.nz<0){ nx=-nx; nz=-nz; }
+    const ext=0.12, eax=ax-ux*ext, eaz=az-uz*ext, ebx=bx+ux*ext, ebz=bz+uz*ext;
+    shearBox(gb,eax,eaz,at,ebx,ebz,bt,Math.max(at-ab,bt-bb),CIT_TH,stone,SS);
+    shearBox(gb,eax,eaz,at-0.02,ebx,ebz,bt-0.02,0.22,CIT_TH+0.16,C_.trim,0);
+    // swallow-tailed merlons along the outer edge
+    const n=Math.max(1,Math.round(L/1.6));
+    for (let m=0;m<n;m++){ const t=(m+0.5)/n, y=lerp(at,bt,t), px=ax+ux*L*t+nx*(CIT_TH/2-0.25), pz=az+uz*L*t+nz*(CIT_TH/2-0.25);
+      gb.add(T.box, mat(px,y,pz,0.62,1.0,0.5,ry), stone, null, SS);
+      for (const s of [-1,1]) gb.add(T.box, mat(px+ux*s*0.2,y+1.0,pz+uz*s*0.2,0.22,0.38,0.5,ry), stone, null, SS); }
+    ch.obbs.push({x:(ax+bx)/2,z:(az+bz)/2,hw:L/2+0.1,hd:CIT_TH/2,rot:ry,top:Infinity}); }
+  // the towers, open to the town, with tiled roofs on a cornice
+  for (const t of c.towers){ if (!own(t.x,t.z)) continue;
+    const H=mat(t.x,0,t.z,1,1,1,t.rot), w=CIT_TW, so=Math.sign(Math.sin(t.rot)*c.pts[t.k].nx+Math.cos(t.rot)*c.pts[t.k].nz)||1;
+    gb.add(T.box, mm(H,mat(0,t.bot,0,w,t.top-t.bot,w)), stone, null, SS);
+    gb.add(T.box, mm(H,mat(0,t.top-0.1,0,w+0.5,0.35,w+0.5)), C_.trim, null);
+    gb.add(T.pyr, mm(H,mat(0,t.top+0.25,0,w+0.9,2.3,w+0.9)), roofC, null, SR);
+    for (const y of [t.top-1.6,t.top-5.6]){ if (y<c.pts[t.k].hi+1.5 && y!==t.top-1.6) continue;
+      gb.add(T.boxC, mm(H,mat(0,y,so*(w/2+0.02),0.32,1.2,0.1)), C_.win, null);
+      for (const s of [-1,1]) gb.add(T.boxC, mm(H,mat(s*(w/2+0.02),y,so*0.8,0.1,1.2,0.32)), C_.win, null); }
+    ch.obbs.push({...t.ob,top:Infinity}); }
+  // the gates: a tower over an arched passage, its doors open against the passage's walls
+  for (const g of c.gates){ if (!own(g.x,g.z)) continue;
+    const H=mat(g.x,0,g.z,1,1,1,g.rot), r=g.r, pw=CIT_PW, D=CIT_GD, spring=g.yR+3.6, W=2*(r+pw);
+    const so=Math.sign(Math.sin(g.rot)*c.pts[g.k].nx+Math.cos(g.rot)*c.pts[g.k].nz)||1;
+    for (const s of [-1,1]){ gb.add(T.box, mm(H,mat(s*(r+pw/2),g.bot,0,pw,g.top-g.bot,D)), stone, null, SS);
+      const [px,pz]=localToWorld(g.ob,s*(r+pw/2),0); ch.obbs.push({x:px,z:pz,hw:pw/2,hd:D/2,rot:g.rot,top:Infinity}); }
+    archFill(gb,mm(H,mat(0,spring,0)),r,r,D,g.top-spring,stone,SS,C_.stoneDark,SS);
+    const m=Math.max(9,Math.round(2*r*2.4)), seg=Math.PI*(r+0.14)/m+0.03;
+    for (const fz of [-D/2-0.02,D/2+0.02]) for (let i=0;i<m;i++){ const ang=Math.PI*(i+0.5)/m;
+      gb.add(T.boxC, mm(H,mat(Math.cos(ang)*(r+0.14),spring+Math.sin(ang)*(r+0.14),fz,0.34,seg,0.16,0,0,ang)), i===Math.floor(m/2)?C_.trim:vsTone(C_.stone,i), null); }
+    gb.add(T.box, mm(H,mat(0,g.top-0.1,0,W+0.5,0.35,D+0.5)), C_.trim, null);
+    gb.add(T.pyr, mm(H,mat(0,g.top+0.25,0,W+0.9,3.0,D+0.9)), roofC, null, SR);
+    for (const s of [-1,1]) gb.add(T.box, mm(H,mat(s*(r-0.08),g.yR,-so*(D/2-0.4-r/2),0.12,spring-g.yR+r*0.55,r)), C_.door, null, SW);
+    const yw=spring+r+1.4;
+    if (yw<g.top-1.2) for (const fz of [-1,1]) for (const s of [-1,1]) gb.add(T.boxC, mm(H,mat(s*1.1,yw+(g.main&&fz===so?2.4:0),fz*(D/2+0.02),0.32,1.2,0.1)), C_.win, null);
+    if (g.main){ const rotF=so>0?g.rot:g.rot+Math.PI, HF=mat(g.x,0,g.z,1,1,1,rotF), fz=D/2+0.02, y=Math.min(g.top-1.2,spring+r+1.6);
+      gb.add(T.cylC, mm(HF,mat(0,y,fz,1.35,0.08,1.35,0,Math.PI/2)), C_.white, null);
+      gb.add(T.cylC, mm(HF,mat(0,y,fz-0.02,1.55,0.08,1.55,0,Math.PI/2)), C_.teal, null);
+      gb.add(T.cylC, mm(HF,mat(0,y,fz+0.1,0.1,0.04,0.1,0,Math.PI/2)), C_.ink, null);
+      const [wx,wz]=localToWorld({x:g.x,z:g.z,rot:rotF},0,fz+0.07), F={x:wx,y,z:wz,rot:rotF};
+      (ch.clockFaces||(ch.clockFaces=[])).push(F); clockFaces.add(F);
+      (ch.snd||(ch.snd=[])).push({id:'clock_bell',x:g.x,y:g.top-1,z:g.z}); } }
+  gb.oy=oy0;
 }
 
 /* ================= names ================= */
@@ -4567,6 +4783,7 @@ function genChunk(cx,cz,lod=0){
   // parapets and a metre to spare) is reserved in every block it reaches before anything is placed there
   for (let i=cx-2;i<=cx+3;i++){ const X=railCross(i); if (!X) continue; const o={x:X.x,z:X.z,hw:vRoadW(X.i,X.z)+1.4,hd:X.flat+1,rot:X.rot};
     if (Math.abs(o.x-(cx+0.5)*C)<C/2+o.hd+o.hw && Math.abs(o.z-(cz+0.5)*C)<C/2+o.hd+o.hw) ch.place.push(o); }
+  buildCitadel(gb,ch,cx,cz);
   const cellOk=(x,z,m)=>insideCell(cx,cz,x,z,m);
   const alleyS=(A,x,z)=>A.dir==='h'?z-A.f(x):x-A.f(z);
   function canPlace(o,pad=0.04,opt={}){
@@ -15805,7 +16022,7 @@ window.__village={ get seed(){ return SEED_TEXT; }, aerGround:(x,y)=>aerGround(x
   findHarbour(){ for (let d=0;d<12;d++) for (const sd of SIDES) for (const n of [Math.floor(player.x/HARB)+d,Math.floor(player.x/HARB)-d]){ const H=harbourInfo(sd,n); if (H) return {x:H.x,z:coastZ(sd,H.x)+sd*7,W:H.W,sd,qz:coastZ(sd,H.x+H.W/2-1)+sd*2.5}; } return null; },
   findBeach(){ for (let x=player.x; x<player.x+3000; x+=10) for (const sd of SIDES){ const z=coastZ(sd,x)+sd*5; if (heightAt(x,z)<0.6 && heightAt(x,z)>0.1 && !harbourAt(sd,x)) return {x,z,sd}; } return null; },
   ridge(x){ return {x,z:ridgeZ(x)}; },
-  sea,farMesh,scene,setTilt,setAO,AO,get aoOn(){ return aoOn; },render,audioState:()=>({ctx:audioCtx&&audioCtx.state,muted,ready:SND.ready,loaded:Object.keys(SND.buf)}),SND,SNDV,SNDS,shore,surfaceAt,startAudio,updateChunks:(x,z)=>updateChunks(x,z,1e9),disposeChunk,farPoint(gi,gj){ COVE_FAST++; try{ return farPoint(gi,gj); } finally{ COVE_FAST--; } },FS,findPeak(){ const i0=Math.floor(player.x/PEAK), j0=Math.floor(player.z/PEAK); for (let r=0;r<30;r++) for (let i=-r;i<=r;i++) for (let j=-r;j<=r;j++){ const P=peakInfo(i0+i,j0+j); if (P) return P; } return null; },toggleTrain,get tunnelK(){return tunnelK;},get chase(){return chase;},cats,railPerp,railZ,railY,railState,findStation(){ const n0=Math.floor(player.x/ST_SP); for (let k=0;k<200;k++) for (const sg of [1,-1]){ const S=stationInfo(n0+sg*k); if (S) return S; } return null; },findBridge(){ const i0=Math.round(player.x/C); for (let k=0;k<300;k++) for (const sg of [1,-1]){ const X=railCross(i0+sg*k); if (X) return X; } return null; },get view(){return VIEW;},findRail(kind){ for (let x=player.x; x<player.x+6000; x+=8){ if (railState(x)===kind) return {x,z:railZ(x),y:railY(x)}; } return null; },findCountry(kind){ for (let r=0;r<20;r++) for (let i=-r;i<=r;i++) for (let j=-r;j<=r;j++){ const cx=Math.floor(player.x/C)+i, cz=Math.floor(player.z/C)+j; if (chunkKind(cx,cz)===kind) return {x:cx*C+C/2,z:cz*C+C/2}; } return null; },train,setHour:v=>{hour=v;}, get hour(){ return hour; }, lightHour(h){ hour=h; updateDaylight(); updateShadowFrame(); },
+  sea,farMesh,scene,setTilt,setAO,AO,get aoOn(){ return aoOn; },render,audioState:()=>({ctx:audioCtx&&audioCtx.state,muted,ready:SND.ready,loaded:Object.keys(SND.buf)}),SND,SNDV,SNDS,shore,surfaceAt,startAudio,updateChunks:(x,z)=>updateChunks(x,z,1e9),disposeChunk,farPoint(gi,gj){ COVE_FAST++; try{ return farPoint(gi,gj); } finally{ COVE_FAST--; } },FS,findCitadels(n=3){ const i0=Math.floor(player.x/PEAK), j0=Math.floor(player.z/PEAK), out=[]; for (let r=0;r<30 && out.length<n;r++) for (let i=-r;i<=r;i++) for (let j=-r;j<=r;j++){ if (Math.max(Math.abs(i),Math.abs(j))!==r) continue; const P=peakInfo(i0+i,j0+j); const c=P&&citadelOf(P); if (c){ citHeights(c); out.push({x:P.x,z:P.z,H:P.H,R:P.R,f:c.f,n:c.N,towers:c.towers.length,gates:c.gates.map(g=>({x:g.x,z:g.z,rot:g.rot,yR:g.yR,top:g.top,main:!!g.main,r:g.r}))}); } } return out; },citadelOf,vRoadX,hRoadZ,findPeak(){ const i0=Math.floor(player.x/PEAK), j0=Math.floor(player.z/PEAK); for (let r=0;r<30;r++) for (let i=-r;i<=r;i++) for (let j=-r;j<=r;j++){ const P=peakInfo(i0+i,j0+j); if (P) return P; } return null; },toggleTrain,get tunnelK(){return tunnelK;},get chase(){return chase;},cats,railPerp,railZ,railY,railState,findStation(){ const n0=Math.floor(player.x/ST_SP); for (let k=0;k<200;k++) for (const sg of [1,-1]){ const S=stationInfo(n0+sg*k); if (S) return S; } return null; },findBridge(){ const i0=Math.round(player.x/C); for (let k=0;k<300;k++) for (const sg of [1,-1]){ const X=railCross(i0+sg*k); if (X) return X; } return null; },get view(){return VIEW;},findRail(kind){ for (let x=player.x; x<player.x+6000; x+=8){ if (railState(x)===kind) return {x,z:railZ(x),y:railY(x)}; } return null; },findCountry(kind){ for (let r=0;r<20;r++) for (let i=-r;i<=r;i++) for (let j=-r;j<=r;j++){ const cx=Math.floor(player.x/C)+i, cz=Math.floor(player.z/C)+j; if (chunkKind(cx,cz)===kind) return {x:cx*C+C/2,z:cz*C+C/2}; } return null; },train,setHour:v=>{hour=v;}, get hour(){ return hour; }, lightHour(h){ hour=h; updateDaylight(); updateShadowFrame(); },
   boatCam(){ for (const ch of chunks.values()) for (const b of ch.boats) if (b.floating) return {x:b.m.position.x,z:b.m.position.z,rot:b.m.rotation.y}; return null; },
   ferries,islandRoute,coastZ,harbourInfo,ferryLanding,ferryPortInfo,hbS,sailers,harbourAt,
   // whether a walker starting at (x0,z0,y0) can reach a point where goal(x,z) holds, under the player's own rules:
