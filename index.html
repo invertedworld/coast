@@ -2529,12 +2529,20 @@ function faceHoles(arr,P,N,u0,u1,y0,y1,rects,door){
   const q=(ua,ub,ya,yb)=>{ if (ub-ua>1e-4 && yb-ya>1e-4) q3n(arr,P(ua,ya),P(ub,ya),P(ub,yb),P(ua,yb),N); };
   const us=[u0,u1]; for (const r of rects) us.push(r[0],r[1]); for (const a of arches) us.push(a.c-a.r,a.c+a.r);
   const U=[...new Set(us.map(v=>clamp(v,u0,u1)))].sort((a,b)=>a-b);
+  // the wall of a column from ys up to y1, with the openings that cross it
+  const fill=(ua,ub,um,ys)=>{ const cov=rects.filter(r=>r[0]<um && r[1]>um).map(r=>[clamp(r[2],ys,y1),clamp(r[3],ys,y1)]).sort((a,b)=>a[0]-b[0]);
+    let y=ys; for (const [ya,yb] of cov){ q(ua,ub,y,ya); y=Math.max(y,yb); } q(ua,ub,y,y1); };
   for (let i=0;i+1<U.length;i++){ const ua=U[i], ub=U[i+1], um=(ua+ub)/2, a=arches.find(a=>um>a.c-a.r && um<a.c+a.r);
+    // over an arch, the wall between the curve and the level of its crown, cut to this column, and above the crown the
+    // wall with its openings, so that a window over a doorway is open as any other
     if (a){ if (y1<=a.f){ q(ua,ub,y0,y1); continue; } q(ua,ub,y0,a.f);
-      if (y1>a.s+a.r) for (let k=0;k<ARCH_N;k++){ const p=archAt(a,k), b=archAt(a,k+1); q3n(arr,P(p[0],p[1]),P(b[0],b[1]),P(b[0],y1),P(p[0],y1),N); }
+      const top=a.s+a.r;
+      if (y1>top){ for (let k=0;k<ARCH_N;k++){ const p=archAt(a,k), b=archAt(a,k+1), xa=Math.max(p[0],ua), xb=Math.min(b[0],ub); if (xb-xa<1e-6) continue;
+          const ya=p[1]+(b[1]-p[1])*(xa-p[0])/(b[0]-p[0]), yb=p[1]+(b[1]-p[1])*(xb-p[0])/(b[0]-p[0]);
+          q3n(arr,P(xa,ya),P(xb,yb),P(xb,top),P(xa,top),N); }
+        fill(ua,ub,um,top); }
       continue; }
-    const cov=rects.filter(r=>r[0]<um && r[1]>um).map(r=>[clamp(r[2],y0,y1),clamp(r[3],y0,y1)]).sort((a,b)=>a[0]-b[0]);
-    let y=y0; for (const [ya,yb] of cov){ q(ua,ub,y,ya); y=Math.max(y,yb); } q(ua,ub,y,y1);
+    fill(ua,ub,um,y0);
   }
 }
 // the sides and soffit of an arched opening between two parallel planes, facing into the opening
