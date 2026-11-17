@@ -12926,19 +12926,23 @@ canvas.addEventListener('mousedown',e=>{ if (e.button!==0 || !TELE.on) return; c
   if (now-teleClickT<400){ teleClickT=0; if (teleGoThere()) e.stopImmediatePropagation(); } else teleClickT=now; },true);
 // the camera of the bird's-eye view, set from the point it looks at (the player), its heading, tilt and distance; it is
 // called each frame, and at once whenever the view is moved by the pointer or the fingers (dt 0)
-let aerLift=0;   // how far the bird's-eye view is lifted to glide over higher ground near the camera
+let aerLift=0, aerMoved='';   // how far the bird's-eye view is lifted to glide over higher ground near the camera, and where it was last frame
 function aerCamera(dt,moving){
     // the view keeps one height and one angle wherever it is moved, whatever the ground beneath: the point it looks at
     // stays at the level it had when the view was entered (or the player was last set down), and the camera stands
     // at its distance and tilt from that point. Where higher ground comes near the camera (within a third of its
     // distance, and at least 30 m, all round) the whole view glides up to keep 3 m clear of it, at the same angle,
-    // rising over about a second and settling again more slowly once it is past; the camera is never let below 0.5 m
+    // rising over about a second and settling again more slowly once it is past, but only while the view is being
+    // moved, so that it never sinks while it is left alone; the camera is never let below 0.5 m
     // above the ground directly beneath it. While the view is being moved (dt 0) the lift is held as it is
     if (aboveY===null || firstCam){ aboveY=eyeY; aerLift=0; }
     const ty=aboveY+1.2, cx=player.x+Math.sin(yaw)*Math.cos(pitch)*dist, cz=player.z+Math.cos(yaw)*Math.cos(pitch)*dist, cy=ty+Math.sin(pitch)*dist;
     if (dt>0){ const r=Math.max(30,dist*0.33); let h=heightAt(cx,cz);
       for (let k=0;k<12;k++){ const a=k/12*Math.PI*2; h=Math.max(h,heightAt(cx+Math.cos(a)*r,cz+Math.sin(a)*r),heightAt(cx+Math.cos(a)*r*0.5,cz+Math.sin(a)*r*0.5)); }
-      const want=Math.max(0,h+3-cy); aerLift+=(want-aerLift)*(1-Math.exp(-dt*(want>aerLift?1.6:0.5))); }
+      // it rises whenever higher ground comes near, but settles back down only while the view is moving, so that a
+      // view left alone holds its height rather than sinking of its own accord
+      const want=Math.max(0,h+3-cy), mv=player.x+','+player.z+','+yaw+','+pitch+','+dist, moved=mv!==aerMoved; aerMoved=mv;
+      if (want>aerLift || moved) aerLift+=(want-aerLift)*(1-Math.exp(-dt*(want>aerLift?1.6:0.5))); }
     const lift=Math.max(aerLift,heightAt(cx,cz)+0.5-cy);
     camTarget.set(player.x,ty+lift,player.z);
     camPos.set(cx,cy+lift,cz);
