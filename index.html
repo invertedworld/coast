@@ -580,7 +580,7 @@ function mtTint(c,h,slope,n=0.5,p=0.5){ if (h<110) return c;
   if (m>0) c.lerp(_mtC.copy(MT_GARRIGUE).lerp(MT_MAQUIS,smooth((n*0.4+p*0.6-0.35)/0.3)),Math.min(0.85,m*0.9));
   const k=Math.max(smooth((h-170)/200),smooth((slope-0.7)/0.6)*smooth((h-120)/60)*0.9);
   if (k>0) c.lerp(_mtC.copy(MT_ROCK).lerp(MT_PALE,smooth((p-0.45)/0.3)*0.8).lerp(MT_SCREE,clamp((slope-0.5)*1.4,0,1)*0.8+n*0.2),k); return c; }
-const _mtC=new THREE.Color();
+const _mtC=new THREE.Color(), _gMt=new THREE.Color();
 function mtSpine0(x){ return ridgeZ(x)+0.35*(halfW(x)-MT_D0)*(fbm(x*0.0011,5.3,471,2)-0.5)*2; }
 // how high the range stands at x, from 0 to 1
 function mtLevel0(x){
@@ -5413,11 +5413,17 @@ function genChunk(cx,cz,lod=0){
       else if (dr<16 && stationNear(x,38)){ cA.lerp(C_.piazza,0.85); flag=1; cob=0; pv=Math.max(pv,0.85); } }
     if (ch.field){ const [lu,lv]=obbLocal(ch.field,x,z); if (Math.abs(lu)<ch.field.hw && Math.abs(lv)<ch.field.hd){ cA.copy(((Math.floor(lu/1.4)%2)+2)%2?FIELD_A:FIELD_B); cob=0; pv=0; } }
     if (COUNTRY.has(ch.kind) && ch.kind!=='coast' && ch.kind!=='mount' && rd>0.6){ const d=vnoise(x*0.05,z*0.05,991); cA.lerp(d>0.55?LIMESTONE:DRYGRASS,ch.kind==='rocky'?0.45:0.3); }
-    if (P){ const dd=Math.hypot(x-P.x,z-P.z); if (dd<P.r+1.2){ const t=clamp((P.r+1.2-dd)/1.5,0,1); cA.lerp(C_.piazza.clone().multiplyScalar(0.96+n2*0.06),t); if (P.small) cob=Math.max(cob,t); else { flag=t; cob*=1-t; } pv=Math.max(pv,t); } }
+    // the paving fades into the ground beyond the square's edge, under the houses round it; where a belvedere's wall
+    // stands instead, the paving runs whole up to the wall, and none of the fade is seen
+    if (P){ const dd=Math.hypot(x-P.x,z-P.z), B=ch.belv;
+      const walled=B && dd>P.r-0.4 && dd<=P.r+1.45 && (a=>B.segs.has(Math.floor(a/(Math.PI*2)*B.nseg)%B.nseg))((Math.atan2(z-P.z,x-P.x)+Math.PI*2)%(Math.PI*2));
+      if (dd<P.r+1.2 || walled){ const t=walled?1:clamp((P.r+1.2-dd)/1.5,0,1); cA.lerp(C_.piazza.clone().multiplyScalar(0.96+n2*0.06),t); if (P.small) cob=Math.max(cob,t); else { flag=t; cob*=1-t; } pv=Math.max(pv,t); } }
     for (const sd of SIDES){ const HB=harbourAt(sd,x); if (HB){ const sh=hbS(HB,x,z); if (sh>=-0.3 && sh<9.5 && Math.abs(x-HB.x)<HB.W/2+3){ const t=clamp((9.5-sh)/1.5,0,1); cA.lerp(C_.piazza,t); flag=Math.max(flag,t); cob=0; pv=Math.max(pv,t); } } }
     if (ch.garden){ const [lu,lv]=obbLocal(ch.garden,x,z); if (Math.abs(lu)<ch.garden.hw-0.4 && Math.abs(lv)<ch.garden.hd-0.4){ cA.copy(C_.grass).lerp(C_.grass2,n1); cob=0; pv=0; } }
     if (slope>0.75){ const t=clamp((slope-0.75)*1.6,0,0.85)*(1-cob); cA.lerp(C_.rock,t); }
-    if (h>120) mtTint(cA,h,slope,n1,vnoise(x*0.025,z*0.025,995));
+    // the mountain's garrigue, maquis and rock colour the ground high up, but not its paving: a square, a street or a
+    // station's forecourt keeps its stone at any height
+    if (h>120 && pv<1){ mtTint(_gMt.copy(cA),h,slope,n1,vnoise(x*0.025,z*0.025,995)); cA.lerp(_gMt,1-pv); }
     const seaRock=ch.kind==='isle' && h>-1 && !islandNear(x,z);
     if (seaRock) cA.copy(C_.rock).lerp(GREY_ROCK,0.5+0.5*n1).multiplyScalar(0.92+n2*0.14);
     cA.multiplyScalar(1-0.1*(1-pv));   // unpaved ground is a tenth darker than its base colours; the beach is not
