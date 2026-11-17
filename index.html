@@ -5249,16 +5249,19 @@ function genChunk(cx,cz,lod=0){
         // arched spans between piers, one every 14 m of x. Where the line crosses x at an angle a metre of x is L metres of
         // track, so each pier is 2 m thick along the track and each arch spans the rest of the 14L between them. The
         // piers and the arches are laid along the track (rotA turns a box's x axis onto it) and 3.9 m wide across it
+        // a span that runs off the end of the viaduct onto the embankment has no arch: it is built solid down to the
+        // ground as the abutment against the bank, so that no deck is left bridging nothing
         const span=14, L=len/step, rx=span/2-1/L, rotA=rot-Math.PI/2;
-        for (let q=0;q<2;q++){ const xs=xa+q+0.5, xl=((xs%span)+span)%span-span/2;
+        const archOk=xc=>railState(xc-rx)==='viaduct' && railState(xc)==='viaduct' && railState(xc+rx)==='viaduct';
+        for (let q=0;q<2;q++){ const xs=xa+q+0.5, xl=((xs%span)+span)%span-span/2, full=archOk(xs-xl);
           // the part of this metre of x under the arch: the masonry above the curve of the arch is solid down to the lowest
           // point of the curve over it, so that where the ground rises under an arch the player cannot walk into it
-          { const a=Math.max(xl-0.5,-rx), b=Math.min(xl+0.5,rx);
+          if (full){ const a=Math.max(xl-0.5,-rx), b=Math.min(xl+0.5,rx);
             if (b-a>0.001){ const R=rx*L, xc=xs-xl, d=Math.max(Math.abs(a),Math.abs(b))*L, xa2=xs+(a+b)/2-xl;
               const bot=railY(xc)-1.45-R-0.6+Math.sqrt(Math.max(0,R*R-d*d));
               ch.obbs.push({x:xa2,z:railZ(xa2),hw:1.95,hd:(b-a)*L/2,rot,top:Infinity,bot}); } }
           // the part of this metre of x outside the arch
-          const lo=xl>0?Math.max(xl-0.5,rx):xl-0.5, hi=xl>0?xl+0.5:Math.min(xl+0.5,-rx);
+          const lo=!full?xl-0.5:xl>0?Math.max(xl-0.5,rx):xl-0.5, hi=!full?xl+0.5:xl>0?xl+0.5:Math.min(xl+0.5,-rx);
           if (hi-lo<0.001) continue;
           const xm=xs+(lo+hi)/2-xl, ys=railY(xm), zs=railZ(xm), deckBottom=ys-1.45;
           // the piers are built in slices down to the ground at its lowest across their width
@@ -5267,7 +5270,7 @@ function genChunk(cx,cz,lod=0){
           if (deckBottom-bottom>0.05) gb.add(T.box, mat(xm,bottom,zs,(hi-lo)*L+0.02,deckBottom-bottom,3.9,rotA), stoneR, null, SS);
           ch.obbs.push({x:xm,z:zs,hw:1.95,hd:(hi-lo)*L/2,rot,top:Infinity}); }
         { const xc=Math.floor(xa/span)*span+span/2;
-          if (xc>=xa && xc<xb){ const r=rx*L, yc=railY(xc), zc=railZ(xc), sp=yc-1.45-r-0.6;
+          if (xc>=xa && xc<xb && archOk(xc)){ const r=rx*L, yc=railY(xc), zc=railZ(xc), sp=yc-1.45-r-0.6;
             archFill(gb,mat(xc,sp,zc,1,1,1,rotA),r,r,3.9,yc-1.45-sp,stoneR,SS,stoneR,SS); } }
       }
     }
