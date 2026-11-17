@@ -2420,13 +2420,13 @@ function roadArch(type,idx,seg){
    worked out from the hill and the streets alone, so that every block it crosses agrees where it runs, and each
    block builds the stretch whose middle lies in it. There are at most four gates, one towards each of north, south,
    east and west where a street crosses the wall that way: a tower over an arched passage, the gate on the side
-   towards the nearer coast carrying a clock. The wall runs on across the other streets, which end against it. Square towers with tiled
-   roofs stand on the wall about every 30 m. A walk runs along the top of the wall behind a parapet 0.75 m high, and a
-   stair against the inside of the wall climbs to it on each stretch between towers and gates. A height is given
+   towards the nearer coast carrying a clock. The wall runs on across the other streets, which end against it. A
+   walk runs along the top of the wall behind a parapet 0.75 m high, and a stair against the inside of the wall
+   climbs to it on each stretch between two gates. A height is given
    up where its wall would come near the railway outside a tunnel, the coast road or a station, or where two gates
    would stand close together, and the next is tried; a hill where none will do has no wall. Houses, squares,
-   alleys and archways keep off the wall, its towers and gates, and off a strip of open ground 5 m wide outside it. */
-const CIT_TH=1.8, CIT_TW=5.2, CIT_GD=6.5, CIT_PW=1.6, CIT_TS=30, CIT_PH=0.75, CIT_PT=0.5, CIT_SW=1.1, CIT_RISE=0.2, CIT_GO=0.3;
+   alleys and archways keep off the wall, its stairs and gates, and off a strip of open ground 5 m wide outside it. */
+const CIT_TH=1.8, CIT_GD=6.5, CIT_PW=1.6, CIT_PH=0.75, CIT_PT=0.5, CIT_SW=1.1, CIT_RISE=0.2, CIT_GO=0.3;
 function citadelOf(P){
   if (P.cit!==undefined) return P.cit;
   P.cit=null;
@@ -2439,7 +2439,7 @@ function citAt(x,z){ const i=Math.floor(x/PEAK), j=Math.floor(z/PEAK);
   for (let dj=-1;dj<=1;dj++) for (let di=-1;di<=1;di++){ const P=peakInfo(i+di,j+dj);
     if (P && Math.abs(x-P.x)<P.R*1.25 && Math.abs(z-P.z)<P.R*1.25){ const c=citadelOf(P); if (c) return c; } }
   return null; }
-// whether a footprint comes within m of the wall, its towers or its gates
+// whether a footprint comes within m of the wall, its stairs or its gates
 function citHit(o,m=0.3){ const c=citAt(o.x,o.z); if (!c) return false; const e=o.hw+o.hd;
   if (o.x<c.x0-e-6 || o.x>c.x1+e+6 || o.z<c.z0-e-6 || o.z>c.z1+e+6) return false;
   for (const q of c.foot){ const f=e+q.hw+q.hd+m; if (Math.abs(q.x-o.x)<f && Math.abs(q.z-o.z)<f && obbOverlap(o,q,-m)) return true; }
@@ -2529,14 +2529,6 @@ function citRing(P,h0,f){
   // the main gate faces the nearer coast
   { const s=P.z-coastZ(1,P.x), n=coastZ(-1,P.x)-P.z, dz=s<n?-1:1; let best=null, bv=-1e9;
     for (const g of gates){ const v=(g.z-P.z)*dz/Math.hypot(g.x-P.x,g.z-P.z); if (v>bv){ bv=v; best=g; } } best.main=true; }
-  // the towers, evenly along the wall from the main gate, none near a gate or a street
-  const sAt=[0]; for (let k=1;k<=N;k++) sAt.push(sAt[k-1]+Math.hypot(pts[k%N].x-pts[k-1].x,pts[k%N].z-pts[k-1].z));
-  const L=sAt[N], nT=Math.max(4,Math.round(L/CIT_TS)), sp=L/nT, g0=gates.find(g=>g.main), s0=sAt[g0.k], towers=[];
-  for (let m=0;m<nT;m++){ const s=(s0+(m+0.5)*sp)%L; let k=0; while (k<N-1 && sAt[k+1]<s) k++;
-    const p=pts[k], w=CIT_TW, off=w/2-CIT_TH/2, x=p.x+p.nx*off, z=p.z+p.nz*off, rot=Math.atan2(-p.uz,p.ux), ob={x,z,hw:w/2,hd:w/2,rot};
-    if (gates.some(g=>Math.hypot(g.x-x,g.z-z)<14)) continue;
-    if (obbSamples(ob).some(q=>roadDist(q[0],q[1])<0.6)) continue;
-    towers.push({k,x,z,rot,ob}); }
   // the wall's heights, from the hill before its streets are cut: its top 6.2 m above the ground outside and at
   // least 2.3 m above the ground inside, smoothed along its length; the walk behind the parapet CIT_PH below it
   for (const p of pts){ const hc=baseH(p.x,p.z), hi=baseH(p.x-p.nx*2.6,p.z-p.nz*2.6), ho=baseH(p.x+p.nx*2.6,p.z+p.nz*2.6);
@@ -2544,11 +2536,11 @@ function citRing(P,h0,f){
   for (let pass=0;pass<2;pass++){ const o=pts.map(p=>p.top);
     for (let k=0;k<N;k++){ let s=0; for (let d=-4;d<=4;d++) s+=o[(k+d+N)%N]; pts[k].top=Math.max(s/9,pts[k].hi+2.3); } }
   for (const p of pts) p.walk=p.top-CIT_PH;
-  // a stair up to the walk of each stretch between towers and gates, against the inside of the wall: a landing
+  // a stair up to the walk of each stretch between gates, against the inside of the wall: a landing
   // level with the walk at one end of the stretch, then steps running down along the wall until they meet the
   // ground, from whichever end needs fewer that fit within the stretch
   const stairs=[];
-  { const blocked=pts.map(p=>gates.some(g=>obbIn({...g.ob,hw:g.ob.hw+0.4,hd:g.ob.hd+0.4},p.x,p.z)) || towers.some(t=>obbIn({...t.ob,hw:t.ob.hw+0.4,hd:t.ob.hd+0.4},p.x,p.z)));
+  { const blocked=pts.map(p=>gates.some(g=>obbIn({...g.ob,hw:g.ob.hw+0.4,hd:g.ob.hd+0.4},p.x,p.z)));
     const k0=blocked.indexOf(true), runs=[]; let run=null;
     for (let q=1;q<=N;q++){ const k=(k0+q)%N; if (blocked[k]){ if (run) runs.push(run); run=null; } else (run||(run=[])).push(pts[k]); }
     for (const R of runs){ if (R.length<4) continue;
@@ -2568,19 +2560,18 @@ function citRing(P,h0,f){
           put(CIT_GO,top); }
         if (ok && (!best || steps.length<best.length)) best=steps; }
       if (best) stairs.push(best); } }
-  // the ground the wall, its towers and its gates stand on, kept from everything else
+  // the ground the wall, its stairs and its gates stand on, kept from everything else
   const foot=[];
   for (let k=0;k<N;k++){ const A=pts[k], B=pts[(k+1)%N], l=Math.hypot(B.x-A.x,B.z-A.z);
     // the wall's own width, and a strip of open ground 5 m wide along its outside
     foot.push({x:(A.x+B.x)/2+A.nx*2.5,z:(A.z+B.z)/2+A.nz*2.5,hw:l/2+0.1,hd:CIT_TH/2+2.8,rot:Math.atan2(-(B.z-A.z),B.x-A.x)}); }
-  for (const t of towers) foot.push({...t.ob,hw:t.ob.hw+0.2,hd:t.ob.hd+0.2});
   for (const g of gates) foot.push({...g.ob,hw:g.ob.hw+0.2,hd:g.ob.hd+0.3});
   for (const S of stairs){ const A=S[0], B=S[S.length-1], l=Math.hypot(B.x-A.x,B.z-A.z)||0.1;
     foot.push({x:(A.x+B.x)/2,z:(A.z+B.z)/2,hw:l/2+0.9,hd:CIT_SW/2+0.4,rot:Math.atan2(-(B.z-A.z)/l,(B.x-A.x)/l)}); }
   let x0=1e9,x1=-1e9,z0=1e9,z1=-1e9; for (const p of pts){ x0=Math.min(x0,p.x); x1=Math.max(x1,p.x); z0=Math.min(z0,p.z); z1=Math.max(z1,p.z); }
-  return {P,N,pts,gates,towers,stairs,foot,x0:x0-8,x1:x1+8,z0:z0-8,z1:z1+8,f};
+  return {P,N,pts,gates,stairs,foot,x0:x0-8,x1:x1+8,z0:z0-8,z1:z1+8,f};
 }
-// the heights of the wall, its towers and gates, worked out from the ground once its streets and squares are known
+// the heights of the wall and its gates, worked out from the ground once its streets and squares are known
 function citHeights(c){
   if (c.hDone) return; c.hDone=true; const H=heightAtExact;
   // the wall's foot, below the ground as its streets and squares leave it
@@ -2590,15 +2581,13 @@ function citHeights(c){
     for (let q=-CIT_GD/2;q<=CIT_GD/2;q+=CIT_GD/4){ const [x,z]=localToWorld(g.ob,0,q); yR=Math.max(yR,H(x,z)); }
     for (const q of obbSamples(g.ob)) lo=Math.min(lo,H(q[0],q[1]));
     g.yR=yR; g.bot=lo-1.5; g.top=Math.max(yR+3.6+g.r+3.4,wallTop(g.x,g.z)+4.5); }
-  for (const t of c.towers){ let lo=1e9; for (const q of obbSamples(t.ob)) lo=Math.min(lo,H(q[0],q[1]));
-    t.bot=lo-1.5; t.top=c.pts[t.k].top+4.3; }
 }
 // a box whose top edge runs from (ax,ay,az) to (bx,by,bz), hgt deep and th thick, square to its length
 function shearBox(gb,ax,az,ay,bx,bz,by,hgt,th,col,surf){
   const L=Math.hypot(bx-ax,bz-az), nx=-(bz-az)/L*th, nz=(bx-ax)/L*th, m=new THREE.Matrix4();
   m.set(bx-ax,0,nx,(ax+bx)/2, by-ay,hgt,0,(ay+by)/2-hgt, bz-az,0,nz,(az+bz)/2, 0,0,0,1);
   gb.add(T.box,m,col,null,surf); }
-// the stretches of the wall, the towers and the gates that block (cx,cz) builds, and the footprint it keeps clear
+// the stretches of the wall, the stairs and the gates that block (cx,cz) builds, and the footprint it keeps clear
 function buildCitadel(gb,ch,cx,cz){
   const xc=cx*C+C/2, zc=cz*C+C/2, c=citAt(xc,zc); if (!c) return;
   if (xc<c.x0-C/2 || xc>c.x1+C/2 || zc<c.z0-C/2 || zc>c.z1+C/2) return;
@@ -2626,25 +2615,16 @@ function buildCitadel(gb,ch,cx,cz){
     shearBox(gb,eax+nx*po,eaz+nz*po,at,ebx+nx*po,ebz+nz*po,bt,CIT_PH+0.05,CIT_PT,stone,SS);
     shearBox(gb,eax+nx*po,eaz+nz*po,at+0.1,ebx+nx*po,ebz+nz*po,bt+0.1,0.14,CIT_PT+0.12,C_.trim,0);
     ch.obbs.push({x:(ax+bx)/2+nx*po,z:(az+bz)/2+nz*po,hw:L/2+0.1,hd:CIT_PT/2,rot:ry,top:Infinity});
-    // the walk, in pieces short enough to follow its slope
-    { const np=Math.max(1,Math.ceil(L/0.6));
-      for (let q=0;q<np;q++){ const t=(q+0.5)/np; ch.obbs.push({x:lerp(ax,bx,t)+nx*wo,z:lerp(az,bz,t)+nz*wo,hw:L/np/2+0.06,hd:(CIT_TH-CIT_PT)/2,rot:ry,top:lerp(aw,bw,t)}); } }
+    // the walk, a ramp along the stretch so that it is walked smoothly; it meets the next at the same height
+    { const e=ext+0.03, sl=(bw-aw)/L, ya=aw-sl*e, yb=bw+sl*e, w=L+2*e;
+      ch.obbs.push({x:(ax+bx)/2+nx*wo,z:(az+bz)/2+nz*wo,hw:w/2,hd:(CIT_TH-CIT_PT)/2,rot:ry,top:Math.max(ya,yb),
+        roof:{kind:'ramp',ya,yb,w,d:CIT_TH-CIT_PT,y0:Math.min(ya,yb),rise:Math.abs(yb-ya)}}); }
   }
   // the stairs up to the walk, solid masonry from the ground
   for (const S of c.stairs) for (const st of S){ if (!own(st.x,st.z)) continue;
     const g=Math.min(heightAt(st.x,st.z),baseH(st.x,st.z))-0.4;
     gb.add(T.box, mat(st.x,g,st.z,st.len+0.02,st.top-g,CIT_SW,st.rot), stone, null, SS);
     ch.obbs.push({x:st.x,z:st.z,hw:st.len/2+0.01,hd:CIT_SW/2,rot:st.rot,top:st.top}); }
-  // the towers, open to the town, with tiled roofs on a cornice
-  for (const t of c.towers){ if (!own(t.x,t.z)) continue;
-    const H=mat(t.x,0,t.z,1,1,1,t.rot), w=CIT_TW, so=Math.sign(Math.sin(t.rot)*c.pts[t.k].nx+Math.cos(t.rot)*c.pts[t.k].nz)||1;
-    gb.add(T.box, mm(H,mat(0,t.bot,0,w,t.top-t.bot,w)), stone, null, SS);
-    gb.add(T.box, mm(H,mat(0,t.top-0.1,0,w+0.5,0.35,w+0.5)), C_.trim, null);
-    gb.add(T.pyr, mm(H,mat(0,t.top+0.25,0,w+0.9,2.3,w+0.9)), roofC, null, SR);
-    for (const y of [t.top-1.6,t.top-5.6]){ if (y<c.pts[t.k].hi+1.5 && y!==t.top-1.6) continue;
-      gb.add(T.boxC, mm(H,mat(0,y,so*(w/2+0.02),0.32,1.2,0.1)), C_.win, null);
-      for (const s of [-1,1]) gb.add(T.boxC, mm(H,mat(s*(w/2+0.02),y,so*0.8,0.1,1.2,0.32)), C_.win, null); }
-    ch.obbs.push({...t.ob,top:Infinity}); }
   // the gates: a tower over an arched passage, its doors open against the passage's walls
   for (const g of c.gates){ if (!own(g.x,g.z)) continue;
     const H=mat(g.x,0,g.z,1,1,1,g.rot), r=g.r, pw=CIT_PW, D=CIT_GD, spring=g.yR+3.6, W=2*(r+pw);
@@ -2652,6 +2632,7 @@ function buildCitadel(gb,ch,cx,cz){
     for (const s of [-1,1]){ gb.add(T.box, mm(H,mat(s*(r+pw/2),g.bot,0,pw,g.top-g.bot,D)), stone, null, SS);
       const [px,pz]=localToWorld(g.ob,s*(r+pw/2),0); ch.obbs.push({x:px,z:pz,hw:pw/2,hd:D/2,rot:g.rot,top:Infinity}); }
     archFill(gb,mm(H,mat(0,spring,0)),r,r,D,g.top-spring,stone,SS,C_.stoneDark,SS);
+    ch.obbs.push({x:g.x,z:g.z,hw:r,hd:D/2,rot:g.rot,top:Infinity,bot:spring});   // the tower over the passage, which can be walked under
     const m=Math.max(9,Math.round(2*r*2.4)), seg=Math.PI*(r+0.14)/m+0.03;
     for (const fz of [-D/2-0.02,D/2+0.02]) for (let i=0;i<m;i++){ const ang=Math.PI*(i+0.5)/m;
       gb.add(T.boxC, mm(H,mat(Math.cos(ang)*(r+0.14),spring+Math.sin(ang)*(r+0.14),fz,0.34,seg,0.16,0,0,ang)), i===Math.floor(m/2)?C_.trim:vsTone(C_.stone,i), null); }
@@ -2738,6 +2719,8 @@ function roofAt(R,lu,lv){
     return R.y0+R.rise*(1-a/sp)+0.19*Math.hypot(1,R.rise/sp); }
   if (R.kind==='hip'||R.kind==='spire'){ const W=R.w/2+ROOF_OH, D=R.d/2+ROOF_OH; if (au>W||av>D) return null;
     return R.y0+0.06+R.rise*(1-Math.max(au/W,av/D)); }
+  // a ramp, such as a stretch of a citadel's walk: level across, rising evenly along u from ya to yb
+  if (R.kind==='ramp'){ if (au>R.w/2+0.02 || av>R.d/2+0.02) return null; return R.ya+(R.yb-R.ya)*clamp(lu/R.w+0.5,0,1); }
   if (au>R.w/2+0.125 || av>R.d/2+0.125) return null;
   return R.y0+0.15;
 }
@@ -2746,6 +2729,7 @@ function roofSlope(R,lu,lv){
   if (R.kind==='side') return {k:R.rise/(R.d/2),du:0,dv:Math.sign(lv)||1};
   if (R.kind==='hip'||R.kind==='spire'){ const W=R.w/2+ROOF_OH, D=R.d/2+ROOF_OH;
     return Math.abs(lu)/W>Math.abs(lv)/D?{k:R.rise/W,du:Math.sign(lu)||1,dv:0}:{k:R.rise/D,du:0,dv:Math.sign(lv)||1}; }
+  if (R.kind==='ramp') return {k:Math.abs(R.yb-R.ya)/R.w,du:R.yb>R.ya?-1:1,dv:0};
   return {k:0,du:0,dv:0};
 }
 function addDoor(gb,H,x,z,ry=0){
@@ -16068,7 +16052,7 @@ window.__village={ get seed(){ return SEED_TEXT; }, aerGround:(x,y)=>aerGround(x
   findHarbour(){ for (let d=0;d<12;d++) for (const sd of SIDES) for (const n of [Math.floor(player.x/HARB)+d,Math.floor(player.x/HARB)-d]){ const H=harbourInfo(sd,n); if (H) return {x:H.x,z:coastZ(sd,H.x)+sd*7,W:H.W,sd,qz:coastZ(sd,H.x+H.W/2-1)+sd*2.5}; } return null; },
   findBeach(){ for (let x=player.x; x<player.x+3000; x+=10) for (const sd of SIDES){ const z=coastZ(sd,x)+sd*5; if (heightAt(x,z)<0.6 && heightAt(x,z)>0.1 && !harbourAt(sd,x)) return {x,z,sd}; } return null; },
   ridge(x){ return {x,z:ridgeZ(x)}; },
-  sea,farMesh,scene,setTilt,setAO,AO,get aoOn(){ return aoOn; },render,audioState:()=>({ctx:audioCtx&&audioCtx.state,muted,ready:SND.ready,loaded:Object.keys(SND.buf)}),SND,SNDV,SNDS,shore,surfaceAt,startAudio,updateChunks:(x,z)=>updateChunks(x,z,1e9),disposeChunk,farPoint(gi,gj){ COVE_FAST++; try{ return farPoint(gi,gj); } finally{ COVE_FAST--; } },FS,findCitadels(n=3){ const i0=Math.floor(player.x/PEAK), j0=Math.floor(player.z/PEAK), out=[]; for (let r=0;r<30 && out.length<n;r++) for (let i=-r;i<=r;i++) for (let j=-r;j<=r;j++){ if (Math.max(Math.abs(i),Math.abs(j))!==r) continue; const P=peakInfo(i0+i,j0+j); const c=P&&citadelOf(P); if (c){ citHeights(c); out.push({x:P.x,z:P.z,H:P.H,R:P.R,f:c.f,n:c.N,towers:c.towers.length,stairs:c.stairs.map(S=>S.length),stairList:c.stairs.map(S=>({top:S[0],foot:S[S.length-1],n:S.length,steps:S})),gates:c.gates.map(g=>({x:g.x,z:g.z,rot:g.rot,yR:g.yR,top:g.top,main:!!g.main,r:g.r}))}); } } return out; },citadelOf,vRoadX,hRoadZ,findPeak(){ const i0=Math.floor(player.x/PEAK), j0=Math.floor(player.z/PEAK); for (let r=0;r<30;r++) for (let i=-r;i<=r;i++) for (let j=-r;j<=r;j++){ const P=peakInfo(i0+i,j0+j); if (P) return P; } return null; },toggleTrain,get tunnelK(){return tunnelK;},get chase(){return chase;},cats,railPerp,railZ,railY,railState,findStation(){ const n0=Math.floor(player.x/ST_SP); for (let k=0;k<200;k++) for (const sg of [1,-1]){ const S=stationInfo(n0+sg*k); if (S) return S; } return null; },findBridge(){ const i0=Math.round(player.x/C); for (let k=0;k<300;k++) for (const sg of [1,-1]){ const X=railCross(i0+sg*k); if (X) return X; } return null; },get view(){return VIEW;},findRail(kind){ for (let x=player.x; x<player.x+6000; x+=8){ if (railState(x)===kind) return {x,z:railZ(x),y:railY(x)}; } return null; },findCountry(kind){ for (let r=0;r<20;r++) for (let i=-r;i<=r;i++) for (let j=-r;j<=r;j++){ const cx=Math.floor(player.x/C)+i, cz=Math.floor(player.z/C)+j; if (chunkKind(cx,cz)===kind) return {x:cx*C+C/2,z:cz*C+C/2}; } return null; },train,setHour:v=>{hour=v;}, get hour(){ return hour; }, lightHour(h){ hour=h; updateDaylight(); updateShadowFrame(); },
+  sea,farMesh,scene,setTilt,setAO,AO,get aoOn(){ return aoOn; },render,audioState:()=>({ctx:audioCtx&&audioCtx.state,muted,ready:SND.ready,loaded:Object.keys(SND.buf)}),SND,SNDV,SNDS,shore,surfaceAt,startAudio,updateChunks:(x,z)=>updateChunks(x,z,1e9),disposeChunk,farPoint(gi,gj){ COVE_FAST++; try{ return farPoint(gi,gj); } finally{ COVE_FAST--; } },FS,findCitadels(n=3){ const i0=Math.floor(player.x/PEAK), j0=Math.floor(player.z/PEAK), out=[]; for (let r=0;r<30 && out.length<n;r++) for (let i=-r;i<=r;i++) for (let j=-r;j<=r;j++){ if (Math.max(Math.abs(i),Math.abs(j))!==r) continue; const P=peakInfo(i0+i,j0+j); const c=P&&citadelOf(P); if (c){ citHeights(c); out.push({x:P.x,z:P.z,H:P.H,R:P.R,f:c.f,n:c.N,stairs:c.stairs.map(S=>S.length),ring:c.pts.filter((p,i)=>i%15===0).map(p=>({x:p.x,z:p.z,walk:p.walk,ux:p.ux,uz:p.uz,nx:p.nx,nz:p.nz})),stairList:c.stairs.map(S=>({top:S[0],foot:S[S.length-1],n:S.length,steps:S})),gates:c.gates.map(g=>({x:g.x,z:g.z,rot:g.rot,yR:g.yR,top:g.top,main:!!g.main,r:g.r}))}); } } return out; },citadelOf,vRoadX,hRoadZ,findPeak(){ const i0=Math.floor(player.x/PEAK), j0=Math.floor(player.z/PEAK); for (let r=0;r<30;r++) for (let i=-r;i<=r;i++) for (let j=-r;j<=r;j++){ const P=peakInfo(i0+i,j0+j); if (P) return P; } return null; },toggleTrain,get tunnelK(){return tunnelK;},get chase(){return chase;},cats,railPerp,railZ,railY,railState,findStation(){ const n0=Math.floor(player.x/ST_SP); for (let k=0;k<200;k++) for (const sg of [1,-1]){ const S=stationInfo(n0+sg*k); if (S) return S; } return null; },findBridge(){ const i0=Math.round(player.x/C); for (let k=0;k<300;k++) for (const sg of [1,-1]){ const X=railCross(i0+sg*k); if (X) return X; } return null; },get view(){return VIEW;},findRail(kind){ for (let x=player.x; x<player.x+6000; x+=8){ if (railState(x)===kind) return {x,z:railZ(x),y:railY(x)}; } return null; },findCountry(kind){ for (let r=0;r<20;r++) for (let i=-r;i<=r;i++) for (let j=-r;j<=r;j++){ const cx=Math.floor(player.x/C)+i, cz=Math.floor(player.z/C)+j; if (chunkKind(cx,cz)===kind) return {x:cx*C+C/2,z:cz*C+C/2}; } return null; },train,setHour:v=>{hour=v;}, get hour(){ return hour; }, lightHour(h){ hour=h; updateDaylight(); updateShadowFrame(); },
   boatCam(){ for (const ch of chunks.values()) for (const b of ch.boats) if (b.floating) return {x:b.m.position.x,z:b.m.position.z,rot:b.m.rotation.y}; return null; },
   ferries,islandRoute,coastZ,harbourInfo,ferryLanding,ferryPortInfo,hbS,sailers,harbourAt,
   // whether a walker starting at (x0,z0,y0) can reach a point where goal(x,z) holds, under the player's own rules:
