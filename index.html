@@ -4767,6 +4767,7 @@ function genChunk(cx,cz,lod=0){
         if (ch.alleys.some(A=>Math.abs(alleyS(A,wx,wz))<A.hw+seg/2)) continue;
         const bot=baseH(P.x+Math.cos(a)*(P.r+2.4),P.z+Math.sin(a)*(P.r+2.4))-0.8-P.level;
         gb.add(T.box, mat(wx,bot,wz,seg,-bot+0.1,0.6,rot), shade(C_.stone,R,0.03), bot, SS);
+        (ch.belv||(ch.belv={P,nseg,segs:new Set()})).segs.add(i);
         if (da<gapHalf) continue;
         gb.add(T.box, mat(wx,0.1,wz,seg,0.12,0.7,rot), C_.trim, null, SS);
         gb.add(T.box, mat(wx,0.22,wz,0.2,0.75,0.2,rot), C_.trim, null, SS);
@@ -5359,7 +5360,20 @@ function genChunk(cx,cz,lod=0){
   const cvNear=[[x0,z0],[x0+C,z0],[x0,z0+C],[x0+C,z0+C],[xc,zc]].some(([a,b])=>coveAtXZ(a,b));
   for (let j=0;j<=N;j++) for (let i=0;i<=N;i++){
     const x=x0+i*step, z=z0+j*step, gi=(j+1)*G+(i+1), h=hg[gi];
-    const dx=(hg[gi+1]-hg[gi-1])/(2*step), dz=(hg[gi+G]-hg[gi-G])/(2*step), nl=Math.hypot(dx,1,dz), slope=Math.hypot(dx,dz);
+    let dx=(hg[gi+1]-hg[gi-1])/(2*step), dz=(hg[gi+G]-hg[gi-G])/(2*step), nl=Math.hypot(dx,1,dz), slope=Math.hypot(dx,dz);
+    // in front of a square's retaining wall the ground falls the wall's full height within its 0.6 m, which the grid
+    // cannot follow: the triangles between the raised samples inside the wall and the ground beyond would stand out
+    // in front of it as teeth. The samples just outside the wall are moved to just within its face, at the height of the
+    // ground beyond, so that the whole fall lies within the masonry (not at a block's edge, which its neighbour shares).
+    // The ground beyond is read exactly, since the block's grid of samples would blend the fall into it
+    let px=x, pz=z, ph=h;
+    if (ch.belv && i>0 && i<N && j>0 && j<N){ const B=ch.belv, BP=B.P, ox=x-BP.x, oz=z-BP.z, dd=Math.hypot(ox,oz), rf=BP.r+1.45;
+      if (dd>rf && dd<rf+2.5*step){ let a=Math.atan2(oz,ox); if (a<0) a+=Math.PI*2;
+        if (B.segs.has(Math.floor(a/(Math.PI*2)*B.nseg)%B.nseg)){ const ux=ox/dd, uz=oz/dd, qo=Math.max(dd,BP.r+2.4);
+          if (dd<rf+1.5*step){ px=BP.x+ux*rf; pz=BP.z+uz*rf; const q=BP.r+1.81; ph=heightAtExact(BP.x+ux*q,BP.z+uz*q); }
+          // its shading and colour, and those of the samples next to it, are those of the ground beyond, not of the fall
+          const ex=BP.x+ux*qo, ez=BP.z+uz*qo; dx=(heightAtExact(ex+0.5,ez)-heightAtExact(ex-0.5,ez)); dz=(heightAtExact(ex,ez+0.5)-heightAtExact(ex,ez-0.5));
+          nl=Math.hypot(dx,1,dz); slope=Math.hypot(dx,dz); } } }
     const n1=vnoise(x*0.3,z*0.3,5), n2=vnoise(x*1.1,z*1.1,6);
     cA.copy(C_.sand).lerp(C_.sand2,n1*0.7+n2*0.3);
     const wildG=ch.kind==='wild'||ch.kind==='mount', g=vnoise(x*0.07,z*0.07,8), gth=0.58-clamp((h-20)/60,0,0.3)-(wildG?0.3:0);
@@ -5384,7 +5398,7 @@ function genChunk(cx,cz,lod=0){
     if (!seaRock && h<1.6 && (cvc===null||cvc===0.12)){ const t=clamp((1.6-h)/1.2,0,1)*(1-cob*0.7); cA.lerp(C_.beach,t); }
     if (h<0){ cA.lerp(C_.seabed,clamp(-h/2.2,0,1)); cob=0; flag=0; }
     if (h>-0.45 && h<0.12) cA.lerp(C_.foam,0.55*(1-Math.abs(h+0.15)/0.3));
-    gpos.push(x,h,z); gnor.push(-dx/nl,1/nl,-dz/nl); gcol.push(cA.r,cA.g,cA.b); gpav.push(cob,flag); gplz.push(plz[0],plz[1],plz[2],plz[3]);
+    gpos.push(px,ph,pz); gnor.push(-dx/nl,1/nl,-dz/nl); gcol.push(cA.r,cA.g,cA.b); gpav.push(cob,flag); gplz.push(plz[0],plz[1],plz[2],plz[3]);
   }
   const portals=[]; { let pv=railState(x0-13); for (let x=x0-12; x<x0+C+12; x+=2){ const st=railState(x+1);
     if (st!==pv && (st==='tunnel'||pv==='tunnel')){ const sl=(railZ(x+1)-railZ(x-1))/2, l=Math.hypot(1,sl); portals.push({x,z:railZ(x),tx:1/l,tz:sl/l,into:st==='tunnel'?1:-1}); } pv=st; } }
