@@ -12930,18 +12930,17 @@ let aerLift=0, aerMoved='';   // how far the bird's-eye view is lifted to glide 
 function aerCamera(dt,moving){
     // the view keeps one height and one angle wherever it is moved, whatever the ground beneath: the point it looks at
     // stays at the level it had when the view was entered (or the player was last set down), and the camera stands
-    // at its distance and tilt from that point. Where higher ground comes near the camera (within a third of its
-    // distance, and at least 30 m, all round) the whole view glides up to keep 3 m clear of it, at the same angle,
-    // rising over about a second and settling again more slowly once it is past, but only while the view is being
-    // moved, so that it never sinks while it is left alone; the camera is never let below 0.5 m
-    // above the ground directly beneath it. While the view is being moved (dt 0) the lift is held as it is
+    // at its distance and tilt from that point. Only where the camera itself would meet the ground or a building (as
+    // a gull would, within 2 m of a wall or roof) does the whole view glide up, at the same angle, to keep 1.5 m clear
+    // of it, rising over about a second; it settles back more slowly once past, but only while the view is being
+    // moved, so that it never moves while left alone. The camera is never let below 0.5 m above the ground directly
+    // beneath it. While the view is being moved by the pointer (dt 0) the lift is held as it is
     if (aboveY===null || firstCam){ aboveY=eyeY; aerLift=0; }
     const ty=aboveY+1.2, cx=player.x+Math.sin(yaw)*Math.cos(pitch)*dist, cz=player.z+Math.cos(yaw)*Math.cos(pitch)*dist, cy=ty+Math.sin(pitch)*dist;
-    if (dt>0){ const r=Math.max(30,dist*0.33); let h=heightAt(cx,cz);
-      for (let k=0;k<12;k++){ const a=k/12*Math.PI*2; h=Math.max(h,heightAt(cx+Math.cos(a)*r,cz+Math.sin(a)*r),heightAt(cx+Math.cos(a)*r*0.5,cz+Math.sin(a)*r*0.5)); }
-      // it rises whenever higher ground comes near, but settles back down only while the view is moving, so that a
-      // view left alone holds its height rather than sinking of its own accord
-      const want=Math.max(0,h+3-cy), mv=player.x+','+player.z+','+yaw+','+pitch+','+dist, moved=mv!==aerMoved; aerMoved=mv;
+    if (dt>0){ const h=gullTopAt(cx,cz);
+      // it rises only where the camera would otherwise meet the ground or a building, and settles back down only
+      // while the view is moving, so that a view left alone holds its height
+      const want=Math.max(0,h+1.5-cy), mv=player.x+','+player.z+','+yaw+','+pitch+','+dist+','+aboveY, moved=mv!==aerMoved; aerMoved=mv;
       if (want>aerLift || moved) aerLift+=(want-aerLift)*(1-Math.exp(-dt*(want>aerLift?1.6:0.5))); }
     const lift=Math.max(aerLift,heightAt(cx,cz)+0.5-cy);
     camTarget.set(player.x,ty+lift,player.z);
@@ -12961,7 +12960,8 @@ function aerCamera(dt,moving){
    the fingers. A drag with the right button, or with Shift, Alt or Ctrl held, turns the view about the point it looks
    at (across) and tilts it (up and down), from looking straight down to nearly level; on a touch screen two fingers
    turn it as they twist and tilt it as they slide up or down together. W A S D move the view, Q and E (or the left
-   and right arrows) turn it, the up and down arrows tilt it and + and − zoom; Shift moves faster. A double click (a
+   and right arrows) turn it, the up and down arrows tilt it (with Shift, raise and lower it) and + and − zoom; Shift
+   moves faster. A double click (a
    double tap) goes down to the ground there. */
 const AER_PMIN=0.06, AER_PMAX=1.5;
 const aer={drag:null,touch:new Map(),one:null,two:null,tapT:0,tapX:0,tapY:0,t0:0,moved:0};
@@ -14832,7 +14832,14 @@ function frame0(now){
   pollPad(dt);
   const turn=(keys.KeyQ||keys.ArrowLeft?1:0)-(keys.KeyE||keys.ArrowRight?1:0);
   yaw+=turn*dt*1.8;
-  if (mode==='above'){ if (keys.ArrowUp) pitch=clamp(pitch-dt*0.9,AER_PMIN,AER_PMAX); if (keys.ArrowDown) pitch=clamp(pitch+dt*0.9,AER_PMIN,AER_PMAX); if (keys.ArrowUp||keys.ArrowDown) aerUp=0;
+  // in the bird's-eye view the up and down arrows tilt the view; with Shift they raise and lower it, the whole view
+  // at its tilt, faster the further out it is, the camera kept above the ground and the buildings as ever
+  if (mode==='above'){ const vk=(keys.ArrowUp?1:0)-(keys.ArrowDown?1:0);
+    if (vk && (keys.ShiftLeft||keys.ShiftRight)){ if (aboveY!==null){ aboveY+=vk*dt*Math.max(6,dist*0.6);
+      // no lower than keeps the camera 1.5 m clear of what is beneath it
+      const cx=player.x+Math.sin(yaw)*Math.cos(pitch)*dist, cz=player.z+Math.cos(yaw)*Math.cos(pitch)*dist;
+      if (vk<0) aboveY=Math.max(aboveY,gullTopAt(cx,cz)+1.5-1.2-Math.sin(pitch)*dist); } }
+    else { if (keys.ArrowUp) pitch=clamp(pitch-dt*0.9,AER_PMIN,AER_PMAX); if (keys.ArrowDown) pitch=clamp(pitch+dt*0.9,AER_PMIN,AER_PMAX); if (vk) aerUp=0; }
     const zk=((keys.Minus||keys.NumpadSubtract)?1:0)-((keys.Equal||keys.NumpadAdd)?1:0);
     if (zk) dist=clamp(dist*Math.exp(zk*dt*1.8),7,60000); }
   let mx=(keys.KeyD?1:0)-(keys.KeyA?1:0)+joy.x+pad.x, mz=(keys.KeyW||(mode!=="above"&&keys.ArrowUp)?1:0)-(keys.KeyS||(mode!=="above"&&keys.ArrowDown)?1:0)-joy.y-pad.y;
