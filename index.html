@@ -2420,7 +2420,7 @@ function roadArch(type,idx,seg){
    worked out from the hill and the streets alone, so that every block it crosses agrees where it runs, and each
    block builds the stretch whose middle lies in it. Wherever a street crosses the wall there is a gate, a tower
    over an arched passage; the gate on the side towards the nearer coast carries a clock. Square towers with tiled
-   roofs stand on the wall about every 30 m, and the wall is crowned with swallow-tailed merlons. A height is given
+   roofs stand on the wall about every 30 m, and the wall is finished with a plain coping. A height is given
    up where its wall would come near the railway outside a tunnel, the coast road or a station, or where two gates
    would stand close together, and the next is tried; a hill where none will do has no wall. Houses, squares,
    alleys and archways keep off the wall, its towers and gates, and off a strip of open ground 5 m wide outside it. */
@@ -2579,15 +2579,9 @@ function buildCitadel(gb,ch,cx,cz){
     const at=lerp(A.top,B.top,ta), bt=lerp(A.top,B.top,tb), ab=lerp(A.bot,B.bot,ta), bb=lerp(A.bot,B.bot,tb);
     if (!own((ax+bx)/2,(az+bz)/2)) continue;
     const L=Math.hypot(bx-ax,bz-az), ux=(bx-ax)/L, uz=(bz-az)/L, ry=Math.atan2(-uz,ux);
-    let nx=-uz, nz=ux; if (nx*A.nx+nz*A.nz<0){ nx=-nx; nz=-nz; }
     const ext=0.12, eax=ax-ux*ext, eaz=az-uz*ext, ebx=bx+ux*ext, ebz=bz+uz*ext;
     shearBox(gb,eax,eaz,at,ebx,ebz,bt,Math.max(at-ab,bt-bb),CIT_TH,stone,SS);
     shearBox(gb,eax,eaz,at-0.02,ebx,ebz,bt-0.02,0.22,CIT_TH+0.16,C_.trim,0);
-    // swallow-tailed merlons along the outer edge
-    const n=Math.max(1,Math.round(L/1.6));
-    for (let m=0;m<n;m++){ const t=(m+0.5)/n, y=lerp(at,bt,t), px=ax+ux*L*t+nx*(CIT_TH/2-0.25), pz=az+uz*L*t+nz*(CIT_TH/2-0.25);
-      gb.add(T.box, mat(px,y,pz,0.62,1.0,0.5,ry), stone, null, SS);
-      for (const s of [-1,1]) gb.add(T.box, mat(px+ux*s*0.2,y+1.0,pz+uz*s*0.2,0.22,0.38,0.5,ry), stone, null, SS); }
     ch.obbs.push({x:(ax+bx)/2,z:(az+bz)/2,hw:L/2+0.1,hd:CIT_TH/2,rot:ry,top:Infinity}); }
   // the towers, open to the town, with tiled roofs on a cornice
   for (const t of c.towers){ if (!own(t.x,t.z)) continue;
