@@ -2371,9 +2371,11 @@ function heightAtExact(x,z){
   // the line runs on a level bed 8 m wide, cut into the hill or built up on an embankment;
   // over a tunnel the ground is kept level with the portal parapets so the lined bore is always covered
   { const S=stationNear(x,40), hwL=S?15:4.0, d=mainPerp(x,z); if (d<hwL+4.6){ const sl=(railZ(x+1)-railZ(x-1))/2, xp=x+sl*(z-railZ(x))/(1+sl*sl), st=railState(xp), ry=railY(xp);
-      // the cover over a bore begins 3.5 m in from the portal, within the depth of its masonry, so that on a curve, where
-      // the line's state is projected across at a slant, its edge never stands out in front of the wing walls
-      const deep=st==='tunnel' && railState(xp-3.5)==='tunnel' && railState(xp+3.5)==='tunnel';
+      // the cover over a bore begins 3 m in from the portal along the track, within the depth of its masonry (4 m), so
+      // that on a curve, where the line's state is projected across at a slant, its edge never stands out in front of
+      // the wing walls; measured along x, on a line running at a slant it began beyond the masonry, and the ground's
+      // grid hung down into the bore between the cutting's floor and the cover
+      const dIn=3/Math.sqrt(1+sl*sl), deep=st==='tunnel' && railState(xp-dIn)==='tunnel' && railState(xp+dIn)==='tunnel';
       if (st==='open' || (st==='tunnel' && !deep)){ const w=1-smooth((d-hwL)/4.5); h=lerp(h,ry-0.2,w); }
       else if (deep){ const w=1-smooth((d-4)/5); h=Math.max(h,lerp(h,ry+8.6,w)); } } }
   // a goods line's bed likewise, wider along the sidings
