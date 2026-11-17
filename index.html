@@ -4749,31 +4749,42 @@ function genChunk(cx,cz,lod=0){
     // the balustrade stops short of the church, which may stand out over the drop with its steps
     const openAt=a=>baseH(P.x+Math.cos(a)*(P.r+2.6),P.z+Math.sin(a)*(P.r+2.6))<P.level-0.8 && !(ch.churchOb && obbCircleDist(ch.churchOb,P.x+Math.cos(a)*(P.r+1.25),P.z+Math.sin(a)*(P.r+1.25))<0.9);
     const rw=P.r+1.25, nseg=Math.ceil(2*Math.PI*rw/1.1);
-    let stairA=null, lowest=1e9;
+    const cands=[];
     for (let i=0;i<nseg;i++){ const a=i/nseg*6.283; if (!openAt(a)) continue;
-      const h=baseH(P.x+Math.cos(a)*(P.r+4),P.z+Math.sin(a)*(P.r+4)); if (h<lowest){ lowest=h; stairA=a; } }
+      cands.push({a,h:baseH(P.x+Math.cos(a)*(P.r+4),P.z+Math.sin(a)*(P.r+4))}); }
+    cands.sort((u,v)=>u.h-v.h);
     // the stair down through the gap is planned first: it must reach the ground before any road, steepening a
-    // little if need be; where it cannot, the balustrade is left unbroken and there is no stair
-    let stairPlan=null;
-    if (stairA!==null){ const dx=Math.cos(stairA), dz=Math.sin(stairA);
-      for (const [ri,go] of [[0.24,0.42],[0.27,0.36],[0.3,0.32]]){ const steps=[];
+    // little if need be, and the whole flight, with a landing of 1.5 m at its foot, must lie within the square's own
+    // block, since the houses of the next block are placed without knowledge of it. It runs down where the ground
+    // falls lowest, or failing that at the next lowest point of the open side; where no flight fits, the
+    // balustrade is left unbroken and there is no stair
+    let stairA=null, stairPlan=null;
+    const stepIn=(x,z,dx,dz,go)=>{ for (const [u,v] of [[-1.3,-go/2],[1.3,-go/2],[-1.3,go/2],[1.3,go/2]])
+      if (!insideCell(cx,cz,x+dx*v-dz*u,z+dz*v+dx*u,0.1)) return false; return true; };
+    for (const {a} of cands){ const dx=Math.cos(a), dz=Math.sin(a);
+      for (const [ri,go] of [[0.24,0.42],[0.27,0.36],[0.3,0.32]]){ const steps=[]; let ok=false;
         for (let kk=0; kk<48; kk++){ const dd=P.r+0.95+kk*go+go/2, x=P.x+dx*dd, z=P.z+dz*dd, top=P.level-(kk+1)*ri, g=baseH(x,z);
-          if (top<=g+0.05){ stairPlan={steps,go};
+          if (top<=g+0.05){ ok=true;
             // where the ground at the foot lies lower than the hillside (a street levelled into it), further steps carry
             // the flight down to it, so that its last step meets the ground; the flight above is as planned
             for (let k2=kk; k2<kk+8; k2++){ const d2=P.r+0.95+k2*go+go/2, x2=P.x+dx*d2, z2=P.z+dz*d2, t2=P.level-(k2+1)*ri, ga=heightAt(x2,z2);
-              if (t2<=ga+0.05 || ga<0.2) break; steps.push({x:x2,z:z2,top:t2,g:Math.min(baseH(x2,z2),ga)}); }
+              if (t2<=ga+0.05 || ga<0.2) break;
+              if (!stepIn(x2,z2,dx,dz,go)){ ok=false; break; }
+              steps.push({x:x2,z:z2,top:t2,g:Math.min(baseH(x2,z2),ga)}); }
+            if (ok){ const n=steps.length, fd=P.r+0.95+n*go+1.5;
+              ok=insideCell(cx,cz,P.x+dx*fd,P.z+dz*fd,0.1); }
             break; }
           if (roadDist(x,z)<0) break;
           if (heightAt(x,z)<0.2) break;   // no stair runs down into a harbour's basin or the sea
+          if (!stepIn(x,z,dx,dz,go)) break;
           steps.push({x,z,top,g}); }
-        if (stairPlan) break; }
-      if (!stairPlan) stairA=null; }
-    if (stairA!==null){
+        if (ok){ stairPlan={steps,go}; break; } }
+      if (stairPlan){ stairA=a; break; } }
+    if (cands.length){
       const gapHalf=1.15/rw;
       for (let i=0;i<nseg;i++){
         const a=(i+0.5)/nseg*6.283; if (!openAt(a)) continue;
-        let da=Math.abs(Math.atan2(Math.sin(a-stairA),Math.cos(a-stairA)));
+        const da=stairA===null?Infinity:Math.abs(Math.atan2(Math.sin(a-stairA),Math.cos(a-stairA)));
         const wx=P.x+Math.cos(a)*rw, wz=P.z+Math.sin(a)*rw, rot=Math.atan2(Math.cos(a),Math.sin(a)), seg=2*Math.PI*rw/nseg+0.06;
         // an alley that runs through the square comes up through an opening in the wall, where its steps meet the paving
         if (ch.alleys.some(A=>Math.abs(alleyS(A,wx,wz))<A.hw+seg/2)) continue;
@@ -4789,21 +4800,25 @@ function genChunk(cx,cz,lod=0){
         for (let rr=P.r+4; rr<P.r+14; rr+=3.2) ch.placeCircles.push({x:P.x+Math.cos(a)*rr,z:P.z+Math.sin(a)*rr,r:2.6});
       }
       // benches facing the view
-      for (const off of [-0.32,0.32]){ const a=stairA+off*(10/rw); if (!openAt(a)) continue;
+      const viewA=stairA!==null?stairA:cands[0].a;
+      for (const off of [-0.32,0.32]){ const a=viewA+off*(10/rw); if (!openAt(a)) continue;
         const bx=P.x+Math.cos(a)*(P.r-0.4), bz=P.z+Math.sin(a)*(P.r-0.4), rot=Math.atan2(Math.cos(a),Math.sin(a));
         gb.add(T.box, mat(bx,0,bz,2.0,0.45,0.55,rot), shade(C_.stone,R,0.03), 0, SS);
         ch.obbs.push({x:bx,z:bz,hw:1.0,hd:0.3,rot,top:Infinity});
         for (const sx of [-0.5,0.5]) addSeat(ch,mat(bx,0,bz,1,1,1,rot),gb.oy,sx,0.45,0,0.45,'bench'); }
       // stair down through the gap
-      const rot=Math.atan2(Math.cos(stairA),Math.sin(stairA)), go=stairPlan.go;
+      if (stairA!==null){ const rot=Math.atan2(Math.cos(stairA),Math.sin(stairA)), go=stairPlan.go;
       for (const {x,z,top,g} of stairPlan.steps){
         gb.add(T.box, mat(x,g-0.6-P.level,z,2.1,top-g+0.6,go+0.02,rot), shade(C_.stone,R,0.03), g-0.6-P.level, SS);
         for (const sd of [-1,1]) gb.add(T.box, mat(x+Math.cos(rot)*sd*1.15,top-P.level,z-Math.sin(rot)*sd*1.15,0.22,0.9,go+0.04,rot), C_.trim, null, SS);
         ch.obbs.push({x,z,hw:1.05,hd:go/2,rot,top});
         ch.placeCircles.push({x,z,r:1.8});
       }
+      // the landing at the foot is kept clear of houses
+      const fd=P.r+0.95+stairPlan.steps.length*go+0.9;
+      ch.placeCircles.push({x:P.x+Math.cos(stairA)*fd,z:P.z+Math.sin(stairA)*fd,r:1.6}); }
       if (ch.kind==='piazza') ch.desc+=' Its open side looks out over the roofs to the sea.';
-      else if (ch.kind==='church') ch.desc='Church square on a terrace, with a balustrade and steps on the downhill side.';
+      else if (ch.kind==='church') ch.desc=stairA!==null?'Church square on a terrace, with a balustrade and steps on the downhill side.':'Church square on a terrace, with a balustrade on the downhill side.';
     }
     let a=R()*6.28; const a1=a+Math.PI*2;
     while (a<a1){
