@@ -1,5 +1,5 @@
 /* ================= the art gallery: a building that shows the player's own pictures =================
-   A single tall room, whitewashed inside and out, under a pitched roof of clay tiles with whitewashed gables at the
+   A single tall room, whitewashed inside and out, under a pitched roof of teal tiles with whitewashed gables at the
    front and back and three skylights in each slope, which let daylight fall into the room. The front has a tall arched doorway with a pair of blue
    doors standing open and, above it, a signboard hung at right angles to the wall from an iron bracket, showing an
    easel in black on white; the walls are whitewashed pure white, inside and out. Inside, a floor of pale limestone, a bench down the middle, and the pictures hung at
@@ -65,15 +65,15 @@ function floorTex() {
     g.fillStyle = `rgb(${v + 14},${v + 6},${v - 12})`; g.fillRect(x + 2, row * 128 + 2, w - 4, 124); x += w; } }
   const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; return t;
 }
-// clay roof tiles: the channels of the curved tiles running down the slope, each course lapping the one below
+// roof tiles in the teal of the church spires and clock towers: the channels of the curved tiles running down the slope, each course lapping the one below
 function tileTex() {
   const c = document.createElement('canvas'); c.width = 256; c.height = 256; const g = c.getContext('2d');
   let s = 11; const R = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296);
-  g.fillStyle = '#a5472f'; g.fillRect(0, 0, 256, 256);
+  g.fillStyle = '#4f8f7d'; g.fillRect(0, 0, 256, 256);
   const cols = 6, rows = 4, cw = 256 / cols, rh = 256 / rows;
   for (let i = 0; i < cols; i++) for (let j = 0; j < rows; j++) {
     const x = i * cw, y = j * rh, v = (R() - 0.5) * 26, gr = g.createLinearGradient(x, 0, x + cw, 0);
-    const base = [178 + v, 82 + v * 0.6, 56 + v * 0.4], dk = k => `rgb(${base[0] * k | 0},${base[1] * k | 0},${base[2] * k | 0})`;
+    const base = [116 + v * 0.6, 193 + v, 170 + v * 0.8], dk = k => `rgb(${base[0] * k | 0},${base[1] * k | 0},${base[2] * k | 0})`;
     gr.addColorStop(0, dk(0.62)); gr.addColorStop(0.35, dk(1.0)); gr.addColorStop(0.6, dk(1.08)); gr.addColorStop(1, dk(0.66));
     g.fillStyle = gr; g.fillRect(x, y, cw, rh - 3);
     g.fillStyle = 'rgba(40,14,8,0.45)'; g.fillRect(x, y + rh - 4, cw, 4);
@@ -139,7 +139,7 @@ export function buildArtGallery(pictures = [], opts = {}) {
     if (wl.holes.length) for (const s of [-1, 1]) { const L = (wl.len - dw) / 2; const b = new THREE.Mesh(new THREE.BoxGeometry(L, 0.42, 0.03), skirt); b.position.set(s * (dw / 2 + L / 2), 0.21, wl.z + 0.015); o.add(b); }
     else { const b = new THREE.Mesh(new THREE.BoxGeometry(wl.len + (wl.ry === 0 || wl.ry === Math.PI ? 0 : 2 * T) + 0.06, 0.42, 0.03), skirt); b.position.set(0, 0.21, wl.z + 0.015); o.add(b); }
   }
-  // the roof: a pitched roof of clay tiles over the gables, its eaves overhanging the side walls, with ridge tiles
+  // the roof: a pitched roof of teal tiles over the gables, its eaves overhanging the side walls, with ridge tiles
   // along the top and three skylights in each slope. Inside, the room is open to the roof: limewashed boarding under
   // the tiles, carried by a ridge beam and tie beams across the room at the height of the side walls.
   const OH = GALLERY.eave, OZ = 0.3, Ls = (hw + OH) / Math.cos(PA), eY = H - OH * Math.tan(PA), ZL = hd + OZ;
@@ -171,7 +171,7 @@ export function buildArtGallery(pictures = [], opts = {}) {
     { const f = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.16, 2 * ZL), wood); f.position.set(sd * (hw + OH + 0.01), eY - 0.02, 0); group.add(f); }
   }
   // the ridge tiles: a row of half-round tiles along the top
-  { const rt = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 2 * ZL + 0.06, 12, 1, false, -Math.PI / 2, Math.PI), new THREE.MeshStandardMaterial({ color: 0x9c4129, roughness: 0.8 }));
+  { const rt = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 2 * ZL + 0.06, 12, 1, false, -Math.PI / 2, Math.PI), new THREE.MeshStandardMaterial({ color: 0x5f9e8b, roughness: 0.8 }));
     rt.rotation.x = Math.PI / 2; rt.rotation.y = 0; rt.position.set(0, H + GH + 0.12 / Math.cos(PA) - 0.02, 0); rt.castShadow = true; group.add(rt);
     rt.rotation.set(Math.PI / 2, 0, 0); rt.geometry.rotateY(Math.PI / 2); }
   // the gables' verges: a band of limewash along the slope where the tiles stop

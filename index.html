@@ -2767,7 +2767,7 @@ function galleryChanged(){
 // be entered; when not, its doors are shut
 function addGallery(gb,ch,ob,base,open=true){
   const {W,L}=ob, h=GAL.h, hw=W/2, hl=L/2, rise=hw*Math.tan(GAL.pitch), {x,z,rot}=ob, R=rng(Math.floor(hash(Math.round(x*8),Math.round(z*8),9203)*4294967296));
-  const H=mat(x,0,z,1,1,1,rot), LP=(a,b,c)=>new THREE.Vector3(a,b,c).applyMatrix4(H).toArray(), roofC=shade(pick(R,C_.roofs),R,0.04);
+  const H=mat(x,0,z,1,1,1,rot), LP=(a,b,c)=>new THREE.Vector3(a,b,c).applyMatrix4(H).toArray(), roofC=(pick(R,C_.roofs),R(),C_.teal);   // the teal of the spires and clock towers (the draws kept, so the town is unchanged)
   let hmin=1e9; for (const p of obbSamples({x,z,hw,hd:hl,rot})) hmin=Math.min(hmin,heightAt(p[0],p[1]));
   const fb=Math.min(-0.3,hmin-base-0.8);
   gb.add(T.box, mm(H,mat(0,fb,0,W+0.1,-fb-0.03,L+0.1)), GAL_WHITE, fb, SP);
@@ -4635,7 +4635,7 @@ function genChunk(cx,cz,lod=0){
         }
         let hmin=1e9; for (const p of obbSamples(ob)) hmin=Math.min(hmin,heightAt(p[0],p[1]));
         const fb=Math.min(-0.3,hmin-P.level-0.8);
-        const h=8+R()*2.2, wall=shade(C_.stone,R,0.03), roofC=shade(pick(R,C_.roofs),R,0.04);
+        const h=8+R()*2.2, wall=shade(C_.stone,R,0.03), roofC=(pick(R,C_.roofs),R(),C_.teal);   // the nave and the apse in the tower's teal (the draws kept)
         const H=mat(cxp,0,czp,1,1,1,rot);
         // the plinth and the buried steps stop just below the paving, so that no top face shares its plane
         gb.add(T.box, mm(H,mat(0,fb,0,W+0.3,-fb-0.03,L+0.3)), shade(C_.stoneDark,R,0.03), fb, SS);
