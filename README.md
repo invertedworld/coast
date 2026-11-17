@@ -201,9 +201,10 @@ The keys are short and the numbers rounded, positions to 0.1 m and angles to 0.0
 | `s` | The seed text. |
 | `h` | The hour, to 0.01 h. |
 | `z` | 1 if the world is paused. |
+| `t` | Tilt-shift, 1 on or 0 off; it is set as the scene had it, without changing the setting kept for later visits. |
 | `m` | The mode: `walk`, `above`, `swim`, `cab`, `chase`, `side` (trackside), `coach`, `ferry`, `stern` (the ferry from astern), `helm`, `astern` (the dinghy from astern), `gull` or `dolphin`. Riding the goods train is `cab`, `chase` or `side` with `G` given instead of `T`. |
 | `p` | The player `[x, y, z]`: the feet, or in the water the eye, or following a creature the creature. |
-| `l` | The look in the mode's own terms: `walk`, `swim` `[yaw, pitch, under]`; `above` `[yaw, pitch, dist, aerUp]`; `cab` `[tYaw, tPitch]`; `chase` `[yaw, pitch, d]`; `coach` `[co.yaw, co.pitch]`; `ferry` `[fe.yaw, fe.pitch]`; `stern` `[feLook.yaw, feLook.pitch, feChaseD]`; `helm` `[dgyLook.yaw, dgyLook.pitch]`; `astern` the same and `dgyChaseD`; `gull`, `dolphin` `[FOL.yaw, FOL.pitch, FOL.d]`. |
+| `l` | The look in the mode's own terms: `walk`, `swim` `[yaw, pitch, under]`; `above` `[yaw, pitch, dist, aerUp, aboveY, aerLift]`, the last two the height of the point the view looks at and its lift over the ground, so that the view returns at the height it had; `cab` `[tYaw, tPitch]`; `chase` `[yaw, pitch, d]`; `coach` `[co.yaw, co.pitch]`; `ferry` `[fe.yaw, fe.pitch]`; `stern` `[feLook.yaw, feLook.pitch, feChaseD]`; `helm` `[dgyLook.yaw, dgyLook.pitch]`; `astern` the same and `dgyChaseD`; `gull`, `dolphin` `[FOL.yaw, FOL.pitch, FOL.d]`. |
 | `T` | The passenger train `[x, dir, v, wait]`. |
 | `G` | The goods train `[side, x0 of its line, x, dir, lead, v, wait, toB, leg x, leg wait]`; the line is found again by its side and `x0` (`sceneGoodsLine`). |
 | `C` | The coach `[car, lx, lz]`. |

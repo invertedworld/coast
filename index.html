@@ -12929,7 +12929,7 @@ canvas.addEventListener('mousedown',e=>{ if (e.button!==0 || !TELE.on) return; c
   if (now-teleClickT<400){ teleClickT=0; if (teleGoThere()) e.stopImmediatePropagation(); } else teleClickT=now; },true);
 // the camera of the bird's-eye view, set from the point it looks at (the player), its heading, tilt and distance; it is
 // called each frame, and at once whenever the view is moved by the pointer or the fingers (dt 0)
-let aerLift=0, aerMoved='';   // how far the bird's-eye view is lifted to glide over higher ground near the camera, and where it was last frame
+let aerLift=0, aerMoved='', aerRestore=null;   // how far the bird's-eye view is lifted to glide over higher ground near the camera, and where it was last frame
 function aerCamera(dt,moving){
     // the view keeps one height and one angle wherever it is moved, whatever the ground beneath: the point it looks at
     // stays at the level it had when the view was entered (or the player was last set down), and the camera stands
@@ -12938,7 +12938,7 @@ function aerCamera(dt,moving){
     // of it, rising over about a second; it settles back more slowly once past, but only while the view is being
     // moved, so that it never moves while left alone. The camera is never let below 0.5 m above the ground directly
     // beneath it. While the view is being moved by the pointer (dt 0) the lift is held as it is
-    if (aboveY===null || firstCam){ aboveY=eyeY; aerLift=0; }
+    if (aboveY===null || firstCam){ if (aerRestore){ aboveY=aerRestore.y; aerLift=aerRestore.lift; aerRestore=null; } else { aboveY=eyeY; aerLift=0; } }
     const ty=aboveY+1.2, cx=player.x+Math.sin(yaw)*Math.cos(pitch)*dist, cz=player.z+Math.cos(yaw)*Math.cos(pitch)*dist, cy=ty+Math.sin(pitch)*dist;
     if (dt>0){ const h=gullTopAt(cx,cz);
       // it rises only where the camera would otherwise meet the ground or a building, and settles back down only
@@ -14064,7 +14064,7 @@ function sceneState(){
     if (sit.fr==='world') o.x=[...A(s.x,s.y,s.z),sr2(sit.L0)];
     else { const i=(sit.fr==='coach'?COACH_SEATS:FERRY_SEATS).indexOf(s); if (i>=0) o.x=[i,sr2(sit.L0)]; } };
   const ret=R=>{ if (R) o.r=[...P(R.x,R.y,R.z),sr2(R.yaw)]; };
-  if (mode==='above'){ o.m='above'; o.l=[sr2(yaw),sr2(pitch),Math.round(dist),sr2(aerUp)]; if (ridden) Fy(); }
+  if (mode==='above'){ o.m='above'; o.l=[sr2(yaw),sr2(pitch),Math.round(dist),sr2(aerUp)]; if (aboveY!==null) o.l.push(sr1(aboveY),sr1(aerLift)); if (ridden) Fy(); }
   else if (mode==='swim'){ const S=swimmer.state; o.m='swim'; o.p=P(S.x,S.y,S.z); o.l=[...A(yaw,fpPitch),S.under?1:0]; ret(uwReturn); }
   else if (mode==='train'||mode==='chase'){
     if (rideGoods){ if (!goods.R){ o.m='walk'; o.l=A(yaw,fpPitch); return o; } G(); } else T();
@@ -14079,6 +14079,7 @@ function sceneState(){
   else if (mode==='follow' && FOL.kind){ o.m=FOL.kind; o.p=P(FOL.p.x,FOL.p.y,FOL.p.z); o.l=[...A(FOL.yaw,FOL.pitch),sr1(FOL.d)]; ret(FOL.ret); }
   else { o.m='walk'; o.l=A(yaw,fpPitch); seat(); }
   if (CAMP.c) o.K=[CAMP.x,CAMP.z,CAMP.rot];
+  o.t=tiltShift?1:0;   // tilt-shift, as it was
   const ph=PHOTO.api.state; if (ph.on) o.c=[sr1(ph.focal),ph.fNumber,ph.autofocus?0:sr2(ph.focus),sr2(ph.ev),ph.ratio];
   return o; }
 async function sceneLink(){ return sceneLinkOf(sceneState()); }
@@ -14151,10 +14152,11 @@ function scenePlace(o){
   if (Array.isArray(p) && [0,1,2].every(i=>Number.isFinite(+p[i]))){ player.x=+p[0]; player.y=+p[1]-(o.m==='swim'?1.62:0); player.z=+p[2]; }
   player.vy=0; player.holdT=3; player.grounded=true; eyeY=null; }
 // once the blocks round the player are built: the vehicles where they were, and the player in the same mode and view.
-// l is, by mode: walk and swim [yaw,pitch(,under)], above [yaw,pitch,distance,rise], cab [yaw,pitch] in the cab,
+// l is, by mode: walk and swim [yaw,pitch(,under)], above [yaw,pitch,distance,rise(,height of the point it looks at, lift)], cab [yaw,pitch] in the cab,
 // chase [yaw,pitch,distance], coach and ferry [yaw,pitch] in the vehicle's frame, stern and astern [yaw,pitch,
 // distance], helm [yaw,pitch] from the bow, gull and dolphin [yaw,pitch,distance]
 function sceneRestore(o){
+  if (o.t===0||o.t===1) tiltShift=o.t===1;   // tilt-shift as it was, without changing the setting kept for later visits
   const N=sceneNum, l=Array.isArray(o.l)?o.l:[], m=o.m;
   const walk=()=>{ mode='street'; yaw=N(l,0,yaw); fpPitch=clamp(N(l,1),-1.2,1.2); };
   if (o.z){ paused=true; lastClock=null; }
@@ -14176,7 +14178,9 @@ function sceneRestore(o){
   if (m==='above'){
     if (F){ deck(); toggleView(); } else { walk(); toggleView(); }
     yaw=N(l,0,yaw); pitch=clamp(N(l,1,0.25),0.06,1.5); dist=clamp(N(l,2,45),7,60000); aerUp=clamp(N(l,3),0,1.2);
-    ascent.t=descent.t=-1; firstCam=true; aboveY=null; }
+    ascent.t=descent.t=-1; firstCam=true; aboveY=null;
+    // the height the view stood at and its lift over the ground, where the scene records them
+    aerRestore=l.length>=6 && Number.isFinite(+l[4]) ? {y:+l[4],lift:Math.max(0,N(l,5))} : null; }
   else if (m==='swim'){ walk(); mode='swim'; swimmer.enter({x:player.x,y:player.y+1.62,z:player.z,yaw,pitch:fpPitch});
     if (N(l,2)){ const S=swimmer.state; S.mode='under'; S.under=true; S.underT=2; diveQuiet=true; }
     uwReturn=Array.isArray(o.r)?{x:N(o.r,0),y:N(o.r,1),z:N(o.r,2),yaw:N(o.r,3)}:null; }
