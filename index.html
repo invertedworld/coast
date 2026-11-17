@@ -2474,12 +2474,15 @@ function roofAt(R,lu,lv){
   if (R.kind==='front'||R.kind==='side'){ const sp=R.kind==='front'?R.w/2:R.d/2, a=R.kind==='front'?au:av, b=R.kind==='front'?av:au, len=R.kind==='front'?R.d/2:R.w/2;
     if (a>sp+ROOF_OH || b>len+ROOF_OH) return null;
     return R.y0+R.rise*(1-a/sp)+0.19*Math.hypot(1,R.rise/sp); }
+  if (R.kind==='cone'){ const W=R.w/2+ROOF_OH, d=Math.hypot(lu,lv); if (d>W) return null; return R.y0+0.06+R.rise*(1-d/W); }
   if (R.kind==='hip'||R.kind==='spire'){ const W=R.w/2+ROOF_OH, D=R.d/2+ROOF_OH; if (au>W||av>D) return null;
+    if (R.rc){ const k=R.rc+ROOF_OH, qu=au-(W-k), qv=av-(D-k); if (qu>0 && qv>0 && Math.hypot(qu,qv)>k) return null; }
     return R.y0+0.06+R.rise*(1-Math.max(au/W,av/D)); }
   if (au>R.w/2+0.125 || av>R.d/2+0.125) return null;
   return R.y0+0.15;
 }
 function roofSlope(R,lu,lv){
+  if (R.kind==='cone'){ const d=Math.hypot(lu,lv)||1; return {k:R.rise/(R.w/2+ROOF_OH),du:lu/d,dv:lv/d}; }
   if (R.kind==='front') return {k:R.rise/(R.w/2),du:Math.sign(lu)||1,dv:0};
   if (R.kind==='side') return {k:R.rise/(R.d/2),du:0,dv:Math.sign(lv)||1};
   if (R.kind==='hip'||R.kind==='spire'){ const W=R.w/2+ROOF_OH, D=R.d/2+ROOF_OH;
@@ -2582,6 +2585,283 @@ function addDoorFrame(gb,H,dx,Z){
   for (const s of [-1,1]) gb.add(T.box, mm(H,mat(dx+s*(DR+0.075),0,Z,0.14,DS,0.1)), C_.stone, null, SS);
   const m=9, rr=DR+0.075;
   for (let i=0;i<m;i++){ const a=Math.PI*(i+0.5)/m; gb.add(T.boxC, mm(H,mat(dx+Math.cos(a)*rr,DS+Math.sin(a)*rr,Z,0.14,Math.PI*rr/m+0.02,0.1,0,0,a)), i===4?C_.trim:vsTone(C_.stone,i), null); }
+}
+/* ---------- round houses, and houses with rounded corners ----------
+   A house may be built round, a cylinder under a conical roof, or with its four corners rounded on a radius of RC
+   under a hipped roof whose corners are rounded to match. The choice is drawn from the house's own random sequence,
+   so that the rest of the town is unchanged. A house with rounded corners is laid out inside as any other: RC is small
+   enough that the room's square inner corners stay within the thickness of the wall. A round house has a round room
+   on each storey, the storeys joined by a spiral stair turning round a newel at the back. Both are withheld until
+   they are approved; ?shapes in the address shows them. */
+const SHAPES_OK=(()=>{ try{ return new URLSearchParams(location.search).has('shapes'); }catch(_){ return false; } })();
+const RC=0.7;
+function houseShape(o){
+  if (!SHAPES_OK || o.tower || o.kind || o.flag || o.crenel) return null;
+  const roof=o.roof||'front'; if (roof!=='front' && roof!=='side' && roof!=='hip') return null;
+  const RS=rng(Math.floor(hash(Math.round(o.x*8),Math.round(o.z*8),4471)*4294967296)), u=RS();
+  if (u<0.14 && Math.min(o.w,o.d)>=4.8 && Math.abs(o.w-o.d)<1.8 && o.h>=2.62) return 'round';
+  if (u<0.4 && Math.min(o.w,o.d)>=3.6) return 'rounded';
+  return null;
+}
+// a quad of a smooth surface: corners A B C D with their normals, wound to face along out
+function q4s(P,N,A,B,C,D,nA,nB,nC,nD,out){
+  const ux=B[0]-A[0], uy=B[1]-A[1], uz=B[2]-A[2], vx=C[0]-A[0], vy=C[1]-A[1], vz=C[2]-A[2];
+  const g=(uy*vz-uz*vy)*out[0]+(uz*vx-ux*vz)*out[1]+(ux*vy-uy*vx)*out[2];
+  const T=g>=0?[[A,nA],[B,nB],[C,nC],[A,nA],[C,nC],[D,nD]]:[[A,nA],[C,nC],[B,nB],[A,nA],[D,nD],[C,nC]];
+  for (const [p,n] of T){ P.push(p[0],p[1],p[2]); N.push(n[0],n[1],n[2]); }
+}
+const smoothTpl=(P,N)=>({p:new Float32Array(P),n:new Float32Array(N),smooth:true});
+// the plan of a rectangle hw by hd with its corners rounded on radius r, as points round it anticlockwise from above
+function rrPts(hw,hd,r,seg=6){ const out=[];
+  for (const [sx,sz,a0] of [[1,1,0],[-1,1,Math.PI/2],[-1,-1,Math.PI],[1,-1,1.5*Math.PI]])
+    for (let i=0;i<=seg;i++){ const a=a0+Math.PI/2*i/seg; out.push([sx*(hw-r)+r*Math.cos(a),sz*(hd-r)+r*Math.sin(a)]); }
+  return out; }
+// a flat polygon at height y, as a fan from its middle, facing up (ny=1) or down (ny=-1)
+function polyFan(A,pts,y,ny){ for (let i=0;i<pts.length;i++){ const a=pts[i], b=pts[(i+1)%pts.length];
+  const T=[[0,y,0],[a[0],y,a[1]],[b[0],y,b[1]]], gx=(T[1][2]-T[0][2])*(T[2][0]-T[0][0])-(T[1][0]-T[0][0])*(T[2][2]-T[0][2]);
+  if (gx*ny>=0) A.push(...T[0],...T[1],...T[2]); else A.push(...T[0],...T[2],...T[1]); } }
+
+// the outer walls of a house with rounded corners: four flat faces, each stopping RC short of the corners, with the
+// doorway (dx, or null for a painted door) and, once a room is built, the windows cut out; a quarter-cylinder at each
+// corner; and the top
+function roundedShell(gb,H,w,h,d,dx,col,by,surf,room){
+  const A=[], wins=room?room.wins:[], hw=w/2, hd=d/2, a=hw-RC, b=hd-RC;
+  const faces=[{N:[0,0,1],P:(u,y)=>[u,y,hd],u0:-a,u1:a,door:dx,sel:v=>Math.abs(v.ry)<0.1,u:v=>v.x},
+    {N:[0,0,-1],P:(u,y)=>[u,y,-hd],u0:-a,u1:a,door:null,sel:v=>Math.abs(Math.abs(v.ry)-Math.PI)<0.1,u:v=>v.x},
+    {N:[1,0,0],P:(u,y)=>[hw,y,u],u0:-b,u1:b,door:null,sel:v=>Math.abs(v.ry-Math.PI/2)<0.1,u:v=>v.z},
+    {N:[-1,0,0],P:(u,y)=>[-hw,y,u],u0:-b,u1:b,door:null,sel:v=>Math.abs(v.ry+Math.PI/2)<0.1,u:v=>v.z}];
+  for (const f of faces){ const rects=wins.filter(f.sel).map(v=>[f.u(v)-v.w/2,f.u(v)+v.w/2,v.y-v.h/2,v.y+v.h/2]);
+    faceHoles(A,f.P,f.N,f.u0,f.u1,0,h,rects,f.door!==null&&f.door!==undefined?[{c:f.door,r:DR,s:DS,f:DF}]:[]); }
+  polyFan(A,rrPts(hw,hd,RC),h,1);
+  if (dx!==null && dx!==undefined) reveal(A,hd,hd-WT,dx);
+  gb.add(triTpl(A), H, col, by, surf);
+  const P=[], N=[], seg=6;
+  for (const [sx,sz,a0] of [[1,1,0],[-1,1,Math.PI/2],[-1,-1,Math.PI],[1,-1,1.5*Math.PI]])
+    for (let i=0;i<seg;i++){ const t0=a0+Math.PI/2*i/seg, t1=a0+Math.PI/2*(i+1)/seg, c0=[Math.cos(t0),0,Math.sin(t0)], c1=[Math.cos(t1),0,Math.sin(t1)];
+      const p=(c,y)=>[sx*a+RC*c[0],y,sz*b+RC*c[2]], tm=(t0+t1)/2;
+      q4s(P,N,p(c0,0),p(c1,0),p(c1,h),p(c0,h),c0,c1,c1,c0,[Math.cos(tm),0,Math.sin(tm)]); }
+  gb.add(smoothTpl(P,N), H, col, by, surf);
+  if (dx!==null && dx!==undefined){ const S=[]; q3n(S,[dx-DR,DF,hd-WT],[dx+DR,DF,hd-WT],[dx+DR,DF,hd],[dx-DR,DF,hd],[0,1,0]); gb.add(triTpl(S), H, C_.stone, null, SS); }
+}
+// a hipped roof over rounded corners: a pyramid on the plan of the walls widened by the overhang, its corners rounded
+// to match, over a trim of the same plan
+function roundedRoof(gb,H,w,d,h,rise,roofC){
+  const oh=ROOF_OH;
+  if (gb.lod>=2){ gb.add(T.pyr, mm(H,mat(0,h,0,w+2*oh,rise,d+2*oh)), roofC, null, SR); return; }
+  const tr=rrPts(w/2+oh+0.05,d/2+oh+0.05,RC+oh+0.05), A=[];
+  polyFan(A,tr,h+0.07,1); polyFan(A,tr,h-0.03,-1);
+  for (let i=0;i<tr.length;i++){ const p=tr[i], q=tr[(i+1)%tr.length]; q3n(A,[p[0],h-0.03,p[1]],[q[0],h-0.03,q[1]],[q[0],h+0.07,q[1]],[p[0],h+0.07,p[1]],[(p[0]+q[0])/2,0,(p[1]+q[1])/2]); }
+  gb.add(triTpl(A), H, C_.trim, null);
+  const pts=rrPts(w/2+oh,d/2+oh,RC+oh), y0=h+0.06, top=[0,y0+rise,0], B=[];
+  for (let i=0;i<pts.length;i++){ const p=pts[i], q=pts[(i+1)%pts.length], P0=[p[0],y0,p[1]], Q0=[q[0],y0,q[1]];
+    const ux=Q0[0]-P0[0], uz=Q0[2]-P0[2], vx=top[0]-P0[0], vy=top[1]-y0, vz=top[2]-P0[2], gy=uz*vx-ux*vz;
+    if (gy>=0) B.push(...P0,...Q0,...top); else B.push(...P0,...top,...Q0); }
+  gb.add(triTpl(B), H, roofC, null, SR);
+}
+
+/* A round house: radius r, its wall WT thick, in RH_F facets about 55 cm wide (the doorway is the two facets either
+   side of the front, and each window one facet). Angles t are measured from the front (+z) towards +x. */
+const RH_FW=0.55;
+const rhN=r=>2*Math.max(8,Math.round(Math.PI*r/RH_FW));
+const rhT=(n,i)=>-Math.PI+2*Math.PI*(i+0.5)/n;                    // the middle of facet i
+const rhDoor=(n,i)=>Math.abs(rhT(n,i))<2*Math.PI/n;                // the two facets of the doorway
+const RH_DH=DS+DR;                                                 // the head of the doorway
+// a tube of radius r about (cx,cz), from y0 to y1, in n facets, smooth, facing out or in; holes: [facet, ya, yb]
+// openings cut as whole facets (the doorway, if door, up to RH_DH)
+function rhTube(r,n,y0,y1,inward,holes=[],door=false,cx=0,cz=0){
+  const P=[], N=[], cuts=[y0,y1]; if (door && y0<RH_DH) cuts.push(RH_DH); for (const [,ya,yb] of holes) cuts.push(ya,yb);
+  const rows=[...new Set(cuts.filter(y=>y>=y0&&y<=y1))].sort((a,b)=>a-b), s=inward?-1:1;
+  for (let k=0;k+1<rows.length;k++){ const ya=rows[k], yb=rows[k+1];
+    for (let i=0;i<n;i++){ const t0=-Math.PI+2*Math.PI*i/n, t1=t0+2*Math.PI/n;
+      if (door && yb<=RH_DH+1e-6 && rhDoor(n,i)) continue;
+      if (holes.some(([f,ha,hb])=>f===i && ya>=ha-1e-6 && yb<=hb+1e-6)) continue;
+      const v=(t,y)=>[cx+r*Math.sin(t),y,cz+r*Math.cos(t)], nr=t=>[s*Math.sin(t),0,s*Math.cos(t)], tm=(t0+t1)/2;
+      q4s(P,N,v(t0,ya),v(t1,ya),v(t1,yb),v(t0,yb),nr(t0),nr(t1),nr(t1),nr(t0),nr(tm)); } }
+  return smoothTpl(P,N);
+}
+// the reveals through a round wall between radii ri and ro: of window facets [i,ya,yb], and of the doorway
+function rhReveals(A,n,ri,ro,holes,door){
+  const a=Math.PI/n, pt=(r,t,y)=>[r*Math.sin(t),y,r*Math.cos(t)];
+  for (const [i,ya,yb] of holes){ const t=rhT(n,i);
+    for (const sg of [-1,1]){ const tt=t+sg*a; q3n(A,pt(ri,tt,ya),pt(ro,tt,ya),pt(ro,tt,yb),pt(ri,tt,yb),[-sg*Math.cos(tt),0,sg*Math.sin(tt)]); }
+    for (const [y,ny] of [[ya,1],[yb,-1]]) q3n(A,pt(ri,t-a,y),pt(ro,t-a,y),pt(ro,t+a,y),pt(ri,t+a,y),[0,ny,0]); }
+  if (door){ const da=2*a;
+    for (const sg of [-1,1]) q3n(A,pt(ri,sg*da,0),pt(ro,sg*da,0),pt(ro,sg*da,RH_DH),pt(ri,sg*da,RH_DH),[-sg,0,0]);
+    for (let k=0;k<2;k++){ const ta=-da+k*da, tb=ta+da; q3n(A,pt(ri,ta,RH_DH),pt(ro,ta,RH_DH),pt(ro,tb,RH_DH),pt(ri,tb,RH_DH),[0,-1,0]); } }
+}
+// the windows of a round house: the windows that addHouse would set in the walls of a square house of its size, each
+// moved round to the facet nearest it, so that they draw on the same random numbers; on the ground floor none within
+// three facets of the doorway, and none higher up straight behind the stair
+function rhWindows(list,n,h){
+  const out=[], used=new Set();
+  for (const v of list){ let t=Math.atan2(v.x,v.z), i=Math.round((t+Math.PI)/(2*Math.PI)*n-0.5); i=((i%n)+n)%n;
+    const ground=v.y<FH;
+    if (ground && Math.abs(rhT(n,i))<4*2*Math.PI/n) continue;
+    if (rhDoor(n,i)) continue;
+    if (!ground && Math.abs(Math.abs(rhT(n,i))-Math.PI)<0.7) continue;
+    const ya=v.y-v.h/2, yb=v.y+v.h/2; if (yb>h-0.3) continue;
+    const key=i+':'+Math.round(v.y*10); if (used.has(key)) continue; used.add(key); out.push([i,ya,yb]); }
+  return out; }
+// the outside of a round house: its wall, with the doorway and windows cut through when it can be entered, the
+// window panes and shutters, a ring of trim under the eaves and the conical roof
+function roundOutside(gb,H,r,h,rise,wall,roofC,shut,wins,room,by,surf){
+  const n=rhN(r), fw=2*r*Math.sin(Math.PI/n);
+  if (gb.lod>=2) gb.add(T.cyl, mm(H,mat(0,0,0,2*r,h,2*r)), wall, by, surf);
+  else { gb.add(rhTube(r,n,0,h,false,room?wins:[],!!room), H, wall, by, surf);
+    if (!room){ const A=[]; polyFan(A,Array.from({length:n},(_,i)=>{ const t=-Math.PI+2*Math.PI*i/n; return [r*Math.sin(t),r*Math.cos(t)]; }),h,1); gb.add(triTpl(A),H,wall,null,surf); }
+    else { const A=[]; rhReveals(A,n,r-WT,r,wins,true); gb.add(triTpl(A), H, wall, null, 0);
+      const S=[]; for (let k=0;k<2;k++){ const a=-2*Math.PI/n+k*2*Math.PI/n, b=a+2*Math.PI/n, p=(rr,t)=>[rr*Math.sin(t),DF,rr*Math.cos(t)]; q3n(S,p(r-WT,a),p(r,a),p(r,b),p(r-WT,b),[0,1,0]); }
+      gb.add(triTpl(S), H, C_.stone, null, SS); } }
+  for (const [i,ya,yb] of wins){ const t=rhT(n,i), hh=yb-ya, ym=(ya+yb)/2, L=mm(H,mat(r*Math.sin(t),ym,r*Math.cos(t),1,1,1,t));
+    gb.add(T.boxC5, mm(L,mat(0,0,0.0,fw-0.03,hh,0.12)), C_.win, null, Math.random()<0.5?5:10);
+    gb.add(T.boxC, mm(L,mat(0,-hh/2-0.06,0.07,fw+0.18,0.08,0.18)), C_.trim, null);
+    if (shut) for (const sg of [-1,1]){ const ts=t+sg*(fw/2+0.17)/r, Ls=mm(H,mat((r+0.04)*Math.sin(ts),ym,(r+0.04)*Math.cos(ts),1,1,1,ts)); gb.add(T.boxC, mm(Ls,mat(0,0,0,0.32,hh+0.06,0.08)), shut, null, SW); } }
+  gb.add(T.cyl, mm(H,mat(0,h-0.02,0,2*r+0.3,0.14,2*r+0.3)), C_.trim, null);
+  gb.add(T.cone, mm(H,mat(0,h+0.06,0,2*(r+ROOF_OH),rise,2*(r+ROOF_OH))), roofC, null, SR);
+}
+// the room of a round house: its storeys, the wall as a ring of colliders with the doorway left open, the spiral
+// stair, the floors with the stairwell, and a rail round each stairwell but on the side where the stair arrives
+const RH_SR=0.95;   // the stair's radius, to the outer end of its treads
+function roundRoom(ch,o,base,r,h,floors){
+  if (h<2.62 || r<2.3) return null;
+  const R=rng(Math.floor(hash(Math.round(o.x*8),Math.round(o.z*8),4411)*4294967296)), s=R()<0.5?1:-1, ri=r-WT;
+  const D={x:o.x,z:o.z,rot:o.rot,base,fl:base+DF,w:2*r,d:2*r,h,dx:0,iw:ri,zf:ri,zb:-ri,r,ri,floors,seed:Math.floor(R()*4294967296),s,
+    col:pick(R,DOOR_COLS).clone().multiplyScalar(0.9+R()*0.2),y:base+DF,a:0,av:0,idle:9,walls:[],wins:[],room:null,idx:-1,lw:DOOR_W,leaf:'house',kind:'round'};
+  [D.hx,D.hz]=localToWorld(o,-s*DR,r-WT/2);
+  D.area={x:o.x,z:o.z,hw:r,hd:r,rot:o.rot,r};
+  D.clip=[[0,0,ri*0.92,ri*0.42,undefined,WT],[0,0,ri*0.42,ri*0.92,undefined,WT]];
+  const sr=Math.min(RH_SR,ri*0.5), sz=-(ri-sr-0.05); D.sr=sr; D.sz=sz;
+  let nf=Math.max(1,floors); while (nf>1 && h-0.22-((nf-1)*FH+DF)<2.2) nf--;
+  D.levels=[]; for (let f=0;f<nf;f++) D.levels.push({F:f*FH+DF,Hc:f<nf-1?(f+1)*FH-0.15:h-0.22});
+  D.top=D.levels[nf-1].Hc; D.st=null;
+  const loc=(u,v)=>localToWorld(D,u,v), seg=(cu,cv,len,th,ang,top,bot)=>{ const [x,z]=loc(cu,cv); return {x,z,hw:len/2,hd:th/2,rot:o.rot+ang,top:top===Infinity?Infinity:base+top,bot:bot===undefined?undefined:base+bot}; };
+  // the wall
+  { const m=28; for (let i=0;i<m;i++){ const t=-Math.PI+2*Math.PI*(i+0.5)/m, rr=ri+0.2; if (Math.abs(t)<0.34) continue;
+      D.walls.push(seg(rr*Math.sin(t),rr*Math.cos(t),2*Math.PI*rr/m+0.06,0.4,t,Infinity)); }
+    for (const sg of [-1,1]){ const t=sg*0.36, rr=ri+0.2; D.walls.push(seg(rr*Math.sin(t),rr*Math.cos(t),0.12,0.4,t,Infinity)); } }
+  // the stair: 13 treads of 20 cm to each storey, each turning through TS, round a newel; the flights follow one
+  // another round, each starting where the one below ended
+  const TS=2*Math.PI*0.8/ST_N; D.tr=[];
+  for (let f=0;f<nf-1;f++) for (let k=0;k<ST_N;k++){ const j=f*ST_N+k, ta=Math.PI/2*s+j*TS*s; D.tr.push({f,k,top:D.levels[f].F+(k+1)*ST_R,ta,tb:ta+TS*s}); }
+  D.walls.push(seg(0,sz,0.24,0.24,0,D.levels[nf-1].F+1.0));   // the newel
+  for (const t of D.tr){ const tm=(t.ta+t.tb)/2;
+    for (const [a,b] of [[0.12,(0.12+sr)/2],[(0.12+sr)/2,sr]]){ const rm=(a+b)/2; D.walls.push(seg(rm*Math.sin(tm),sz+rm*Math.cos(tm),2*rm*Math.sin(TS/2)+0.06,b-a,tm,t.top,t.top-0.22)); } }
+  // the floors above the ground, in strips across the room, round the stairwell; the rail round the stairwell
+  const wr=sr+0.08;
+  for (let f=1;f<nf;f++){ const F=D.levels[f].F;
+    for (let v=-ri;v<ri-1e-6;v+=0.3){ const v0=v, v1=Math.min(ri,v+0.3), vm=(v0+v1)/2, vn=Math.abs(v0)<Math.abs(v1)?v0:v1, c=Math.sqrt(Math.max(0,ri*ri-vn*vn));
+      const dz=Math.min(Math.abs(v0-sz),Math.abs(v1-sz),(v0<sz&&v1>sz)?0:9), hh=dz<wr?Math.sqrt(wr*wr-dz*dz):0;
+      for (const [u0,u1] of hh?[[-c,-hh],[hh,c]]:[[-c,c]]) if (u1-u0>0.05){ const [x,z]=loc((u0+u1)/2,vm); D.walls.push({x,z,hw:(u1-u0)/2,hd:(v1-v0)/2,rot:o.rot,top:base+F,bot:base+F-0.15}); } }
+    const tEnd=D.tr[f*ST_N-1].tb;
+    for (let i=0;i<20;i++){ const t=2*Math.PI*(i+0.5)/20, dd=Math.abs(Math.atan2(Math.sin(t-tEnd),Math.cos(t-tEnd)));
+      if (dd<1.1 || Math.abs(Math.atan2(Math.sin(t-(tEnd-1.6*s)),Math.cos(t-(tEnd-1.6*s))))<0.5) continue;
+      D.walls.push(seg(wr*Math.sin(t),sz+wr*Math.cos(t),2*Math.PI*wr/20+0.04,0.08,t,F+1.0,F+0.05)); } }
+  D.rail=(f)=>{ const tEnd=D.tr[f*ST_N-1].tb; return t=>{ const dd=Math.abs(Math.atan2(Math.sin(t-tEnd),Math.cos(t-tEnd))); return !(dd<1.1 || Math.abs(Math.atan2(Math.sin(t-(tEnd-1.6*s)),Math.cos(t-(tEnd-1.6*s))))<0.5); }; };
+  (ch.doors||(ch.doors=[])).push(D); (ch.rooms||(ch.rooms=[])).push(D);
+  return D;
+}
+// the ceiling over (x,z) of a round house: over the stairwell, that of the storey above
+function roundCeil(D,x,z,y){
+  const L=D.levels; let f=0; for (let i=1;i<L.length;i++) if (D.base+L[i].F<=y+0.5) f=i;
+  if (f<L.length-1){ const [u,v]=obbLocal(D,x,z); if (Math.hypot(u,v-D.sz)<D.sr+0.1) return D.base+L[f+1].Hc; }
+  return D.base+L[f].Hc; }
+function buildRoundGeo(D){
+  const R=rng(D.seed), gb=new GB(0), H=mat(D.x,D.base,D.z,1,1,1,D.rot), ri=D.ri, r=D.r, n=rhN(r), ao=D.base, sz=D.sz, sr=D.sr;
+  const wallC=pick(R,ROOM_WALLS).clone(), dadoC=pick(R,ROOM_DADO), floorC=pick(R,ROOM_FLOORS).clone(), wood=pick(R,ROOM_WOOD), dark=wood.clone().multiplyScalar(0.6);
+  const boards=wood.clone().multiplyScalar(1.15), stairC=R()<0.6?shade(C_.stone,R,0.03):wood, floorS=R()<0.75?SS:SW;
+  const B=(x,y,z,sx,sy,sz2,col,surf=0,ry=0)=>gb.add(T.box, mm(H,mat(x,y,z,sx,sy,sz2,ry)), col, ao, surf);
+  const nf=D.levels.length, wins=D.rwins||[], solid=[], wr=sr+0.08;
+  D.seats=[]; D.lights=[];
+  const seat=(x,y,z,dx,dz,h,kind)=>D.seats.push(seatOf(mm(H,mat(x,y,z,1,1,1,Math.atan2(dx,dz))),0,0,0,0,h,kind));
+  const disc=(y,up,hole)=>{ const sh=new THREE.Shape(); sh.absarc(0,0,ri,0,Math.PI*2,false);
+    if (hole){ const p=new THREE.Path(); p.absarc(0,up?-sz:sz,wr,0,Math.PI*2,true); sh.holes.push(p); }
+    const g=new THREE.ShapeGeometry(sh,24).rotateX(up?-Math.PI/2:Math.PI/2).translate(0,y,0); return tpl(g,false); };
+  // the lining of the wall, whole height, with the doorway and the windows; their reveals are built with the outside
+  gb.add(rhTube(ri,n,0,D.top+0.02,true,wins,true), H, wallC, null, 0);
+  // a painted dado round the ground floor
+  gb.add(rhTube(ri-0.01,n,DF,DF+0.95,true,wins.filter(w=>w[1]<DF+0.95),true), H, dadoC, null, 0);
+  for (let fi=0;fi<nf;fi++){ const {F,Hc}=D.levels[fi], up=fi<nf-1;
+    gb.add(disc(F,true,fi>0), H, fi?boards:floorC, null, fi?SW:floorS);
+    gb.add(disc(Hc,false,up), H, boards, null, SW);
+    if (up){ gb.add(rhTube(wr,24,Hc,D.levels[fi+1].F,true,[],false,0,sz), H, boards, null, SW); }
+    // daylight through the windows of this storey, and through the doorway on the ground floor; their glass
+    for (const [i,ya,yb] of wins){ if (ya<F-0.05 || yb>Hc+0.05) continue; const t=rhT(n,i), c=[ri*Math.sin(t),(ya+yb)/2,ri*Math.cos(t)], fw=2*r*Math.sin(Math.PI/n);
+      roomLightAt(D,0,c[0],c[1],c[2],[-Math.sin(t),0,-Math.cos(t)],fw*(yb-ya),F-0.05,Hc+0.05);
+      (D.glassGB||(D.glassGB=new GB(0))).add(T.boxC, mm(H,mat((r-0.04)*Math.sin(t),c[1],(r-0.04)*Math.cos(t),fw-0.04,yb-ya,0.01,t)), hex('#ffffff'), null);
+      gb.add(T.boxC, mm(H,mat((ri+0.02)*Math.sin(t),ya-0.025,(ri+0.02)*Math.cos(t),fw+0.12,0.05,WT+0.04,t)), wallC.clone().multiplyScalar(0.92), null); }
+    if (!fi) roomLightAt(D,1,0,DF+1.1,ri,[0,0,-1],2.2,F-0.05,Hc+0.05);
+    // the rail round the stairwell of the flight below, open where the stair arrives
+    if (fi>0){ const ok=D.rail(fi);
+      for (let i=0;i<20;i++){ const t0=2*Math.PI*i/20, t1=2*Math.PI*(i+1)/20, tm=(t0+t1)/2; if (!ok(tm)) continue;
+        const p0=[wr*Math.sin(t0),sz+wr*Math.cos(t0)], p1=[wr*Math.sin(t1),sz+wr*Math.cos(t1)], L=Math.hypot(p1[0]-p0[0],p1[1]-p0[1]);
+        B((p0[0]+p1[0])/2,F+0.92,(p0[1]+p1[1])/2,L+0.01,0.05,0.05,dark,SW,tm);
+        B(p0[0],F,p0[1],0.035,0.92,0.035,dark); } }
+    // furniture, kept within the round wall, clear of the stair and its well, and of the door's sweep
+    const placed=[];
+    // a piece fits where every point of it sampled lies within the wall, clear of the stairwell and its rail, of the
+    // door's sweep and the way from the door to the foot of the stair, and of what is already placed
+    const ptOk=(px,pz)=>Math.hypot(px,pz)<=ri-0.05 && Math.hypot(px,pz-sz)>=wr+0.3
+      && (fi || (Math.hypot(px+D.s*DR,pz-ri)>DOOR_W+0.25 && !(Math.abs(px-D.s*0.3)<0.75 && pz>sz)))
+      && !placed.some(q=>Math.hypot(px-q[0],pz-q[1])<q[2]+0.3);
+    const fits=(x,z,w2,d2,ry=0)=>{ const c=Math.cos(ry), sn=Math.sin(ry);
+      for (const a of [-1,0,1]) for (const b of [-1,0,1]){ const px=x+a*w2*c+b*d2*sn, pz=z-a*w2*sn+b*d2*c; if (!ptOk(px,pz)) return false; } return true; };
+    const fitsR=(x,z,rad)=>{ if (!ptOk(x,z)) return false; for (let k=0;k<8;k++){ const a=k*Math.PI/4; if (!ptOk(x+rad*Math.sin(a),z+rad*Math.cos(a))) return false; } return true; };
+    const take=(x,z,w2,d2)=>{ placed.push([x,z,Math.hypot(w2,d2)]); solid.push([x,z,w2,d2,F]); };
+    const lamp=(x,z)=>{ roomLightAt(D,2,x,F+1.7,z,null,2.8,F-0.05,Hc+0.05);
+      gb.add(T.cyl8, mm(H,mat(x,F+1.9,z,0.015,Hc-F-1.9,0.015)), hex('#2a2624'), null);
+      gb.add(T.cone, mm(H,mat(x,F+1.75,z,0.4,0.22,0.4)), pick(R,[hex('#e9e2cf'),hex('#3f5f4a'),hex('#b5654a')]), null);
+      gb.add(T.sphLo, mm(H,mat(x,F+1.76,z,0.12,0.12,0.12)), hex('#fff1c8'), null); };
+    const chair=(cx,cz,fx,fz,col)=>{ const H2=mm(H,mat(cx,F,cz,1,1,1,Math.atan2(fx,fz)));
+      for (const lx of [-0.17,0.17]) for (const lz of [-0.17,0.17]) gb.add(T.box, mm(H2,mat(lx,0,lz,0.035,0.45,0.035)), col, ao);
+      gb.add(T.box, mm(H2,mat(0,0.45,0,0.42,0.04,0.42)), col, ao, SW); gb.add(T.box, mm(H2,mat(0,0.49,-0.19,0.42,0.48,0.03)), col, ao, SW);
+      seat(cx,F+0.49,cz,fx,fz,0.49,'chair'); };
+    // the places round the wall at angle t (from the front), at distance k in from it
+    const at=(t,k)=>[(ri-k)*Math.sin(t),(ri-k)*Math.cos(t)];
+    let lampAt=null;
+    if (!fi){
+      // a round table with two chairs, or one, or none, on the side away from the stair's foot
+      const chairC=pick(R,[dark,hex('#2f5d46'),hex('#ece8df'),wood]);
+      tbl: for (const t of [-D.s*1.5,-D.s*1.2,-D.s*1.85,D.s*2.3]) for (const nc of [2,1,0]){ const rad=nc?0.95:0.45, [x,z]=at(t,rad+0.05);
+        if (!fitsR(x,z,rad)) continue;
+        gb.add(T.cyl, mm(H,mat(x,F+0.72,z,0.8,0.04,0.8)), wood, ao, SW); B(x,F,z,0.07,0.72,0.07,dark); B(x,F,z,0.45,0.03,0.45,dark);
+        const tx=Math.cos(t), tz=-Math.sin(t);   // along the wall
+        for (let c=0;c<nc;c++){ const sg=c?-1:1; chair(x+tx*sg*0.62,z+tz*sg*0.62,-tx*sg,-tz*sg,chairC); }
+        placed.push([x,z,rad]); solid.push([x,z,0.42,0.42,F]); for (let c=0;c<nc;c++){ const sg=c?-1:1; solid.push([x+tx*sg*0.62,z+tz*sg*0.62,0.22,0.22,F]); }
+        lampAt=[x,z]; break tbl; }
+      // a dresser of plates against the wall
+      for (const t of [D.s*2.0,-D.s*2.4,D.s*1.3,-D.s*0.9]){ const [x,z]=at(t,0.25); if (!fits(x,z,0.55,0.22,t)) continue;
+        const H2=mm(H,mat(x,F,z,1,1,1,t+Math.PI)); gb.add(T.box, mm(H2,mat(0,0,0,1.1,0.85,0.44)), wood, ao, SW); gb.add(T.box, mm(H2,mat(0,0.85,-0.02,1.16,0.04,0.48)), dark, ao, SW);
+        gb.add(T.box, mm(H2,mat(0,0.89,-0.12,1.1,0.95,0.2)), wood, ao, SW);
+        for (let k=0;k<4;k++) gb.add(T.cylC, mm(H2,mat(-0.39+k*0.26,1.35,-0.02,0.22,0.02,0.22,0,Math.PI/2)), R()<0.5?hex('#f3efe6'):hex('#3d6aa8'), null);
+        take(x,z,0.55,0.22); break; }
+    } else {
+      // a bed with its head against the wall, a chest, and a chair
+      const cover=pick(R,[hex('#e9e2cf'),hex('#9c3f34'),hex('#3f5f7a'),hex('#c9b48a'),hex('#7d9a6a')]);
+      bed: for (const t of [-D.s*1.3,D.s*1.3,-D.s*0.9,D.s*0.9,-D.s*1.8,D.s*1.8,0]) for (const bw of [0.45,0.4]){
+        // as far in from the wall as lets its foot corners clear the curve
+        const k=ri+0.97-Math.sqrt(Math.max(0,(ri-0.06)**2-bw*bw))+0.01, [x,z]=at(t,k), ry=t+Math.PI/2;
+        if (!fits(x,z,0.97,bw,ry)) continue;
+        const H2=mm(H,mat(x,F,z,1,1,1,ry));
+        gb.add(T.box, mm(H2,mat(0,0,0,1.9,0.42,2*bw)), dark, ao, SW); gb.add(T.box, mm(H2,mat(0,0.42,0,1.86,0.14,2*bw-0.04)), cover, ao);
+        gb.add(T.box, mm(H2,mat(-0.93,0,0,0.06,1.0,2*bw+0.04)), dark, ao, SW); gb.add(T.box, mm(H2,mat(-0.72,0.56,0,0.3,0.1,2*bw-0.4)), hex('#f4efe6'), ao);
+        take(x,z,0.97,bw); break bed; }
+      for (const t of [D.s*0.6,-D.s*0.6,D.s*2.1,-D.s*2.1,0]){ const [x,z]=at(t,0.3); if (!fits(x,z,0.45,0.25,t)) continue;
+        const H2=mm(H,mat(x,F,z,1,1,1,t)); gb.add(T.box, mm(H2,mat(0,0,0,0.9,0.5,0.5)), dark, ao, SW); gb.add(T.box, mm(H2,mat(0,0.5,0,0.94,0.04,0.54)), wood, ao, SW); take(x,z,0.45,0.25); break; }
+    }
+    lamp(...(lampAt||[0,Math.min(ri-0.9,sz+wr+0.75)]));
+  }
+  // the stair: the newel and the treads, each a wedge of stone or wood in two lengths
+  gb.add(T.cyl, mm(H,mat(0,0,sz,0.24,D.levels[nf-1].F+1.0,0.24)), stairC, null, stairC===wood?SW:SS);
+  for (const t of D.tr){ const tm=(t.ta+t.tb)/2;
+    for (const [a,b] of [[0.12,(0.12+sr)/2],[(0.12+sr)/2,sr]]){ const rm=(a+b)/2, w=2*b*Math.sin(Math.abs(t.tb-t.ta)/2)+0.02;
+      gb.add(T.box, mm(H,mat(rm*Math.sin(tm),t.top-0.22,sz+rm*Math.cos(tm),w,0.22,b-a+0.01,tm)), stairC, null, stairC===wood?SW:SS); } }
+  // a handrail up the outer edge of each flight
+  for (let i=0;i+1<D.tr.length;i++){ const a=D.tr[i], b=D.tr[i+1]; if (a.f!==b.f) continue; const pa=[(sr-0.04)*Math.sin(a.ta),a.top+0.9,sz+(sr-0.04)*Math.cos(a.ta)], pb=[(sr-0.04)*Math.sin(b.ta),b.top+0.9,sz+(sr-0.04)*Math.cos(b.ta)];
+    const LP=p=>new THREE.Vector3(...p).applyMatrix4(H).toArray(); segBox(gb,LP(pa),LP(pb),0.05,0.05,dark,SW);
+    if (a.k%3===0) B(pa[0],a.top,pa[2],0.035,0.9,0.035,dark); }
+  if (!D.furn){ D.furn=true; for (const [x,z,w2,d2,F] of solid){ const [wx,wz]=localToWorld(D,x,z);
+    D.walls.push({x:wx,z:wz,hw:w2,hd:d2,rot:D.rot,top:D.base+F+2.0,bot:F>DF+0.01?D.base+F:undefined}); } }
+  return gb.geometry(D.x,D.z);
 }
 // whether a house can be entered, and if so its room: the floor lies just above the foot of the front wall. Where
 // the hillside rises inside the house above the floor, the ground is not drawn inside the room (see roomClip)
@@ -3698,7 +3978,7 @@ function addDoorPlants(gb,ch,H,R,o,w,fz,dx,h,lampSide,climber){
     if (Math.abs(g-(P.y+gb.oy))<0.4) flValerian(gb,new THREE.Matrix4().makeTranslation(P.x,g-gb.oy,P.z),R); }
 }
 function addHouse(gb,ch,R,o){
-  const w=o.w, d=o.d, h=o.h;
+  const w=o.w, d=o.d, h=o.h, shape=houseShape(o), rr=Math.min(w,d)/2;
   let base=o.base;
   if (base===undefined){
     base=heightAt(o.x+Math.sin(o.rot)*d/2, o.z+Math.cos(o.rot)*d/2);
@@ -3710,8 +3990,10 @@ function addHouse(gb,ch,R,o){
     for (let j=1;j<nv;j++){ const v=(j/nv-0.5)*d; at(-w/2,v); at(w/2,v); }
     at(0,0);
     if (base-hmin>0.05){ const fb=hmin-0.8-gb.oy;
-      gb.add(T.box, mat(o.x,fb,o.z,w+0.16,base-hmin+0.8,d+0.16,o.rot), shade(C_.stone,R,0.05), fb, SS);
-      gb.add(T.box, mat(o.x,base-gb.oy-0.08,o.z,w+0.24,0.16,d+0.24,o.rot), C_.trim, null); }
+      if (shape==='round'){ gb.add(T.cyl, mat(o.x,fb,o.z,2*rr+0.16,base-hmin+0.8,2*rr+0.16,o.rot), shade(C_.stone,R,0.05), fb, SS);
+        gb.add(T.cyl, mat(o.x,base-gb.oy-0.08,o.z,2*rr+0.24,0.16,2*rr+0.24,o.rot), C_.trim, null); }
+      else { gb.add(T.box, mat(o.x,fb,o.z,w+0.16,base-hmin+0.8,d+0.16,o.rot), shade(C_.stone,R,0.05), fb, SS);
+        gb.add(T.box, mat(o.x,base-gb.oy-0.08,o.z,w+0.24,0.16,d+0.24,o.rot), C_.trim, null); } }
   }
   const by=base-gb.oy;
   const H=mat(o.x,by,o.z,1,1,1,o.rot);
@@ -3720,11 +4002,26 @@ function addHouse(gb,ch,R,o){
   const shut=o.tower?null:(R()<0.4?pick(R,C_.shutters):null);
   // the body is added once the door is placed: a house that can be entered has an opening in its front wall
   let room=null;
-  const addBody=()=>{ if (room) shellWithDoor(gb,H,w,h,d,room.dx,wall,by,o.stoneWalls?SS:SP,room); else gb.add(T.box, mm(H,mat(0,0,0,w,h,d)), wall, by, o.stoneWalls?SS:SP); };
-  const roof=o.roof||'front', fz=d/2+0.01;
+  // a round house's windows are gathered as they are drawn and set in its wall with the body
+  const rwins=[];
+  const addBody=()=>{ const surf=o.stoneWalls?SS:SP;
+    if (shape==='round'){ const n=rhN(rr), wl=rhWindows(rwins,n,h); if (room) room.rwins=wl; roundOutside(gb,H,rr,h,rise,wall,roofC,shut,wl,room,by,surf); return; }
+    if (shape==='rounded'){ if (gb.lod>=2) gb.add(T.box, mm(H,mat(0,0,0,w,h,d)), wall, by, surf); else roundedShell(gb,H,w,h,d,room?room.dx:null,wall,by,surf,room); return; }
+    if (room) shellWithDoor(gb,H,w,h,d,room.dx,wall,by,surf,room); else gb.add(T.box, mm(H,mat(0,0,0,w,h,d)), wall, by, surf); };
+  const roof0=o.roof||'front', roof=shape==='round'?'cone':shape==='rounded'?'hip':roof0, fz=shape==='round'?rr+0.01:d/2+0.01;
+  // the face of the front wall at x: a round house's curves back from its front
+  const fzAt=x=>shape==='round'?Math.sqrt(Math.max(0,rr*rr-x*x))+0.01:fz;
+  // a window: on a round house, gathered to be moved round to a facet of its wall; on one with rounded corners, kept
+  // off the curve of the corners
+  const aWin=(gb2,H2,x,y,z,ry,ww,hh,sh,rm)=>{
+    if (shape==='round'){ rwins.push({x,y,z,h:hh}); return; }
+    if (shape==='rounded'){ const lim=a=>Math.max(0,a-RC-ww/2-0.05); if (Math.abs(Math.cos(ry))>0.5) x=clamp(x,-lim(w/2),lim(w/2)); else z=clamp(z,-lim(d/2),lim(d/2)); }
+    addWin(gb2,H2,x,y,z,ry,ww,hh,sh,rm); };
   // the roof's rise is kept, so that its surface can be walked on (roofAt)
   let rise=0;
-  if (roof==='front') gableRoof(gb,H,w,d,h,rise=w*(0.36+R()*0.12),wall,roofC);
+  if (shape==='round') rise=rr*(0.62+R()*0.25);
+  else if (shape==='rounded') roundedRoof(gb,H,w,d,h,rise=Math.min(w,d)*(0.45+R()*0.2),roofC);
+  else if (roof==='front') gableRoof(gb,H,w,d,h,rise=w*(0.36+R()*0.12),wall,roofC);
   else if (roof==='side') gableRoof(gb,mm(H,mat(0,0,0,1,1,1,Math.PI/2)),d,w,h,rise=d*(0.32+R()*0.1),wall,roofC);
   else if (roof==='hip') hipRoof(gb,H,w,d,h,rise=Math.min(w,d)*(0.45+R()*0.2),roofC);
   else if (roof==='spire') hipRoof(gb,H,w,d,h,rise=Math.min(w,d)*(1.3+R()*0.6),o.spireCol||roofC);
@@ -3739,23 +4036,27 @@ function addHouse(gb,ch,R,o){
   }
   const floorH=2.6, floors=Math.max(1,Math.floor(h/floorH));
   let doorX=null, lampX=null, climber=false;
-  if (!o.noDoor){ const dx=(R()-0.5)*Math.max(0,w-2.6); doorX=dx;
-    room=gb.lod===0?doorwayFor(ch,o,base,dx,w,h,d,floors):null;
-    if (room) addDoorFrame(gb,H,dx,d/2); else addDoor(gb,H,dx,fz-0.06);
-    if (R()<0.3){ const lx=dx+(dx>0?-0.9:0.9); lampX=lx;
-      gb.add(T.boxC, mm(H,mat(lx,2.62,fz+0.15,0.06,0.06,0.32)), WIRE, null);
-      gb.add(T.boxC, mm(H,mat(lx,2.42,fz+0.3,0.22,0.3,0.22)), BULB, null, 6);
-      gb.add(T.pyr, mm(H,mat(lx,2.57,fz+0.3,0.3,0.16,0.3)), WIRE, null);
-      const v=new THREE.Vector3(lx,2.42,fz+0.3).applyMatrix4(H); glow(ch,v.x,v.y+gb.oy,v.z,2.2); }
+  // a round house's door is in the middle of its front
+  const doorRoom=dx=>gb.lod!==0?null:shape==='round'?roundRoom(ch,o,base,rr,h,floors):doorwayFor(ch,o,base,dx,w,h,d,floors);
+  const fd=shape==='round'?rr:d/2;
+  if (!o.noDoor){ let dx=(R()-0.5)*Math.max(0,w-2.6); if (shape==='round') dx=0; doorX=dx;
+    room=doorRoom(dx);
+    if (room) addDoorFrame(gb,H,dx,fd); else addDoor(gb,H,dx,fz-0.06);
+    if (R()<0.3){ const lx=dx+(dx>0?-0.9:0.9), lz=fzAt(lx); lampX=lx;
+      if (!(shape==='rounded' && Math.abs(lx)>w/2-RC-0.15)){
+        gb.add(T.boxC, mm(H,mat(lx,2.62,lz+0.15,0.06,0.06,0.32)), WIRE, null);
+        gb.add(T.boxC, mm(H,mat(lx,2.42,lz+0.3,0.22,0.3,0.22)), BULB, null, 6);
+        gb.add(T.pyr, mm(H,mat(lx,2.57,lz+0.3,0.3,0.16,0.3)), WIRE, null);
+        const v=new THREE.Vector3(lx,2.42,lz+0.3).applyMatrix4(H); glow(ch,v.x,v.y+gb.oy,v.z,2.2); } }
     if (R()<0.12) gb.add(T.boxC, mm(H,mat(dx,2.25,fz+0.45,1.7,0.06,0.95,0,0.32)), R()<0.5?C_.canvasA:C_.white, null);
-    if (R()<0.35){ const sx=dx+(dx>0?-1.4:1.4); if (Math.abs(sx)<w/2-0.5){ addWin(gb,H,sx,1.15,fz,0,0.5,0.7,shut,room); } }
+    if (R()<0.35){ const sx=dx+(dx>0?-1.4:1.4); if (Math.abs(sx)<w/2-0.5){ aWin(gb,H,sx,1.15,fz,0,0.5,0.7,shut,room); } }
   }
   // a building drawn without a door is given one, from its own random sequence so that the town is unchanged
-  else { const RD=rng(Math.floor(hash(Math.round(o.x*8),Math.round(o.z*8),4421)*4294967296)), dx=(RD()-0.5)*Math.max(0,w-2.6);
-    room=gb.lod===0?doorwayFor(ch,o,base,dx,w,h,d,floors):null;
-    if (room) addDoorFrame(gb,H,dx,d/2); else addDoor(gb,H,dx,fz-0.06); }
+  else { const RD=rng(Math.floor(hash(Math.round(o.x*8),Math.round(o.z*8),4421)*4294967296)); let dx=(RD()-0.5)*Math.max(0,w-2.6); if (shape==='round') dx=0;
+    room=doorRoom(dx);
+    if (room) addDoorFrame(gb,H,dx,fd); else addDoor(gb,H,dx,fz-0.06); }
   // the climber draws on its own random sequence so that it leaves the layout of the town unchanged
-  if (!o.tower && !o.noDoor){ const RB=rng(Math.floor(hash(Math.round(o.x*8),Math.round(o.z*8),4401)*4294967296));
+  if (!o.tower && !o.noDoor && shape!=='round'){ const RB=rng(Math.floor(hash(Math.round(o.x*8),Math.round(o.z*8),4401)*4294967296));
     if (RB()<0.3){ climber=true; addBougainvillea(gb,H,RB,w,fz,Math.min(h-0.4,floors>1?4.4:h-0.3)); } }
   // hanging baskets, pots and valerian at the front door, on their own random sequence
   if (!o.tower && doorX!==null) addDoorPlants(gb,ch,H,rng(Math.floor(hash(Math.round(o.x*8),Math.round(o.z*8),4461)*4294967296)),o,w,fz,doorX,h,lampX,climber);
@@ -3764,7 +4065,7 @@ function addHouse(gb,ch,R,o){
     const y=f*floorH+0.95, n=w>4.8&&R()<0.6?2:1;
     // a tower's top-floor window that would run into the openings of its belfry is left out; the random draws are
     // made all the same, so that the rest of the town is unchanged
-    const aw=o.tower&&o.belfry&&y+0.39>h-1.5-0.65-0.25?()=>{}:addWin;
+    const aw=o.tower&&o.belfry&&y+0.39>h-1.5-0.65-0.25?()=>{}:aWin;
     for (let k=0;k<n;k++){ if (R()<0.12) continue; const xx=n===1?(R()-0.5)*(w-1.9):(k?1:-1)*(w*0.24); aw(gb,H,xx,y,fz,0,0.5,0.78,shut,room); }
     for (const s of [1,-1]) if (R()<0.42) aw(gb,H,s*(w/2+0.01),y,(R()-0.5)*(d-1.8),Math.PI/2*s,0.5,0.78,shut,room);
     if (R()<0.3) aw(gb,H,(R()-0.5)*(w-1.6),y,-fz,Math.PI,0.5,0.78,shut,room);
@@ -3774,11 +4075,12 @@ function addHouse(gb,ch,R,o){
     for (let s=0;s<4;s++){ const HR=mm(H,mat(0,0,0,1,1,1,s*Math.PI/2)), off=(s%2?w:d)/2+0.01;
       for (const xx of (w>3.3?[-0.55,0.55]:[0])){ gb.add(T.boxC5, mm(HR,mat(xx,y,off,0.55,1.3,0.12)), C_.win, null, 10);
         gb.add(T.cylC, mm(HR,mat(xx,y+0.65,off,0.55,0.1,0.55,0,Math.PI/2)), C_.win, null, 10); } } }   // the arch a little thinner than the opening, so their faces never share a plane
-  if (roof==='front' && w>3.8 && R()<0.6) addWin(gb,H,0,h+w*0.13,fz,0,0.38,0.45);
+  if (roof0==='front' && w>3.8 && R()<0.6 && !shape) addWin(gb,H,0,h+w*0.13,fz,0,0.38,0.45);
   let chim=null;
   if (roof!=='flat' && roof!=='spire' && R()<0.3){ gb.add(T.box, mm(H,mat(w*0.22,h,-d*0.18,0.55,Math.min(w,d)*0.4+1.0,0.55)), wall, null, SP);
     const [cx2,cz2]=localToWorld({x:o.x,z:o.z,rot:o.rot},w*0.22,-d*0.18); chim={x:cx2,z:cz2,hw:0.3,hd:0.3,rot:o.rot,top:base+h+Math.min(w,d)*0.4+1.0,bot:base+h}; }
-  const ob={x:o.x,z:o.z,hw:w/2,hd:d/2,rot:o.rot,top:Infinity,roof:{kind:roof,y0:base+h,rise,w,d,crenel:!!o.crenel}};
+  const ob=shape==='round'?{x:o.x,z:o.z,hw:rr,hd:rr,rot:o.rot,top:Infinity,roof:{kind:'cone',y0:base+h,rise,w:2*rr,d:2*rr}}
+    :{x:o.x,z:o.z,hw:w/2,hd:d/2,rot:o.rot,top:Infinity,roof:{kind:roof,y0:base+h,rise,w,d,crenel:!!o.crenel,rc:shape==='rounded'?RC:0}};
   if (room) ob.room=room;
   if (chim) ch.obbs.push(chim);
   // a crenellated top: its merlons stand round the edge of the flat roof
@@ -11587,7 +11889,7 @@ function collide(){
   // indoors the floor replaces the ground, which may rise above it under the back of the house
   for (const ch of near) for (const o of ch.obbs){ if (!o.room) continue; const [lu,lv]=obbLocal(o,player.x,player.z);
     const A=o.room.area||o, [au,av]=A===o?[lu,lv]:obbLocal(A,player.x,player.z);
-    if (Math.abs(au)<=A.hw && Math.abs(av)<=A.hd && py>o.room.fl-1.2){ g=o.room.fl;
+    if ((A.r?Math.hypot(au,av)<=A.r:Math.abs(au)<=A.hw && Math.abs(av)<=A.hd) && py>o.room.fl-1.2){ g=o.room.fl;
       for (const q of o.room.walls){ if (q.top===Infinity||q.top>py+STEP) continue; const [qu,qv]=obbLocal(q,player.x,player.z); if (Math.abs(qu)<=q.hw+0.05&&Math.abs(qv)<=q.hd+0.05) g=Math.max(g,q.top); } } }
   colRoof=null;
   for (const ch of near){
@@ -11603,6 +11905,7 @@ function collide(){
 // stairwell of its flight up, that of the storey above. A church or a lighthouse, which has no storeys, sets none.
 function roomCeil(D,x,z,y){
   const L=D.levels; if (!L) return Infinity;
+  if (D.kind==='round') return roundCeil(D,x,z,y);
   let f=0; for (let i=1;i<L.length;i++) if (D.base+L[i].F<=y+0.5) f=i;
   if (f<L.length-1 && D.st){ const S=flight(D,f), [u,v]=obbLocal(D,x,z); if (u>S.x0 && u<S.x1 && v>S.well[0] && v<S.well[1]) return D.base+L[f+1].Hc; }
   return D.base+L[f].Hc; }
@@ -11669,7 +11972,7 @@ let indoors=null;   // the room the player is in, if any, for the sound
 function playerRadius(dt){
   let want=0.6; indoors=null;
   for (const ch of nearbyChunks()) if (ch.rooms) for (const D of ch.rooms){ const A=D.area||D, [lu,lv]=obbLocal(A,player.x,player.z);
-    if (Math.abs(lu)<(A.hw??D.w/2) && Math.abs(lv)<(A.hd??D.d/2) && player.y>D.fl-1.2 && player.y<D.base+D.top){ indoors=D; break; } }
+    if ((A.r?Math.hypot(lu,lv)<A.r:Math.abs(lu)<(A.hw??D.w/2) && Math.abs(lv)<(A.hd??D.d/2)) && player.y>D.fl-1.2 && player.y<D.base+D.top){ indoors=D; break; } }
   if (indoors) want=0.3;
   for (const ch of nearbyChunks()){ if (!ch.doors) continue;
     for (const D of ch.doors){ if (Math.hypot(D.hx-player.x,D.hz-player.z)<3.5){ want=0.3; break; }
@@ -11725,6 +12028,7 @@ const ROOM_FLOORS=['#b4694c','#a95f45','#c07a58','#9c8a72'].map(hex), ROOM_WOOD=
 function buildRoomGeo(D){
   if (D.kind==='tower') return buildTowerGeo(D);
   if (D.kind==='lighthouse') return buildLighthouseGeo(D);
+  if (D.kind==='round') return buildRoundGeo(D);
   const R=rng(D.seed), gb=new GB(0), H=mat(D.x,D.base,D.z,1,1,1,D.rot), iw=D.iw, zf=D.zf, zb=D.zb, ao=D.base;
   const wallC=pick(R,ROOM_WALLS).clone(), dadoC=pick(R,ROOM_DADO), floorC=pick(R,ROOM_FLOORS).clone(), wood=pick(R,ROOM_WOOD), dark=wood.clone().multiplyScalar(0.6);
   const boards=wood.clone().multiplyScalar(1.15), stairC=R()<0.6?shade(C_.stone,R,0.03):wood, floorS=R()<0.75?SS:SW, barn=D.kind==='barn';
@@ -15801,7 +16105,7 @@ requestAnimationFrame(()=>setTimeout(async ()=>{
     // on a desktop, a greeting naming the help key, once the world is on the screen (not on arriving by Go there)
     if (!MOBILE && !went) toast('','Welcome! Press H for help',6000); }));
 },30));
-window.__village={ get seed(){ return SEED_TEXT; }, aerGround:(x,y)=>aerGround(x,y), get aerView(){ return {yaw,pitch,dist,x:player.x,z:player.z,cy:camPos.y,gy:heightAt(camPos.x,camPos.z),lift:aerLift}; }, TELE, teleRaise, teleLower, teleMag, get teleRing(){ return teleRing; }, viewZoom, get origin(){ return ORIGIN; }, share:{state:sceneState,link:sceneLink,qrEncode,get shared(){ return SCENE; }}, get paused(){ return paused; }, set paused(v){ if (!!v!==paused){ paused=!!v; lastClock=null; } }, goods, glZone, branchesAt, get mantle(){ return mantle; }, get colRoof(){ return colRoof; }, roofAt, roofSlope, topAt, get sit(){ return sit; }, get indoors(){ return indoors; }, roomFns:{flight,localToWorld,obbLocal,roomCeil}, sitKey, sitFind, sitStand, sitSpotOk, get camp(){ return CAMP; }, campKey, campPitch, campStrike, campWhyNot, campFit, campBuild, campLight, beachStretch, BCH_SP, COACH_SEATS, FERRY_SEATS, coachEnter, genChunk, coastRoadZ, brZ, brY, heightAt, player, chunks, rooms, doorMesh, keys, setYaw:v=>{yaw=v;}, get yaw(){return yaw;}, fe, co, lightsNear, beams, ruinIn, cats, catHome, PEOPLE, get ridden(){ return ridden; },
+window.__village={ get seed(){ return SEED_TEXT; }, aerGround:(x,y)=>aerGround(x,y), get aerView(){ return {yaw,pitch,dist,x:player.x,z:player.z,cy:camPos.y,gy:heightAt(camPos.x,camPos.z),lift:aerLift}; }, TELE, teleRaise, teleLower, teleMag, get teleRing(){ return teleRing; }, viewZoom, get origin(){ return ORIGIN; }, share:{state:sceneState,link:sceneLink,qrEncode,get shared(){ return SCENE; }}, get paused(){ return paused; }, set paused(v){ if (!!v!==paused){ paused=!!v; lastClock=null; } }, goods, glZone, branchesAt, get mantle(){ return mantle; }, get colRoof(){ return colRoof; }, roofAt, roofSlope, topAt, get sit(){ return sit; }, get indoors(){ return indoors; }, roomFns:{flight,localToWorld,obbLocal,roomCeil,buildRoomGeo}, sitKey, sitFind, sitStand, sitSpotOk, get camp(){ return CAMP; }, campKey, campPitch, campStrike, campWhyNot, campFit, campBuild, campLight, beachStretch, BCH_SP, COACH_SEATS, FERRY_SEATS, coachEnter, genChunk, coastRoadZ, brZ, brY, heightAt, player, chunks, rooms, doorMesh, keys, setYaw:v=>{yaw=v;}, get yaw(){return yaw;}, fe, co, lightsNear, beams, ruinIn, cats, catHome, PEOPLE, get ridden(){ return ridden; },
   findHarbour(){ for (let d=0;d<12;d++) for (const sd of SIDES) for (const n of [Math.floor(player.x/HARB)+d,Math.floor(player.x/HARB)-d]){ const H=harbourInfo(sd,n); if (H) return {x:H.x,z:coastZ(sd,H.x)+sd*7,W:H.W,sd,qz:coastZ(sd,H.x+H.W/2-1)+sd*2.5}; } return null; },
   findBeach(){ for (let x=player.x; x<player.x+3000; x+=10) for (const sd of SIDES){ const z=coastZ(sd,x)+sd*5; if (heightAt(x,z)<0.6 && heightAt(x,z)>0.1 && !harbourAt(sd,x)) return {x,z,sd}; } return null; },
   ridge(x){ return {x,z:ridgeZ(x)}; },
