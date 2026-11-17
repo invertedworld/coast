@@ -2582,7 +2582,7 @@ function doorwayFor(ch,o,base,dx,w,h,d,floors){
   const W=(u0,u1,v0,v1)=>{ const [x,z]=localToWorld(o,(u0+u1)/2,(v0+v1)/2); return {x,z,hw:(u1-u0)/2,hd:(v1-v0)/2,rot:o.rot,top:Infinity}; };
   const walls=[W(-w/2,-iw,-d/2,d/2), W(iw,w/2,-d/2,d/2), W(-w/2,w/2,-d/2,zb), W(-w/2,dx-DR,zf,d/2), W(dx+DR,w/2,zf,d/2)];
   const [hx,hz]=localToWorld(o,dx-s*DR,d/2-WT/2);
-  const D={x:o.x,z:o.z,rot:o.rot,base,fl,w,d,h,dx,iw,zf,zb,floors,hc:floors>1?2.45:h-0.22,seed:Math.floor(R()*4294967296),s,
+  const D={x:o.x,z:o.z,rot:o.rot,base,fl,w,d,h,dx,iw,zf,zb,floors,seed:Math.floor(R()*4294967296),s,
     col:pick(R,DOOR_COLS).clone().multiplyScalar(0.9+R()*0.2),hx,hz,y:base+DF,a:0,av:0,idle:9,walls,wins:[],room:null,idx:-1,lw:DOOR_W,leaf:'house',
     kind:o.kind||(o.tower?'tower':'house'),belfry:!!o.belfry};
   if (D.kind==='tower') towerColliders(D); else roomLevels(D);
@@ -2590,20 +2590,24 @@ function doorwayFor(ch,o,base,dx,w,h,d,floors){
   return D;
 }
 // The storeys of a room. A house of two or more storeys that is wide and deep enough has a floor you can walk on at
-// each storey, reached by straight flights of 13 risers of 20 cm. The flights run along the side walls, the first
+// each storey, reached by straight flights of 13 risers of 20 cm, with treads of 25 cm, or in a smaller house as little
+// as 18 cm, as steep as the stairs of an old town house. A house too small for any flight is one room open to the roof,
+// so that its upper windows look into it rather than into the dark above a ceiling. The flights run along the side walls, the first
 // on the side away from the door, rising towards the back, and each one above it on the other side, rising the
 // other way, so that each arrives near the foot of the next. Each flight leaves a stairwell in the floor above it.
-const FH=2.6, ST_N=13, ST_G=0.25, ST_R=FH/ST_N, ST_W=0.9;
+const FH=2.6, ST_N=13, ST_GS=[0.25,0.22,0.2,0.18], ST_R=FH/ST_N, ST_W=0.9;
 function roomLevels(D){
   const {iw,zf,zb,h,floors}=D; let nf=1, st=null;
-  if (floors>=2 && 2*iw>=3.4 && zf-zb>=ST_N*ST_G+1.4){
+  if (floors>=2 && 2*iw>=3.0){
     const sideA=D.dx>0?-1:1, hingeX=D.dx-D.s*DR, xa=sideA>0?iw-ST_W:-iw;
-    for (const z0 of [zf-1.3,zf-2.3]){ const z1=z0-ST_N*ST_G; if (z1<zb+0.05) continue;
-      const cx=clamp(hingeX,xa,xa+ST_W), cz=clamp(zf,z1,z0); if (Math.hypot(cx-hingeX,cz-zf)<DOOR_W+0.2) continue;
-      st={sideA,z0,z1}; break; }
+    for (const g of ST_GS){ if (zf-zb<ST_N*g+1.05) continue;
+      for (const z0 of [zf-1.3,zf-2.3,zf-1.0]){ const z1=z0-ST_N*g; if (z1<zb+0.05) continue;
+        const cx=clamp(hingeX,xa,xa+ST_W), cz=clamp(zf,z1,z0); if (Math.hypot(cx-hingeX,cz-zf)<DOOR_W+0.2) continue;
+        st={sideA,z0,z1,g}; break; }
+      if (st) break; }
     if (st){ nf=floors; while (nf>1 && h-0.22-((nf-1)*FH+DF)<2.2) nf--; }
   }
-  D.levels=[]; for (let f=0;f<nf;f++) D.levels.push({F:f*FH+DF, Hc:f<nf-1?(f+1)*FH-0.15:(nf>1?h-0.22:D.hc)});
+  D.levels=[]; for (let f=0;f<nf;f++) D.levels.push({F:f*FH+DF, Hc:f<nf-1?(f+1)*FH-0.15:h-0.22});
   D.top=D.levels[nf-1].Hc; D.st=nf>1?st:null;
   if (!D.st) return;
   // the colliders: steps, the floors with their stairwells, and a rail round each stairwell
@@ -2617,19 +2621,19 @@ function roomLevels(D){
 // flight f, from storey f to f+1: its strip across the room, the extent of each step, its stairwell in the floor
 // above, and the rails round the stairwell
 function flight(D,f){
-  const {iw,st}=D, side=f%2?-st.sideA:st.sideA, x0=side>0?iw-ST_W:-iw, x1=x0+ST_W, up=f%2===0;   // up: rising towards the back
-  const stepZ=k=>up?[st.z0-k*ST_G,st.z0-(k-1)*ST_G]:[st.z1+(k-1)*ST_G,st.z1+k*ST_G];
-  const well=up?[st.z0-(ST_N-1)*ST_G,st.z0-ST_G]:[st.z1+ST_G,st.z1+(ST_N-1)*ST_G];   // headroom from the second step
+  const {iw,st}=D, g=st.g, side=f%2?-st.sideA:st.sideA, x0=side>0?iw-ST_W:-iw, x1=x0+ST_W, up=f%2===0;   // up: rising towards the back
+  const stepZ=k=>up?[st.z0-k*g,st.z0-(k-1)*g]:[st.z1+(k-1)*g,st.z1+k*g];
+  const well=up?[st.z0-(ST_N-1)*g,st.z0-g]:[st.z1+g,st.z1+(ST_N-1)*g];   // headroom from the second step
   const xi=side>0?x0:x1, lowZ=up?well[1]:well[0];
   // where the head lies too close to the end wall for the walker to turn out between the wall and the end of the rail,
   // the rail along the open side stops two steps short of the head, so that the top steps can be left sideways
-  const cramp=up?well[0]-D.zb<0.7:D.zf-well[1]<0.7, ra=up&&cramp?well[0]+2*ST_G:well[0], rb=!up&&cramp?well[1]-2*ST_G:well[1];
+  const cramp=up?well[0]-D.zb<0.7:D.zf-well[1]<0.7, ra=up&&cramp?well[0]+2*g:well[0], rb=!up&&cramp?well[1]-2*g:well[1];
   const rails=[[xi-0.03,xi+0.03,ra,rb],[x0,x1,lowZ-0.03,lowZ+0.03]];
   // the floor of the storey above on which the walker steps off the flight: beyond the head, and beside the top steps
   // where the rail stops short, clear of its end
   const head=[up?[x0,x1,well[0]-0.45,well[0]]:[x0,x1,well[1],well[1]+0.45]];
   if (cramp) head.push([side>0?xi-0.5:xi,side>0?xi:xi+0.5,up?well[0]:rb+0.35,up?ra-0.35:well[1]]);
-  return {side,x0,x1,up,stepZ,well,rails,xi,lowZ,cramp,head};
+  return {side,x0,x1,up,g,stepZ,well,rails,xi,lowZ,cramp,head};
 }
 /* ---------- churches that can be entered ----------
    The nave keeps its walls, roof and windows; at full detail its front wall has the doorway, with a pair of leaves,
@@ -11732,7 +11736,7 @@ function buildRoomGeo(D){
     // beams across the ceiling, clear of the stairwell
     for (let z=zb+0.6; z<zf-0.3; z+=0.85){ if (wellHere && z>wellHere[2]-0.1 && z<wellHere[3]+0.1) continue; B(0,Hc-0.16,z,2*iw,0.16,0.14,dark,SW); }
     // the flight up to the next storey: solid steps along the wall, with a handrail on the open side
-    if (here){ for (let k=1;k<ST_N;k++){ const [za,zz]=here.stepZ(k); B((here.x0+here.x1)/2,F,(za+zz)/2,ST_W,k*ST_R,ST_G+0.002,stairC,stairC===wood?SW:SS); }
+    if (here){ for (let k=1;k<ST_N;k++){ const [za,zz]=here.stepZ(k); B((here.x0+here.x1)/2,F,(za+zz)/2,ST_W,k*ST_R,here.g+0.002,stairC,stairC===wood?SW:SS); }
       const ke=here.cramp?ST_N-3:ST_N-1, [a0,a1]=here.stepZ(1), [b0,b1]=here.stepZ(ke), zs=here.up?a1:a0, ze=here.up?b0:b1, xr=here.xi-(here.side>0?0.04:-0.04);
       segBox(gb,LP(xr,F+ST_R+0.9,zs),LP(xr,F+ke*ST_R+0.9,ze),0.05,0.05,dark,SW);
       for (const [z,y] of [[zs,F+ST_R],[ze,F+ke*ST_R]]) B(xr,y,z,0.06,0.9,0.06,dark,SW); }
