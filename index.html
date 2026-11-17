@@ -2418,8 +2418,9 @@ function roadArch(type,idx,seg){
    centred on it. The outline of those squares, its corners rounded off, is the wall's line, so that its corners
    fall in the middles of blocks and its sides cross each street square, halfway between two crossroads. It is
    worked out from the hill and the streets alone, so that every block it crosses agrees where it runs, and each
-   block builds the stretch whose middle lies in it. Wherever a street crosses the wall there is a gate, a tower
-   over an arched passage; the gate on the side towards the nearer coast carries a clock. Square towers with tiled
+   block builds the stretch whose middle lies in it. There are at most four gates, one towards each of north, south,
+   east and west where a street crosses the wall that way: a tower over an arched passage, the gate on the side
+   towards the nearer coast carrying a clock. The wall runs on across the other streets, which end against it. Square towers with tiled
    roofs stand on the wall about every 30 m. A walk runs along the top of the wall behind a parapet 0.75 m high, and a
    stair against the inside of the wall climbs to it on each stretch between towers and gates. A height is given
    up where its wall would come near the railway outside a tunnel, the coast road or a station, or where two gates
@@ -2499,25 +2500,32 @@ function citRing(P,h0,f){
   const gates=[], D=CIT_GD;
   const addGate=(k,x,z,tx,tz,hwAt,junction)=>{
     const A=pts[k], B=pts[(k+1)%N], l=Math.hypot(tx,tz), lr=Math.hypot(B.x-A.x,B.z-A.z);
-    if (Math.abs(((B.x-A.x)*tz-(B.z-A.z)*tx)/(l*lr))<0.82 || junction) return false;
+    const ok=Math.abs(((B.x-A.x)*tz-(B.z-A.z)*tx)/(l*lr))>=0.82 && !junction;
     let hw=0; for (let q=-D/2;q<=D/2;q+=D/4) hw=Math.max(hw,hwAt(q));
     const r=hw+0.15, rot=Math.atan2(tx,tz);
-    gates.push({k,x,z,r,rot,ob:{x,z,hw:r+CIT_PW,hd:D/2,rot}}); return true; };
+    gates.push({k,x,z,r,rot,ok,ob:{x,z,hw:r+CIT_PW,hd:D/2,rot}}); };
   for (let k=0;k<N;k++){ const A=pts[k], B=pts[(k+1)%N];
     for (let i=Math.floor(Math.min(A.x,B.x)/C); i<=Math.ceil(Math.max(A.x,B.x)/C); i++){
       const fa=A.x-vRoadX(i,A.z), fb=B.x-vRoadX(i,B.z); if ((fa<0)===(fb<0)) continue;
       const t=fa/(fa-fb), z=lerp(A.z,B.z,t), x=vRoadX(i,z); if (!vSegOn(i,vSegAt(x,z))) continue;
       const jj=Math.round(z/C), junction=Math.abs(z-hRoadZ(jj,x))<13 && (hSegOn(i-1,jj)||hSegOn(i,jj));
-      if (!addGate(k,x,z,vRoadX(i,z+0.5)-x,0.5,q=>vRoadW(i,z+q),junction)) return null; }
+      addGate(k,x,z,vRoadX(i,z+0.5)-x,0.5,q=>vRoadW(i,z+q),junction); }
     for (let j=Math.floor(Math.min(A.z,B.z)/C); j<=Math.ceil(Math.max(A.z,B.z)/C); j++){
       const fa=A.z-hRoadZ(j,A.x), fb=B.z-hRoadZ(j,B.x); if ((fa<0)===(fb<0)) continue;
       const t=fa/(fa-fb), x=lerp(A.x,B.x,t), z=hRoadZ(j,x); if (!hSegOn(hSegAt(x,z),j)) continue;
       const ii=Math.round(x/C), junction=Math.abs(x-vRoadX(ii,z))<13 && (vSegOn(ii,j-1)||vSegOn(ii,j));
-      if (!addGate(k,x,z,0.5,hRoadZ(j,x+0.5)-z,q=>hRoadW(j,x+q),junction)) return null; } }
+      addGate(k,x,z,0.5,hRoadZ(j,x+0.5)-z,q=>hRoadW(j,x+q),junction); } }
+  // a gate at most towards each of north, south, east and west: the crossing that lies most nearly that way from the
+  // summit, within 45 degrees of it, where the street meets the wall square and away from a crossroads; the wall runs
+  // on across every other street, which ends against it
+  const cross=gates.splice(0);
+  for (const [ax,az] of [[0,1],[0,-1],[1,0],[-1,0]]){ let best=null, bv=Math.SQRT1_2;
+    for (const g of cross){ if (!g.ok || gates.includes(g)) continue; const dx=g.x-P.x, dz=g.z-P.z, v=(dx*ax+dz*az)/Math.hypot(dx,dz); if (v>bv){ bv=v; best=g; } }
+    if (best) gates.push(best); }
   if (gates.length<2) return null;
   for (let a=0;a<gates.length;a++) for (let b=a+1;b<gates.length;b++) if (Math.hypot(gates[a].x-gates[b].x,gates[a].z-gates[b].z)<24) return null;
-  // the wall itself keeps off the streets
-  for (const p of pts) if (!gates.some(g=>obbCircleDist(g.ob,p.x,p.z)<0.6) && roadDist(p.x,p.z)<1.5) return null;
+  // the wall itself runs along no street, only across them
+  for (const p of pts) if (!cross.some(g=>obbCircleDist(g.ob,p.x,p.z)<0.6) && roadDist(p.x,p.z)<1.5) return null;
   // the main gate faces the nearer coast
   { const s=P.z-coastZ(1,P.x), n=coastZ(-1,P.x)-P.z, dz=s<n?-1:1; let best=null, bv=-1e9;
     for (const g of gates){ const v=(g.z-P.z)*dz/Math.hypot(g.x-P.x,g.z-P.z); if (v>bv){ bv=v; best=g; } } best.main=true; }
