@@ -5001,7 +5001,9 @@ function genChunk(cx,cz,lod=0){
     const openAt=a=>baseH(P.x+Math.cos(a)*(P.r+2.6),P.z+Math.sin(a)*(P.r+2.6))<P.level-0.8 && !(ch.churchOb && obbCircleDist(ch.churchOb,P.x+Math.cos(a)*(P.r+1.25),P.z+Math.sin(a)*(P.r+1.25))<0.9);
     const rw=P.r+1.25, nseg=Math.ceil(2*Math.PI*rw/1.1);
     const cands=[];
-    for (let i=0;i<nseg;i++){ const a=i/nseg*6.283; if (!openAt(a)) continue;
+    // nor does it run across the art gallery, which may stand out over the drop too, its doorway on the square
+    const galAt=a=>!!ch.galleryOb && obbCircleDist(ch.galleryOb,P.x+Math.cos(a)*(P.r+1.25),P.z+Math.sin(a)*(P.r+1.25))<0.9;
+    for (let i=0;i<nseg;i++){ const a=i/nseg*6.283; if (!openAt(a) || galAt(a)) continue;
       cands.push({a,h:baseH(P.x+Math.cos(a)*(P.r+4),P.z+Math.sin(a)*(P.r+4))}); }
     cands.sort((u,v)=>u.h-v.h);
     // the stair down through the gap is planned first: it must reach the ground before any road, steepening a
@@ -5039,6 +5041,7 @@ function genChunk(cx,cz,lod=0){
         const wx=P.x+Math.cos(a)*rw, wz=P.z+Math.sin(a)*rw, rot=Math.atan2(Math.cos(a),Math.sin(a)), seg=2*Math.PI*rw/nseg+0.06;
         // an alley that runs through the square comes up through an opening in the wall, where its steps meet the paving
         if (ch.alleys.some(A=>Math.abs(alleyS(A,wx,wz))<A.hw+seg/2)) continue;
+        if (galAt(a)){ R(); continue; }   // (its stone's draw kept, so that the rest of the square is as before)
         const bot=baseH(P.x+Math.cos(a)*(P.r+2.4),P.z+Math.sin(a)*(P.r+2.4))-0.8-P.level;
         gb.add(T.box, mat(wx,bot,wz,seg,-bot+0.1,0.6,rot), shade(C_.stone,R,0.03), bot, SS);
         (ch.belv||(ch.belv={P,nseg,segs:new Set()})).segs.add(i);
