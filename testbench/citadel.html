@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coast · citadel</title>
+<link rel="icon" href="data:,">
+<link href="https://fonts.googleapis.com/css2?family=Alegreya+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#9fc0dc;font-family:'Alegreya Sans',system-ui,sans-serif;}
+  canvas{display:block;width:100%;height:100%;touch-action:none;}
+  #panel{position:fixed;top:12px;right:12px;width:250px;padding:12px 14px;border-radius:10px;
+    background:rgba(250,246,238,0.88);color:#2b2b35;font-size:15px;box-shadow:0 2px 14px rgba(0,0,0,0.15);}
+  #panel .row{display:grid;grid-template-columns:70px 1fr;align-items:center;gap:6px;margin:5px 0;}
+  #panel label{color:#555}
+  #panel select{font:inherit;font-size:14px;padding:4px 6px;border:1px solid #c9bda9;border-radius:6px;background:#fffaf2;color:#2b2b35;}
+  body.bare #panel{display:none}
+  @media (max-width:520px){ #panel{left:12px;right:12px;width:auto;top:auto;bottom:12px;} }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="panel">
+  <div class="row"><label for="style">Walls</label><select id="style">
+    <option value="A">Curtain wall, round towers</option><option value="B">Bastioned wall</option><option value="C">Towers with roofs</option></select></div>
+  <div class="row"><label for="round">Houses</label><select id="round">
+    <option value="1">Some round</option><option value="0">All square</option></select></div>
+  <div class="row"><label for="view">View</label><select id="view">
+    <option value="air">From the air</option><option value="road">The road to the gate</option><option value="gate">The gate</option>
+    <option value="inside">Inside the gate</option><option value="street">A round house</option></select></div>
+</div>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"}}</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js';
+
+// a mockup of a walled hill town (a citadel) in the colours of the game: a hill by the sea, the town on its levelled
+// top, a wall round the edge of the top with towers and one gate, and a road winding up to the gate
+const PAL={ walls:['#f3e4d0','#efd6bf','#f6ebdd','#eacbb0','#f1dcc4','#e9c3ab','#f4dfcc','#edd0b8','#f2d8c8'],
+  roofs:['#d65a52','#de6b5b','#cc514c','#d8645a','#c94f48','#dd5f55'], teal:'#74c1aa', trim:'#f8f1e7', win:'#3a2b2b', door:'#6a4530',
+  stone:'#dcc6ab', stoneDark:'#c4ad92', piazza:'#efdcb6', road:'#e9d2a6', grass:'#a6a661', grass2:'#8f9a53', rock:'#b8a48e',
+  cypress:'#36502a', water:'#3f86c0', shutters:['#6f9c86','#5d7f9a','#8a5a3c','#7aa58f'] };
+const Q=new URLSearchParams(location.search);
+if (Q.has('bare')) document.body.classList.add('bare');
+const sel={style:document.getElementById('style'),round:document.getElementById('round'),view:document.getElementById('view')};
+for (const k in sel){ if (Q.has(k)) sel[k].value=Q.get(k); sel[k].onchange=()=>{ if (k==='view') setView(); else build(); }; }
+
+const canvas=document.getElementById('c');
+const renderer=new THREE.WebGLRenderer({canvas,antialias:true,preserveDrawingBuffer:true});
+renderer.setPixelRatio(Math.min(2,devicePixelRatio)); renderer.shadowMap.enabled=true; renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+renderer.toneMapping=THREE.ACESFilmicToneMapping;
+const scene=new THREE.Scene(); scene.background=new THREE.Color('#9fc0dc'); scene.fog=new THREE.Fog('#bcd2e2',180,700);
+const camera=new THREE.PerspectiveCamera(55,1,0.1,1500);
+const controls=new OrbitControls(camera,canvas); controls.enableDamping=true;
+scene.add(new THREE.HemisphereLight(0xcfe3f5,0xb59b78,0.95));
+const sun=new THREE.DirectionalLight(0xfff1dd,2.7); sun.position.set(-90,120,70); sun.castShadow=true; sun.shadow.mapSize.set(4096,4096);
+Object.assign(sun.shadow.camera,{left:-110,right:110,top:110,bottom:-110,near:10,far:400}); sun.shadow.bias=-0.0005; sun.shadow.normalBias=0.05; scene.add(sun,sun.target);
+
+// the random sequence, so that each style is the same town
+let seed=1; const R=()=>{ seed=(seed*16807)%2147483647; return (seed-1)/2147483646; };
+const pick=a=>a[Math.floor(R()*a.length)];
+const M={}; const mat=(c,rough=0.9)=>M[c+rough]||(M[c+rough]=new THREE.MeshStandardMaterial({color:c,roughness:rough}));
+let root=null;
+const add=(geo,c,x,y,z,ry=0,cast=true)=>{ const m=new THREE.Mesh(geo,typeof c==='string'?mat(c):c); m.position.set(x,y,z); m.rotation.y=ry; m.castShadow=cast; m.receiveShadow=true; root.add(m); return m; };
+const box=(w,h,d)=>new THREE.BoxGeometry(w,h,d).translate(0,h/2,0);
+
+// the hill: a top levelled at TOP within the town's outline, falling to the plain and, to the south, to the sea
+const TOP=40, GATE_A=Math.PI/2;   // the gate faces south, towards the sea (+z)
+const rimR=a=>50+4*Math.sin(3*a+0.7)+2.5*Math.sin(5*a+2.1);
+const sstep=t=>t<=0?0:t>=1?1:t*t*(3-2*t);
+function hAt(x,z){ const r=Math.hypot(x,z), a=Math.atan2(z,x), rr=rimR(a);
+  const fall=sstep((r-rr+2)/(70+14*Math.sin(2*a))), n=3*Math.sin(x*0.05+1)*Math.cos(z*0.045)+1.5*Math.sin(x*0.13+z*0.11);
+  let h=TOP*(1-fall)+(8+n)*fall;
+  h+= r>rr ? -Math.min(3,(r-rr)*0.6)*(1-fall)*0 : 0;
+  if (z>170) h-= (z-170)*0.15;
+  { const da=Math.atan2(Math.sin(a-GATE_A),Math.cos(a-GATE_A)), lat=Math.abs(da)*r, out=r-rr;
+    if (out>-1 && lat<9){ const k=sstep((9-lat)/4); h=Math.max(h, h+(Math.max(h,TOP-0.1-Math.max(0,out-1)*0.28)-h)*k); } }   // the shore
+  return h; }
+
+// the road: from the gate down the hill in two bends, then away along the plain
+function roadPath(){ const pts=[], ga=GATE_A, gr=rimR(ga);
+  const ctrl=[[Math.cos(ga)*(gr+4),Math.sin(ga)*(gr+4)],[Math.cos(ga)*(gr+22),Math.sin(ga)*(gr+22)],[-40,gr+38],[-62,gr+55],[-20,gr+78],[30,gr+92],[60,gr+112],[70,gr+150]];
+  for (let i=0;i<ctrl.length-1;i++){ const [a,b]=[ctrl[i],ctrl[i+1]], p0=ctrl[Math.max(0,i-1)], p3=ctrl[Math.min(ctrl.length-1,i+2)];
+    for (let t=0;t<1;t+=0.05){ const t2=t*t, t3=t2*t;
+      const f=(k)=>0.5*((2*a[k])+(-p0[k]+b[k])*t+(2*p0[k]-5*a[k]+4*b[k]-p3[k])*t2+(-p0[k]+3*a[k]-3*b[k]+p3[k])*t3);
+      pts.push([f(0),f(1)]); } }
+  return pts; }
+
+function terrain(){
+  const S=760, N=300, g=new THREE.PlaneGeometry(S,S,N,N).rotateX(-Math.PI/2), p=g.attributes.position, col=[];
+  const road=roadPath();
+  const roadD=(x,z)=>{ let d=1e9; for (let i=0;i<road.length-1;i++){ const [ax,az]=road[i],[bx,bz]=road[i+1], vx=bx-ax, vz=bz-az, t=Math.max(0,Math.min(1,((x-ax)*vx+(z-az)*vz)/(vx*vx+vz*vz))); d=Math.min(d,Math.hypot(x-ax-vx*t,z-az-vz*t)); } return d; };
+  const c=new THREE.Color();
+  for (let i=0;i<p.count;i++){ const x=p.getX(i), z=p.getZ(i), h=hAt(x,z); p.setY(i,h);
+    const r=Math.hypot(x,z), a=Math.atan2(z,x), inside=r<rimR(a)-1;
+    const sl=Math.hypot(hAt(x+1,z)-hAt(x-1,z),hAt(x,z+1)-hAt(x,z-1))/2, n=0.5+0.5*Math.sin(x*0.3)*Math.cos(z*0.27);
+    c.set(PAL.grass).lerp(new THREE.Color(PAL.grass2),n*0.6);
+    if (sl>0.55) c.lerp(new THREE.Color(PAL.rock),Math.min(0.85,(sl-0.55)*1.6));
+    if (inside) c.set(PAL.piazza).multiplyScalar(0.95+0.05*n);
+    if (!inside && roadD(x,z)<3.2) c.set(PAL.road);
+    if (h<1.2) c.set('#ecd9ad');
+    col.push(c.r,c.g,c.b); }
+  g.setAttribute('color',new THREE.Float32BufferAttribute(col,3)); g.computeVertexNormals();
+  const m=new THREE.Mesh(g,new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.95})); m.receiveShadow=true; root.add(m);
+  const sea=new THREE.Mesh(new THREE.PlaneGeometry(1600,1600).rotateX(-Math.PI/2),new THREE.MeshStandardMaterial({color:PAL.water,roughness:0.35,metalness:0.1}));
+  sea.position.y=0.3; root.add(sea);
+  // cypresses along the road and olives on the slopes
+  for (let i=66;i<road.length;i+=4){ const [x,z]=road[i], [x2,z2]=road[i+1]||road[i-1], dx=x2-x, dz=z2-z, l=Math.hypot(dx,dz);
+    for (const s of [-1,1]){ const px=x-dz/l*s*4.2, pz=z+dx/l*s*4.2; if (R()<0.5) continue; add(new THREE.ConeGeometry(0.9,8+R()*3,8).translate(0,5,0),PAL.cypress,px,hAt(px,pz)-0.3,pz); } }
+  for (let k=0;k<160;k++){ const a=R()*Math.PI*2, r=rimR(a)+12+R()*110, x=Math.cos(a)*r, z=Math.sin(a)*r; if (hAt(x,z)<2 || roadD(x,z)<9) continue;
+    const t=add(new THREE.IcosahedronGeometry(1.7+R()*0.8,0).translate(0,2.6,0),'#7f8b55',x,hAt(x,z),z); t.scale.y=0.8;
+    add(new THREE.CylinderGeometry(0.18,0.25,1.6,5).translate(0,0.8,0),'#6a4a30',x,hAt(x,z),z); }
+  return road;
+}
+
+// a house: a box of plaster, rounded at the corners, or round, with a hipped or conical roof of tiles, windows and a door
+function roundedRect(w,d,r){ const s=new THREE.Shape(), x=-w/2, y=-d/2;
+  s.moveTo(x+r,y); s.lineTo(x+w-r,y); s.absarc(x+w-r,y+r,r,-Math.PI/2,0); s.lineTo(x+w,y+d-r); s.absarc(x+w-r,y+d-r,r,0,Math.PI/2);
+  s.lineTo(x+r,y+d); s.absarc(x+r,y+d-r,r,Math.PI/2,Math.PI); s.lineTo(x,y+r); s.absarc(x+r,y+r,r,Math.PI,1.5*Math.PI); return s; }
+function prism(shape,h,curve=6){ return new THREE.ExtrudeGeometry(shape,{depth:h,bevelEnabled:false,curveSegments:curve}).rotateX(-Math.PI/2); }
+function windows(x,y,z,ry,w,d,h,floors,shut){
+  for (let f=0;f<floors;f++){ const yy=y+1.5+f*2.8; if (yy+1.3>y+h) break;
+    for (const [nx,nz,len] of [[0,1,w],[0,-1,w],[1,0,d],[-1,0,d]]){ const n=Math.max(1,Math.floor(len/2.6));
+      for (let k=0;k<n;k++){ const u=(k+0.5)/n*len-len/2; if (R()<0.25) continue;
+        const lx=nx?nx*(w/2+0.02):u, lz=nz?nz*(d/2+0.02):u, c=Math.cos(ry), s=Math.sin(ry);
+        const wx=x+lx*c+lz*s, wz=z-lx*s+lz*c, wr=ry+(nx?Math.PI/2:0);
+        add(new THREE.BoxGeometry(0.75,1.15,0.08),PAL.win,wx,yy+0.6,wz,wr,false);
+        for (const sd of [-1,1]) add(new THREE.BoxGeometry(0.4,1.15,0.06),shut,wx+Math.cos(wr)*sd*0.62,yy+0.6,wz-Math.sin(wr)*sd*0.62,wr,false); } } } }
+function house(x,z,y,w,d,h,ry,kind){
+  const wall=pick(PAL.walls), roof=pick(PAL.roofs), shut=pick(PAL.shutters);
+  if (kind==='round'){ const r=w/2;
+    add(new THREE.CylinderGeometry(r,r,h,28).translate(0,h/2,0),wall,x,y,z);
+    add(new THREE.CylinderGeometry(r+0.12,r+0.12,0.25,28).translate(0,h,0),PAL.trim,x,y,z);
+    add(new THREE.ConeGeometry(r+0.45,r*0.75,28).translate(0,h+r*0.375+0.15,0),roof,x,y,z);
+    const fl=Math.floor((h-0.8)/2.8);
+    for (let f=0;f<fl;f++) for (let k=0;k<6;k++){ if (R()<0.3) continue; const a=k/6*Math.PI*2+(f%2)*Math.PI/6+ry+Math.PI/6;
+      const wx=x+Math.sin(a)*(r+0.01), wz=z+Math.cos(a)*(r+0.01), yy=y+2.1+f*2.8;
+      add(new THREE.BoxGeometry(0.75,1.15,0.1),PAL.win,wx,yy,wz,a,false);
+      for (const sd of [-1,1]){ const b=a+sd*0.62/r; add(new THREE.BoxGeometry(0.4,1.15,0.06),shut,x+Math.sin(b)*(r+0.03),yy,z+Math.cos(b)*(r+0.03),b,false); } }
+    add(new THREE.BoxGeometry(1.1,2.2,0.1),PAL.door,x+Math.sin(ry)*(r+0.02),y+1.1,z+Math.cos(ry)*(r+0.02),ry,false);
+    return; }
+  if (kind==='rounded'){ const rr=Math.min(1.6,w*0.25);
+    add(prism(roundedRect(w,d,rr),h),wall,x,y,z,ry);
+    add(prism(roundedRect(w+0.25,d+0.25,rr+0.12),0.25).translate(0,h,0),PAL.trim,x,y,z,ry);
+    // a hipped roof whose corners are rounded too: the plan shrinking to a ridge as it rises
+    const g=prism(roundedRect(w+0.8,d+0.8,rr+0.4),1.0).translate(0,h+0.15,0); const p=g.attributes.position;
+    for (let i=0;i<p.count;i++){ const yy=p.getY(i); if (yy>h+0.5){ const s=Math.max(w,d)>w?1:1; p.setX(i,p.getX(i)*(d<w?0.55:0.12)); p.setZ(i,p.getZ(i)*(d<w?0.12:0.55)); p.setY(i,h+0.15+Math.min(w,d)*0.38); } }
+    g.computeVertexNormals(); add(g,roof,x,y,z,ry);
+  } else {
+    add(box(w,h,d),wall,x,y,z,ry);
+    add(box(w+0.25,0.25,d+0.25).translate(0,h,0),PAL.trim,x,y,z,ry);
+    const g=new THREE.ConeGeometry(Math.SQRT1_2*1,1,4,1).rotateY(Math.PI/4); g.translate(0,0.5,0); g.scale(w+0.8,Math.min(w,d)*0.38,d+0.8);
+    add(g.translate(0,h+0.15,0),roof,x,y,z,ry); }
+  windows(x,y,z,ry,w,d,h,Math.floor(h/2.8),shut);
+  const c=Math.cos(ry), s=Math.sin(ry); add(new THREE.BoxGeometry(1.1,2.2,0.1),PAL.door,x+s*(d/2+0.03),y+1.1,z+c*(d/2+0.03),ry,false);
+}
+
+// merlons along a run of wall, from (ax,az) to (bx,bz), on its outer edge at height y
+function merlons(ax,az,bx,bz,y,nx,nz,kind){
+  const len=Math.hypot(bx-ax,bz-az), n=Math.floor(len/1.5), ry=Math.atan2(bx-ax,bz-az);
+  for (let k=0;k<n;k+=1){ const t=(k+0.5)/n, x=ax+(bx-ax)*t+nx*0.55, z=az+(bz-az)*t+nz*0.55;
+    if (kind==='swallow'){ const g=new THREE.BoxGeometry(0.5,1.3,0.85); const m=add(g,PAL.stone,x,y+0.65,z,ry);
+      add(new THREE.BoxGeometry(0.5,0.45,0.32).translate(0,0,0.27),PAL.stone,x,y+1.52,z,ry); add(new THREE.BoxGeometry(0.5,0.45,0.32).translate(0,0,-0.27),PAL.stone,x,y+1.52,z,ry); }
+    else add(new THREE.BoxGeometry(0.5,1.15,0.85),PAL.stone,x,y+0.58,z,ry); } }
+
+function walls(style){
+  const N=72, P=[], rimY=TOP+6.5;
+  for (let i=0;i<N;i++){ const a=i/N*Math.PI*2, r=rimR(a)+0.6; P.push([Math.cos(a)*r,Math.sin(a)*r,a]); }
+  const gi=Math.round(GATE_A/(Math.PI*2)*N);
+  const towerAt=new Set(), every=style==='B'?12:style==='C'?8:6;
+  for (let i=0;i<N;i+=every) towerAt.add((i+gi+every/2)%N);
+  // the curtain: a wall 1.8 m thick, battered at its foot, from the slope outside up to its walk
+  for (let i=0;i<N;i++){ if (Math.abs(i-gi)<1 || Math.abs(i+1-gi)<1) {}
+    const [ax,az]=P[i], [bx,bz]=P[(i+1)%N], mx=(ax+bx)/2, mz=(az+bz)/2, len=Math.hypot(bx-ax,bz-az)+0.25, ry=Math.atan2(bx-ax,bz-az);
+    const ox=Math.cos(P[i][2]+Math.PI/N), oz=Math.sin(P[i][2]+Math.PI/N), base=hAt(mx+ox*4,mz+oz*4)-1.5;
+    if (i===gi-1 || i===gi) { /* the gate stands here */ }
+    const H=rimY-base;
+    add(box(1.8,H,len).translate(0,base,0),PAL.stone,mx,0,mz,ry);
+    if (style==='B'){ // a sloped scarp to the cordon, a round cordon, and a low rounded parapet above
+      const sc=new THREE.CylinderGeometry(0.3,0.3,len,8).rotateX(Math.PI/2);
+      add(box(3.4,Math.max(0.1,TOP+2.5-base),len).translate(0.8,base,0),PAL.stoneDark,mx,0,mz,ry);
+      add(sc,PAL.trim,mx+ox*1.2,TOP+3.0,mz+oz*1.2,ry);
+      add(box(0.7,0.9,len).translate(0,rimY,0),PAL.stone,mx+ox*0.55,0,mz+oz*0.55,ry);
+      add(new THREE.CylinderGeometry(0.36,0.36,len,10).rotateX(Math.PI/2),PAL.trim,mx+ox*0.55,rimY+0.9,mz+oz*0.55,ry);
+    } else {
+      add(box(2.6,2.6,len).translate(0.5,base,0),PAL.stoneDark,mx,0,mz,ry);   // the batter
+      merlons(ax,az,bx,bz,rimY,ox,oz,style==='C'?'swallow':'square');
+    }
+  }
+  // towers
+  for (const i of towerAt){ if (Math.abs(i-gi)<3) continue; const [x,z,a]=P[i], ox=Math.cos(a), oz=Math.sin(a), base=hAt(x+ox*7,z+oz*7)-1.5;
+    if (style==='A'){ const r=3.6, tx=x+ox*2.2, tz=z+oz*2.2, H=rimY+2.5-base;
+      add(new THREE.CylinderGeometry(r,r+0.6,H,24).translate(0,base+H/2,0),PAL.stone,tx,0,tz);
+      add(new THREE.CylinderGeometry(r+0.35,r+0.35,0.5,24).translate(0,rimY+2.5,0),PAL.trim,tx,0,tz);
+      for (let k=0;k<12;k++){ const b=k/12*Math.PI*2; add(new THREE.BoxGeometry(0.9,1.15,0.6),PAL.stone,tx+Math.cos(b)*(r+0.1),rimY+3.3,tz+Math.sin(b)*(r+0.1),-b+Math.PI/2); }
+      for (const f of [0.35,0.65]) add(new THREE.BoxGeometry(0.25,1.2,0.1),PAL.win,tx+ox*(r+0.05),base+H*f+2,tz+oz*(r+0.05),Math.atan2(ox,oz),false);
+    } else if (style==='B'){ // a bastion: an arrowhead of masonry pointing out, its faces sloped, with a sentry box at its point
+      const s=new THREE.Shape(); s.moveTo(-9,0); s.lineTo(-7,7); s.lineTo(0,15); s.lineTo(7,7); s.lineTo(9,0); s.lineTo(-9,0);
+      const H=rimY-base, g=new THREE.ExtrudeGeometry(s,{depth:H,bevelEnabled:false}).rotateX(-Math.PI/2);
+      const p=g.attributes.position; for (let k=0;k<p.count;k++){ const yy=p.getY(k), t=1-yy/H; p.setX(k,p.getX(k)*(1+0.12*t)); p.setZ(k,p.getZ(k)*(1+0.12*t)); }
+      g.computeVertexNormals(); g.translate(0,base,0);
+      const m=add(g,PAL.stone,x,0,z,Math.atan2(ox,-oz)+Math.PI); m.rotation.y=-a-Math.PI/2+Math.PI;
+      m.rotation.y=Math.atan2(ox,oz)+Math.PI;
+      const px=x+ox*14.6, pz=z+oz*14.6;
+      add(new THREE.CylinderGeometry(0.9,0.6,2.4,12).translate(0,1.2,0),PAL.trim,px,rimY,pz);
+      add(new THREE.SphereGeometry(1.0,12,6,0,Math.PI*2,0,Math.PI/2),PAL.teal,px,rimY+2.4,pz);
+    } else { // a square tower open to the town, with a tiled roof on brackets
+      const w=6, tx=x+ox*1.6, tz=z+oz*1.6, H=rimY+6-base, ry=Math.atan2(ox,oz);
+      add(box(w,H,w).translate(0,base,0),PAL.stone,tx,0,tz,ry);
+      add(box(w+0.6,0.4,w+0.6).translate(0,rimY+6,0),PAL.trim,tx,0,tz,ry);
+      const g=new THREE.ConeGeometry(Math.SQRT1_2,1,4,1).rotateY(Math.PI/4).translate(0,0.5,0); g.scale(w+1.4,2.4,w+1.4);
+      add(g.translate(0,rimY+6.4,0),pick(PAL.roofs),tx,0,tz,ry);
+      for (const yy of [rimY-6,rimY+2.5]) add(new THREE.BoxGeometry(0.35,1.4,0.1),PAL.win,tx+ox*(w/2+0.03),yy,tz+oz*(w/2+0.03),ry,false);
+    } }
+  // the gate
+  const [gx,gz,ga]=P[gi], ox=Math.cos(ga), oz=Math.sin(ga), ry=Math.atan2(ox,oz);
+  const W=style==='B'?10:9, D=9, H=rimY+(style==='C'?9:style==='A'?6:1.5)-(hAt(gx+ox*6,gz+oz*6)-1), base=rimY-H+ (style==='B'?1.5:style==='C'?9:6);
+  const AW=3.6, AH=5.2, fy=TOP+0.0;
+  const s=new THREE.Shape(); s.moveTo(-W/2,0); s.lineTo(W/2,0); s.lineTo(W/2,H); s.lineTo(-W/2,H); s.lineTo(-W/2,0);
+  const hole=new THREE.Path(); const yb=fy-base; hole.moveTo(-AW/2,yb); hole.lineTo(AW/2,yb); hole.lineTo(AW/2,yb+AH-AW/2); hole.absarc(0,yb+AH-AW/2,AW/2,0,Math.PI,false); hole.lineTo(-AW/2,yb); s.holes.push(hole);
+  const g=new THREE.ExtrudeGeometry(s,{depth:D,bevelEnabled:false,curveSegments:16}).translate(0,0,-D/2);
+  g.translate(0,base,0); add(g,PAL.stone,gx,0,gz,ry);
+  // the voussoirs round the arch, and the road through it
+  for (let k=0;k<=8;k++){ const b=k/8*Math.PI, rr=AW/2+0.35; add(new THREE.BoxGeometry(0.75,0.5,0.4),k%2?PAL.trim:PAL.stoneDark,gx+ox*(D/2+0.05)+Math.cos(ry)*Math.cos(b)*rr,fy+AH-AW/2+Math.sin(b)*rr,gz+oz*(D/2+0.05)-Math.sin(ry)*Math.cos(b)*rr,ry).rotation.z=0; }
+  // the doors, open inwards against the passage
+  for (const sd of [-1,1]){ const dx=gx-ox*(D/2-0.6)+Math.cos(ry)*sd*(AW/2-0.1), dz=gz-oz*(D/2-0.6)-Math.sin(ry)*sd*(AW/2-0.1);
+    add(new THREE.BoxGeometry(0.15,AH-0.8,AW/2),PAL.door,dx-ox*AW/4,fy+(AH-0.8)/2,dz-oz*AW/4,ry); }
+  if (style==='A'){ for (let k=0;k<7;k++){ const u=(k+0.5)/7*W-W/2; for (const f of [1,-1]) add(new THREE.BoxGeometry(0.8,1.15,0.6),PAL.stone,gx+Math.cos(ry)*u+ox*f*(D/2-0.3),base+H+0.58,gz-Math.sin(ry)*u+oz*f*(D/2-0.3),ry); }
+    // the town's arms over the gate
+    add(new THREE.BoxGeometry(1.4,1.7,0.15),PAL.teal,gx+ox*(D/2+0.08),fy+AH+1.4,gz+oz*(D/2+0.08),ry,false); }
+  if (style==='B'){ // a classical portal: pilasters, an entablature and a pediment over the arch
+    for (const sd of [-1,1]) add(box(0.8,AH+0.6,0.4),PAL.trim,gx+ox*(D/2+0.2)+Math.cos(ry)*sd*(AW/2+1.1),fy,gz+oz*(D/2+0.2)-Math.sin(ry)*sd*(AW/2+1.1),ry);
+    add(box(AW+3.4,0.8,0.6),PAL.trim,gx+ox*(D/2+0.25),fy+AH+0.6,gz+oz*(D/2+0.25),ry);
+    const t=new THREE.Shape(); t.moveTo(-(AW+3.6)/2,0); t.lineTo((AW+3.6)/2,0); t.lineTo(0,1.6); t.lineTo(-(AW+3.6)/2,0);
+    add(new THREE.ExtrudeGeometry(t,{depth:0.6,bevelEnabled:false}).translate(0,0,-0.3),PAL.trim,gx+ox*(D/2+0.25),fy+AH+1.4,gz+oz*(D/2+0.25),ry);
+    add(new THREE.CylinderGeometry(0.75,0.75,0.12,20).rotateX(Math.PI/2),PAL.teal,gx+ox*(D/2+0.12),fy+AH+2.6+0.2,gz+oz*(D/2+0.12),ry,false); }
+  if (style==='C'){ const g2=new THREE.ConeGeometry(Math.SQRT1_2,1,4,1).rotateY(Math.PI/4).translate(0,0.5,0); g2.scale(W+1.6,3.4,D+1.6);
+    add(g2.translate(0,base+H+0.2,0),pick(PAL.roofs),gx,0,gz,ry);
+    add(box(W+0.6,0.4,D+0.6).translate(0,base+H-0.2,0),PAL.trim,gx,0,gz,ry);
+    for (const yy of [fy+AH+2.2]) for (const sd of [-1,1]) add(new THREE.BoxGeometry(0.9,1.4,0.1),PAL.win,gx+ox*(D/2+0.03)+Math.cos(ry)*sd*2,yy,gz+oz*(D/2+0.03)-Math.sin(ry)*sd*2,ry,false);
+    // a clock face over the arch
+    add(new THREE.CylinderGeometry(0.9,0.9,0.12,24).rotateX(Math.PI/2),PAL.trim,gx+ox*(D/2+0.08),fy+AH+4.4,gz+oz*(D/2+0.08),ry,false); }
+  return {gx,gz,ga,D};
+}
+
+// the town inside: a street from the gate to a square in the middle, a church on the square, and houses packed between
+function town(round){
+  const G={x:Math.cos(GATE_A),z:Math.sin(GATE_A)}, pz={x:0,z:-4};
+  add(new THREE.CylinderGeometry(0.45,0.6,3.2,10).translate(0,1.6,0),PAL.trim,pz.x,TOP,pz.z);   // a column on the square
+  // the church: a nave and a campanile with the teal spire of the game's churches
+  const cx=-6, cz=-22, cy=TOP;
+  add(box(10,11,20),PAL.walls[2],cx,cy,cz); const roof=new THREE.Shape(); roof.moveTo(-5.6,0); roof.lineTo(5.6,0); roof.lineTo(0,3.4); roof.lineTo(-5.6,0);
+  add(new THREE.ExtrudeGeometry(roof,{depth:20.6,bevelEnabled:false}).translate(0,11,-10.3),PAL.teal,cx,cy,cz);
+  add(new THREE.CylinderGeometry(1.4,1.4,0.15,24).rotateX(Math.PI/2),PAL.trim,cx,cy+8,cz+10.06,0,false);
+  add(new THREE.BoxGeometry(2,3.6,0.1),PAL.door,cx,cy+1.8,cz+10.06,0,false);
+  add(box(4.5,24,4.5),PAL.walls[0],cx+8,cy,cz-6); add(new THREE.ConeGeometry(3.4,6,4).rotateY(Math.PI/4).translate(0,27,0),PAL.teal,cx+8,cy,cz-6);
+  for (const sd of [-1,1]) add(new THREE.BoxGeometry(0.9,2.2,0.1),PAL.win,cx+8+sd*0.0,cy+20.5,cz-6+2.27*sd,0,false);
+  const taken=[{x:cx,z:cz,r:12},{x:cx+8,z:cz-6,r:4},{x:0,z:-4,r:9}];
+  const ok=(x,z,r)=>{ const a=Math.atan2(z,x); if (Math.hypot(x,z)+r>rimR(a)-3.2) return false;
+    // the street from the gate to the square
+    const t=Math.max(0,Math.min(1,((x-pz.x)*G.x+(z-pz.z)*G.z)/rimR(GATE_A))), sx=pz.x+G.x*t*rimR(GATE_A), sz=pz.z+G.z*t*rimR(GATE_A);
+    if (Math.hypot(x-sx,z-sz)<r+2.2) return false;
+    for (const o of taken) if (Math.hypot(x-o.x,z-o.z)<r+o.r-0.6) return false; return true; };
+  for (let k=0;k<5000 && taken.length<260;k++){
+    const a=R()*Math.PI*2, rr=Math.sqrt(R())*52, x=Math.cos(a)*rr, z=Math.sin(a)*rr;
+    let kind='box'; if (round){ const u=R(); kind=u<0.12?'round':u<0.4?'rounded':'box'; } else R();
+    const w=kind==='round'?5+R()*2.4:5+R()*3, d=kind==='round'?w:6+R()*3.5, rad=kind==='round'?w/2:Math.hypot(w,d)/2*0.86;
+    if (!ok(x,z,rad)) continue;
+    // houses face the square or the street, turned a little each
+    const ry=Math.atan2(-x,-z)+(R()-0.5)*0.3, h=kind==='round'?6+R()*5:6+Math.floor(R()*3)*2.8+R()*0.6;
+    house(x,z,TOP,w,d,h,ry,kind); taken.push({x,z,r:rad}); if (kind==='round') ROUNDS.push({x,z,r:rad}); }
+  // a round watch tower inside the walls, the oldest building in the town
+  if (round) { add(new THREE.CylinderGeometry(3,3.3,19,24).translate(0,9.5,0),PAL.stone,22,TOP,-24);
+    for (let k=0;k<10;k++){ const b=k/10*Math.PI*2; add(new THREE.BoxGeometry(0.8,1,0.5),PAL.stone,22+Math.cos(b)*3.05,TOP+19.5,-24+Math.sin(b)*3.05,-b+Math.PI/2); } }
+}
+
+let gate=null, ROAD=null, ROUNDS=[], TAKEN=null;
+function build(){
+  if (root) scene.remove(root); root=new THREE.Group(); scene.add(root); seed=7;
+  ROUNDS=[]; ROAD=terrain(); gate=walls(sel.style.value); town(sel.round.value==='1'); setView(); }
+
+function setView(){ const v=sel.view.value, G=gate, ox=Math.cos(G.ga), oz=Math.sin(G.ga);
+  if (v==='air'){ camera.fov=45; camera.position.set(105,92,128); controls.target.set(0,TOP-4,0); }
+  else if (v==='road'){ camera.fov=55; const [x,z]=ROAD[58]; camera.position.set(x,hAt(x,z)+1.7,z); controls.target.set(G.gx,TOP+4,G.gz); }
+  else if (v==='gate'){ camera.fov=55; const x=G.gx+ox*24+6, z=G.gz+oz*24; camera.position.set(x,hAt(x,z)+1.7,z); controls.target.set(G.gx,TOP+4.2,G.gz); }
+  else if (v==='inside'){ camera.fov=60; const x=G.gx-ox*7, z=G.gz-oz*7; camera.position.set(x,TOP+1.7,z); controls.target.set(0,TOP+4,-4); }
+  else { camera.fov=60;
+    // the round house nearest the square, seen from the open ground in front of its door
+    const H=ROUNDS.slice().sort((a,b)=>Math.hypot(a.x,a.z+4)-Math.hypot(b.x,b.z+4))[0]||{x:10,z:8,r:3}, l=Math.hypot(H.x,H.z+4)||1;
+    const ux=-H.x/l, uz=-(H.z+4)/l, d=Math.min(l-1,H.r+15);
+    camera.fov=55; camera.position.set(H.x+ux*d-uz*2,TOP+1.7,H.z+uz*d+ux*2); controls.target.set(H.x,TOP+6.5,H.z); }
+  camera.updateProjectionMatrix(); controls.update(); }
+
+function resize(){ renderer.setSize(innerWidth,innerHeight,false); camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); }
+addEventListener('resize',resize); resize(); build();
+renderer.setAnimationLoop(()=>{ controls.update(); renderer.render(scene,camera); });
+window.__ready=true;
+</script>
+</body>
+</html>
