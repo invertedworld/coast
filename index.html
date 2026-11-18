@@ -7320,6 +7320,9 @@ let teleView=null, teleViewVer=0;
 // widened by the camera's height above the ground, so that the houses between the camera and the point it looks at
 // keep their detail, and do not vanish, as the view draws back from that point
 let camRing=null;
+// and while a train ridden through a long tunnel is about to be carried on towards its far end (tunSkipStep), the
+// blocks round the point it will be set down at have rings of their own (skipRing), so that they stand ready there
+let skipRing=null;
 function camRingSet(){
   if (mode!=='above'){ camRing=null; return; }
   const cx=Math.floor(camera.position.x/C), cz=Math.floor(camera.position.z/C), h=Math.floor(Math.max(0,camera.position.y-Math.max(0,heightAt(camera.position.x,camera.position.z)))/C*0.75);
@@ -7330,6 +7333,7 @@ function camRingSet(){
 function wantAt(cx,cz,pcx,pcz){ let w=wantLod(cx-pcx,cz-pcz);
   if (camRing && (cx-camRing.cx)*camRing.fx+(cz-camRing.cz)*camRing.fz>=-1.5){ const d=Math.max(Math.abs(cx-camRing.cx),Math.abs(cz-camRing.cz),camRing.h), t=d<=LOD0?0:d<=VIEW?1:d<=lodRing()?2:-1; if (t>=0&&(w<0||t<w)) w=t; }
   if (teleRing){ const d=teleD(cx,cz), t=d<=teleRing.r0?0:d<=teleRing.r1?1:d<=teleRing.r2?2:-1; if (t>=0&&(w<0||t<w)) w=t; }
+  if (skipRing){ const d=Math.max(Math.abs(cx-skipRing.cx),Math.abs(cz-skipRing.cz)), t=d<=skipRing.r0?0:d<=skipRing.r1?1:d<=skipRing.r2?2:-1; if (t>=0&&(w<0||t<w)) w=t; }
   if (teleView){ const v=teleView.get(key(cx,cz)); if (v!==undefined && (w<0||v<w)) w=v; }
   return w; }
 let chunkState='', queueT=0;
@@ -7367,7 +7371,7 @@ let ringX=0, ringZ=0;   // the block on which the rings of detail are centred
 function updateChunks(px,pz,budgetMs,loading=budgetMs>=1e8){
   if (window.__holdChunks && !loading) return;   // for automated checks: the blocks held as they are
   const lead=!loading, bx=Math.floor(px/C), bz=Math.floor(pz/C), pcx=bx+(lead?mot.ox:0), pcz=bz+(lead?mot.oz:0);
-  const RR=lodRing(), TR=teleRing, st=pcx+','+pcz+','+VIEW+','+LOD0+(TR?','+TR.cx+','+TR.cz+','+TR.r0:'')+(teleView?','+teleViewVer:'')+(camRing?','+camRing.cx+','+camRing.cz+','+camRing.h+','+camRing.s:''), now=performance.now();
+  const RR=lodRing(), TR=teleRing, st=pcx+','+pcz+','+VIEW+','+LOD0+(TR?','+TR.cx+','+TR.cz+','+TR.r0:'')+(teleView?','+teleViewVer:'')+(camRing?','+camRing.cx+','+camRing.cz+','+camRing.h+','+camRing.s:'')+(skipRing?',j'+skipRing.cx+','+skipRing.cz+','+skipRing.r2:''), now=performance.now();
   // the rings only change when the player crosses into another block, the offset ahead changes or the draw distance changes
   if (st===chunkState && !queue.length && !loading) return;
   let turned=false; if (!loading && queue.length && now-queueT>100){ camera.getWorldDirection(_vd); turned=_vd.dot(sortDir)<0.94; }
@@ -7402,6 +7406,9 @@ function updateChunks(px,pz,budgetMs,loading=budgetMs>=1e8){
       // and the blocks round the telescope's point that lie beyond the player's own rings
       if (TR) for (let cz=TR.cz-TR.r2;cz<=TR.cz+TR.r2;cz++) for (let cx=TR.cx-TR.r2;cx<=TR.cx+TR.r2;cx++)
         if (Math.max(Math.abs(cx-pcx),Math.abs(cz-pcz))>RR) want(cx,cz);
+      // and those round the point a train in a long tunnel is to be carried on to
+      if (skipRing){ const J=skipRing; for (let cz=J.cz-J.r2;cz<=J.cz+J.r2;cz++) for (let cx=J.cx-J.r2;cx<=J.cx+J.r2;cx++)
+        if (Math.max(Math.abs(cx-pcx),Math.abs(cz-pcz))>RR) want(cx,cz); }
       // and those in the telescope's field
       if (teleView) for (const k of teleView.keys()){ const i=k.indexOf(','), cx=+k.slice(0,i), cz=+k.slice(i+1);
         if (Math.max(Math.abs(cx-pcx),Math.abs(cz-pcz))>RR && !(TR && Math.max(Math.abs(cx-TR.cx),Math.abs(cz-TR.cz))<=TR.r2)) want(cx,cz); }
@@ -11095,6 +11102,64 @@ function tunHoldD(){
   const portal=train.dir>0?TUNW.xa:TUNW.xb, d=(portal-train.x)*train.dir;
   // short of the stopping mark it brakes to it; past the mark but short of the portal it stops where it stands
   return d>40?d-40:d>0?0.001:1e9; }
+/* A long tunnel is cut short for whoever rides the train through it, in the cab, in a coach or from beside the line
+   (which rides in the cab while the train is underground), or who watches it in the chase view. As the train goes in,
+   if the bore runs on for more than TSK_LAND+TSK_GAIN m, the blocks round the point TSK_LAND m short of its far portal
+   are built (skipRing). Once the whole train has been 2 s underground (and, for a view looking back down the bore, the
+   opening behind is 150 m off, lost in the dark), with the far opening still out of sight, the train is set down at
+   that point, running as it was. From the cab and the coaches nothing is seen to change: the lining is the same
+   throughout, the dark reaches 140 m ahead, and the far opening comes into sight only from 600 m. The chase view,
+   which looks down on the hillside over the bore, dips to black for the move instead, and comes back to the train
+   TSK_LAND_C m short of the portal, with the blocks there built as they would be for a player standing there. */
+const TSK_LAND=610, TSK_LAND_C=220, TSK_GAIN=300;
+const TSK={exit:null,dir:0,t:0,dest:null,done:false,fade:0,cut:false};
+const tskVeil=document.createElement('div');
+tskVeil.style.cssText='position:fixed;inset:0;background:#000;opacity:0;pointer-events:none';
+canvas.after(tskVeil);
+let trainLen=0; const _tskV=new THREE.Vector3();
+function tskReady(J){
+  for (let cz=J.cz-J.r2;cz<=J.cz+J.r2;cz++) for (let cx=J.cx-J.r2;cx<=J.cx+J.r2;cx++){
+    const w=wantAt(cx,cz,Math.floor(player.x/C)+mot.ox,Math.floor(player.z/C)+mot.oz); if (w<0) continue;
+    const ch=chunks.get(key(cx,cz)); if (!ch || ch.redo || ch.lod>w || ch.fade<1) return false; }
+  return true; }
+// the cab eye's eased height and heading, carried with the train from one point on the line to another
+function tskCarry(x0,x1){
+  const d=train.dir, off=mode==='train'?d*1.2:-d*1.8, hd=x=>{ const xe=x+off; return Math.atan2(28*d,railZ(xe+d*14)-railZ(xe-d*14)); };
+  if (cam.y!==null){ cam.y+=railY(x1+off)-railY(x0+off); cam.head+=hd(x1)-hd(x0); } }
+function tunSkipStep(dt){
+  const S=TSK, chaseV=mode==='chase' && !chase.side, who=(riding() && !rideGoods) || mode==='coach';
+  // the veil lifts once the train has been moved, or if the ride ends while it is down
+  if (S.fade>0 && (S.cut || !who || !S.dest)){ S.fade=Math.max(0,S.fade-dt/0.5); tskVeil.style.opacity=S.fade; if (!S.fade) S.cut=false; }
+  const quit=()=>{ S.dest=null; skipRing=null; };
+  if (!who || railState(train.x)!=='tunnel' || train.dir!==S.dir && S.exit!==null){ S.exit=null; S.t=0; S.done=false; S.dir=train.dir; quit(); return; }
+  if (!trainLen) trainLen=train.cars.reduce((a,c)=>a+c.L+train.GAP,0);
+  const d=train.dir;
+  if (S.exit===null){ let e=train.x; while ((e-train.x)*d<8000 && railState(e+d*2)==='tunnel') e+=d*2; S.exit=e; S.dir=d; }
+  if (S.done) return;
+  // the whole train in the bore for 2 s; and, if the view looks back down the bore, the opening behind lost in the
+  // dark, 150 m back from the eye
+  camera.getWorldDirection(_tskV); const tl=Math.hypot(1,(railZ(train.x+1)-railZ(train.x-1))/2), back=(_tskV.x+_tskV.z*(railZ(train.x+1)-railZ(train.x-1))/2)*d/tl<-0.5;
+  const reach=back?Math.max(trainLen,Math.abs(camera.position.x-train.x))+150:trainLen+10;
+  let inside=true; for (let u=0;u<=reach;u+=10) if (railState(train.x-d*Math.min(u,reach))!=='tunnel'){ inside=false; break; }
+  S.t=inside?S.t+dt:0;
+  const land=chaseV?TSK_LAND_C:TSK_LAND, ah=(S.exit-train.x)*d;
+  if (!S.dest){
+    if (ah<land+TSK_GAIN) return;
+    const x=S.exit-d*land, z=railZ(x);
+    S.dest={x,chase:chaseV};
+    skipRing=chaseV?{cx:Math.floor(x/C),cz:Math.floor(z/C),r0:LOD0,r1:VIEW,r2:lodRing()}:{cx:Math.floor(x/C),cz:Math.floor(z/C),r0:1,r1:4,r2:4};
+    return; }
+  // the view changed meanwhile, or the train has come too near the point for the move to be worth it
+  if (S.dest.chase!==chaseV || ah<land+TSK_GAIN*0.5){ quit(); S.done=true; return; }
+  if (S.t<2 || !tskReady(skipRing)) return;
+  if (!chaseV){
+    // from the cab or a coach, only while it is dark ahead and the far opening is not yet in sight
+    if (tunnelK<0.97 || tunV.vis>0.01) return; }
+  else if (S.fade<1){ S.fade=Math.min(1,S.fade+dt/0.35); tskVeil.style.opacity=S.fade; return; }
+  const x0=train.x; train.x=S.dest.x; tskCarry(x0,train.x);
+  player.x+=train.x-x0; player.z=railZ(player.x);
+  if (chaseV){ chase.fresh=true; chase.lift=1; S.cut=true; }
+  quit(); S.done=true; }
 function updateTrain(dt){
   tunWalkStep();
   if (!train.init){ train.init=true; train.x=player.x-train.dir*300; train.v=train.sp; train.wait=0; }
@@ -11112,6 +11177,7 @@ function updateTrain(dt){
     if (d<1e8 && (step>=d || (d<0.004 && train.v<0.08))){ train.x+=train.dir*d; train.v=0; if (!held) train.wait=12; }
     else train.x+=train.dir*step;
   }
+  tunSkipStep(dt);
   if (Math.abs(train.x-player.x)>1600){ train.dir=Math.random()<0.5?1:-1; train.x=player.x-train.dir*1400; train.v=train.sp; train.wait=0; }
   // each car spans the chord between two points on the track a car length apart, and the next car
   // begins one coupling gap behind, so the cars stay coupled on curves and grades alike
@@ -16072,7 +16138,7 @@ window.__village={ get seed(){ return SEED_TEXT; }, aerGround:(x,y)=>aerGround(x
   findHarbour(){ for (let d=0;d<12;d++) for (const sd of SIDES) for (const n of [Math.floor(player.x/HARB)+d,Math.floor(player.x/HARB)-d]){ const H=harbourInfo(sd,n); if (H) return {x:H.x,z:coastZ(sd,H.x)+sd*7,W:H.W,sd,qz:coastZ(sd,H.x+H.W/2-1)+sd*2.5}; } return null; },
   findBeach(){ for (let x=player.x; x<player.x+3000; x+=10) for (const sd of SIDES){ const z=coastZ(sd,x)+sd*5; if (heightAt(x,z)<0.6 && heightAt(x,z)>0.1 && !harbourAt(sd,x)) return {x,z,sd}; } return null; },
   ridge(x){ return {x,z:ridgeZ(x)}; },
-  sea,farMesh,scene,setTilt,setAO,AO,get aoOn(){ return aoOn; },render,audioState:()=>({ctx:audioCtx&&audioCtx.state,muted,ready:SND.ready,loaded:Object.keys(SND.buf)}),SND,SNDV,SNDS,shore,surfaceAt,startAudio,updateChunks:(x,z)=>updateChunks(x,z,1e9),disposeChunk,farPoint(gi,gj){ COVE_FAST++; try{ return farPoint(gi,gj); } finally{ COVE_FAST--; } },FS,findCitadels(n=3){ const i0=Math.floor(player.x/PEAK), j0=Math.floor(player.z/PEAK), out=[]; for (let r=0;r<30 && out.length<n;r++) for (let i=-r;i<=r;i++) for (let j=-r;j<=r;j++){ if (Math.max(Math.abs(i),Math.abs(j))!==r) continue; const P=peakInfo(i0+i,j0+j); const c=P&&citadelOf(P); if (c){ citHeights(c); out.push({x:P.x,z:P.z,H:P.H,R:P.R,f:c.f,n:c.N,stairs:c.stairs.map(S=>S.length),ring:c.pts.filter((p,i)=>i%15===0).map(p=>({x:p.x,z:p.z,walk:p.walk,ux:p.ux,uz:p.uz,nx:p.nx,nz:p.nz})),stairList:c.stairs.map(S=>({top:S[0],foot:S[S.length-1],n:S.length,steps:S})),gates:c.gates.map(g=>({x:g.x,z:g.z,rot:g.rot,yR:g.yR,top:g.top,main:!!g.main,r:g.r}))}); } } return out; },citadelOf,vRoadX,hRoadZ,findPeak(){ const i0=Math.floor(player.x/PEAK), j0=Math.floor(player.z/PEAK); for (let r=0;r<30;r++) for (let i=-r;i<=r;i++) for (let j=-r;j<=r;j++){ const P=peakInfo(i0+i,j0+j); if (P) return P; } return null; },toggleTrain,get tunnelK(){return tunnelK;},get chase(){return chase;},cats,railPerp,railZ,railY,railState,findStation(){ const n0=Math.floor(player.x/ST_SP); for (let k=0;k<200;k++) for (const sg of [1,-1]){ const S=stationInfo(n0+sg*k); if (S) return S; } return null; },findBridge(){ const i0=Math.round(player.x/C); for (let k=0;k<300;k++) for (const sg of [1,-1]){ const X=railCross(i0+sg*k); if (X) return X; } return null; },get view(){return VIEW;},findRail(kind){ for (let x=player.x; x<player.x+6000; x+=8){ if (railState(x)===kind) return {x,z:railZ(x),y:railY(x)}; } return null; },findCountry(kind){ for (let r=0;r<20;r++) for (let i=-r;i<=r;i++) for (let j=-r;j<=r;j++){ const cx=Math.floor(player.x/C)+i, cz=Math.floor(player.z/C)+j; if (chunkKind(cx,cz)===kind) return {x:cx*C+C/2,z:cz*C+C/2}; } return null; },train,setHour:v=>{hour=v;}, get hour(){ return hour; }, lightHour(h){ hour=h; updateDaylight(); updateShadowFrame(); },
+  sea,farMesh,scene,setTilt,setAO,AO,get aoOn(){ return aoOn; },render,audioState:()=>({ctx:audioCtx&&audioCtx.state,muted,ready:SND.ready,loaded:Object.keys(SND.buf)}),SND,SNDV,SNDS,shore,surfaceAt,startAudio,updateChunks:(x,z)=>updateChunks(x,z,1e9),disposeChunk,farPoint(gi,gj){ COVE_FAST++; try{ return farPoint(gi,gj); } finally{ COVE_FAST--; } },FS,findCitadels(n=3){ const i0=Math.floor(player.x/PEAK), j0=Math.floor(player.z/PEAK), out=[]; for (let r=0;r<30 && out.length<n;r++) for (let i=-r;i<=r;i++) for (let j=-r;j<=r;j++){ if (Math.max(Math.abs(i),Math.abs(j))!==r) continue; const P=peakInfo(i0+i,j0+j); const c=P&&citadelOf(P); if (c){ citHeights(c); out.push({x:P.x,z:P.z,H:P.H,R:P.R,f:c.f,n:c.N,stairs:c.stairs.map(S=>S.length),ring:c.pts.filter((p,i)=>i%15===0).map(p=>({x:p.x,z:p.z,walk:p.walk,ux:p.ux,uz:p.uz,nx:p.nx,nz:p.nz})),stairList:c.stairs.map(S=>({top:S[0],foot:S[S.length-1],n:S.length,steps:S})),gates:c.gates.map(g=>({x:g.x,z:g.z,rot:g.rot,yR:g.yR,top:g.top,main:!!g.main,r:g.r}))}); } } return out; },citadelOf,vRoadX,hRoadZ,findPeak(){ const i0=Math.floor(player.x/PEAK), j0=Math.floor(player.z/PEAK); for (let r=0;r<30;r++) for (let i=-r;i<=r;i++) for (let j=-r;j<=r;j++){ const P=peakInfo(i0+i,j0+j); if (P) return P; } return null; },toggleTrain,get tsk(){ return TSK; },get camObj(){ return camera; },get skipRing(){ return skipRing; },get tunVis(){ return tunV.vis; },get tunnelK(){return tunnelK;},get chase(){return chase;},cats,railPerp,railZ,railY,railState,findStation(){ const n0=Math.floor(player.x/ST_SP); for (let k=0;k<200;k++) for (const sg of [1,-1]){ const S=stationInfo(n0+sg*k); if (S) return S; } return null; },findBridge(){ const i0=Math.round(player.x/C); for (let k=0;k<300;k++) for (const sg of [1,-1]){ const X=railCross(i0+sg*k); if (X) return X; } return null; },get view(){return VIEW;},findRail(kind){ for (let x=player.x; x<player.x+6000; x+=8){ if (railState(x)===kind) return {x,z:railZ(x),y:railY(x)}; } return null; },findCountry(kind){ for (let r=0;r<20;r++) for (let i=-r;i<=r;i++) for (let j=-r;j<=r;j++){ const cx=Math.floor(player.x/C)+i, cz=Math.floor(player.z/C)+j; if (chunkKind(cx,cz)===kind) return {x:cx*C+C/2,z:cz*C+C/2}; } return null; },train,setHour:v=>{hour=v;}, get hour(){ return hour; }, lightHour(h){ hour=h; updateDaylight(); updateShadowFrame(); },
   boatCam(){ for (const ch of chunks.values()) for (const b of ch.boats) if (b.floating) return {x:b.m.position.x,z:b.m.position.z,rot:b.m.rotation.y}; return null; },
   ferries,islandRoute,coastZ,harbourInfo,ferryLanding,ferryPortInfo,hbS,sailers,harbourAt,
   // whether a walker starting at (x0,z0,y0) can reach a point where goal(x,z) holds, under the player's own rules:
