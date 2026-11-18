@@ -1986,8 +1986,51 @@ function railY(x){ const i=Math.floor(x/10), t=x/10-i, p0=railYs(i-1), p1=railYs
 // The raw classification is taken per 2 m cell; short tunnels become cuttings, short viaducts become
 // embankments, and short open gaps between two long tunnels (or viaducts) are joined up.
 const RS_NAME=['open','viaduct','tunnel'], RS_MIN=[0,8,20], RS_GAP=[0,8,15], rrCache=new Map(), rsCache=new Map();
-function railRaw(i){ let v=rrCache.get(i); if (v!==undefined) return v; const x=i*2+1, d=baseH(x,railZ(x))-railY(x);
-  v=d>5?2:d<-4.5?1:0; if (rrCache.size>200000) rrCache.clear(); rrCache.set(i,v); return v; }
+// How far the hill stands above the line, at its centre. Up to RT_SHALLOW the line runs in a cutting. Deeper, it runs
+// in a cutting where no street runs along it and each street crossing within 20 m can be carried over it on a bridge
+// (cutOk), to RT_TOWN deep through a town and RT_COUNTRY in open country; elsewhere it is in tunnel
+const RT_SHALLOW=5, RT_TOWN=12, RT_COUNTRY=18;
+const railD=x=>baseH(x,railZ(x))-railY(x);
+// the width of a cutting's side: 4.5 m, and in open country, where it is deeper than RT_SHALLOW, 0.7 m more for each
+// metre deeper, back to 4.5 m within 4 m of a tunnel's portal (whose wing walls reach 9.3 m from the line) and within
+// 12 m of a street's bridge (whose span covers a side 4.5 m wide), widening over the next 16 m; taken per 2 m cell and
+// eased between cells
+const CUT_WMAX=4.5+(RT_COUNTRY-RT_SHALLOW)*0.7+0.1, cwCache=new Map();
+function cutWCell(i){ let v=cwCache.get(i); if (v!==undefined) return v; v=4.5;
+  const x=i*2+1, dd=railD(x)-RT_SHALLOW;
+  if (dd>0 && !railTown(x)){ let pd=40; for (let k=1;k<=20 && pd===40;k++) for (const sg of [-1,1]) if (railCell(i+sg*k)===2){ pd=k*2-2; break; }
+    const i0=Math.round(x/C); let bd=40; for (let j=i0-1;j<=i0+1;j++){ const R=railXing(j); if (R.street) bd=Math.min(bd,Math.abs(R.x-x)); }
+    v=4.5+Math.min(dd,RT_COUNTRY-RT_SHALLOW)*0.7*clamp((pd-4)/16,0,1)*clamp((bd-12)/16,0,1); }
+  if (cwCache.size>200000) cwCache.clear(); cwCache.set(i,v); return v; }
+// how far a point on the line lies from the nearest tunnel portal, along x, up to 16 m
+const pdCache=new Map();
+function portalDist(x){ const i=Math.floor(x/2); let v=pdCache.get(i);
+  if (v===undefined){ const c=railCell(i); v=16; for (let k=1;k<=8 && v===16;k++) if (railCell(i+k)!==c && (c===2||railCell(i+k)===2) || railCell(i-k)!==c && (c===2||railCell(i-k)===2)) v=k*2-1;
+    if (pdCache.size>200000) pdCache.clear(); pdCache.set(i,v); }
+  return v; }
+function cutW(x){ const u=x/2-0.5, i=Math.floor(u), t=u-i; return lerp(cutWCell(i),cutWCell(i+1),smooth(t)); }
+function railTown(x){ const z=railZ(x); for (const [dx,dz] of [[0,0],[0,16],[0,-16],[16,0],[-16,0]]) if (isVillage(Math.floor((x+dx)/C),Math.floor((z+dz)/C))) return true; return false; }
+function cutOk(x){
+  const z=railZ(x), i0=Math.round(x/C);
+  // a street running along the line is never cut down into
+  const j=Math.round(z/C); if (hSegOn(hSegAt(x,z),j) && Math.abs(z-hRoadZ(j,x))<hRoadW(j,x)+9.5) return false;
+  // a street crossing within 20 m is carried over on a bridge, and the line is in the cutting 12 m either side of it,
+  // as the bridge asks
+  for (let i=i0-1;i<=i0+1;i++){ const R=railXing(i); if (!R.street || Math.abs(R.x-x)>=20) continue;
+    if (!R.X) return false;
+    for (const k of [-12,0,12]) if (railD(R.x+k)>RT_TOWN) return false; }
+  return true; }
+// the raw state of a cell: 0 open, 1 viaduct, 2 tunnel, and 4 where the hill stands more than RT_SHALLOW above the
+// line but a cutting may be made (cutChoice); a run of such cells under 30 m long beside a tunnel is left in the
+// tunnel, so that a cutting does not split a tunnel into a stub too short to be kept as one
+function railRaw4(i){ let v=rrCache.get(i); if (v!==undefined) return v; const x=i*2+1, d=railD(x);
+  v=d>RT_SHALLOW?(d>(railTown(x)?RT_TOWN:RT_COUNTRY) || !cutOk(x)?2:4):d<-4.5?1:0;
+  if (rrCache.size>200000) rrCache.clear(); rrCache.set(i,v); return v; }
+const rbCache=new Map();
+function railRaw(i){ let v=rbCache.get(i); if (v!==undefined) return v; v=railRaw4(i);
+  if (v===4){ let a=i, b=i; while (i-a<15 && railRaw4(a-1)===4) a--; while (b-i<15 && railRaw4(b+1)===4) b++;
+    v=b-a+1<15 && (railRaw4(a-1)===2 || railRaw4(b+1)===2)?2:0; }
+  if (rbCache.size>200000) rbCache.clear(); rbCache.set(i,v); return v; }
 function railRunLong(i,k){ let n=1; for (let j=i-1; n<RS_MIN[k] && railRaw(j)===k; j--) n++; for (let j=i+1; n<RS_MIN[k] && railRaw(j)===k; j++) n++; return n>=RS_MIN[k]; }
 function railCell(i){
   let v=rsCache.get(i); if (v!==undefined) return v;
@@ -2008,7 +2051,7 @@ function railBack(x,D,dir){ const s=(railZ(x+1)-railZ(x-1))/2; let u=D/Math.sqrt
 // one station in each 900 m of line, sited on the first stretch of level open track found in the slot,
 // in a town where there is one, so that trains call roughly every kilometre
 const ST_SP=900, stCache=new Map();
-function stationOk(x){ if (railY(x)<=3) return false; for (let dx=-56;dx<=56;dx+=8) if (railState(x+dx)!=='open') return false; return true; }
+function stationOk(x){ if (railY(x)<=3) return false; for (let dx=-56;dx<=56;dx+=8) if (railState(x+dx)!=='open') return false; for (let dx=-80;dx<=80;dx+=8) if (railD(x+dx)>RT_SHALLOW) return false; return true; }
 function stationInfo(n){
   if (stCache.has(n)) return stCache.get(n);
   let S=null; const off=hash(n,0,931)*60;
@@ -2091,22 +2134,33 @@ function brPerp(B,x,z){ if (!brIn(B,x)) return 1e9; const s=(brZ(B,x+1)-brZ(B,x-
 function branchPerp(x,z){ let d=1e9; for (const B of branchesAt(x)) d=Math.min(d,brPerp(B,x,z)); return d; }
 /* ---------- road bridges where north-south streets cross the line ---------- */
 const rxCache=new Map();
-function railCross(i){
-  if (rxCache.has(i)) return rxCache.get(i);
+// where north-south street i meets the line, whether a street runs there, and the bridge that could carry it over a
+// cutting (X), worked out from the ground alone, before the line's state is known
+const rgCache=new Map();
+function railXing(i){
+  if (rgCache.has(i)) return rgCache.get(i);
   let z=railZ(i*C); for (let k=0;k<8;k++) z=railZ(vRoadX(i,z));
-  const x=vRoadX(i,z); let X=null;
-  if (vSegOn(i,vSegAt(x,z)) && railState(x)==='open' && railState(x-12)==='open' && railState(x+12)==='open' && !stationNear(x,70)){
+  const x=vRoadX(i,z), street=vSegOn(i,vSegAt(x,z)); let X=null;
+  if (street){
     const ry=railY(x), rot=Math.atan2(vRoadX(i,z+0.5)-vRoadX(i,z-0.5),1), sl=(railZ(x+1)-railZ(x-1))/2, rl=Math.hypot(1,sl);
     const sinT=Math.max(0.45,Math.abs((1/rl)*Math.cos(rot)-(sl/rl)*Math.sin(rot))), flat=Math.min(22,8.8/sinT+1);
     // bridge only where the line lies in a cutting and the street carries on at ground level on both sides
     // a bridge only where at least one side stands well above the line, and the street carries on past the
-    // foot of each approach ramp (no steeper than 1 in 7), so both ends meet the street on the ground
+    // foot of each approach ramp (no steeper than 1 in 7), so both ends meet the street on the ground; the deck is
+    // level with the lower side, or 6.4 m above the rails where that is lower, and the street comes down to it from
+    // the higher side, up to 9 m above it, and up to it from a lower side as much as 2.5 m below the rails
     const g=sg=>{ const zz=z+sg*(flat+3); return baseH(vRoadX(i,zz),zz); }, gN=g(-1), gS=g(1), deck=Math.max(ry+6.4,Math.min(gN,gS));
-    const ramp=gg=>clamp((deck-gg)/0.15,12,40), rN=ramp(gN), rS=ramp(gS);
-    let ok=Math.max(gN,gS)>=ry+4.5 && Math.min(gN,gS)>=ry+0.5 && Math.max(gN,gS)<deck+3;
+    const ramp=gg=>clamp(Math.abs(deck-gg)/0.15,12,60), rN=ramp(gN), rS=ramp(gS);
+    let ok=Math.max(gN,gS)>=ry+4.5 && Math.min(gN,gS)>=ry-2.5 && Math.max(gN,gS)<deck+9;
     for (const [sg,rl] of [[-1,rN],[1,rS]]) for (let e=3; ok && e<=rl+12; e+=6){ const zz=z+sg*(flat+e), xx=vRoadX(i,zz);
       if (!vSegOn(i,vSegAt(xx,zz)) || mainPerp(xx,zz)<8.6) ok=false; }
     if (ok) X={i,x,z,ry,rot,sinT,flat,deck,rN,rS}; }
+  const R={x,z,street,X}; if (rgCache.size>20000) rgCache.clear(); rgCache.set(i,R); return R;
+}
+function railCross(i){
+  if (rxCache.has(i)) return rxCache.get(i);
+  const R=railXing(i), x=R.x;
+  const X=R.X && railState(x)==='open' && railState(x-12)==='open' && railState(x+12)==='open' && !stationNear(x,70)?R.X:null;
   if (rxCache.size>20000) rxCache.clear(); rxCache.set(i,X); return X;
 }
 function vRoadCenterH(i,xr,z){ const h=baseH(xr,z), X=railCross(i); if (!X) return h; const d=Math.abs(z-X.z), rl=z<X.z?X.rN:X.rS; if (d>X.flat+rl) return h; if (d<X.flat) return X.deck-BR_SINK; return lerp(X.deck,h,clamp((d-X.flat)/rl,0,1)); }
@@ -2373,14 +2427,18 @@ function heightAtExact(x,z){
   if (wsum>0) h=lerp(h,tsum/wsum,wmax);
   // the line runs on a level bed 8 m wide, cut into the hill or built up on an embankment;
   // over a tunnel the ground is kept level with the portal parapets so the lined bore is always covered
-  { const S=stationNear(x,40), hwL=S?15:4.0, d=mainPerp(x,z); if (d<hwL+4.6){ const sl=(railZ(x+1)-railZ(x-1))/2, xp=x+sl*(z-railZ(x))/(1+sl*sl), st=railState(xp), ry=railY(xp);
+  { const S=stationNear(x,40), hwL=S?15:4.0, d=mainPerp(x,z); if (d<hwL+CUT_WMAX){ const sl=(railZ(x+1)-railZ(x-1))/2, xp=x+sl*(z-railZ(x))/(1+sl*sl), st=railState(xp), ry=railY(xp);
       // the cover over a bore begins 3 m in from the portal along the track, within the depth of its masonry (4 m), so
       // that on a curve, where the line's state is projected across at a slant, its edge never stands out in front of
       // the wing walls; measured along x, on a line running at a slant it began beyond the masonry, and the ground's
       // grid hung down into the bore between the cutting's floor and the cover
       const dIn=3/Math.sqrt(1+sl*sl), deep=st==='tunnel' && railState(xp-dIn)==='tunnel' && railState(xp+dIn)==='tunnel';
-      if (st==='open' || (st==='tunnel' && !deep)){ const w=1-smooth((d-hwL)/4.5); h=lerp(h,ry-0.2,w); }
-      else if (deep){ const w=1-smooth((d-4)/5); h=Math.max(h,lerp(h,ry+8.6,w)); } } }
+      if (st==='open' || (st==='tunnel' && !deep)){ const fw=S||st!=='open'?4.5:cutW(xp); if (d<hwL+fw){ const w=1-smooth((d-hwL)/fw); h=lerp(h,ry-0.2,w); } }
+      else if (deep){ const w=1-smooth((d-4)/5);
+        // over the bore just behind a portal, the hill is held down to the cover's level, so that where it stands
+        // higher its slope down to the cutting does not reach into the arch; it rises again 10 m in
+        if (d<6.5){ const pd=portalDist(xp); if (pd<10) h=Math.min(h,lerp(ry+8.6,h,Math.max(smooth((pd-5)/5),smooth((d-5)/1.5)))); }
+        h=Math.max(h,lerp(h,ry+8.6,w)); } } }
   // a goods line's bed likewise, wider along the sidings
   // but the coast road beside it keeps its own level, the slope between them held up by the road's sea wall
   for (const B of branchesAt(x)){ if (!brIn(B,x,2)) continue; const d=brPerp(B,x,z), hw=brTerm(B,x)?5:4.0;
