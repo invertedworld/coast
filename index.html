@@ -403,7 +403,6 @@ const SP=1, SR=2, SS=3, SW=4, SB=7; // surface patterns: plaster, roof tiles, st
 // portal, up to 31 m, in one value from 100, which the building shader reads back (patchBuildings) to dim the sky's
 // and the sun's light on it with depth, leaving lamps' light as it is
 const BORE_PAT=[SB,SS,SW,0], boreSurf=(sf,d)=>100+32*Math.max(0,BORE_PAT.indexOf(sf))+Math.min(31,Math.round(d));
-const BLACK=new THREE.Color(0,0,0);
 
 /* ================= geometry builder ================= */
 function tpl(geo,smooth){ const g=geo.index?geo.toNonIndexed():geo; return {p:g.attributes.position.array,n:g.attributes.normal.array,smooth}; }
@@ -414,7 +413,6 @@ function prismTpl(){
   return {p:new Float32Array(P),n:new Float32Array(P.length),smooth:false};
 }
 const T={
-  quadV:tpl(new THREE.PlaneGeometry(1,1),false),
   box:tpl(new THREE.BoxGeometry(1,1,1).translate(0,.5,0),false),
   boxC:tpl(new THREE.BoxGeometry(1,1,1),false),
   cyl:tpl(new THREE.CylinderGeometry(.5,.5,1,28).translate(0,.5,0),true),
@@ -5588,21 +5586,16 @@ function genChunk(cx,cz,lod=0){
       for (const o of [-0.72,0.72]) segBox(gb,[xa+nx*o,ya+0.3,za+nz*o],[xb+nx*o,yb+0.3,zb+nz*o],0.08,0.13,steel,bs(0));
       for (let k=0;k<3;k++){ const t=(k+0.5)/3; gb.add(T.boxC, mat(lerp(xa,xb,t),lerp(ya,yb,t)+0.2,lerp(za,zb,t),2.5,0.12,0.26,rot), sleeper, null, bs(SW)); }
       if (st==='tunnel'){
-        // the bore is lined throughout: side walls, a floor and a vault of stone (distant blocks only near the portals)
-        if (lod>=2 && railState(xm-40)==='tunnel' && railState(xm+40)==='tunnel') continue;
+        // the bore is lined throughout: side walls, a floor and a vault of stone, in distant blocks with a coarser
+        // vault; without it the sky would be seen through the hill's cover, from a portal and along the bore
         // the first 4 m behind each portal lie within its masonry, which already lines the opening
         // (measured along the track, which may cross the x axis at a slant, and kept short enough that the lining
         // starts inside the masonry, with no gap open to the sky between them)
         { const ins=2.5*step/len; if (railState(xm-ins)!=='tunnel' || railState(xm+ins)!=='tunnel') continue; }
-        const l3=Math.hypot(xb-xa,yb-ya,zb-za), Hs=mat((xa+xb)/2,(ya+yb)/2,(za+zb)/2,1,1,1,Math.atan2(xb-xa,zb-za),-Math.atan2(yb-ya,len)), RV=PA+0.25, nv=12;
+        const l3=Math.hypot(xb-xa,yb-ya,zb-za), Hs=mat((xa+xb)/2,(ya+yb)/2,(za+zb)/2,1,1,1,Math.atan2(xb-xa,zb-za),-Math.atan2(yb-ya,len)), RV=PA+0.25, nv=lod>=2?6:12;
         for (const sg of [-1,1]) gb.add(T.boxC, mm(Hs,mat(sg*RV,(PS-0.6)/2,0,0.5,PS+0.6,l3+0.04)), brick, null, bs(SB));
         gb.add(T.boxC, mm(Hs,mat(0,-0.55,0,2*PA+0.2,0.6,l3+0.04)), lining, null, bs(0));
         for (let k=0;k<nv;k++){ const a=Math.PI*(k+0.5)/nv; gb.add(T.boxC, mm(Hs,mat(Math.cos(a)*RV,PS+Math.sin(a)*RV,0,0.5,2*RV*Math.sin(Math.PI/(2*nv))+0.05,l3+0.04,0,0,a)), brick, null, bs(SB)); }
-        // in a distant block the lining stops 40 m in from each portal; there a black screen, facing the portal and so
-        // seen only from outside, closes the bore, which would otherwise show the sky through the hill's cover
-        if (lod>=2) for (const sg of [-1,1]) if (railState(xm-sg*36)==='tunnel' && railState(xm-sg*38)!=='tunnel'){
-          const Hc=mat((xa+xb)/2,(ya+yb)/2,(za+zb)/2,1,1,1,Math.atan2(xb-xa,zb-za)+(sg>0?Math.PI:0));
-          gb.add(T.quadV, mm(Hc,mat(0,(PS+RV)/2-0.5,0,2*RV+0.6,PS+RV+1.2,1)), BLACK, null); }
         continue;
       }
       ch.obbs.push({x:(xa+xb)/2,z:(za+zb)/2,hw:st==='viaduct'?2.1:1.5,hd:len/2,rot,top:(ya+yb)/2+0.2,bot:st==='viaduct'?Math.min(ya,yb)-1.45:undefined});
