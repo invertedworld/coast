@@ -5079,7 +5079,8 @@ function genChunk(cx,cz,lod=0){
     for (let i=0;i<nseg;i++){ const a=i/nseg*6.283; if (!openAt(a) || galAt(a)) continue;
       cands.push({a,h:baseH(P.x+Math.cos(a)*(P.r+4),P.z+Math.sin(a)*(P.r+4))}); }
     cands.sort((u,v)=>u.h-v.h);
-    // the stair down through the gap is planned first: it must reach the ground before any road, steepening a
+    // the stair down through the gap is planned first: it must reach the ground before any road or the railway's
+    // bed, the steps that carry it on down to ground levelled lower than the hillside included, steepening a
     // little if need be, and the whole flight, with a landing of 1.5 m at its foot, must lie within the square's own
     // block, since the houses of the next block are placed without knowledge of it. It runs down where the ground
     // falls lowest, or failing that at the next lowest point of the open side; where no flight fits, the
@@ -5095,12 +5096,12 @@ function genChunk(cx,cz,lod=0){
             // the flight down to it, so that its last step meets the ground; the flight above is as planned
             for (let k2=kk; k2<kk+8; k2++){ const d2=P.r+0.95+k2*go+go/2, x2=P.x+dx*d2, z2=P.z+dz*d2, t2=P.level-(k2+1)*ri, ga=heightAt(x2,z2);
               if (t2<=ga+0.05 || ga<0.2) break;
-              if (!stepIn(x2,z2,dx,dz,go)){ ok=false; break; }
+              if (!stepIn(x2,z2,dx,dz,go) || roadDist(x2,z2)<0 || railPerp(x2,z2)<5){ ok=false; break; }
               steps.push({x:x2,z:z2,top:t2,g:Math.min(baseH(x2,z2),ga)}); }
             if (ok){ const n=steps.length, fd=P.r+0.95+n*go+1.5;
-              ok=insideCell(cx,cz,P.x+dx*fd,P.z+dz*fd,0.1); }
+              ok=insideCell(cx,cz,P.x+dx*fd,P.z+dz*fd,0.1) && railPerp(P.x+dx*fd,P.z+dz*fd)>=5; }
             break; }
-          if (roadDist(x,z)<0) break;
+          if (roadDist(x,z)<0 || railPerp(x,z)<5) break;   // nor onto a street, nor the railway's bed (5 m from the line)
           if (heightAt(x,z)<0.2) break;   // no stair runs down into a harbour's basin or the sea
           if (!stepIn(x,z,dx,dz,go)) break;
           steps.push({x,z,top,g}); }
