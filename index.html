@@ -11352,6 +11352,9 @@ function buildWagon(kind){
 const SHUNTER=buildShunter(), WAGON={van:buildWagon('van'),open:buildWagon('open'),tank:buildWagon('tank'),flat:buildWagon('flat')};
 const GOODS_SPEC=[SHUNTER,...['van','open','tank','flat','van','van','open','flat','tank','tank','open','van'].map(k=>WAGON[k]),SHUNTER];
 const goods={cars:[],R:null,x:0,dir:1,lead:0,v:0,wait:0,toB:false,legs:[],check:0};
+// the goods train's headlight, like the passenger train's but on a shorter, lower shunter, and lit only after dusk:
+// the goods line runs in the open along the shore, never in a tunnel, so it casts no shadows
+const goodsSpot=new THREE.SpotLight(hex('#ffeccc'),0,180,0.3,0.6,1.2); world.add(goodsSpot,goodsSpot.target);
 GOODS_SPEC.forEach((spec,i)=>{ const loco=i===0||i===GOODS_SPEC.length-1, m=new THREE.Mesh(spec.geo,matTrain); m.castShadow=true; m.receiveShadow=true; m.rotation.order='YXZ'; m.visible=false; world.add(m);
   goods.cars.push({m,L:spec.L,loco,flip:i===GOODS_SPEC.length-1,lamps:loco?locoLamps(m,SHUNT_L,2.85):null}); });
 // a point a given chord length behind (dir=1) or ahead (dir=-1) of x along a branch
@@ -11377,7 +11380,7 @@ function updateGoods(dt){
   const g=goods; g.check-=dt;
   if (g.check<=0){ g.check=2; const A=nearestBranch(), R=g.R;
     if (A!==R && !(riding() && rideGoods)){ if (A) goodsStart(A,10+Math.random()*20); else { g.R=null; for (const c of g.cars) c.m.visible=false; } } }
-  const R=g.R; if (!R) return;
+  const R=g.R; if (!R){ goodsSpot.intensity=0; return; }
   if (g.wait>0){ g.wait-=dt; g.v=0;
     // at a quay it reverses: the other shunter leads from where the rear of the train stands
     if (g.wait<=0 && !g.legs.length){ g.lead=1-g.lead; g.dir=-g.dir; g.x=g.tail; g.toB=!g.toB; g.legs=[{x:g.toB?R.x1-GOODS_STAND:R.x0+GOODS_STAND,wait:30}]; } }
@@ -11394,6 +11397,11 @@ function updateGoods(dt){
   g.tail=routeBack(R,xf,-0.8,g.dir);
   const lead=g.cars[g.lead?g.cars.length-1:0];
   for (const c of g.cars) if (c.lamps) for (const l of c.lamps) l.material=c===lead?lampWhite:lampRed;
+  // the leading shunter's headlight, after dusk; its nose is its +z end, as the passenger locomotive's is
+  const m=lead.m; m.updateMatrixWorld();
+  goodsSpot.position.copy(_hv.set(0,1.1,SHUNT_L/2+0.4).applyMatrix4(m.matrix));
+  goodsSpot.target.position.copy(_hv.set(0,-0.2,SHUNT_L/2+50).applyMatrix4(m.matrix));
+  goodsSpot.intensity=300*nightU.value;
 }
 
 /* ================= island ferries ================= */
