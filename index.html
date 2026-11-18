@@ -4061,7 +4061,7 @@ function addHouse(gb,ch,R,o){
   }
   const floorH=2.6, floors=Math.max(1,Math.floor(h/floorH));
   let doorX=null, lampX=null, climber=false;
-  if (!o.noDoor){ const dx=(R()-0.5)*Math.max(0,w-2.6); doorX=dx;
+  if (!o.noDoor){ const r0=R(), dx=o.doorX!==undefined?o.doorX:(r0-0.5)*Math.max(0,w-2.6); doorX=dx;
     room=gb.lod===0?doorwayFor(ch,o,base,dx,w,h,d,floors):null;
     if (room) addDoorFrame(gb,H,dx,d/2); else addDoor(gb,H,dx,fz-0.06);
     if (R()<0.3){ const lx=dx+(dx>0?-0.9:0.9); lampX=lx;
@@ -4544,12 +4544,17 @@ function buildStation(gb,ch,R,S){
     gb.add(T.cyl8, mat(lx,ry+0.95,lz,0.14,3.4,0.14), posts, null); gb.add(T.boxC, mat(lx,ry+4.45,lz,0.32,0.4,0.32), BULB, null, 6); glow(ch,lx,ry+4.45,lz,2.8); }
   // station building facing the track
   const [hx,hz]=at(S.x,sd*(4.9+3.6)), s=(railZ(S.x+1)-railZ(S.x-1))/2, l=Math.hypot(1,s), fx=(s/l)*sd, fz=-(1/l)*sd;
-  const ob=addHouse(gb,ch,R,{x:hx,z:hz,rot:Math.atan2(fx,fz),w:14,d:7,h:7.4,base:S.ry+0.15,roof:'hip',wall:hex('#e2b789'),kind:'station'});
-  const Hb=mat(hx,S.ry+0.15,hz,1,1,1,Math.atan2(fx,fz));
+  // its floor is level with the platform's top, on a plinth down into the ground, so that its door opens onto the
+  // platform; the door is in the middle of the front, under the sign and between two of the canopy's posts (2 m either
+  // side of the station's middle), whose posts stand 0.9 m out from the wall where a door's awning would reach them
+  const fl=S.ry+0.95, rb=Math.atan2(fx,fz);
+  gb.add(T.box, mat(hx,S.ry-1.0,hz,14.16,fl-S.ry+1.0,7.16,rb), stone, S.ry-1.0, SS);
+  gb.add(T.box, mat(hx,fl-0.08,hz,14.24,0.16,7.24,rb), C_.trim, null);
+  const ob=addHouse(gb,ch,R,{x:hx,z:hz,rot:rb,w:14,d:7,h:7.4,base:fl,roof:'hip',wall:hex('#e2b789'),kind:'station',doorX:0});
+  const Hb=mat(hx,fl,hz,1,1,1,rb);
   gb.add(T.box, mm(Hb,mat(0,5.2,3.52,4.2,0.7,0.12)), C_.white, null);
   gb.add(T.box, mm(Hb,mat(0,5.35,3.6,3.6,0.4,0.06)), hex('#1f3550'), null);
   gb.add(T.cylC, mm(Hb,mat(0,6.4,3.55,0.9,0.1,0.9,0,Math.PI/2)), C_.white, null);
-  gb.add(T.box, mm(Hb,mat(0,-0.2,3.5+0.05,14.4,0.35,0.3)), stone, null, SS);
 }
 
 /* ================= harbour ================= */
@@ -5582,6 +5587,13 @@ function genChunk(cx,cz,lod=0){
         gb.add(T.box, mm(Hp,mat(0,-1.5,zc,2*PA+0.2,1.25,PD)), lining, null);
         for (let k=0;k<13;k++){ const ang=Math.PI*(k+0.5)/13; gb.add(T.boxC, mm(Hp,mat(Math.cos(ang)*(PA+0.22),PS+Math.sin(ang)*(PA+0.22),zf-into*0.02,0.85,0.6,0.14,0,0,ang)), k===6?C_.trim:vsTone(C_.stone,k), null); }
         for (const sg of [-1,1]){ const [px,pz]=localToWorld({x:xb,z:zb,rot},sg*(PA+PW/2),zc); ch.obbs.push({x:px,z:pz,hw:PW/2,hd:PD/2,rot,top:Infinity}); }
+        // behind the masonry, a slab of stone just under the hill's cover, over the vault, closes the ground left out
+        // there around the opening (inPortal), which reaches past the masonry's back where the line is steep; without
+        // it the empty inside of the hill showed through behind the coping
+        { const cs=1/Math.hypot(1,(railZ(xb+1)-railZ(xb-1))/2);
+          for (let k=0;k<3;k++){ const a0=PD-0.4+k*1.2, a1=a0+1.2, y0=railY(xb+into*a0*cs), y1=railY(xb+into*a1*cs);
+            const top=Math.min(y0,y1)+8.3-yb, bot=Math.max(y0,y1)+7.8-yb;
+            if (top>bot+0.05) gb.add(T.box, mm(Hp,mat(0,bot,into*(a0+a1)/2,11.6,top-bot,1.25)), stoneR, null, SS); } }
       }
       prev=st;
       if (!mine) continue;
@@ -5772,7 +5784,7 @@ function genChunk(cx,cz,lod=0){
   }
   const portals=[]; { let pv=railState(x0-13); for (let x=x0-12; x<x0+C+12; x+=2){ const st=railState(x+1);
     if (st!==pv && (st==='tunnel'||pv==='tunnel')){ const sl=(railZ(x+1)-railZ(x-1))/2, l=Math.hypot(1,sl); portals.push({x,z:railZ(x),tx:1/l,tz:sl/l,into:st==='tunnel'?1:-1}); } pv=st; } }
-  const inPortal=(px,pz)=>portals.some(P=>{ const dx=px-P.x, dz=pz-P.z, a=(dx*P.tx+dz*P.tz)*P.into, q=dx*P.tz-dz*P.tx; return a>-1.5&&a<4.5&&Math.abs(q)<5.6; });
+  const inPortal=(px,pz)=>portals.some(P=>{ const dx=px-P.x, dz=pz-P.z, a=(dx*P.tx+dz*P.tz)*P.into, q=dx*P.tz-dz*P.tx; return a>step/2-0.2&&a<4.5&&Math.abs(q)<5.6; });
   for (let j=0;j<N;j++) for (let i=0;i<N;i++){ const a=j*(N+1)+i, b=a+1, c=a+N+1, d=c+1;
     if (portals.length){ const h00=hg[(j+1)*G+i+1], h10=hg[(j+1)*G+i+2], h01=hg[(j+2)*G+i+1], h11=hg[(j+2)*G+i+2];
       if (Math.max(h00,h10,h01,h11)-Math.min(h00,h10,h01,h11)>2.5 && inPortal(x0+(i+0.5)*step,z0+(j+0.5)*step)) continue; }
@@ -6274,6 +6286,11 @@ const matDL=new THREE.MeshLambertMaterial({vertexColors:true}); patchBuildings(m
   matDL.customProgramCacheKey=()=>'doors-local'; }
 const seaUniforms={uTime:{value:0}};
 const matG=new THREE.MeshLambertMaterial({vertexColors:true}); patchGround(matG);
+// the ground casts shadows into the headlight's map only: in a map drawn with the sun's orthographic projection its
+// triangles are put outside the view, so that the hills do not darken the ground they stand on in the sun's light
+const GROUND_DEPTH=new THREE.MeshDepthMaterial({depthPacking:THREE.RGBADepthPacking});
+GROUND_DEPTH.onBeforeCompile=(sh)=>{ sh.vertexShader=sh.vertexShader.replace('#include <project_vertex>','#include <project_vertex>\n  if (projectionMatrix[3][3]>0.5) gl_Position=vec4(2.0,2.0,2.0,1.0);'); };
+const groundCasts=m=>{ m.castShadow=true; m.customDepthMaterial=GROUND_DEPTH; return m; };
 /* ---------- fading blocks in and out: a screen-space dither discards a growing share of fragments ---------- */
 // Each fade level is its own material sharing one compiled program (the settled materials carry no discard,
 // so the GPU can still reject hidden fragments early); the old version of a block that is changing
@@ -7274,7 +7291,7 @@ function addChunkToScene(ch){
   // a block at full detail is never merged into a tile (it is built again, simplified, as the player moves away), so
   // its arrays are let go once they are on the GPU
   if (ch.lod===0){ for (const a of Object.values(ch.geo.attributes)) a.onUpload(dropArray); }
-  ch.ground=at(new THREE.Mesh(ch.groundGeo,matG)); ch.ground.receiveShadow=true;
+  ch.ground=groundCasts(at(new THREE.Mesh(ch.groundGeo,matG))); ch.ground.receiveShadow=true;
   // only the blocks that reach below the sea are seen through the water, in the sea's depth pass
   if (!ch.groundGeo.boundingBox) ch.groundGeo.computeBoundingBox();
   if (ch.groundGeo.boundingBox.min.y<0.2){ ch.mesh.layers.enable(1); ch.ground.layers.enable(1); }
@@ -7358,7 +7375,7 @@ function updateTiles(budgetMs=2){
       for (const a of Object.values(geo.attributes)) a.onUpload(dropArray); if (geo.index) geo.index.onUpload(dropArray);
       m.frustumCulled=false; m.onAfterRender=uploaded; };
     add(mergeGeos(B,oB),g=>{ const m=new THREE.Mesh(g,matB); m.receiveShadow=true; if (deep) m.layers.enable(1); return m; });
-    add(mergeGeos(G,oB),g=>{ const m=new THREE.Mesh(g,matG); m.receiveShadow=true; if (deep) m.layers.enable(1); return m; });
+    add(mergeGeos(G,oB),g=>{ const m=groundCasts(new THREE.Mesh(g,matG)); m.receiveShadow=true; if (deep) m.layers.enable(1); return m; });
     add(mergeGeos(S,oS),g=>{ const m=new THREE.Mesh(g,surfMat); m.renderOrder=2; return m; });
     add(mergeGeos(L,oL),g=>{ const m=new THREE.Points(g,glowMat); m.renderOrder=3; return m; });
   }
@@ -11132,6 +11149,18 @@ const train={cars:[], x:0, dir:1, sp:17, v:17, wait:0, init:false, GAP:0.8, lead
 // headlights: a spotlight from the front of the locomotive aimed along the line, and warm light from the
 // coach windows falling on the ground either side; they light the surroundings at dusk, at night and in tunnels
 const headSpot=new THREE.SpotLight(hex('#ffeccc'),0,240,0.5,0.75,1.2); world.add(headSpot,headSpot.target);
+/* The headlight casts shadows, so that while the locomotive is in a tunnel the hill over it stops its light, which
+   otherwise reached the trees and the ground over the bore and along the cutting beyond the far portal. The ground
+   casts into its map, though not into the sun's (GROUND_DEPTH): the ground's underside, seen from inside the bore,
+   then closes off everything above it. */
+headSpot.castShadow=true; headSpot.shadow.mapSize.set(1024,1024); headSpot.shadow.autoUpdate=false;
+headSpot.shadow.bias=-0.0006; headSpot.shadow.normalBias=0.05; headSpot.shadow.camera.near=0.5;
+let headShN=0;
+// the map is drawn while the headlight is near enough to be seen, and by day outside a tunnel, where the light is
+// faint, once in 3 frames
+function headShadow(){
+  const p=headSpot.position, near=headSpot.intensity>0 && Math.hypot(p.x-camera.position.x,p.z-camera.position.z)<headSpot.distance+60;
+  headSpot.shadow.needsUpdate=near && (headSpot.intensity>=40 || (++headShN)%3===0); }
 // the coach lamps join the scene only after dusk, since every light adds to the cost of every lit pixel
 // the lamps stay in the scene, dark by day: adding or removing a light would recompile every lit material
 const coachLamps=[1,2,4].map(i=>({l:new THREE.PointLight(hex('#ffbf73'),0,26,1.5),i})); let coachLampsOn=false; for (const c of coachLamps) world.add(c.l);
@@ -14020,6 +14049,15 @@ function rideTrain(){ if (rideGoods){ const g=goods, R=g.R;
     const rev=g.wait>0 && !g.legs.length && g.tail!==undefined, ld=rev?1-g.lead:g.lead;
     return {x:rev?g.tail:g.x,dir:rev?-g.dir:g.dir,Z:x=>routeZ(R,x),Y:x=>routeY(R,x),st:()=>'open',lead:g.cars[ld?g.cars.length-1:0].m,cars:g.cars}; }
   return {x:train.x,dir:train.dir,Z:railZ,Y:railY,st:railState,lead:leadCar().m,cars:train.cars}; }
+// the height a camera at p must keep above the cars beneath it: their roofs, about 4.2 m above each car's centre line,
+// followed along its pitch, within 3.4 m of a car's centre line to either side, so that on a grade the cars behind the locomotive, which stand higher going downhill, do not rise through the chase view
+function roofClear(RT,p,margin){ let y=-1e9;
+  for (const c of RT.cars){ const m=c.m; if (!m.visible) continue;
+    const r=m.rotation.y, ax=Math.sin(r), az=Math.cos(r), dx=p.x-m.position.x, dz=p.z-m.position.z;
+    const al=dx*ax+dz*az, lat=Math.abs(dx*az-dz*ax);
+    if (Math.abs(al)>c.L/2+1.5 || lat>3.4) continue;
+    y=Math.max(y,m.position.y+4.2-Math.tan(m.rotation.x)*al+margin); }
+  return y; }
 function ride(kind,which){
   if (!riding()){ prevMode=mode==='above'?'above':'street'; cam.y=null;
     const gl=goods.R&&goods.cars[goods.lead?goods.cars.length-1:0].m.position, pl=leadCar().m.position;
@@ -15243,9 +15281,9 @@ function frame0(now){
       if (RT.st(xe)==='tunnel') chase.lift+=(1-chase.lift)*kf; else chase.lift*=1-kf;
       camTarget.y=lerp(camTarget.y,Math.max(camTarget.y,heightAt(camTarget.x,camTarget.z)+3),chase.lift);
       const want=_cv.set(camTarget.x-Math.sin(a)*cp*chase.d, camTarget.y+Math.sin(chase.pitch)*chase.d, camTarget.z-Math.cos(a)*cp*chase.d);
-      want.y=Math.max(want.y,heightAt(want.x,want.z)+2.5);
+      want.y=Math.max(want.y,heightAt(want.x,want.z)+2.5,roofClear(RT,want,2.5));
       if (chase.fresh){ camPos.copy(want); chase.fresh=false; } else camPos.lerp(want,1-Math.exp(-dt*6));
-      camPos.y=Math.max(camPos.y,heightAt(camPos.x,camPos.z)+2);
+      camPos.y=Math.max(camPos.y,heightAt(camPos.x,camPos.z)+2,roofClear(RT,camPos,1.5));
       camera.position.copy(camPos); camLookAt(camTarget);
     }
     sky.position.copy(camera.position);
@@ -15276,7 +15314,7 @@ function frame0(now){
   dgySailor(); PEOPLE.update(wdt);
   updateFleet(dt);
   updateGulls(dt);
-  updateShadowFrame(); shadowDue();
+  updateShadowFrame(); shadowDue(); headShadow();
   updateHUD();
   updateStats();
   PHOTO.frame(dt,render);
