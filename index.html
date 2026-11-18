@@ -11148,7 +11148,7 @@ const LOCO=buildLoco(), COACH=buildCoach();
 const train={cars:[], x:0, dir:1, sp:17, v:17, wait:0, init:false, GAP:0.8, lead:0};
 // headlights: a spotlight from the front of the locomotive aimed along the line, and warm light from the
 // coach windows falling on the ground either side; they light the surroundings at dusk, at night and in tunnels
-const headSpot=new THREE.SpotLight(hex('#ffeccc'),0,240,0.5,0.75,1.2); world.add(headSpot,headSpot.target);
+const headSpot=new THREE.SpotLight(hex('#ffeccc'),0,240,0.3,0.6,1.2); world.add(headSpot,headSpot.target);
 /* The headlight casts shadows, so that while the locomotive is in a tunnel the hill over it stops its light, which
    otherwise reached the trees and the ground over the bore and along the cutting beyond the far portal. The ground
    casts into its map, though not into the sun's (GROUND_DEPTH): the ground's underside, seen from inside the bore,
@@ -11177,7 +11177,7 @@ function updateTrainLights(){
   loco.updateMatrixWorld();
   headSpot.position.copy(_hv.set(0,1.3,LOCO.L/2+0.4).applyMatrix4(loco.matrix));   // the lead locomotive's nose is always its +z end
   headSpot.target.position.copy(_hv.set(0,-0.2,LOCO.L/2+60).applyMatrix4(loco.matrix));
-  headSpot.intensity=12+900*dark;
+  headSpot.intensity=8+420*dark;
   // the saloon lamps are lit after dusk, and in a tunnel while the train is ridden, cab or coach alike; they are kept
   // low so that the saloon is not washed out
   const lampK=Math.max(0.25*nightU.value, mode==='train'||mode==='coach'?0.2*tunnelK:0);
