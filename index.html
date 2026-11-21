@@ -3024,7 +3024,8 @@ function churchRoom(ch,cx,cz,rot,base,W,L,h,wz,seed){
    hanging basket either side of it, a signboard of an easel hung from an iron bracket above it, and bougainvillea on
    each side wall. It was developed in testbench/art-gallery.html (photo/artgallery.js). Inside, a pale limestone
    floor, the room open to the roof, a bench down the middle, and up to eight pictures at eye level, each lit by a
-   picture light; a click on one while the pointer is free goes there, as Go there in the gallery does. */
+   picture light; a click on one while the pointer is free, or Space while facing one close to, goes there, as Go there
+   in the gallery does. */
 const GAL={W:8.4,L:11,h:4.8,pitch:0.44}, GAL_SIZES=[[8.4,11],[7.4,9.6],[6.8,8.6]];
 const GAL_WHITE=hex('#fbfaf7'), GAL_BLUE=hex('#24578f'), GAL_IRON=hex('#1f1f21'), GAL_SKY=[-3.4,0,3.4];
 // the gallery's footprint beside the square, in direction a from its middle, the front towards the square; hw and hd
@@ -13091,8 +13092,19 @@ function galleryPick(e){
   const D=indoors; if (!D || D.kind!=='gallery' || !D.pics || !D.pics.length || document.pointerLockElement===canvas) return null;
   const r=canvas.getBoundingClientRect(); galNdc.set((e.clientX-r.left)/r.width*2-1,-((e.clientY-r.top)/r.height)*2+1);
   galRay.setFromCamera(galNdc,camera); galRay.far=14; const hit=galRay.intersectObjects(D.pics)[0]; return hit?hit.object:null; }
-function galleryClick(e){
-  const m=galleryPick(e); if (!m) return false;
+function galleryClick(e){ const m=galleryPick(e); return m?galleryGo(m):false; }
+// standing in a gallery and facing a picture, within 4 m and no more than 45 degrees to either side of square on, Space
+// goes there as a click on it does, rather than jumping
+function galleryAhead(){
+  const D=indoors; if (!D || D.kind!=='gallery' || !D.pics || !D.pics.length || mode!=='street' || PHOTO.on || TELE.on) return null;
+  galNdc.set(0,0); galRay.setFromCamera(galNdc,camera); galRay.far=4; const hit=galRay.intersectObjects(D.pics)[0]; if (!hit) return null;
+  const n=new THREE.Vector3(0,0,1).transformDirection(hit.object.matrixWorld);
+  return Math.abs(n.dot(galRay.ray.direction))>=Math.SQRT1_2?hit.object:null; }
+addEventListener('keydown',e=>{
+  if (e.code!=='Space' || e.ctrlKey || e.metaKey || e.altKey || !started || islandShown() || shareShown() || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target&&e.target.tagName||'')) return;
+  const m=galleryAhead(); if (!m) return;
+  e.preventDefault(); e.stopImmediatePropagation(); if (!e.repeat) galleryGo(m); },true);
+function galleryGo(m){
   const [pw,ph]=m.userData.size, r=canvas.getBoundingClientRect(); let x0=1e9, y0=1e9, x1=-1e9, y1=-1e9;
   for (const [u,v] of [[-1,-1],[1,-1],[1,1],[-1,1]]){ const q=m.localToWorld(new THREE.Vector3(u*pw/2,v*ph/2,0)).project(camera);
     const sx=r.left+(q.x+1)/2*r.width, sy=r.top+(1-q.y)/2*r.height; x0=Math.min(x0,sx); y0=Math.min(y0,sy); x1=Math.max(x1,sx); y1=Math.max(y1,sy); }
