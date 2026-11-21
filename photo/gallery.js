@@ -304,9 +304,11 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
   // with. The page that shows the place begins with the picture in the same place (goThereFrame in index.html, which
   // this matches), so that nothing moves as the page is loaded again.
   const GO_GROUND = '#05080c', GO_BORDER = 6;
-  const goFrame = (W, H, a) => { const M = Math.round(Math.min(W, H) * 0.07), b = GO_BORDER;
-    const iw = Math.min(W - 2 * M - 2 * b, (H - 2 * M - 2 * b) * a), ih = iw / a, w = iw + 2 * b, h = ih + 2 * b;
-    return { left: (W - w) / 2, top: (H - h) / 2, width: w, height: h }; };
+  // a band of GO_LABEL below the picture is left for the progress of the world being built
+  const GO_LABEL = 96;
+  const goFrame = (W, H, a) => { const M = Math.round(Math.min(W, H) * 0.07), b = GO_BORDER, Hp = H - GO_LABEL;
+    const iw = Math.min(W - 2 * M - 2 * b, (Hp - 2 * M - 2 * b) * a), ih = iw / a, w = iw + 2 * b, h = ih + 2 * b;
+    return { left: (W - w) / 2, top: (Hp - h) / 2, width: w, height: h }; };
   let going = false;
   // from is the element the picture lies in, or the rectangle on the screen it covers ({ left, top, width, height })
   function goThere(p, w, from) {
@@ -323,7 +325,7 @@ export function createGallery({ renderer, scene, camera, origin, onClose, onLoad
     const zoom = c.animate([{}, { left: px(f.left), top: px(f.top), width: px(f.width), height: px(f.height) }], { duration: T, easing: 'cubic-bezier(.55,0,.2,1)', fill: 'forwards' });
     const undo = () => { ov.remove(); c.remove(); going = false; };
     Promise.resolve(goTo(sc, { canvas: src, fov: m.fov, aspect: a, ready: zoom.finished }))
-      .then(ok => { if (ok === false) undo(); }, undo);
+      .then(ok => { if (ok === false) undo(); else if (ok === 'here') { undo(); close(); } }, undo);
   }
   function copy(item, btn) {
     // the PNG is given to the clipboard as a promise, so that the write starts within the click (Safari requires it)

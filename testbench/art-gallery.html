@@ -62,8 +62,8 @@ async function loadMine(){
     const db=await new Promise((res,rej)=>{ const q=indexedDB.open('coast-pictures',1); q.onupgradeneeded=()=>q.result.createObjectStore('photos',{keyPath:'id'}); q.onsuccess=()=>res(q.result); q.onerror=()=>rej(q.error); });
     const recs=await new Promise((res,rej)=>{ const t=db.transaction('photos','readonly').objectStore('photos').getAll(); t.onsuccess=()=>res(t.result||[]); t.onerror=()=>rej(t.error); });
     const bm=async b=>{ const i=await createImageBitmap(b), c=document.createElement('canvas'); c.width=i.width; c.height=i.height; c.getContext('2d').drawImage(i,0,0); return c; };
-    const out=[]; for (const r of recs){ const works=[]; for (const w of r.works||[]) works.push({canvas:await bm(w.png),time:w.time,style:w.style});
-      out.push({n:r.n,canvas:await bm(r.png),time:r.time,works}); }
+    const out=[]; for (const r of recs){ const works=[]; for (const w of r.works||[]) works.push({canvas:await bm(w.png),time:w.time,style:w.style,meta:w.meta});
+      out.push({n:r.n,canvas:await bm(r.png),time:r.time,meta:r.meta,works}); }
     return out;
   }catch(e){ return []; }
 }
@@ -74,7 +74,8 @@ function samples(){
     g.fillStyle='#2f5f8f'; g.fillRect(0,c.height*0.62,c.width,c.height*0.38);
     g.fillStyle='#6d7a4c'; g.beginPath(); g.moveTo(0,c.height*0.7); for (let x=0;x<=c.width;x+=40) g.lineTo(x,c.height*(0.55-0.12*Math.sin(x/c.width*3+i))); g.lineTo(c.width,c.height*0.75); g.closePath(); g.fill();
     g.fillStyle='#efe6d6'; for (let k=0;k<6;k++) g.fillRect(c.width*(0.15+k*0.11),c.height*(0.5+0.03*(k%2)),c.width*0.07,c.height*0.1);
-    out.push({n:i+1,canvas:c,time:i,works:i%2?[{canvas:c,time:100+i,style:'watercolour'}]:[]}); });
+    // the first three photographs and two of the three paintings record a scene, and so glow round their frames
+    out.push({n:i+1,canvas:c,time:i,meta:i<3?{scene:{}}:null,works:i%2?[{canvas:c,time:100+i,style:'watercolour',meta:i!==3?{scene:{}}:null}]:[]}); });
   return out;
 }
 let mine=null, G=null;

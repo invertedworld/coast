@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coast · horn echoes</title>
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Alegreya+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;min-height:100%;background:#9fc0dc;font-family:'Alegreya Sans',system-ui,sans-serif;color:#2b2b35}
+  main{max-width:640px;margin:32px auto;padding:0 16px}
+  #panel{padding:16px 18px;border-radius:10px;background:rgba(250,246,238,0.92);font-size:15px;box-shadow:0 2px 14px rgba(0,0,0,0.15)}
+  h1{font-size:20px;font-weight:500;margin:0 0 12px}
+  .row{display:grid;grid-template-columns:110px 1fr 76px;align-items:center;gap:10px;margin:8px 0}
+  label{color:#555}
+  output{text-align:right;font-variant-numeric:tabular-nums}
+  input[type=range]{width:100%;accent-color:#2f5f8f}
+  .btns{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
+  button{font:inherit;padding:6px 14px;border:1px solid #c9bda9;border-radius:6px;background:#fffaf2;color:#2b2b35;cursor:pointer}
+  button.pri{background:#2f5f8f;border-color:#2f5f8f;color:#fff}
+  button:disabled{opacity:.5;cursor:default}
+  canvas{display:block;width:100%;height:140px;margin-top:14px;border-radius:6px;background:#1d2733}
+  .key{display:flex;gap:16px;margin-top:6px;font-size:13px;color:#555}
+  .key i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+  @media (max-width:520px){ .row{grid-template-columns:86px 1fr 66px} }
+</style>
+</head>
+<body>
+<main><div id="panel">
+  <h1>Ferry horn echoes</h1>
+  <div class="row"><label for="st">Start</label><input id="st" type="range" min="1" max="4" step="0.01" value="2.1"><output id="stV"></output></div>
+  <div class="row"><label for="rp">Ramp</label><input id="rp" type="range" min="0.02" max="1.5" step="0.01" value="0.3"><output id="rpV"></output></div>
+  <div class="row"><label for="tg">Tail gain</label><input id="tg" type="range" min="0" max="24" step="0.5" value="8"><output id="tgV"></output></div>
+  <div class="row"><label for="lp">Tail LPF</label><input id="lp" type="range" min="0" max="1" step="0.001" value="0.315"><output id="lpV"></output></div>
+  <div class="row"><label for="fo">Fade out</label><input id="fo" type="range" min="0" max="2" step="0.05" value="0.5"><output id="foV"></output></div>
+  <canvas id="plot"></canvas>
+  <div class="key"><span><i style="background:#6b7787"></i>Original</span><span><i style="background:#7cc3ad"></i>With the tail raised</span></div>
+  <div class="btns"><button id="play" class="pri" disabled>Play</button><button id="orig" disabled>Play original</button><button id="save" disabled>Export WAV</button></div>
+</div></main>
+<script>
+/* The ferry horn's recording already carries its echo from the hills after the blast, but too faintly. Here the
+   recording is left as it is up to the end of the blast (Start, found from the recording: the last 50 ms within 8 dB
+   of its loudest), and its gain then rises over Ramp to Tail gain, which it keeps to the end, fading out over the last
+   Fade out seconds so that the louder echo does not stop short where the recording ends. The recording's hiss, which
+   the blast covers but the raised tail would bring up, is taken out of the tail by a steep low-pass (Tail LPF, four
+   poles) brought in with the same ramp; the echo itself lies almost wholly below 1.2 kHz. Export WAV writes the
+   result for sounds/ferry-horn-hills.mp3. */
+const SR=48000, $=id=>document.getElementById(id);
+const P={ st:()=>+$('st').value, rp:()=>+$('rp').value, tg:()=>+$('tg').value, fo:()=>+$('fo').value, lp:()=>500*Math.pow(40,+$('lp').value) };
+const lpOff=()=>+$('lp').value>=0.999;
+// a two-pole low-pass, into a new array
+function lowpass(x,f){ const y=new Float32Array(x.length), w=2*Math.PI*Math.min(f,SR/2-100)/SR, al=Math.sin(w)/(2*Math.SQRT1_2), c=Math.cos(w), a0=1+al;
+  const b0=(1-c)/2/a0, b1=(1-c)/a0, b2=b0, a1=-2*c/a0, a2=(1-al)/a0; let x1=0,x2=0,y1=0,y2=0;
+  for (let i=0;i<x.length;i++){ const v=x[i], o=b0*v+b1*x1+b2*x2-a1*y1-a2*y2; x2=x1; x1=v; y2=y1; y1=o; y[i]=o; } return y; }
+let lpCache={f:0,ch:null};
+function lowCh(){ const f=P.lp(); if (lpCache.f!==f){ lpCache={f,ch:[]}; for (let c=0;c<horn.numberOfChannels;c++) lpCache.ch.push(lowpass(lowpass(horn.getChannelData(c),f),f)); } return lpCache.ch; }
+// how far the tail has come in, 0 to 1, at time t
+function rampAt(t){ const u=Math.min(1,Math.max(0,(t-P.st())/P.rp())); return u*u*(3-2*u); }
+// the sample of channel c at i, the low-passed recording brought in with the ramp, and the gain
+function sampleAt(c,i,T){ const d=horn.getChannelData(c)[i], k=lpOff()?0:rampAt(i/SR); return (k?d+(lowCh()[c][i]-d)*k:d)*gainAt(i/SR,T); }
+let ctx=null, horn=null, playing=null;
+
+// the gain at time t (s) through the recording of length T
+function gainAt(t,T){
+  const G=Math.pow(10,P.tg()/20), k=rampAt(t);
+  const f=P.fo()>0?Math.min(1,Math.max(0,(T-t)/P.fo())):1;
+  return (1+(G-1)*k)*f; }
+function render(c){
+  const n=horn.length, T=n/SR, out=c.createBuffer(horn.numberOfChannels,n,SR);
+  for (let ch=0;ch<horn.numberOfChannels;ch++){ const o=out.getChannelData(ch); for (let i=0;i<n;i++) o[i]=sampleAt(ch,i,T); }
+  return out; }
+function blastEnd(b){
+  const W=Math.floor(0.05*SR), n=Math.floor(b.length/W), r=[]; let pk=0;
+  for (let k=0;k<n;k++){ let e=0; for (let c=0;c<b.numberOfChannels;c++){ const d=b.getChannelData(c); for (let i=k*W;i<(k+1)*W;i++) e+=d[i]*d[i]; } r.push(e); pk=Math.max(pk,e); }
+  let last=0; r.forEach((e,k)=>{ if (e>pk/6.3) last=k; }); return (last+1)*W/SR; }
+
+function stop(){ if (!playing) return; const p=playing; playing=null; p.g.gain.setTargetAtTime(0,ctx.currentTime,0.01); setTimeout(()=>{ try{ p.s.stop(); }catch(_){} p.g.disconnect(); },80); }
+function play(buf){ stop(); if (ctx.state==='suspended') ctx.resume(); const s=ctx.createBufferSource(), g=ctx.createGain(); s.buffer=buf; s.connect(g); g.connect(ctx.destination); s.start(); playing={s,g}; }
+
+function labels(){ $('stV').value=P.st().toFixed(2)+' s'; $('rpV').value=P.rp().toFixed(2)+' s'; $('tgV').value='+'+P.tg().toFixed(1)+' dB'; $('foV').value=P.fo().toFixed(2)+' s';
+  const f=P.lp(); $('lpV').value=lpOff()?'Off':f>=1000?(f/1000).toFixed(1)+' kHz':Math.round(f)+' Hz'; }
+// the level of the original and of the result, in dB, in 20 ms steps
+function draw(){
+  const cv=$('plot'), dpr=devicePixelRatio, w=cv.width=cv.clientWidth*dpr, h=cv.height=cv.clientHeight*dpr, g=cv.getContext('2d');
+  g.clearRect(0,0,w,h); if (!horn) return;
+  const n=horn.length, T=n/SR, W=Math.floor(0.02*SR), FL=-70, top=h*0.06, bot=h*0.86;
+  const lev=(k,withG)=>{ let e=0; for (let c=0;c<horn.numberOfChannels;c++){ const d=horn.getChannelData(c); for (let i=k*W;i<Math.min(n,(k+1)*W);i++){ const v=withG?sampleAt(c,i,T):d[i]; e+=v*v; } }
+    return Math.max(FL,10*Math.log10(e/(W*horn.numberOfChannels)+1e-12)); };
+  const y=db=>bot-(db-FL)/(-FL)*(bot-top);
+  for (const [withG,col] of [[true,'#7cc3ad'],[false,'#6b7787']]){ g.strokeStyle=col; g.lineWidth=1.5*dpr; g.beginPath();
+    for (let k=0;k*W<n;k++){ const x=k*W/n*w; k?g.lineTo(x,y(lev(k,withG))):g.moveTo(x,y(lev(k,withG))); } g.stroke(); }
+  g.fillStyle='rgba(233,196,143,.8)'; g.fillRect(P.st()/T*w,top,1*dpr,bot-top);
+  g.fillStyle='rgba(255,255,255,.55)'; g.font=`${11*dpr}px Alegreya Sans`;
+  for (let s=1;s<T;s++){ const x=s/T*w; g.fillRect(x,bot,1,h*0.05); g.fillText(s+' s',x+3,h*0.97); }
+  for (const db of [-20,-40,-60]){ g.fillText(db+' dB',4*dpr,y(db)-3*dpr); g.fillRect(0,y(db),w,0.5*dpr); } }
+
+for (const id of ['st','rp','tg','fo','lp']) $(id).addEventListener('input',()=>{ labels(); draw(); });
+$('play').addEventListener('click',()=>play(render(ctx)));
+$('orig').addEventListener('click',()=>play(horn));
+$('save').addEventListener('click',()=>{
+  const b=render(ctx), n=b.length, nc=b.numberOfChannels, L=b.getChannelData(0), R=b.getChannelData(nc>1?1:0);
+  let pk=0; for (let i=0;i<n;i++) pk=Math.max(pk,Math.abs(L[i]),Math.abs(R[i])); const k=pk>0.98?0.98/pk:1;
+  const dv=new DataView(new ArrayBuffer(44+n*4)), s=(o,t)=>{ for (let i=0;i<t.length;i++) dv.setUint8(o+i,t.charCodeAt(i)); };
+  s(0,'RIFF'); dv.setUint32(4,36+n*4,true); s(8,'WAVEfmt '); dv.setUint32(16,16,true); dv.setUint16(20,1,true); dv.setUint16(22,2,true);
+  dv.setUint32(24,SR,true); dv.setUint32(28,SR*4,true); dv.setUint16(32,4,true); dv.setUint16(34,16,true); s(36,'data'); dv.setUint32(40,n*4,true);
+  for (let i=0;i<n;i++){ dv.setInt16(44+i*4,Math.max(-1,Math.min(1,L[i]*k))*32767,true); dv.setInt16(46+i*4,Math.max(-1,Math.min(1,R[i]*k))*32767,true); }
+  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([dv],{type:'audio/wav'}));
+  a.download=`ferry-horn-tail-st${P.st().toFixed(2)}-rp${P.rp()}-g${P.tg()}-lp${lpOff()?'off':Math.round(P.lp())}-fo${P.fo()}.wav`; a.click(); });
+
+(async()=>{ labels();
+  ctx=new AudioContext({sampleRate:SR});
+  horn=await ctx.decodeAudioData(await (await fetch('../sounds/ferry-horn.mp3')).arrayBuffer());
+  $('st').value=blastEnd(horn).toFixed(2); labels(); draw();
+  for (const id of ['play','orig','save']) $(id).disabled=false; })();
+addEventListener('resize',draw);
+</script>
+</body>
+</html>

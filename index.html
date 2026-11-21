@@ -128,16 +128,21 @@ kbd{font:500 .76rem/1 var(--font-body);background:var(--plaster);color:var(--ink
 // then turns it into the live view. It is put in place here, while the page is read and before anything is drawn,
 // and is decoded at once (a data: image loads at once, and decoding 'sync' draws no frame without it), so that the
 // first frame of the page already shows it and nothing blinks. goThereFrame matches goFrame in photo/gallery.js.
-function goThereFrame(W,H,a){ const M=Math.round(Math.min(W,H)*0.07), b=6;
-  const iw=Math.min(W-2*M-2*b,(H-2*M-2*b)*a), ih=iw/a, w=iw+2*b, h=ih+2*b; return {left:(W-w)/2,top:(H-h)/2,width:w,height:h}; }
-(()=>{ let g=null; try{ g=JSON.parse(sessionStorage.getItem('coast.goThere')||'null'); sessionStorage.removeItem('coast.goThere'); }catch(_){ return; }
-  if (!g || typeof g.src!=='string' || Date.now()-g.t>60000 || !new URLSearchParams(location.search).has('s')) return;
-  const im=new Image(); im.alt=''; im.decoding='sync'; im.src=g.src;
-  const G=window.__goThere={im,fov:+g.fov||0,aspect:+g.aspect||0};
+// A band of 96 px below the picture is left for the progress of the world being built, which is put there (seeding)
+function goThereFrame(W,H,a){ const M=Math.round(Math.min(W,H)*0.07), b=6, Hp=H-96;
+  const iw=Math.min(W-2*M-2*b,(Hp-2*M-2*b)*a), ih=iw/a, w=iw+2*b, h=ih+2*b; return {left:(W-w)/2,top:(Hp-h)/2,width:w,height:h}; }
+// goThereShow puts the picture (a data: or blob: address) in its mount, and is used as well by Go there within the page
+function goThereShow(src,fov,aspect){
+  const im=new Image(); im.alt=''; im.decoding='sync'; im.src=src;
+  const G=window.__goThere={im,fov:+fov||0,aspect:+aspect||0};
   const el=document.createElement('div'); el.className='gothere'; el.append(im); document.body.prepend(el); G.el=el;
   const place=()=>{ if (G.zooming) return; const a=G.aspect||im.naturalWidth/Math.max(1,im.naturalHeight)||1, f=goThereFrame(innerWidth,innerHeight,a);
-    for (const k in f) im.style[k]=f[k]+'px'; };
-  place(); addEventListener('resize',place); G.place=place; })();
+    for (const k in f) im.style[k]=f[k]+'px';
+    const s=document.getElementById('seeding'); if (s){ s.style.top=(f.top+f.height+16)+'px'; s.style.bottom='auto'; } };
+  place(); addEventListener('resize',place); G.place=place; return G; }
+(()=>{ let g=null; try{ g=JSON.parse(sessionStorage.getItem('coast.goThere')||'null'); sessionStorage.removeItem('coast.goThere'); }catch(_){ return; }
+  if (!g || typeof g.src!=='string' || Date.now()-g.t>60000 || !new URLSearchParams(location.search).has('s')) return;
+  goThereShow(g.src,g.fov,g.aspect); })();
 </script>
 <div class="vignette"></div>
 <div class="tele" id="tele" aria-hidden="true"><span id="teleMag"></span></div>
@@ -299,7 +304,7 @@ import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.m
 import { Cat, catRimUniforms } from './cat/cat.js';
 // the camera for taking pictures (C): lens, depth of field, exposure, viewfinder and gallery; its API is window.__village.photo
 import { createPhoto } from './photo/camera.js';
-import { pickPictures } from './photo/artgallery.js';
+import { pickPictures, pictureGlow } from './photo/artgallery.js';
 import { createPeople } from './people/people.js';
 
 /* ================= random & noise ================= */
@@ -3058,14 +3063,21 @@ function gallerySites(cx,cz){
   const xc=cx*C+C/2, zc=cz*C+C/2, al=alleyInfo(cx,cz), circles=lightsNear(xc,zc,C*0.71+11).map(L=>({x:L.x,z:L.z,r:L.foot})), a0=hash(cx,cz,9102)*Math.PI*2;
   for (const [W,L] of GAL_SIZES) for (let i=0;i<24;i++){ const ob=galleryOb(P,a0+i/24*Math.PI*2,W,L);
     if (sp && ob.dx*sp.dx+ob.dz*sp.dz>0.4) continue;
+    if (sp && sp.church && sp.church.some(f=>obbOverlap(ob,f,0.1))) continue;
     if (blockSiteOk(cx,cz,ob,al,circles,null,heightAt,6,0.9)) out.push(ob); }
   return out; }
 // the square on which the player is first put (spawnPlayer) always has its town's gallery, whatever the town's size,
-// unless none will fit beside it; galSpawn is that square's block and the way the player faces from it
+// unless none will fit beside it; galSpawn is that square's block and the way the player faces from it, and, where the
+// square is its town's church square, the church and its tower, which are built before the gallery is tried
 let galSpawn=null;
 // the block of that square was built while the start was being chosen (spawnBlock), before it was known to hold the
 // gallery: it is built again
-function setGalSpawn(g){ galSpawn=g; const ch=chunks.get(key(g.cx,g.cz)); if (ch) ch.redo=true; }
+// whether the gallery would fit beside the square of block g.cx,g.cz were the player put there, facing g.dx,g.dz
+function galleryFitsAt(g){ const ch=spawnBlock(g.cx,g.cz), prev=galSpawn, k=g.cx*1048576+g.cz+0.5;
+  galSpawn={...g,church:ch.churchFoot}; galSites.delete(k);
+  try{ return gallerySites(g.cx,g.cz).length>0; } finally { galSites.delete(k); galSpawn=prev; } }
+function setGalSpawn(g){ const ch=chunks.get(key(g.cx,g.cz)); if (ch){ ch.redo=true; if (ch.churchFoot) g.church=ch.churchFoot; }
+  galSpawn=g; galSites.forEach((v,k)=>{ if (k%1) galSites.delete(k); }); }
 function isGalleryBlock(cx,cz){ const V=villageOf(cx,cz); if (!V || V.pending) return false;
   if (galSpawn && villageOf(galSpawn.cx,galSpawn.cz)===V && gallerySites(galSpawn.cx,galSpawn.cz).length) return cx===galSpawn.cx && cz===galSpawn.cz;
   return galleryBlock(V)===cx*1048576+cz; }
@@ -4996,7 +5008,7 @@ function genChunk(cx,cz,lod=0){
           // the round head of the window: lit like the window, and a little thinner so that its face stays behind the
           // window's own and the two never share a plane
           gb.add(T.cylC, mm(H,mat(s*(W/2+0.01),h-1.4,z,0.6,0.1,0.6,Math.PI/2,Math.PI/2)), C_.win, null, 5); }
-        ch.obbs.push({x:cxp,z:czp,hw:W/2,hd:L/2,rot,top:Infinity,room:CR||undefined}); ch.place.push(ob); ch.churchOb=ob;
+        ch.obbs.push({x:cxp,z:czp,hw:W/2,hd:L/2,rot,top:Infinity,room:CR||undefined}); ch.place.push(ob); ch.churchOb=ob; ch.churchFoot=tower?[ob,tower]:[ob];
         if (!CR) ch.circles.push({x:cxp+dx*(L/2),z:czp+dz*(L/2),r:W*0.35,top:Infinity});   // the apse, behind the altar end
         if (tower){ const th=17+R()*6, top=R(); (ch.snd||(ch.snd=[])).push({id:'church_bell',x:tower.x,y:heightAt(tower.x,tower.z)+th-2,z:tower.z});
           house({x:tower.x,z:tower.z,rot,w:S,d:S,h:th,wall:shade(C_.stone,R,0.04),stoneWalls:true,roof:'spire',crenel:false,flag:false,
@@ -7559,7 +7571,7 @@ window.__chunkProbe=()=>{
     for (const k of probeSeen.keys()) if (!chunks.has(k)) probeSeen.delete(k);
   } finally { COVE_FAST--; }
   return r; };
-function resetWorld(){ chunkState=''; farCache.clear(); hgTiles.clear(); clearXMemos(); spCache.clear(); lhCache.clear(); hbCache.clear(); rxCache.clear(); farOrigin=''; for (const T of tiles.values()) disposeTile(T); tiles.clear(); tilesDirty.clear(); tilesUrgent.clear(); for (const ch of chunks.values()) disposeChunk(ch); chunks.clear(); chunkVer++; cats.states.clear(); cats.near=[]; for (const k of cats.list){ if (k.s) k.s.inst=null; k.s=null; } for (const ch of dying) disposeChunk(ch); dying.length=0; pkCache.clear(); pzCache.clear(); alCache.clear(); hbCache.clear(); vgCache.clear(); vmCache.clear(); ckCache.clear(); ryCache.clear(); rzCache.clear(); rrCache.clear(); rsCache.clear(); stCache.clear(); rxCache.clear(); lhCache.clear(); rkCache.clear(); ruCache.clear(); cvCache.clear(); icvCache.clear(); cvSlots.clear(); cvMemoN=NaN; cvMemoL=[];
+function resetWorld(){ chunkState=''; galSites.clear(); galSpawn=null; farCache.clear(); hgTiles.clear(); clearXMemos(); spCache.clear(); lhCache.clear(); hbCache.clear(); rxCache.clear(); farOrigin=''; for (const T of tiles.values()) disposeTile(T); tiles.clear(); tilesDirty.clear(); tilesUrgent.clear(); for (const ch of chunks.values()) disposeChunk(ch); chunks.clear(); chunkVer++; cats.states.clear(); cats.near=[]; for (const k of cats.list){ if (k.s) k.s.inst=null; k.s=null; } for (const ch of dying) disposeChunk(ch); dying.length=0; pkCache.clear(); pzCache.clear(); alCache.clear(); hbCache.clear(); vgCache.clear(); vmCache.clear(); ckCache.clear(); ryCache.clear(); rzCache.clear(); rrCache.clear(); rsCache.clear(); stCache.clear(); rxCache.clear(); lhCache.clear(); rkCache.clear(); ruCache.clear(); cvCache.clear(); icvCache.clear(); cvSlots.clear(); cvMemoN=NaN; cvMemoL=[];
   // the goods lines, the offshore islands, the ferry ports and the ferries' routes all belong to the old island
   brZones.clear(); brBucket.clear(); isCache.clear(); fpCache.clear(); irCache.clear(); hgCache.clear(); sgCache.clear(); mtxCache.clear();
   goods.R=null; goods.check=0; for (const c of goods.cars) c.m.visible=false;
@@ -11903,23 +11915,26 @@ function shoreInView(x0,z0,y0,x1,z1,y1){
 let spawnInfo=null;   // the start chosen and its walk to the shore, for tests
 function spawnPlayer(){
   const sq=spawnSquares(), t0=performance.now();
-  // the first square with a direct walk to the shore and that shore in view (looking no more than five squares beyond
-  // the first with the walk); failing that, the first with the walk
-  let first=null;
-  for (let t=0;t<Math.min(sq.length,first?first.t+6:14);t++){ const S=sq[t], W=shoreWalk(S.x,S.z,S.y,1);
+  // the first square with a direct walk to the shore, that shore in view and room beside it for the town's gallery
+  // (looking no more than five squares beyond the first with the walk); failing that, the first with the walk and the
+  // gallery, then the first with the walk and the view, then the first with the walk
+  const cands=[]; let lim=14;
+  for (let t=0;t<Math.min(sq.length,lim);t++){ const S=sq[t], W=shoreWalk(S.x,S.z,S.y,1);
     if (!W) continue;
     const D=Math.hypot(W.x-S.x,W.z-S.z);
     if (W.L>SPAWN_DETOUR*D) continue;
     // the sea in view: at least three of eleven sight lines fanned 25 degrees either side of the way faced
     let seen=0; const a0=Math.atan2(W.x-S.x,W.z-S.z), R0=D+SPAWN_SEA;
     for (let k=-5;k<=5 && seen<3;k++){ const a=a0+k*5*Math.PI/180; if (shoreInView(S.x,S.z,S.y,S.x+Math.sin(a)*R0,S.z+Math.cos(a)*R0,0)) seen++; }
-    const C1={S,W,D,t,view:seen>=3};
-    if (!first) first=C1;
-    if (C1.view){ first=C1; break; } }
-  if (first){ const {S,W,D,t,view}=first;
+    const C1={S,W,D,t,view:seen>=3,gal:galleryFitsAt({cx:S.cx,cz:S.cz,dx:(W.x-S.x)/(D||1),dz:(W.z-S.z)/(D||1)})};
+    if (!cands.length) lim=t+6;
+    cands.push(C1);
+    if (C1.view && C1.gal) break; }
+  const first=cands.find(c=>c.view&&c.gal)||cands.find(c=>c.gal)||cands.find(c=>c.view)||cands[0];
+  if (first){ const {S,W,D,t,view,gal}=first;
     player.x=S.x; player.z=S.z; player.y=S.y; yaw=Math.atan2(-(W.x-S.x),-(W.z-S.z)); fpPitch=-0.1;
     setGalSpawn({cx:S.cx,cz:S.cz,dx:(W.x-S.x)/(D||1),dz:(W.z-S.z)/(D||1)});
-    spawnInfo={...S,tried:t+1,walk:W,ratio:W.L/D,view,ms:performance.now()-t0}; return; }
+    spawnInfo={...S,tried:t+1,walk:W,ratio:W.L/D,view,gal,ms:performance.now()-t0}; return; }
   spawnInfo={fallback:true,squares:sq.length,ms:performance.now()-t0};
   if (sq.length){ const S=sq[0]; player.x=S.x; player.z=S.z; player.y=S.y; yaw=0; fpPitch=-0.1; setGalSpawn({cx:S.cx,cz:S.cz,dx:0,dz:-1}); return; }
   for (let r=0;r<10;r++) for (const i of (r?[-r,r]:[0])){
@@ -12403,7 +12418,7 @@ function buildGallery(C){
   // the pictures: up to two on the back wall, and the rest shared between the side walls, up to three on each, the
   // right-hand wall taking the odd one; each wall's pictures are spaced evenly along it, so that one alone hangs in
   // the middle
-  C.pics=[]; C.texs=[]; const pics=galleryPictures().slice(0,8), lights=[], slots=[];
+  C.pics=[]; C.glows=[]; C.texs=[]; const pics=galleryPictures().slice(0,8), lights=[], slots=[];
   { const n=pics.length, nb=Math.min(2,n), nr=Math.min(3,Math.ceil((n-nb)/2)), nl=Math.min(3,n-nb-nr);
     for (let i=0;i<nb;i++) slots.push({x:-iw+2*iw*(i+0.5)/nb,z:zb,ry:0,wmax:Math.min(2.1,2*iw/nb-0.5)});
     for (let i=0;i<Math.max(nr,nl);i++) for (const [sx,k] of [[1,nr],[-1,nl]]) if (i<k)
@@ -12423,6 +12438,8 @@ function buildGallery(C){
     const pm=new THREE.Mesh(new THREE.PlaneGeometry(pw,ph),new THREE.MeshBasicMaterial({map:tex,color:new THREE.Color(0.92,0.92,0.92)}));
     const Mw=P(0,0,0.0135); Mw.decompose(pm.position,pm.quaternion,pm.scale); pm.position.x-=C.x; pm.position.z-=C.z; pm.position.y+=0;
     pm.userData.picture=pic.item; pm.userData.size=[pw,ph]; C.pics.push(pm);
+    // a picture that can be gone to glows faintly round its frame
+    if (pic.glow){ const gl=pictureGlow(ow,oh); P(0,0,0.002).decompose(gl.position,gl.quaternion,gl.scale); gl.position.x-=C.x; gl.position.z-=C.z; C.glows.push(gl); }
     lights.push([S,y0+ly]); });
   // the gallery's light: the doorway, the skylights and the picture lights
   C.lights=[]; const yl=-1, yh=h+rise+2;
@@ -12431,7 +12448,7 @@ function buildGallery(C){
   for (const [S,y] of lights){ const n=S.ry===0?[0,0,1]:[Math.sign(-S.x),0,0]; roomLightAt(C,2,S.x+n[0]*0.35,y,S.z+n[2]*0.35,null,2.2,yl,yh,0.75); }
   if (!C.furn){ C.furn=true; const [wx,wz]=localToWorld(C,0,-0.3); C.walls.push({x:wx,z:wz,hw:0.3,hd:1.35,rot:C.rot,top:C.base+F+0.48}); }
   const mesh=new THREE.Mesh(gb.geometry(C.x,C.z),makeRoomMaterial(false));
-  for (const pm of C.pics) mesh.add(pm);
+  for (const pm of [...C.pics,...C.glows]) mesh.add(pm);
   mesh.add(C.glass);
   return mesh;
 }
@@ -12614,7 +12631,7 @@ async function startAudio(){
   try{
     const ctx=audioCtx=new (window.AudioContext||window.webkitAudioContext)();
     const lim=ctx.createDynamicsCompressor(); lim.threshold.value=-6; lim.ratio.value=12; lim.connect(ctx.destination);
-    SND.master=ctx.createGain(); SND.master.gain.value=muted?0:1; SND.master.connect(lim);
+    SND.master=ctx.createGain(); SND.master.gain.value=muted||SND.goHold?0:1; SND.master.connect(lim); soundFade();
     // one bus per group, each behind a low-pass filter: the world outside, the train, the ferry, the player, and the
     // footsteps and the camera's shutter (held), which alone are heard while the world is paused
     for (const g of ['world','train','ferry','player','held']){ const f=ctx.createBiquadFilter(); f.type='lowpass'; f.frequency.value=20000; f.Q.value=0.5; f.connect(SND.master);
@@ -12629,6 +12646,19 @@ async function startAudio(){
 }
 function setMuted(m){ muted=m; try{ localStorage.setItem('borgo-mute',m?'1':'0'); }catch(_){} if (SND.master) SND.master.gain.setTargetAtTime(m||SND.hushed?0:1,audioCtx.currentTime,0.08); }
 addEventListener('pointerdown',startAudio); addEventListener('keydown',startAudio);
+// arriving by Go there, the sound is begun at once and held silent while the world is built, then faded in over the
+// reveal (soundFadeIn). The browser allows this because the player clicked on the page that came before; where it does
+// not, the context waits, suspended, for the first key or click, and the fade plays out from then
+SND.goHold=!!window.__goThere; if (SND.goHold) startAudio();
+function soundFadeOut(dur){ SND.goHold=true; const M=SND.master; if (!M) return; const g=M.gain, ct=audioCtx.currentTime;
+  g.cancelScheduledValues(ct); g.setValueAtTime(g.value,ct); g.linearRampToValueAtTime(0,ct+dur/1000); }
+function soundFadeIn(delay,dur){ SND.goHold=false; SND.fadeT0=performance.now()+delay; SND.fadeT1=SND.fadeT0+dur; soundFade(); }
+function soundFade(){ const M=SND.master; if (!M || !SND.fadeT1 || SND.goHold) return;
+  // the gallery's hush is taken as it is now, so that sndUpdate, seeing it unchanged, does not override the fade
+  { const G=PHOTO.api.studio; SND.hushed=!!(G && (G.isOpen || G.artOpen)); }
+  const g=M.gain, ct=audioCtx.currentTime, now=performance.now(), v=muted||SND.hushed?0:1, k=clamp((now-SND.fadeT0)/(SND.fadeT1-SND.fadeT0),0,1);
+  g.cancelScheduledValues(ct); if (k>=1){ g.setValueAtTime(v,ct); return; }
+  g.setValueAtTime(k*v,ct+Math.max(0,(SND.fadeT0-now)/1000)); g.linearRampToValueAtTime(v,ct+(SND.fadeT1-now)/1000); }
 
 const _sl=new THREE.Vector3(), _sf=new THREE.Vector3(), _sp=new THREE.Vector3();
 const SPEED_OF_SOUND=343;
@@ -12661,25 +12691,16 @@ function sndVoice(v,dt,level,x,y,z,rate=1,occl=0){
     // no point keeping a sound running that is far beyond hearing
     if ((def.ref||5)/Math.max(d,1)*gain<0.0005) gain=0; }
   if (occl>0){ gain*=1-0.75*occl; cut=Math.min(cut,lerp(20000,500,occl)); }
-  sndParam(v.g.gain,gain,0.1); sndParam(v.lp.frequency,cut,0.1); sndParam(v.src.playbackRate,rate,0.08); sndParam(v.send.gain,SND.send[grp]*(gain>0?1:0),0.1);
+  sndParam(v.g.gain,gain,v.gtc||0.1); sndParam(v.lp.frequency,cut,0.1); sndParam(v.src.playbackRate,rate,0.08); sndParam(v.send.gain,SND.send[grp]*(gain>0?1:0),0.1);
 }
 // a one-off sound, positioned at (x,y,z) unless pos is null; vel gives the source's velocity for its Doppler shift
-/* the ferry's horn, and its echoes from the hills: from the ship, twelve bearings are searched outwards in 40 m steps,
-   to 2.5 km, for the first ground standing more than 25 m above the sea. The three nearest such slopes each send the
-   horn back, fainter and duller, from where they stand, after the time the sound takes to go out to them and back to
-   the listener beyond the time it takes to come straight; the nearer a slope, the louder its echo */
-// the horn carries some way, but not across the island: it fades from 250 m and is not heard beyond 600 m, and its
-// echoes are heard only with it
+// the ferry's horn, its echo from the hills the recording's own, raised after the blast (testbench/horn-echoes.html); it carries some
+// way, but not across the island: it fades from 250 m and is not heard beyond 600 m
 function hornWithEchoes(pos,opts={}){
   if (!SND.ready) return;
-  const [fx,fy,fz]=pos, L=_sl, d0=Math.hypot(fx-L.x,fy-L.y,fz-L.z), hits=[], far=clamp(1-(d0-250)/350,0,1);
+  const [fx,fy,fz]=pos, L=_sl, d0=Math.hypot(fx-L.x,fy-L.y,fz-L.z), far=clamp(1-(d0-250)/350,0,1);
   if (far<=0) return;
   sndPlay('ferry_horn','ferry',pos,{...opts,gain:(opts.gain??1)*far});
-  for (let k=0;k<12;k++){ const a=k*Math.PI/6, cx=Math.cos(a), cz=Math.sin(a);
-    for (let r=80;r<=2500;r+=40){ const x=fx+cx*r, z=fz+cz*r, h=heightAt(x,z);
-      if (h>25){ const y=h*0.6, d1=Math.hypot(x-fx,y-fy,z-fz), d2=Math.hypot(x-L.x,y-L.y,z-L.z); hits.push({x,y,z,d1,path:d1+d2}); break; } } }
-  hits.sort((p,q)=>p.path-q.path);
-  for (const e of hits.slice(0,3)) sndPlay('ferry_horn','ferry',[e.x,e.y,e.z],{gain:clamp(320/(e.d1+120),0.08,0.55)*far,delay:Math.max(0.15,(e.path-d0)/SPEED_OF_SOUND),occl:0.4,rate:0.99});
 }
 function sndPlay(id,group,pos,{gain=1,rate=1,vel=null,delay=0,occl=0}={}){
   if (!SND.ready) return; SND.asked[id]=(SND.asked[id]||0)+1; const buf=sndBuf(id); if (!buf) return;
@@ -12840,8 +12861,10 @@ function sndUpdate(dt){
   else if (inCoach){ fx=co.lx; fz=co.lz; }
   let spd=0; if (fx!==null && SNDS.prevX!==null && dt>0){ const dd=Math.hypot(fx-SNDS.prevX,fz-SNDS.prevZ); if (dd<3) spd=dd/dt; }
   SNDS.prevX=fx; SNDS.prevZ=fz; SNDS.spd=(SNDS.spd??0)+(spd-(SNDS.spd??0))*(1-Math.exp(-dt*8));
-  const walking=ground && SNDS.spd>0.6, run=keys.ShiftLeft||keys.ShiftRight, stepId=surf==='sand'?'sand':surf==='pavement'?'pavement':'soil';
-  for (const k of ['pavement','sand','soil']) sndVoice(sv('step_'+k,'step_'+k,'held',false),dt,easeTo('step_'+k,walking&&k===stepId?quiet*(run?1.2:1):0,dt,10),0,0,0,run?1.3:1);
+  // the player stops dead when the keys are let go, and the footsteps stop with them, at once rather than fading
+  const halt=spd<0.3, walking=ground && SNDS.spd>0.6 && !halt, run=keys.ShiftLeft||keys.ShiftRight, stepId=surf==='sand'?'sand':surf==='pavement'?'pavement':'soil';
+  for (const k of ['pavement','sand','soil']){ const id='step_'+k, v=sv(id,id,'held',false); if (halt) ambLevel[id]=0; if (v) v.gtc=halt?0.01:0.1;
+    sndVoice(v,dt,easeTo(id,walking&&k===stepId?quiet*(run?1.2:1):0,dt,10),0,0,0,run?1.3:1); }
   if (player.grounded && !SNDS.grounded && SNDS.vy<-4 && fx===player.x) sndPlay('land','player',null,{gain:quiet*clamp(-SNDS.vy/8,0.5,1.4)});
   SNDS.grounded=player.grounded; SNDS.vy=player.vy;
 
@@ -14306,33 +14329,56 @@ async function sceneLinkOf(o){
   const j=JSON.stringify(o), z=new Blob([j]).stream().pipeThrough(new CompressionStream('deflate-raw'));
   const u=new Uint8Array(await new Response(z).arrayBuffer()); let b=''; for (const c of u) b+=String.fromCharCode(c);
   return location.href.split(/[?#]/)[0]+'?s='+btoa(b).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); }
-/* Go there in the gallery: the scene a picture was taken in is opened by its link, without the camera, which is left
-   lowered whether or not it was raised for the picture or when the gallery was opened. The gallery has by then grown
-   the picture to fill the screen; it is handed to the page that follows in the session's storage (coast.goThere) as a
-   JPEG no larger than the screen, with the vertical field of view and the shape of its frame, and is shown there at
-   once, until goThereReveal turns it into the live view. pic is { canvas, fov, aspect, ready }; the promise resolves
-   false when the place could not be opened. */
+/* Go there in the gallery: the player is taken to the scene a picture was taken in without leaving the page, so that
+   the sound, which a browser such as Safari will not start again on a new page until a key is pressed, carries on.
+   The camera is lowered whether or not it was raised for the picture or when the gallery was opened. The gallery has
+   by then grown the picture to its mount (pic.ready); the same picture is put in the same place over the game
+   (goThereShow), the gallery is closed behind it, and the world is built round the place while the picture stays
+   on the screen and the sound fades out; goThereReveal then turns the picture into the live view as the sound fades
+   in again. pic is { canvas, fov, aspect, ready }. The promise resolves 'here' once the picture is over the game, for
+   the gallery to close itself, or false when the place could not be gone to. */
 async function goThere(o,pic){
+  if (seeding) return false;
   try{
     const sc={...o}; delete sc.c;
-    const link=sceneLinkOf(sc);
-    // a painting, being full of detail, makes a far larger JPEG than a photograph: should it not fit in the session's
-    // storage it is kept again smaller and more compressed
-    if (pic && pic.canvas){ const c=pic.canvas, k0=Math.min(1,Math.min(2560,Math.max(innerWidth,innerHeight)*Math.min(2,devicePixelRatio||1))/Math.max(c.width,c.height));
-      for (const [f,q] of [[1,0.88],[0.75,0.8],[0.5,0.75],[0.35,0.7]]) try{
-        const k=k0*f, t=document.createElement('canvas'); t.width=Math.max(1,Math.round(c.width*k)); t.height=Math.max(1,Math.round(c.height*k));
-        t.getContext('2d').drawImage(c,0,0,t.width,t.height);
-        sessionStorage.setItem('coast.goThere',JSON.stringify({t:Date.now(),src:t.toDataURL('image/jpeg',q),fov:pic.fov||0,aspect:pic.aspect||c.width/c.height}));
-        break; }catch(err){ /* too large: tried again smaller; failing that, the place is opened without its picture */ } }
-    const u=await link; if (pic && pic.ready) await pic.ready.catch(()=>{});
-    location.assign(u); return true;
-  }catch(err){ console.warn('The place could not be returned to:',err); try{ sessionStorage.removeItem('coast.goThere'); }catch(_){} return false; }
+    if (pic && pic.ready) await pic.ready.catch(()=>{});
+    if (pic && pic.canvas){ const c=pic.canvas, G=goThereShow(c.toDataURL('image/jpeg',0.9),pic.fov,pic.aspect||c.width/c.height);
+      try{ await G.im.decode(); }catch(_){} }
+    goThereBuild(sc);
+    return 'here';
+  }catch(err){ console.warn('The place could not be gone to:',err); if (window.__goThere){ window.__goThere.el.remove(); window.__goThere=null; } return false; }
+}
+async function goThereBuild(o){
+  seeding=true; soundFadeOut(600);
+  try{
+    const W='Travelling back…', show=k=>seedShow(k,W,false);
+    show(0.03); if (window.__goThere) window.__goThere.place(); await nextPaint();
+    for (const k in keys) keys[k]=false;
+    if (document.pointerLockElement) document.exitPointerLock();
+    if (PHOTO.on) PHOTO.api.exit();
+    // off any boat, train or ferry, out of the water and the bird's-eye view, as on arriving at a place
+    leaveModes(); uwReturn=null; sit=null; crouch=false; mode='street';
+    camera.fov=FOV; camera.near=0.1; camera.far=3600; camera.updateProjectionMatrix(); glowScale();
+    const sd=typeof o.s==='string' && o.s.trim() ? seedText(o.s) : SEED_TEXT;
+    if (sd!==SEED_TEXT){ SEED_TEXT=sd; SEED=seedNumber(sd); PEOPLE.reset(); resetWorld(); spawnPlayer(); }
+    try{ history.replaceState(history.state,'',await sceneLinkOf(o)); }catch(_){}
+    scenePlace(o); eyeY=null; lastCell=null;
+    let total=0;
+    for (;;){ updateChunks(player.x,player.z,40,true); total=Math.max(total,queue.length+1);
+      if (!queue.length) break;
+      show(0.03+0.85*(1-queue.length/total)); await nextPaint(); }
+    show(0.9); await nextPaint(); updateTiles(1e9); rebuildFar(player.x,player.z); farDirty=true;
+    show(1); await nextPaint();
+    try{ sceneRestore(o); }catch(err){ console.warn('The scene could not be restored:',err); }
+    await nextPaint();
+  } finally { seeding=false; last=performance.now(); seedEl.hidden=true; goThereReveal(); }
 }
 // once the world is on the screen, the picture left by Go there becomes the live view: it grows out of its mount until
 // it fills the screen, then settles to the size at which it lies over the view (its own field of view against the
 // game's) while its edges soften into the world behind it and what remains of it fades
 function goThereReveal(){
-  const G=window.__goThere; if (!G || !G.el) return; window.__goThere=null; G.zooming=true; removeEventListener('resize',G.place);
+  seedEl.style.top=seedEl.style.bottom='';
+  const G=window.__goThere; if (!G || !G.el){ if (SND.goHold) soundFadeIn(0,1500); return; } window.__goThere=null; G.zooming=true; removeEventListener('resize',G.place);
   const {el,im}=G, W=innerWidth, H=innerHeight, a=G.aspect||(im.naturalWidth/Math.max(1,im.naturalHeight))||W/H;
   const f=goThereFrame(W,H,a);
   // the picture's height on the screen, covering it, and lying over the view
@@ -14342,6 +14388,7 @@ function goThereReveal(){
   const centred=h=>box((W-h*a)/2,(H-h)/2,h*a,h);
   im.style.webkitMaskComposite='source-in'; im.style.maskComposite='intersect';
   const PAUSE=250, ZOOM=1200, GAP=150, DUR=3000, t0=performance.now()+PAUSE, t1=t0+ZOOM+GAP;
+  soundFadeIn(PAUSE,ZOOM+GAP+DUR);   // the sound fades in as the picture opens into the world
   const step=now=>{
     if (now<t1){
       // out of the mount: the frame grows to cover the screen as the white border and its shadow go
@@ -16266,7 +16313,7 @@ if (new URLSearchParams(location.search).has('perf')){
 requestAnimationFrame(()=>setTimeout(async ()=>{
   // arriving by Go there, the bar says where the player is going rather than what is being done
   const GO=!!window.__goThere, W=GO?'Travelling back…':'Building the world:', show=(k,w)=>seedShow(k,w,!GO), ld=document.getElementById('loading'); if (ld) ld.remove();
-  show(0.03,W); await nextPaint();
+  show(0.03,W); if (GO && window.__goThere) window.__goThere.place(); await nextPaint();
   spawnPlayer();
   // a shared scene (L) puts the player where it was before the first blocks are built round them
   if (SCENE) try{ scenePlace(SCENE); }catch(err){ console.warn('The shared scene could not be placed:',err); }

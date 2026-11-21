@@ -16,7 +16,9 @@
      pictures   each picture's mesh (for a ray from the pointer), with the item it shows
      walls      the walls as boxes in the building's frame, { x, z, hw, hd }, for whoever keeps a walker out of them
    pickPictures(set, pictures): the pictures a gallery shows: the paintings, newest first, or the photographs where
-   there are no paintings; set is the gallery's list of photos ({ canvas, time, works: [{ canvas, time }] }).
+   there are no paintings; set is the gallery's list of photos ({ canvas, time, works: [{ canvas, time }] }). Each is
+   marked glow where it records the scene it was taken in, so that it can be gone to.
+   pictureGlow(ow, oh): a faint warm glow round a frame ow by oh, on the wall behind it, for a picture marked glow.
 */
 import * as THREE from 'three';
 
@@ -26,12 +28,28 @@ export const GALLERY_SLOTS = 8;
 const LIME = 0xfbfaf7, LIME_IN = 0xfbfaf7, SKIRT = 0xfbfaf7, BLUE = 0x24578f, OAK = 0x8a6a45, STONE = 0xd9cdb6;
 
 // the paintings, newest first, or the photographs where there are none
+const hasScene = (p, w) => !!((w && w.meta && w.meta.scene) || (p.meta && p.meta.scene));
 export function pickPictures(photos) {
   const works = [];
-  for (const p of photos) for (const w of p.works || []) works.push({ image: w.canvas, painting: true, time: w.time || p.time, item: { p, w } });
+  for (const p of photos) for (const w of p.works || []) works.push({ image: w.canvas, painting: true, time: w.time || p.time, glow: hasScene(p, w), item: { p, w } });
   if (works.length) return works.sort((a, b) => b.time - a.time).slice(0, GALLERY_SLOTS);
-  return photos.map(p => ({ image: p.canvas, painting: false, time: p.time, item: { p, w: null } }))
+  return photos.map(p => ({ image: p.canvas, painting: false, time: p.time, glow: hasScene(p, null), item: { p, w: null } }))
     .sort((a, b) => b.time - a.time).slice(0, GALLERY_SLOTS);
+}
+
+// the glow round a frame ow by oh: a plane GLOW wider on every side, lying just off the wall behind the frame, whose
+// light is added to the wall's and falls away from the frame's edge to nothing at GLOW
+const GLOW = 0.22, GLOW_K = 0.09;
+export function pictureGlow(ow, oh) {
+  const W = ow + 2 * GLOW, H = oh + 2 * GLOW;
+  const mat = new THREE.ShaderMaterial({
+    uniforms: { uSize: { value: new THREE.Vector2(W, H) }, uHalf: { value: new THREE.Vector2(ow / 2, oh / 2) } },
+    vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    fragmentShader: `uniform vec2 uSize, uHalf; varying vec2 vUv;
+      void main(){ vec2 p = (vUv - 0.5) * uSize; float d = length(max(abs(p) - uHalf, 0.0)), a = 1.0 - smoothstep(0.0, ${GLOW.toFixed(3)}, d);
+        gl_FragColor = vec4(vec3(1.0, 0.9, 0.72) * a * a * ${GLOW_K.toFixed(3)}, 1.0); }`,
+    transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4 });
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(W, H), mat); m.renderOrder = 1; return m;
 }
 
 // a wall in the x-y plane, t thick (towards -z from z=0), rising to a gable of height g in the middle, with holes:
@@ -229,6 +247,7 @@ export function buildArtGallery(pictures = [], opts = {}) {
     const back = new THREE.Mesh(new THREE.BoxGeometry(ow, oh, 0.01), black); back.position.z = 0.006; g.add(back);
     const pm = new THREE.Mesh(new THREE.PlaneGeometry(pw, ph), new THREE.MeshStandardMaterial({ map: tex, roughness: pic.painting ? 0.85 : 0.35 }));
     pm.position.z = 0.016; pm.userData.picture = pic.item; g.add(pm);
+    if (pic.glow) { const gl = pictureGlow(ow, oh); gl.position.z = 0.002; g.add(gl); }
     // a picture light on the wall above the frame: a short arm out from a small plate, and a hood over the lamp
     { const ly = oh / 2 + 0.16, brass = new THREE.MeshStandardMaterial({ color: 0x9a7a3c, roughness: 0.35, metalness: 0.7 });
       const plate = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.07, 0.02), brass); plate.position.set(0, ly, 0.01); g.add(plate);
