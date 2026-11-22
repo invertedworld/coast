@@ -6237,133 +6237,8 @@ function orbitalSky(){
   // wall where this falls to 0. It is concave in t, so that it crosses 0 once at most on any stretch where it starts above
   float wallG(float h, vec3 d, float t, float side){
     float e=side*(uCamW.z+t*d.z)-FZ; vec2 P=vec2(t*d.x,h+t*d.y-RR); return RR-length(P)-wallHw(e/WA); }
-  // the ships
-  uniform float uTime, uPx;
-  uniform vec3 uShP[12], uShX[12], uShY[12]; uniform vec4 uShI[12];
-  // the ships are built from tapered boxes: a box from lo to hi whose half-width (z) and half-height (y) narrow towards
-  // its bow (+x) to kz and ky of those at its stern, met by the line of sight from o along d; and drums along x
-  float hull(vec3 o, vec3 d, vec3 lo, vec3 hi, float kz, float ky, inout vec3 n){
-    vec3 c=0.5*(lo+hi), h=0.5*(hi-lo); o-=c;
-    float az=h.z*(1.0-kz)/(2.0*h.x), ay=h.y*(1.0-ky)/(2.0*h.x), tn=-1e9, tf=1e9; vec3 nn=vec3(1.0,0.0,0.0);
-    vec3 N[6]; float C[6];
-    N[0]=vec3(1.0,0.0,0.0); C[0]=h.x; N[1]=vec3(-1.0,0.0,0.0); C[1]=h.x;
-    N[2]=vec3(az,0.0,1.0); C[2]=h.z-az*h.x; N[3]=vec3(az,0.0,-1.0); C[3]=C[2];
-    N[4]=vec3(ay,1.0,0.0); C[4]=h.y-ay*h.x; N[5]=vec3(ay,-1.0,0.0); C[5]=C[4];
-    for (int i=0;i<6;i++){ float dn=dot(N[i],d), ds=C[i]-dot(N[i],o);
-      if (abs(dn)<1e-9){ if (ds<0.0) return 1e9; continue; }
-      float tt=ds/dn; if (dn<0.0){ if (tt>tn){ tn=tt; nn=N[i]; } } else tf=min(tf,tt); }
-    if (tn>tf) return 1e9; n=normalize(nn); return tn; }
-  float box(vec3 o, vec3 d, vec3 lo, vec3 hi, inout vec3 n){ return hull(o,d,lo,hi,1.0,1.0,n); }
-  float cylX(vec3 o, vec3 d, float x0, float x1, float r, inout vec3 n){
-    float a=dot(d.yz,d.yz), tb=1e9; if (a>1e-12){ float tca=-dot(o.yz,d.yz)/a; vec2 p=o.yz+tca*d.yz; float D=r*r-dot(p,p);
-      if (D>=0.0){ float t=tca-sqrt(D/a), x=o.x+t*d.x; if (x>x0 && x<x1){ n=vec3(0.0,(o.yz+t*d.yz)/r); tb=t; } } }
-    if (abs(d.x)>1e-6){ float tc=((d.x>0.0?x0:x1)-o.x)/d.x; vec2 p=o.yz+tc*d.yz; if (dot(p,p)<r*r && tc<tb){ n=vec3(d.x>0.0?-1.0:1.0,0.0,0.0); tb=tc; } }
-    return tb; }
-  // an engine bell at (y, z) across the stern
-  float nozzle(vec3 o, vec3 d, float y, float z, float r, float x0, inout vec3 n){ return cylX(o-vec3(0.0,y,z),d,x0-0.06,x0+0.01,r,n); }
-  #define SHIP_P(u,pp) if (u<t){ t=u; n=m; part=pp; }
-  // one ship, in its own frame (length 1 along x, its bow at +x), the line of sight from o along d: the distance along
-  // it, the normal, and the part met (0 hull, 1 superstructure, 2 engine, 3 and up modules)
-  float shipHit(vec3 o, vec3 d, float ty, inout vec3 n, inout float part){
-    float t=1e9, u; vec3 m;
-    if (ty<0.5){
-      // a capital ship: a long hull drawn to a point at the bow, tiers of superstructure stepping up towards a tower near
-      // the stern, a keel beneath, sponsons at the sides, and five engines
-      u=hull(o,d,vec3(-0.5,-0.05,-0.14),vec3(0.5,0.05,0.14),0.04,0.35,m); SHIP_P(u,0.0)
-      u=hull(o,d,vec3(-0.46,0.05,-0.08),vec3(0.1,0.09,0.08),0.35,0.7,m); SHIP_P(u,1.0)
-      u=hull(o,d,vec3(-0.42,0.09,-0.045),vec3(-0.12,0.125,0.045),0.6,0.8,m); SHIP_P(u,1.0)
-      u=box(o,d,vec3(-0.37,0.125,-0.02),vec3(-0.3,0.17,0.02),m); SHIP_P(u,1.0)
-      u=box(o,d,vec3(-0.35,0.162,-0.06),vec3(-0.325,0.176,0.06),m); SHIP_P(u,1.0)
-      u=hull(o,d,vec3(-0.42,-0.085,-0.03),vec3(0.25,-0.05,0.03),0.2,0.5,m); SHIP_P(u,1.0)
-      u=box(o,d,vec3(-0.38,-0.03,0.11),vec3(-0.1,0.03,0.17),m); SHIP_P(u,3.0)
-      u=box(o,d,vec3(-0.38,-0.03,-0.17),vec3(-0.1,0.03,-0.11),m); SHIP_P(u,4.0)
-      u=nozzle(o,d,0.0,0.0,0.042,-0.5,m); SHIP_P(u,2.0)
-      u=nozzle(o,d,0.0,0.075,0.035,-0.5,m); SHIP_P(u,2.0)
-      u=nozzle(o,d,0.0,-0.075,0.035,-0.5,m); SHIP_P(u,2.0)
-      u=nozzle(o,d,0.0,0.14,0.026,-0.38,m); SHIP_P(u,2.0)
-      u=nozzle(o,d,0.0,-0.14,0.026,-0.38,m); SHIP_P(u,2.0)
-    } else if (ty<1.5){
-      // an ark: a spine carrying blocks of holds and two habitat drums, a command section at the bow and an engine block
-      u=box(o,d,vec3(-0.5,-0.02,-0.02),vec3(0.46,0.02,0.02),m); SHIP_P(u,0.0)
-      u=hull(o,d,vec3(0.3,-0.06,-0.07),vec3(0.5,0.06,0.07),0.3,0.4,m); SHIP_P(u,1.0)
-      for (int i=0;i<5;i++){ float x=i<3?-0.33+float(i)*0.105:0.07+float(i-3)*0.105;
-        u=box(o,d,vec3(x-0.045,-0.075,-0.09),vec3(x+0.045,0.075,0.09),m); SHIP_P(u,3.0+float(i)) }
-      u=cylX(o,d,-0.035,-0.005,0.17,m); SHIP_P(u,1.0)
-      u=cylX(o,d,0.18,0.21,0.14,m); SHIP_P(u,1.0)
-      u=box(o,d,vec3(-0.5,-0.08,-0.08),vec3(-0.41,0.08,0.08),m); SHIP_P(u,0.0)
-      u=nozzle(o,d,0.04,0.04,0.033,-0.5,m); SHIP_P(u,2.0)
-      u=nozzle(o,d,0.04,-0.04,0.033,-0.5,m); SHIP_P(u,2.0)
-      u=nozzle(o,d,-0.04,0.04,0.033,-0.5,m); SHIP_P(u,2.0)
-      u=nozzle(o,d,-0.04,-0.04,0.033,-0.5,m); SHIP_P(u,2.0)
-    } else {
-      // a flying wing: a broad blade swept to a point, a ridge along its back, pods beneath, and a row of engines
-      u=hull(o,d,vec3(-0.5,-0.025,-0.5),vec3(0.5,0.025,0.5),0.02,0.6,m); SHIP_P(u,0.0)
-      u=hull(o,d,vec3(-0.46,0.025,-0.09),vec3(0.3,0.06,0.09),0.1,0.5,m); SHIP_P(u,1.0)
-      u=hull(o,d,vec3(-0.4,0.06,-0.04),vec3(-0.05,0.085,0.04),0.4,0.8,m); SHIP_P(u,1.0)
-      u=box(o,d,vec3(-0.35,-0.05,0.18),vec3(0.0,-0.02,0.26),m); SHIP_P(u,3.0)
-      u=box(o,d,vec3(-0.35,-0.05,-0.26),vec3(0.0,-0.02,-0.18),m); SHIP_P(u,4.0)
-      for (int i=0;i<6;i++){ float z=(float(i/2)*0.12+0.1)*(mod(float(i),2.0)<0.5?1.0:-1.0);
-        u=nozzle(o,d,0.0,z,0.022,-0.5,m); SHIP_P(u,2.0) }
-    }
-    return t; }
-  // the lights of a ship's hull at p (its own frame) on a face with normal n, where a pixel covers px of its length:
-  // thousands of windows in decks, some districts dark; where a pixel covers many of them, cells of the size of a pixel
-  // each show the light of their windows together, a few of them bright, so that the hull glitters without shimmering
-  vec3 shipLights(vec3 p, vec3 n, float px, float sd){
-    vec2 f=abs(n.x)>0.5?p.zy:abs(n.y)>0.5?p.xz:p.xy;
-    float dist=step(0.45,rh(floor(f*vec2(14.0,9.0))+sd))*(0.4+0.6*step(0.5,rh(floor(f*vec2(40.0,26.0))+sd+1.7)));
-    vec2 g=f*vec2(700.0,450.0);
-    float L=floor(max(log2(px*700.0)+0.5,0.0)), sc=exp2(L), on;
-    vec2 c=floor(g/sc); float r=rh(c+vec2(sd*13.1,L*7.7));
-    if (L<0.5){ vec2 q=fract(g); on=step(0.86,r)*step(abs(q.x-0.5),0.3)*step(abs(q.y-0.5),0.2); }
-    else { float k=8.0+L*3.0; on=0.012*(k+1.0)*pow(r,k); }
-    vec3 lc=mix(vec3(1.0,0.7,0.4),vec3(0.75,0.88,1.0),step(0.82,rh(c+3.3)));
-    return lc*on*dist; }
-  // a point of light at q (from the eye), of angular size a0, and how far off the line of sight it stands
-  float halo(vec3 d, vec3 q, float a0){ float te=dot(q,d); if (te<=0.0) return 0.0; float a=length(cross(d,q))/te; return exp(-a*a/(a0*a0)); }
-  // the ships along the line of sight d from the eye at h: the distance to the first met, its colour, how much of the sky
-  // behind it it hides, and the glow of their engines and beacons wherever they stand in the open (added to glow)
-  float spaceHit(vec3 d, float h, float tLim, out vec3 col, out float hide, inout vec3 glow){
-    float tb=1e30; vec3 n, nb, P; float kind=-1.0, sb=0.0, part=0.0, pb=0.0, ty=0.0; vec3 lp=vec3(0.0);
-    float t, fb=1.0; vec3 Xs=vec3(1.0,0.0,0.0), Ys=vec3(0.0,1.0,0.0);
-    for (int i=0;i<12;i++){ vec4 I=uShI[i]; if (I.x<=0.0 || I.w<=0.0) continue; vec3 c=uShP[i]; float tca=dot(c,d);
-      if (tca<=0.0) continue;
-      vec3 X=uShX[i], Y=uShY[i], Z=cross(X,Y); float L=I.x, D=length(c);
-      // the engines burn blue-white, with a faint plume astern; a white light flashes at the bow, red and green ones at
-      // the sides
-      if (D<tLim){ float a0=max(0.0016,0.035*L/D), wz=I.y<0.5?0.15:I.y<1.5?0.17:0.48;
-        vec3 e=c-X*0.52*L; float g=halo(d,e,a0)*1.6;
-        for (int k=1;k<5;k++) g+=halo(d,e-X*L*0.18*float(k),a0*(1.0+0.5*float(k)))*0.28/float(k);
-        glow+=vec3(0.55,0.75,1.0)*g*I.w;
-        float bl=step(0.9,fract(uTime*0.5+I.z));
-        glow+=vec3(1.0)*halo(d,c+X*0.5*L,0.0012)*1.8*bl*I.w;
-        float b2=step(0.5,fract(uTime*0.25+I.z*3.0));
-        glow+=vec3(1.0,0.15,0.1)*halo(d,c+Z*wz*L-X*0.3*L,0.0011)*1.4*b2*I.w+vec3(0.15,1.0,0.3)*halo(d,c-Z*wz*L-X*0.3*L,0.0011)*1.4*b2*I.w; }
-      vec3 pp=c-tca*d; if (dot(pp,pp)>0.56*L*L) continue;
-      vec3 o=-pp/L, o2=vec3(dot(o,X),dot(o,Y),dot(o,Z)), d2=vec3(dot(d,X),dot(d,Y),dot(d,Z)); float pt;
-      float u=shipHit(o2,d2,I.y,n,pt); if (u>1e8) continue; t=tca+u*L;
-      if (t>0.0 && t<tb){ tb=t; nb=n; kind=3.0; pb=pt; lp=o2+u*d2; part=I.z; fb=I.w; sb=tb*uPx/L; ty=I.y; Xs=X; Ys=Y; } }
-    hide=0.0;
-    if (kind<0.0 || tb>=tLim) return -1.0;
-    // the normal back in the ring's frame, for the light of the sun
-    vec3 Zs=cross(Xs,Ys), nw=Xs*nb.x+Ys*nb.y+Zs*nb.z;
-    vec3 Pw=tb*d; vec2 q=vec2(Pw.x,Pw.y-(RR-h)); float z=uCamW.z+Pw.z, vis=sunVis(q,z,uSun), lit=max(dot(nw,uSun),0.0)*vis;
-    // a dark hull of plates of slightly differing tone, with a faint sheen of the sun
-    vec2 f=abs(nb.x)>0.5?lp.zy:abs(nb.y)>0.5?lp.xz:lp.xy;
-    float pl=mix(rh(floor(f*vec2(90.0,60.0))+part),0.5,smoothstep(0.004,0.02,sb));
-    vec3 base=vec3(0.02,0.021,0.024)*(0.7+0.6*pl)*(pb>0.5&&pb<1.5?1.15:1.0);
-    if (pb>2.5) base*=0.85+0.4*rh(vec2(pb,part));
-    float sp=pow(max(dot(reflect(d,nw),uSun),0.0),60.0)*0.04*vis;
-    vec3 em=shipLights(lp,nb,sb,part*97.0)*9.0*(pb>1.5&&pb<2.5?0.0:1.0);
-    // the engine bells glow inside
-    if (pb>1.5 && pb<2.5 && nb.x<-0.5) em=vec3(0.35,0.6,1.0)*3.5*(1.0+0.15*sin(uTime*7.0+part*40.0));
-    col=(base*(vec3(1.0,0.96,0.9)*lit*2.4+vec3(0.03,0.035,0.045))+vec3(1.0,0.95,0.88)*sp+em)*fb;
-    hide=0.5*fb;
-    return tb; }
   `;
-  const uniforms={uRing:{value:ringTex},uTown:{value:townTex},uIsle:{value:isleTex},uCamW:{value:new THREE.Vector3()},uFogF:{value:1500},
-    uTime:{value:0},uPx:{value:0.0013},
-    uShP:{value:Array.from({length:12},()=>new THREE.Vector3())},uShX:{value:Array.from({length:12},()=>new THREE.Vector3(1,0,0))},uShY:{value:Array.from({length:12},()=>new THREE.Vector3(0,1,0))},uShI:{value:Array.from({length:12},()=>new THREE.Vector4())}};
+  const uniforms={uRing:{value:ringTex},uTown:{value:townTex},uIsle:{value:isleTex},uCamW:{value:new THREE.Vector3()},uFogF:{value:1500}};
   // the sky's own shader in Orbital mode: Coast's sky without the moon, its stars turned about the ring's axis, and the ring
   const skyFrag=`uniform vec3 uTop,uMid,uHor,uSun,uSunCol,uMetA,uMetB,uMet; uniform float uNight,uDay,uRot; varying vec3 vDir;
     ${RING_GLSL}
@@ -6397,7 +6272,7 @@ function orbitalSky(){
       bool fl=tf>0.0 && abs(zf)<=FZ+WS;
       // where the line of sight meets the floor between the walls within six tenths of the fog's reach, the floor is
       // wholly hidden by the haze (ringClear is nil there), and so is anything beyond it. Those pixels, mostly under
-      // scenery drawn over the sky, are given the haze at once instead of the walls and ships being sought
+      // scenery drawn over the sky, are given the haze at once instead of the walls being sought
       if (tf>0.0 && tf<uFogF*0.6 && abs(zf)<FZ){ gl_FragColor=vec4(hazeCol(c,uHor,0.0)+add,1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -6414,11 +6289,7 @@ function orbitalSky(){
         float psi=atan(P.x,RR-P.y); vec3 up=vec3(-sin(psi),cos(psi),0.0); surf=ringFloor(uCamW.x+psi*RR,zf,up,d,uSun,t); }
       else if (tw>0.0){ t=tw; vec2 P=vec2(tw*d.x,h+tw*d.y); float psi=atan(P.x,RR-P.y); vec3 up=vec3(-sin(psi),cos(psi),0.0);
         float e=side*(uCamW.z+tw*d.z)-FZ; surf=ringWall(uCamW.x+psi*RR,RR-length(P-vec2(0.0,RR)),side,e/WA,up,d,uSun,t); }
-      // the ships, seen through the air as the moon is by day
-      vec3 oc, glow=vec3(0.0); float hide; float to=spaceHit(d,h,t>0.0?t:1e30,oc,hide,glow);
-      if (to>0.0){ float T=exp(-ringTau(h,d,to)); c=c*(1.0-hide*T)+oc*T; add=vec3(0.0); }
-      else if (t>0.0){ float T=t==tw?wallClear(h,d,t):ringClear(h,d,t); c=mix(hazeCol(c,uHor,T),surf,T); add*=1.0-smoothstep(0.0,0.02,T); if (t==tw) add*=0.0; }
-      add+=glow*exp(-ringTau(h,d,4e6));
+      if (t>0.0){ float T=t==tw?wallClear(h,d,t):ringClear(h,d,t); c=mix(hazeCol(c,uHor,T),surf,T); add*=1.0-smoothstep(0.0,0.02,T); if (t==tw) add*=0.0; }
       c+=add;
       gl_FragColor=vec4(c,1.0);
       #include <tonemapping_fragment>
@@ -6470,43 +6341,11 @@ const sky=new THREE.Mesh(ORBITAL?new THREE.SphereGeometry(500,64,32):new THREE.S
       #include <colorspace_fragment>
     }`}));
 sky.renderOrder=-1; world.add(sky);
-// (Orbital mode) the sky's view of the ring, the ships and the rim walls near the eye, made once the sky exists
+// (Orbital mode) the sky's view of the ring and the rim walls near the eye, made once the sky exists
 function orbitalScene(){
-  const RING_GLSL=ORB.RING_GLSL, _skyP=new THREE.Vector3(); let SPACE, ringWalls, updateWalls;
+  const RING_GLSL=ORB.RING_GLSL, _skyP=new THREE.Vector3(); let ringWalls, updateWalls;
   sky.onBeforeRender=()=>{ const p=camera.getWorldPosition(_skyP), X=trueX(p.x+ORIGIN.x), Z=trueZ(p.z+ORIGIN.z), h=p.y+ORIGIN.y;
-    skyU.uCamW.value.set(X,h,Z); skyU.uFogF.value=scene.fog.far; skyU.uPx.value=camera.fov*Math.PI/180/Math.max(1,renderer.domElement.height); SPACE.update(X,Z,h); };
-  /* ---------- the ships ----------
-     They are drawn by the sky (spaceHit), from their places relative to the eye, set here each frame. They are out in
-     space and do not turn with the ring: each runs straight and slowly, at a few hundred metres a second, so that the
-     turning of the ring carries them round its axis as it carries the stars. */
-  SPACE=(()=>{
-    const U=skyU, RR=RING_R, SH=[], R=rng(SEED^0x5a17);
-    const RUN=5200e3;   // a ship's run, from 2,600 km off one side of the ring, out of sight below the far wall's top, to as far off the other
-    // seven, 70 to 220 km long, run along the axis, 30 to 250 km off it, through the middle of the ring, where they pass
-    // high overhead against the arch; three giants, 300 to 550 km long, cross it broadside 450 to 900 km off the
-    // ring's sides. Each fades into the distance at either end of its run
-    const CROSS=5000e3, LEN=[150e3,90e3,220e3,70e3,120e3,80e3,160e3,400e3,300e3,550e3];
-    for (let i=0;i<10;i++){ const r=30e3+R()*220e3, th=R()*Math.PI*2, dir=i%2?1:-1;
-      SH.push({L:LEN[i], type:i%3, r, th, dir, v:200+R()*300, z0:R()*RUN, roll:R()*Math.PI*2, seed:R(),
-        cross:i>=7, zc:dir*(450e3+R()*450e3), b:(R()-0.5)*800e3}); }
-    const v=new THREE.Vector3(), X=new THREE.Vector3(), Y=new THREE.Vector3();
-    function update(Xc,Zc,h){
-      const ang=(hour-6)/24*Math.PI*2, ca=Math.cos(ang), sa=Math.sin(ang); U.uTime.value=time%10000;
-      // a ship's place in space, turned into the ring's frame as the stars are: (x, y) about the axis, z along it
-      const put=(k,px,py,pz,ax,ay,az,bx,by,bz,S,ty,seed,rot)=>{
-        const c=rot?ca:1, s=rot?sa:0;
-        U.uShP.value[k].set(px*c-py*s,px*s+py*c+RR-h,pz-Zc);
-        U.uShX.value[k].set(ax*c-ay*s,ax*s+ay*c,az); U.uShY.value[k].set(bx*c-by*s,bx*s+by*c,bz);
-        U.uShI.value[k].set(S,ty,seed,1); };
-      const fade=(w,W)=>Math.min(1,Math.min(w,W-w)/(0.08*W));
-      SH.forEach((S,k)=>{
-        if (S.cross){ const W=CROSS, w=(((S.z0+S.v*time)%W)+W)%W, a=w-W/2, cx=Math.cos(S.th), sx=Math.sin(S.th);
-          put(k,a*cx-S.b*sx,a*sx+S.b*cx,S.zc, cx,sx,0, -sx*Math.cos(S.roll),cx*Math.cos(S.roll),Math.sin(S.roll), S.L,S.type,S.seed,true); U.uShI.value[k].w=fade(w,W); return; }
-        const w=(((S.z0+S.v*time)%RUN)+RUN)%RUN, pz=S.dir*(w-RUN/2);
-        put(k,S.r*Math.cos(S.th),S.r*Math.sin(S.th),pz, 0,0,S.dir, Math.cos(S.roll),Math.sin(S.roll),0, S.L,S.type,S.seed,true); U.uShI.value[k].w=fade(w,RUN); });
-    }
-    return {update,ships:SH};
-  })();
+    skyU.uCamW.value.set(X,h,Z); skyU.uFogF.value=scene.fog.far; };
   // the rim walls near the eye: the wall beyond an outer strip, 12 km long and up its curve to the top, following the eye along the ring in 400 m steps; it stands in the depth of the near world, and
   // the sky draws the rest. Within about 2 km of the eye, where the land on the wall is built in blocks and the distant
   // terrain, the face is let down 40 m beneath them, so that it shows nowhere through their hollows; across the bare band
@@ -6545,7 +6384,7 @@ function orbitalScene(){
     FOG_K.x=Math.exp(-wallBase(p.z+ORIGIN.z)/8400);
     for (const m of ringWalls.children){ const sd=m.userData.sd; m.visible=sd*STRIP>=STRIP_MAX; m.position.z=sd*STRIP_W/2; } };
   ORB.buildRingMap();
-  Object.assign(ORB,{SPACE,ringWalls,updateWalls,wallU});
+  Object.assign(ORB,{ringWalls,updateWalls,wallU});
 }
 if (ORBITAL) orbitalScene();
 // the moon's phase, as last chosen (Shift+N), kept in the browser
@@ -17274,7 +17113,7 @@ requestAnimationFrame(()=>setTimeout(async ()=>{
 },30));
 // (Orbital mode) for automated checks
 if (ORBITAL) window.__orbital={ORB,skyU,get STRIP(){ return STRIP; },setStrip(k){ STRIP=k; wallForget(); },stripStep,trueX,trueZ,wallE,wallBase,ringGround,stripPoint,get voy(){ return voy; },get ORIGIN(){ return ORIGIN; },
-  look(p){ fpPitch=p; },aim(i){ const p=skyU.uShP.value[i], L=p.length(); yaw=Math.PI+Math.atan2(p.x,p.z); fpPitch=Math.asin(p.y/L); return [L/1000,Math.asin(p.y/L)*57.3,skyU.uShI.value[i].x/1000,skyU.uShI.value[i].w]; }};
+  look(p){ fpPitch=p; }};
 window.__village={ get seed(){ return SEED_TEXT; }, __gen:{isVillage,kind0,baseH,coastZ,highGround,seaDist,islandInfo,peakInfo,railZ,railY,coastRoadZ,heightAt}, sceneState:()=>sceneState(), get fly(){ return {aerFly,flyY,flying:flying(),mode,dist,fpPitch,yaw,crouch}; }, flyStart, flyLand, flyGround, gullTopAt:(x,z)=>gullTopAt(x,z), set fpPitchV(v){ fpPitch=v; }, set flyYV(v){ flyY=v; }, aerGround:(x,y)=>aerGround(x,y), get aerView(){ return {yaw,pitch,dist,x:player.x,z:player.z,cy:camPos.y,gy:heightAt(camPos.x,camPos.z),lift:aerLift}; }, TELE, teleRaise, teleLower, teleMag, get teleRing(){ return teleRing; }, viewZoom, get origin(){ return ORIGIN; }, share:{state:sceneState,link:sceneLink,qrEncode,get shared(){ return SCENE; }}, get paused(){ return paused; }, set paused(v){ if (!!v!==paused){ paused=!!v; lastClock=null; } }, goods, glZone, branchesAt, get mantle(){ return mantle; }, get colRoof(){ return colRoof; }, roofAt, roofSlope, topAt, get sit(){ return sit; }, get indoors(){ return indoors; }, roomFns:{flight,localToWorld,obbLocal,roomCeil}, sitKey, sitFind, sitStand, sitSpotOk, get camp(){ return CAMP; }, campKey, campPitch, campStrike, campWhyNot, campFit, campBuild, campLight, beachStretch, BCH_SP, COACH_SEATS, FERRY_SEATS, coachEnter, genChunk, coastRoadZ, brZ, brY, heightAt, player, chunks, rooms, doorMesh, keys, setYaw:v=>{yaw=v;}, get yaw(){return yaw;}, fe, co, lightsNear, beams, ruinIn, cats, catHome, PEOPLE, get ridden(){ return ridden; },
   findHarbour(){ for (let d=0;d<12;d++) for (const sd of SIDES) for (const n of [Math.floor(player.x/HARB)+d,Math.floor(player.x/HARB)-d]){ const H=harbourInfo(sd,n); if (H) return {x:H.x,z:coastZ(sd,H.x)+sd*7,W:H.W,sd,qz:coastZ(sd,H.x+H.W/2-1)+sd*2.5}; } return null; },
   findBeach(){ for (let x=player.x; x<player.x+3000; x+=10) for (const sd of SIDES){ const z=coastZ(sd,x)+sd*5; if (heightAt(x,z)<0.6 && heightAt(x,z)>0.1 && !harbourAt(sd,x)) return {x,z,sd}; } return null; },
