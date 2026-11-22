@@ -36,6 +36,20 @@ Doors open when they are walked into. A door swings away from the side from whic
 
 **X** sits down on the nearest free seat within 1.5 m towards which the player is turned, whether a bench, a chair, a sunbed, a seat in a railway coach or a seat in a ferry's saloon. **X** again, or a step with **W A S D**, stands the player up.
 
+## Flight
+
+**Space** pressed twice in quick succession takes off, and pressed twice again lands. Flight may be begun from anywhere: on foot, in the water, aboard a train, a coach, the ferry or the dinghy, or from the bird's-eye view. The flight begins at the point from which the view was seen, looking the same way, and is seen from the eye. A press of **Space** taken by a picture in an art gallery does not count towards a flight.
+
+The mouse turns the view, and may look straight up or straight down. **W** and **S**, or the up and down arrow keys, fly forward and back in the direction in which the view looks, so that looking down and flying forward descends. **A** and **D** fly sideways. **Space** held rises and **Z** held descends. **Shift** held with any of them flies three times as fast. On a Mac, **Shift** and **Ctrl** held together fly ten times as fast; on Windows and Linux this combination is not provided, since **Ctrl** with **W** closes the browser's tab or window. **Q** and **E** turn the view.
+
+The speed grows with the height above the ground: 8 m/s near the ground, about 600 m/s at 1 km and about 3 km/s at the greatest height, 5.2 km above the ground beneath. The eye is held 1.6 m clear of the ground, the roofs and the sea, measured square to the slope, and rises over hills, cliffs and buildings as they are met.
+
+Landing with **Space** twice, or with **2**, brings the camera down to the eye of the player standing on the ground below, outside any building, over between one and four seconds according to the height. Over open water at least 1.5 m deep, the dinghy of the nearest harbour is brought there and the player takes its helm; over shallower water the player is set down at once. A steep descent onto land, with **Z** or by flying forward while looking down, also lands. Over the sea it does not, and the eye skims the water. Any other view key ends the flight.
+
+> **Example:** To cross to an offshore island, press **Space** twice, hold **Space** until the island comes into view, turn towards it, hold **Shift** and **W** until it lies below, and press **Space** twice to land on it.
+
+On a touch screen, **Fly** in the menu takes off and lands, the joystick flies in the direction in which the view looks, and the jump and crouch buttons rise and descend. On a game controller, **A** pressed twice takes off and lands.
+
 ## Camping
 
 **R** pitches a camp: a small ridge tent and a camp fire, with a log to sit on beside the fire. The fire is laid 2.6 m ahead of the player and the tent stands beyond it, its door facing the fire. **R** again strikes the camp, wherever the player then is. Only one camp may stand at a time, and generating a new island strikes it.

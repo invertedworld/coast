@@ -175,6 +175,16 @@ function goThereShow(src,fov,aspect){
       <div class="row"><span><kbd>↑</kbd><kbd>↓</kbd></span><span>Tilt</span></div>
       <div class="row"><span>Double click</span><span>Go down there</span></div>
     </div>
+    <div class="group"><h3>Flight</h3>
+      <div class="row"><span><kbd>Space</kbd><kbd>Space</kbd></span><span>Take off or land</span></div>
+      <div class="row"><span><kbd>W</kbd><kbd>S</kbd></span><span>Forward and back</span></div>
+      <div class="row"><span><kbd>A</kbd><kbd>D</kbd></span><span>Sideways</span></div>
+      <div class="row"><span><kbd>Space</kbd></span><span>Rise</span></div>
+      <div class="row"><span><kbd>Z</kbd></span><span>Descend</span></div>
+      <div class="row"><span><kbd>Shift</kbd></span><span>Three times as fast</span></div>
+      <div class="row"><span><kbd>Shift</kbd><kbd>Ctrl</kbd></span><span>Ten times as fast (Mac)</span></div>
+      <div class="row"><span><kbd>2</kbd></span><span>Land</span></div>
+    </div>
     <div class="group"><h3>Scenes</h3>
       <div class="row"><span><kbd>1</kbd></span><span>Return to origin</span></div>
       <div class="row"><span><kbd>2</kbd></span><span>Aerial</span></div>
@@ -252,6 +262,7 @@ function goThereShow(src,fov,aspect){
       <div class="row"><span>Left stick</span><span>Walk, swim or steer</span></div>
       <div class="row"><span>Right stick</span><span>Look</span></div>
       <div class="row"><span>A</span><span>Jump</span></div>
+      <div class="row"><span>A twice</span><span>Take off or land</span></div>
       <div class="row"><span>B</span><span>Crouch</span></div>
     </div>
     <div class="group"><h3>Views</h3>
@@ -328,6 +339,13 @@ async function sceneDecode(t){
   return JSON.parse(await new Response(s).text()); }
 const SCENE=await (async()=>{ try{ const t=new URLSearchParams(location.search).get('s'); if (!t) return null;
   const o=await sceneDecode(t); return o && typeof o==='object' && o.v===1 ? o : null; }catch(_){ return null; } })();
+/* Orbital mode: the world is a ring habitat, the island one of many strips of land on the inner face of a vast ring
+   closed by rim walls, the rest of which is drawn in the sky (see the ring, below). It is a hidden mode, decided once
+   here, before anything is generated or drawn, and fixed for the life of the page: by ?orbital in the address, or by
+   a scene made in it (o:1 in the scene; a standard scene has no o). The generator's wrappers, the patches to
+   three.js's shader chunks and everything built for the ring follow this constant; with it false the world, the
+   shaders, the links and the cost are those of Coast alone. Changing mode loads the page afresh */
+const ORBITAL=SCENE ? SCENE.o===1 : (()=>{ try{ return new URLSearchParams(location.search).has('orbital'); }catch(_){ return false; } })();
 let SEED_TEXT=(()=>{ if (SCENE && typeof SCENE.s==='string' && SCENE.s.trim()) return seedText(SCENE.s);
   try{ const q=new URLSearchParams(location.search).get('seed');
   if (q && q.trim() && q.trim().toLowerCase()!=='random') return seedText(q); }catch(_){} return randomSeed(); })();
@@ -358,10 +376,15 @@ const hex=h=>new THREE.Color(h);
 // colour above it as the sky dome does, so a distant hill fades into the sky behind it rather than into a paler band.
 // The colour is a plain object so that every material's copy of the uniform refers to it
 const FOG_MID={r:0,g:0,b:0}, fogMidU={value:FOG_MID};
-THREE.UniformsLib.fog.uFogMid=fogMidU;
-for (const k in THREE.ShaderLib) if (THREE.ShaderLib[k].uniforms.fogColor) THREE.ShaderLib[k].uniforms.uFogMid=fogMidU;
-THREE.ShaderChunk.fog_pars_vertex=THREE.ShaderChunk.fog_pars_vertex.replace('varying float vFogDepth;','varying float vFogDepth; varying float vFogY;');
-THREE.ShaderChunk.fog_vertex=THREE.ShaderChunk.fog_vertex.replace('vFogDepth = - mvPosition.z;','vFogDepth = - mvPosition.z; vFogY = normalize((vec4(mvPosition.xyz,0.0)*viewMatrix).xyz).y;');
+// (Orbital mode) FOG_K.x thins the fog where the air is thin, on a rim wall high above the sea (set by updateWalls); it
+// is an object, as FOG_MID is, so that every material's copy of the fog's uniforms shares it
+const FOG_K={x:1,y:0}, fogKU={value:FOG_K};
+THREE.UniformsLib.fog.uFogMid=fogMidU; if (ORBITAL) THREE.UniformsLib.fog.uFogK=fogKU;
+for (const k in THREE.ShaderLib) if (THREE.ShaderLib[k].uniforms.fogColor){ THREE.ShaderLib[k].uniforms.uFogMid=fogMidU; if (ORBITAL) THREE.ShaderLib[k].uniforms.uFogK=fogKU; }
+THREE.ShaderChunk.fog_pars_vertex=THREE.ShaderChunk.fog_pars_vertex.replace('varying float vFogDepth;',ORBITAL?'varying float vFogDepth; varying float vFogY; uniform vec2 uFogK;':'varying float vFogDepth; varying float vFogY;');
+// (in Orbital mode the fog thickens with the distance from the eye, not the depth along the line of sight, so that it is
+// as thick at the edges of the picture as in the middle and does not change as the view is turned)
+THREE.ShaderChunk.fog_vertex=THREE.ShaderChunk.fog_vertex.replace('vFogDepth = - mvPosition.z;',ORBITAL?'vFogDepth = length(mvPosition.xyz)*uFogK.x; vFogY = normalize((vec4(mvPosition.xyz,0.0)*viewMatrix).xyz).y;':'vFogDepth = - mvPosition.z; vFogY = normalize((vec4(mvPosition.xyz,0.0)*viewMatrix).xyz).y;');
 THREE.ShaderChunk.fog_pars_fragment=THREE.ShaderChunk.fog_pars_fragment.replace('varying float vFogDepth;','varying float vFogDepth; varying float vFogY; uniform vec3 uFogMid;');
 THREE.ShaderChunk.fog_fragment=THREE.ShaderChunk.fog_fragment.replace('mix( gl_FragColor.rgb, fogColor, fogFactor )','mix( gl_FragColor.rgb, mix( fogColor, uFogMid, clamp( ( vFogY + 0.04 ) / 0.16, 0.0, 1.0 ) ), fogFactor )');
 // Whatever stands in a cast shadow also loses part of the sky above it, which the awning, the parasol, the table or
@@ -530,14 +553,112 @@ const mm=(A,B)=>new THREE.Matrix4().multiplyMatrices(A,B);
 // a flat list of world positions as single precision, relative to (ox,0,oz)
 function relPos(P,ox,oz){ const F=new Float32Array(P.length); for (let i=0;i<P.length;i+=3){ F[i]=P[i]-ox; F[i+1]=P[i+1]; F[i+2]=P[i+2]-oz; } return F; }
 
+/* ================= the ring (Orbital mode) =================
+   In Orbital mode the land lies on the inner face of a ring RING_C metres round. Its floor is STRIP_N strips side by
+   side across the ring, each STRIP_W wide and each holding one long island in its own sea, and it is closed on either
+   side at FLOOR_Z by a rim wall whose inner face curves up out of the sea, through WALL_A across the ring, to stand
+   upright WALL_H above the sea. The land runs on up the gentle lower part of the curve to about WALL_LAND; above it
+   the wall is bare gunmetal. x runs along the ring and z across it.
+   The generator makes one strip, as it makes the island, repeating every STRIP_W across. Strip k is that strip read
+   STRIP_K further along the ring, so that its island is another stretch of the same coast: a point at x along the
+   ring and z across it lies in strip k = round(z/STRIP_W), at x+k*STRIP_K, z-k*STRIP_W in the generator. The world
+   near the eye is the generator's, in the player's own strip (STRIP); the strips meet in open sea, where nothing is
+   placed, and whoever crosses into the next is carried over to it (wrapWorld).
+   The strip is made periodic in x: each generator function of x is evaluated at x wrapped into [-C/2, C/2), and over
+   the last JOIN_L metres before C/2 it is blended into its value one turn back, so that it meets itself without a step.
+   Within a few kilometres of the join nothing that is placed by cell (towns, streets, harbours, islands, coves,
+   summits, lights, stations) is placed, so that what stands on either side of it is wild country, the same whichever
+   way it is reached. RING_C and STRIP_K are whole numbers of blocks, of origin steps (OS) and of pattern periods (OP).
+   The near world is drawn flat (the floor rises only d*d/2R, under 2 m within the fog); beyond, the sky draws the rest
+   of the ring. In the standard mode STRIP stays 0, no wall is met (wallSd is 0) and nothing here is called but the
+   small functions below, whose results then leave the generator as it is */
+const RING_C=307*20480, RING_R=RING_C/(2*Math.PI), JOIN_L=3000, RING_G=9.81;
+const STRIP_W=15840, STRIP_N=31, STRIP_MAX=(STRIP_N-1)/2, STRIP_K=119*20480, FLOOR_Z=STRIP_N*STRIP_W/2;
+const WALL_A=100000, WALL_H=200000, WALL_H0=-60, WALL_LAND=10000, WALL_Z=FLOOR_Z+WALL_A, RING_W=2*WALL_Z;
+// the height of a rim wall's inner face at a distance e beyond FLOOR_Z: a quarter ellipse, level with the sea bed at
+// its foot and upright at its top; and the distance from FLOOR_Z at which it rises out of the sea
+function wallHw(e){ const u=Math.min(Math.max(e/WALL_A,0),1); return WALL_H0+(WALL_H-WALL_H0)*(1-Math.sqrt(1-u*u)); }
+const WALL_SHORE=WALL_A*Math.sqrt(1-Math.pow(1-(-WALL_H0)/(WALL_H-WALL_H0),2));
+const SPIN_T=2*Math.PI*Math.sqrt(RING_R/RING_G);   // the ring turns once in this many seconds, giving 1 g at sea level
+let STRIP=0;
+let aerFly=false, flyY=0, spaceT=0;   // flight (see the flight section, below toggleView); declared here, as wallLim reads it
+/* ---------- the land on the rim walls ----------
+   Beyond an outer strip the land runs on up the lower part of the rim wall's curve. In the generator's coordinates of
+   that strip it lies beyond z = +-STRIP_W/2 on the wall's side, e metres beyond the floor's edge: its ground is the
+   wall's face (wallHw) with a shore, a low bluff, hills and broad ridges of its own laid over it (wallLandH), and it is
+   built on as the island is, in villages and open country, judged by its height above the face rather than above the
+   sea. The villages climb as far as WALL_TOWN_E, where the face grows steeper than WALL_TOWN_SLOPE (31 degrees,
+   about 8.4 km up); above that the ground is bare rock and then snow, up to a ragged edge about WALL_LAND up
+   (wallEdgeE), where the land ends at the foot of the wall's bare plates. The plates may be climbed on until the face
+   is too steep to stand on, at WALL_E_STAND (45 degrees, about 21 km up). */
+const WALL_TOWN_SLOPE=0.6, WALL_K=(WALL_H-WALL_H0)/WALL_A;
+const wallUAt=k=>{ const q=k/WALL_K; return q/Math.sqrt(1+q*q); };   // u where the face rises k in 1
+const WALL_TOWN_E=WALL_A*wallUAt(WALL_TOWN_SLOPE), WALL_TOWN_H=wallHw(WALL_TOWN_E);
+// e where the face stands h above the sea
+function wallEOfH(h){ return WALL_A*Math.sqrt(1-Math.pow(1-(h-WALL_H0)/(WALL_H-WALL_H0),2)); }
+const WALL_E_STAND=WALL_A*wallUAt(1);
+// where the land ends along the ring, at x: 600 m either way of WALL_LAND in height
+function wallEdgeE(x){ return wallEOfH(WALL_LAND+1200*(fbm(x*0.0004,7.3,1606,2)-0.5)); }
+// beyond WALL_E_BARE the land has thinned away to the bare face all along the ring, and beyond WALL_E_FACE the ground
+// is drawn by the wall's near face alone (ringWalls), not by the blocks and the distant terrain, whose grids of heights
+// could not follow the face as it steepens towards the vertical
+const WALL_E_BARE=wallEOfH(WALL_LAND+600)+100, WALL_E_FACE=WALL_E_BARE+400;
+// the side (+1 or -1) on which the player's strip meets a wall, or 0
+function wallSd(){ return STRIP>=STRIP_MAX?1:STRIP<=-STRIP_MAX?-1:0; }
+// how far beyond the floor's edge, towards the wall, a point lies (negative on the floor; -Infinity with no wall)
+function wallE(z){ const s=wallSd(); return s?s*z-STRIP_W/2:-Infinity; }
+// the height of the wall's face under a point of its land, and 0 elsewhere: heights above it are judged as heights
+// above the sea are on the island
+function wallBase(z){ const e=wallE(z); return e>WALL_SHORE?wallHw(e):0; }
+// the ground on the wall: the shore wanders 30 m either way; below it the bed falls away as the island's inshore slope
+// does, to the deep floor of the strip's sea
+function wallLandH(x,z,e){
+  const s=e-WALL_SHORE-60*(fbm(x*0.0015,1.9,1601,3)-0.5);
+  let r;
+  if (s<0) r=inshoreH(-s,0.32);
+  else { const bw=18*clamp(vnoise(x*0.008,13.3,1602)*2.2-0.9,0,1);
+    if (s<bw) r=0.06+s*0.05;
+    else { const t=s-bw, rn=vnoise(x*0.0032,z*0.0032,1603), ridge=1-Math.abs(2*rn-1);
+      r=0.06+bw*0.05+30*(1-Math.exp(-t/110))+(fbm(x*0.009,z*0.009,1604,4)-0.5)*28*Math.min(1,t/70)
+        +ridge*ridge*70*clamp((t-120)/320,0,1)+120*fbm(x*0.0007,z*0.0007,1605,3)*clamp(t/600,0,1);
+      r*=1-smooth((e-wallEdgeE(x)+500)/600); } }   // the land thins away to the bare face at its edge
+  return wallHw(e)+r; }
+const SNOW=new THREE.Color('#dfe4ec');
+// the colour of the wall's land above the villages: bare rock from WALL_TOWN_E and snow towards the top of the land;
+// beyond its edge the wall's own gunmetal plates, as the wall is painted from afar (ringWall) but lighter, since the
+// painting is lit more strongly than the ground, with the darker foot of a gallery every 450 m of height and of a
+// ledge every 12 km
+function wallTint(c,x,z,h,n=0.5){ const e=wallE(z); if (e<WALL_TOWN_E-800) return c;
+  c.lerp(_wtC.copy(MT_ROCK).lerp(MT_SCREE,n*0.6),smooth((e-WALL_TOWN_E+800)/1600)*0.9);
+  if (h>WALL_LAND-1600) c.lerp(SNOW,smooth((h-WALL_LAND+1600)/1200)*0.9);
+  const pe=smooth((e-wallEdgeE(x)+150)/200);
+  if (pe>0){ const g=((h%450)+450)%450, l=((h%12000)+12000)%12000, k=(0.9+0.16*n)*(g<13.5?0.7:1)*(l<240?0.6:1);
+    c.lerp(_wtC.setRGB(0.11*k,0.12*k,0.14*k),pe); }
+  return c; }
+const _wtC=new THREE.Color();
+function ringW(x){ return x-RING_C*Math.round(x/RING_C); }
+// (only in Orbital mode is there a join to keep away from)
+function nearJoin(x,m){ return ORBITAL && Math.abs(ringW(x))>RING_C/2-m; }
+function RB1(f,x){ const u=ringW(x), e=u-(RING_C/2-JOIN_L); if (e<=0) return f(u); const t=smooth(e/JOIN_L); return lerp(f(u),f(u-RING_C),t); }
+function RB2(f,x,z){ const u=ringW(x), e=u-(RING_C/2-JOIN_L); if (e<=0) return f(u,z); const t=smooth(e/JOIN_L); return lerp(f(u,z),f(u-RING_C,z),t); }
+function RBs(f,sd,x){ const u=ringW(x), e=u-(RING_C/2-JOIN_L); if (e<=0) return f(sd,u); const t=smooth(e/JOIN_L); return lerp(f(sd,u),f(sd,u-RING_C),t); }
+// the place on the ring of a point given in the generator's coordinates of the player's strip
+function trueX(x){ return ringW(x-STRIP*STRIP_K); }
+function trueZ(z){ return z+STRIP*STRIP_W; }
+
 /* ================= terrain ================= */
 // The land is an endless island running east-west. Its centre line wanders and its width varies;
 // sd=+1 is the south shore, sd=-1 the north shore. Hills rise behind each shore, and where the island is wide a
 // range of mountains runs down the middle.
-function ridgeZ(x){ return 240*(fbm(x*0.0021,3.1,451,3)-0.5); }
+// (in Orbital mode each function of x alone is closed round the ring, RB1, and the island is half as wide again, so that
+// its land reads on the far arch)
+function ridgeZ(x){ return ORBITAL?RB1(ridgeZr,x):ridgeZr(x); }
+function ridgeZr(x){ return 240*(fbm(x*0.0021,3.1,451,3)-0.5); }
 // full width varies between 0.9 km and 3 km: half-width 430-1500 m plus up to 22 m of shoreline wiggle each side
-function halfW(x){ return 430+1070*smooth((fbm(x*0.0008,7.7,461,3)-0.22)/0.56); }
-function coastZ0(sd,x){ return ridgeZ(x)-sd*(halfW(x)+44*(vnoise(x*0.011,sd>0?1.7:4.2,sd>0?409:419)-0.5)); }
+function halfW(x){ return ORBITAL?RB1(halfWr,x):halfWr(x); }
+function halfWr(x){ return ORBITAL?640+1610*smooth((fbm(x*0.0008,7.7,461,3)-0.22)/0.56):430+1070*smooth((fbm(x*0.0008,7.7,461,3)-0.22)/0.56); }
+function coastZ0(sd,x){ return ORBITAL?RBs(coastZ0r,sd,x):coastZ0r(sd,x); }
+function coastZ0r(sd,x){ return ridgeZ(x)-sd*(halfW(x)+44*(vnoise(x*0.011,sd>0?1.7:4.2,sd>0?409:419)-0.5)); }
 // The shore lines and the coast road depend on x alone, yet every height worked out asks for both shores, and the
 // samples of a block share a few dozen values of x between thousands of points. The last value worked out for each of
 // 1024 slots, chosen by x, is therefore kept and returned while x is the same; clearXMemos empties them for a new seed
@@ -594,9 +715,11 @@ function mtTint(c,h,slope,n=0.5,p=0.5){ if (h<110) return c;
   const k=Math.max(smooth((h-170)/200),smooth((slope-0.7)/0.6)*smooth((h-120)/60)*0.9);
   if (k>0) c.lerp(_mtC.copy(MT_ROCK).lerp(MT_PALE,smooth((p-0.45)/0.3)*0.8).lerp(MT_SCREE,clamp((slope-0.5)*1.4,0,1)*0.8+n*0.2),k); return c; }
 const _mtC=new THREE.Color(), _gMt=new THREE.Color();
-function mtSpine0(x){ return ridgeZ(x)+0.35*(halfW(x)-MT_D0)*(fbm(x*0.0011,5.3,471,2)-0.5)*2; }
+function mtSpine0(x){ return ORBITAL?RB1(mtSpine0r,x):mtSpine0r(x); }
+function mtSpine0r(x){ return ridgeZ(x)+0.35*(halfW(x)-MT_D0)*(fbm(x*0.0011,5.3,471,2)-0.5)*2; }
 // how high the range stands at x, from 0 to 1
-function mtLevel0(x){
+function mtLevel0(x){ return ORBITAL?RB1(mtLevel0r,x):mtLevel0r(x); }
+function mtLevel0r(x){
   const w=smooth((halfW(x)-MT_D0-120)/600); if (w<=0) return 0;
   const sw=0.4+0.6*smooth((fbm(x*0.00075,2.9,473,3)-0.3)/0.4);
   // the railway crosses the island where sin(2 pi x / RAIL_L + 0.7) changes sign (railZraw)
@@ -606,9 +729,9 @@ function mtLevel0(x){
 // the range's profile along its length: how high it stands, the height of the crest, which rises to separate summits
 // with saddles between them, and the line of the spine. Every point of the range asks for these several times, so
 // they are worked out at each whole metre, kept, and read in between
-const mtxCache=new Map();
+const mtxCache=new Map(), mtCrestN=x=>fbm(x*0.0017,1.3,481,3);
 function mtX(i){ let v=mtxCache.get(i);
-  if (v===undefined){ const L=mtLevel0(i); v=[L,L>0?MT_H*L*(0.5+0.75*Math.pow(smooth((fbm(i*0.0017,1.3,481,3)-0.28)/0.44),1.3)):0,mtSpine0(i)];
+  if (v===undefined){ const L=mtLevel0(i); v=[L,L>0?MT_H*L*(0.5+0.75*Math.pow(smooth(((ORBITAL?RB1(mtCrestN,i):fbm(i*0.0017,1.3,481,3))-0.28)/0.44),1.3)):0,mtSpine0(i)];
     if (mtxCache.size>200000) mtxCache.clear(); mtxCache.set(i,v); }
   return v; }
 function mtXq(x,q){ const i=Math.floor(x), a=mtX(i)[q]; return a+(mtX(i+1)[q]-a)*(x-i); }
@@ -650,14 +773,14 @@ function mtnH(x0,z0,sS=z0-coastZ(1,x0),sN=coastZ(-1,x0)-z0){
 // whether a block lies on the mountains, where nothing is built and no road runs
 const hgCache=new Map();
 function highGround(cx,cz){ const k=cx*1048576+cz; let v=hgCache.get(k);
-  if (v===undefined){ const x=cx*C+C/2, z=cz*C+C/2; v=mtnH(x,z)>30 || baseH0(x,z)>220; if (hgCache.size>50000) hgCache.clear(); hgCache.set(k,v); }
+  if (v===undefined){ const x=cx*C+C/2, z=cz*C+C/2, e=ORBITAL?wallE(z):-1; v=e>0 ? e>WALL_TOWN_E || baseH0(x,z)-wallBase(z)>220 : mtnH(x,z)>30 || baseH0(x,z)>220; if (hgCache.size>50000) hgCache.clear(); hgCache.set(k,v); }
   return v; }
 // Steep conical hills, each crowned by a hill town with its church on the summit.
 const PEAK=480, pkCache=new Map();
 function peakInfo(i,j){
   const k=i*1048576+j; { const v=pkCache.get(k); if (v!==undefined) return v; }
   let P=null;
-  if (hash(i,j,1201)<0.4){
+  if (hash(i,j,1201)<0.4 && !nearJoin((i+0.5)*PEAK,6000)){
     let x=(i+0.5)*PEAK+(hash(i,j,1202)-0.5)*220, z=(j+0.5)*PEAK+(hash(i,j,1203)-0.5)*220;
     x=Math.floor(x/C)*C+C/2+(hash(i,j,1204)-0.5)*6; z=Math.floor(z/C)*C+C/2+(hash(i,j,1205)-0.5)*6;   // summit near a block centre
     const inland=Math.min(z-coastZ(1,x),coastZ(-1,x)-z);
@@ -676,7 +799,8 @@ function peakAdd(x,z){
 function peakNear(x,z,f=1){ const i=Math.floor(x/PEAK), j=Math.floor(z/PEAK);
   for (let dj=-1;dj<=1;dj++) for (let di=-1;di<=1;di++){ const P=peakInfo(i+di,j+dj); if (P && Math.hypot(x-P.x,z-P.z)<P.R*f) return P; } return null; }
 function peakInChunk(cx,cz){ const P=peakNear(cx*C+C/2,cz*C+C/2,0.5); return P&&P.cx===cx&&P.cz===cz?P:null; }
-function baseH(x,z){
+function baseH(x,z){ return ORBITAL?RB2(baseHr,x,z):baseHr(x,z); }
+function baseHr(x,z){
   const sS=z-coastZ(1,x), sN=coastZ(-1,x)-z;
   let h;
   if (sS<sN-60) h=landProfile(sS,x,z,1);
@@ -685,6 +809,7 @@ function baseH(x,z){
   if (h>0) h+=peakAdd(x,z)*clamp(Math.min(sS,sN)/120,0,1)+mtnH(x,z,sS,sN);
   if (sS<-150) h=Math.max(h,islandH(1,x,z)); else if (sN<-150) h=Math.max(h,islandH(-1,x,z));
   if (sS<-120) h=Math.max(h,seaRockH(1,x,z)); else if (sN<-120) h=Math.max(h,seaRockH(-1,x,z));
+  if (ORBITAL){ const e=wallE(z); if (e>0) h=Math.max(h,wallLandH(x,z,e)); }   // the land on the rim wall
   if (!NO_COVE){ const cv=coveAtXZ(x,z); if (cv) h=coveH(cv,x,z,h); }
   return h;
 }
@@ -702,7 +827,7 @@ const ISLE_KINDS=['hills','ridge','volcano','mesa','cliffs'];
 function islandInfo(sd,m){
   const k=m*4+sd; { const v=isCache.get(k); if (v!==undefined) return v; }
   const o=sd>0?0:70; let I=null; const hh=n=>hash(m,n,1501+o), far=(m&1)!==0;
-  if (hh(0)<(far?0.7:0.75)){
+  if (hh(0)<(far?0.7:0.75) && !nearJoin((m+0.5)*ISL,7000)){
     const asp=1+hh(10)*1.1, th=(hh(11)-0.5)*1.4, R=Math.min((far?190:160)+hh(3)*(far?300:260),0.45*ISL/1.3/Math.sqrt(asp));
     const A=R*Math.sqrt(asp), B=R/Math.sqrt(asp), ext=Math.max(A,B)*1.3, zExt=Math.hypot(A*Math.sin(th),B*Math.cos(th))*1.3;
     const x=m*ISL+(0.08+0.84*hh(2))*ISL, off=far?1300+hh(4)*700:280+hh(4)*370;
@@ -712,6 +837,8 @@ function islandInfo(sd,m){
     if (far) for (const n of [m-1,m+1]){ const N=islandInfo(sd,n); if (!N) continue;
       const dx=x-N.x, need=ext+N.ext+150; if (Math.abs(dx)>=need) continue;
       const dz=Math.sqrt(need*need-dx*dx); if (sd*(N.z-z)<dz) z=N.z-sd*dz; }
+    // (in Orbital mode the strips meet in open sea, and no island straddles the edge of one)
+    if (ORBITAL && Math.abs(z)+ext>STRIP_W/2-2200){ if (isCache.size>4000) isCache.clear(); isCache.set(k,null); return null; }
     const kind=ISLE_KINDS[Math.floor(hh(12)*ISLE_KINDS.length)];
     // the larger islands stand higher, up to 1.7 times the height of one of 180 m
     const H={hills:30+hh(5)*50,ridge:45+hh(5)*70,volcano:70+hh(5)*90,mesa:28+hh(5)*40,cliffs:25+hh(5)*45}[kind]*Math.min(1.7,Math.pow(R/180,0.8));
@@ -757,7 +884,7 @@ function islandH(sd,x,z){
   return best;
 }
 // how far a point lies inland of the nearer mainland shore (negative out at sea)
-function seaDist(x,z){ return Math.min(z-coastZ(1,x),coastZ(-1,x)-z); }
+function seaDist(x,z){ const d=Math.min(z-coastZ(1,x),coastZ(-1,x)-z); if (!ORBITAL) return d; const e=wallE(z); return e>0?Math.max(d,e-WALL_SHORE):d; }
 function islandNear(x,z){ const sd=(z-coastZ(1,x))<(coastZ(-1,x)-z)?1:-1, m=Math.floor(x/ISL);
   for (let k=m-1;k<=m+1;k++){ const I=islandInfo(sd,k); if (I && Math.hypot(x-I.x,z-I.z)<I.ext+20) return I; } return null; }
 function shoreSide(x,z){ return (z-coastZ(1,x))<(coastZ(-1,x)-z)?1:-1; }
@@ -771,7 +898,7 @@ function segDist(x,z,ax,az,bx,bz){ const dx=bx-ax, dz=bz-az, t=clamp(((x-ax)*dx+
 function seaRockInfo(sd,n){
   const k=n*4+sd; { const v=rkCache.get(k); if (v!==undefined) return v; }
   const o=sd>0?0:30, hh=q=>hash(n,q,1801+o); let K=null;
-  if (hh(0)<0.55){
+  if (hh(0)<0.55 && !nearJoin((n+0.5)*RK_SP,8000)){
     const x=n*RK_SP+RK_SP*(0.15+0.7*hh(1)), z=coastZ(sd,x)-sd*(200+hh(2)*140), m0=Math.floor(x/ISL); let ok=true;
     for (let m=m0-1;m<=m0+1 && ok;m++){ const I=islandInfo(sd,m); if (!I) continue;
       if (Math.hypot(x-I.x,z-I.z)<I.ext+150) ok=false;
@@ -798,7 +925,7 @@ function headlandLight(sd,n){ return noCove(()=>headlandLight0(sd,n)); }
 function headlandLight0(sd,n){
   const k='h'+sd+':'+n; if (lhCache.has(k)) return lhCache.get(k);
   const o=sd>0?0:40, R=q=>hash(n,q,1711+o); let L=null;
-  if (hash(n,0,1701+o)<0.45){
+  if (hash(n,0,1701+o)<0.45 && !nearJoin((n+0.5)*LH_SP,8000)){
     // the point where the shore stands furthest out to sea against the coast for 250 m either side
     let best=null;
     for (let x=n*LH_SP+300; x<=(n+1)*LH_SP-300; x+=20){
@@ -878,7 +1005,7 @@ function coveInfo(sd,n){
 }
 function coveSite(sd,n){
   const o=sd>0?0:60, hh=q=>hash(n,q,2101+o);
-  if (hh(0)>=0.8) return null;
+  if (hh(0)>=0.8 || nearJoin((n+0.5)*CV_SP,6000)) return null;
   const P=coveShape(hh,{sd,n,seed:2150+n*13+o,hn:n,ho:2201+o,key:n+':'+sd});
   for (let t=0;t<10;t++){ const X=n*CV_SP+P.UXc+110+hash(n,t,2120+o)*(CV_SP-2*P.UXc-220), m=(coastZ(sd,X+60)-coastZ(sd,X-60))/120, l=Math.hypot(1,m);
     cvFrame(P,X,coastZ(sd,X),1/l,m/l,sd);
@@ -1919,7 +2046,7 @@ function hRoadW(j,x){ return 1.6+1.4*vnoise(x*0.05,j*7.31,16); }
 // no street or lane runs on to the mountains, and between villages none climbs straight up a steep slope
 const sgCache=new Map();
 function segOn(i,j,v){ const k=(i*1048576+j)*2+(v?0:1); let on=sgCache.get(k); if (on!==undefined) return on;
-  on=hash(i,j,v?31:37)>0.16;
+  on=hash(i,j,v?31:37)>0.16 && !nearJoin(i*C,5000);
   if (on){ const [ax,az,bx,bz]=v?[i-1,j,i,j]:[i,j-1,i,j];
     if (highGround(ax,az) || highGround(bx,bz)) on=false;
     else if (!isVillage(ax,az) && !isVillage(bx,bz)){ const d=v?Math.abs(baseH0(i*C,j*C)-baseH0(i*C,j*C+C)):Math.abs(baseH0(i*C,j*C)-baseH0(i*C+C,j*C)); if (d>14) on=false; } }
@@ -1931,7 +2058,8 @@ function hSegAt(x,z){ let i=Math.floor(x/C); if (x<vRoadX(i,z)) i--; else if (x>
 /* ---------- coastal road, a little inland from the shore, running the length of the coast ---------- */
 const CR_HW=2.8;
 const SIDES=[1,-1];
-function coastRoadZ0(sd,x){ return coastZ(sd,x)+sd*(19+3*Math.sin(x*0.017+(sd>0?1.3:4.1))+coveRoadBump(sd,x)); }
+function coastRoadZ0(sd,x){ return ORBITAL?RBs(coastRoadZ0r,sd,x):coastRoadZ0r(sd,x); }
+function coastRoadZ0r(sd,x){ return coastZ(sd,x)+sd*(19+3*Math.sin(x*0.017+(sd>0?1.3:4.1))+coveRoadBump(sd,x)); }
 // beside a goods line the road keeps at least GL_RD from its track, moving inland where the shore it follows bends
 // more sharply than the line, and easing back over 40 m beyond the line's ends
 const GL_RD=CR_HW+6;
@@ -1976,7 +2104,8 @@ function harbourShape(H,x,z,h){
 // through the passes in the mountains (mtLevel) every RAIL_L/2. Its distance from the middle line follows the
 // island's width averaged over 500 m, so that its curves stay gentle where the shore bends sharply.
 const RAIL_IN=190, RAIL_K=2, rzCache=new Map();
-function railZraw(x){ let w=0; for (let k=-6;k<=6;k++) w+=halfW(x+k*40);
+function railZraw(x){ return ORBITAL?RB1(railZraw0,x):railZraw0(x); }
+function railZraw0(x){ let w=0; for (let k=-6;k<=6;k++) w+=halfW(x+k*40);
   return ridgeZ(x)-(w/13-RAIL_IN)*Math.tanh(RAIL_K*Math.sin(x*2*Math.PI/RAIL_L+0.7))/Math.tanh(RAIL_K)+20*Math.sin(x*0.0047+1.1); }
 function railZ(x){ const i=Math.floor(x/2), t=x/2-i; let a=rzCache.get(i), b=rzCache.get(i+1);
   if (a===undefined){ a=railZraw(i*2); rzCache.set(i,a); } if (b===undefined){ b=railZraw(i*2+2); rzCache.set(i+1,b); }
@@ -2073,6 +2202,7 @@ function stationOk(x){ if (railY(x)<=3) return false; for (let dx=-56;dx<=56;dx+
 function stationInfo(n){
   if (stCache.has(n)) return stCache.get(n);
   let S=null; const off=hash(n,0,931)*60;
+  if (nearJoin(n*ST_SP,6000)){ stCache.set(n,null); return null; }
   for (let pass=0; pass<2 && !S; pass++) for (let k=0;k<12;k++){ const x=n*ST_SP+160+off+k*48, z=railZ(x);
     if (pass===0 && !isVillage(Math.floor(x/C),Math.floor(z/C))) continue;
     if (stationOk(x)){ S={n,x,z,ry:railY(x),side:hash(n,0,932)<0.5?1:-1,name:'Stazione di '+SAINTS[Math.floor(hash(n,0,933)*SAINTS.length)]}; break; } }
@@ -2207,7 +2337,7 @@ const core=(cx,cz)=>vnoise(cx*0.23+0.5,cz*0.23+0.5,77);
 // villages are separate clusters; the land between them is open country, and the mountains and the offshore islands
 // have none
 const vgCache=new Map();
-function isVillage(cx,cz){ const k=cx+','+cz; let v=vgCache.get(k); if (v===undefined){ v=!highGround(cx,cz) && seaDist(cx*C+C/2,cz*C+C/2)>-150 && (fbm(cx*0.12+3.3,cz*0.12+1.7,990,3)>0.5 || !!peakNear(cx*C+C/2,cz*C+C/2,1.05)); if (vgCache.size>50000) vgCache.clear(); vgCache.set(k,v); } return v; }
+function isVillage(cx,cz){ const k=cx+','+cz; let v=vgCache.get(k); if (v===undefined){ v=!nearJoin(cx*C,6000) && !highGround(cx,cz) && seaDist(cx*C+C/2,cz*C+C/2)>-150 && (fbm(cx*0.12+3.3,cz*0.12+1.7,990,3)>0.5 || !!peakNear(cx*C+C/2,cz*C+C/2,1.05)); if (vgCache.size>50000) vgCache.clear(); vgCache.set(k,v); } return v; }
 const COUNTRY=new Set(['olives','rocky','farm','coast','wild','isle','mount']);
 // The kind each block would have on its own, drawn from the seed before every village and district is given its church: a
 // summit, and about one block of town in six, would hold a church here.
@@ -2215,7 +2345,7 @@ function kind0(cx,cz){
   if (seaDist(cx*C+C/2,cz*C+C/2)<-150) return 'isle';
   if (highGround(cx,cz)) return 'mount';
   if (peakInChunk(cx,cz)) return 'church';
-  const hc=baseH(cx*C+C/2,cz*C+C/2), k=core(cx,cz), r=hash(cx,cz,201), onHill=!!peakNear(cx*C+C/2,cz*C+C/2,1.1);
+  const hc=ORBITAL?baseH(cx*C+C/2,cz*C+C/2)-wallBase(cz*C+C/2):baseH(cx*C+C/2,cz*C+C/2), k=core(cx,cz), r=hash(cx,cz,201), onHill=!!peakNear(cx*C+C/2,cz*C+C/2,1.1);
   if (!isVillage(cx,cz)){
     if (hc<2.5) return 'coast';
     if ((hc>75 && r<0.6) || (mtnH(cx*C+C/2,cz*C+C/2)>8 && r<0.85)) return 'wild';   // the foot of the mountains is mostly left wild
@@ -5424,7 +5554,7 @@ function genChunk(cx,cz,lod=0){
   // on the mountains, outcrops of limestone: a few great angular crags on the steeper ground above 200 m
   if (ch.kind==='mount') for (let t=0;t<14;t++){ const x=x0+4+R()*(C-8), z=z0+4+R()*(C-8), rot=R()*6.28, s=3+R()*5;
     const h=heightAt(x,z), sl=Math.hypot(heightAt(x+3,z)-heightAt(x-3,z),heightAt(x,z+3)-heightAt(x,z-3))/6;
-    if (h<180 || sl<0.35 || R()>0.55 || railPerp(x,z)<20+s*2 || ch.place.some(o=>obbCircleDist(o,x,z)<s)) continue;
+    if ((ORBITAL ? h-wallBase(z)<180 || wallE(z)>wallEdgeE(x)-200 : h<180) || sl<0.35 || R()>0.55 || railPerp(x,z)<20+s*2 || ch.place.some(o=>obbCircleDist(o,x,z)<s)) continue;
     gb.add(T.crag, mat(x,h-s*0.45,z,s*1.5,s*(0.9+0.5*sl),s*1.2,rot,(R()-0.5)*0.5,(R()-0.5)*0.5), shade(MT_SCREE,R,0.12).lerp(MT_ROCK,0.5), null, 12);
     ch.circles.push({x,z,r:s*0.65,top:h+s*0.4}); ch.place.push({x,z,hw:s*0.7,hd:s*0.7,rot:0}); }
   const tries=ch.kind==='mount'?90:COUNTRY.has(ch.kind)&&ch.kind!=='wild'?0:ch.kind==='wild'?55:70;
@@ -5433,7 +5563,7 @@ function genChunk(cx,cz,lod=0){
     // on the mountains the pines and holm oaks thin out into low maquis with height, and give way to scree and bare
     // rock: nothing grows above about 420 m
     if (ch.kind==='mount'){
-      const h=heightAt(x,z), veg=1-smooth((h-110)/310), q=R(); if (h<1) continue;
+      const h=heightAt(x,z), veg=ORBITAL?(1-smooth((h-wallBase(z)-110)/310))*(1-smooth((wallE(z)-WALL_TOWN_E)/800)):1-smooth((h-110)/310), q=R(); if (h<1 || (ORBITAL && wallE(z)>wallEdgeE(x)-200)) continue;
       if (r<0.55*veg){ if (!canPlace({x,z,hw:0.7,hd:0.7,rot:0},0,{maxRange:12})) continue;
         if (q<0.4*veg*veg){ const k=q<0.22*veg*veg?'aleppo':'holm'; addTree(gb,ch,x,z,R,(0.6+R()*0.4)*(k in FLORA?1.1:1),undefined,k); ch.place.push({x,z,hw:1.2,hd:1.2,rot:0}); }
         else { addFlora(gb,ch,x,z,(0.5+R()*0.6)*(0.6+0.4*veg),undefined,'maquis'); ch.place.push({x,z,hw:0.8,hd:0.8,rot:0}); } }
@@ -5765,7 +5895,8 @@ function genChunk(cx,cz,lod=0){
           nl=Math.hypot(dx,1,dz); slope=Math.hypot(dx,dz); } } }
     const n1=vnoise(x*0.3,z*0.3,5), n2=vnoise(x*1.1,z*1.1,6);
     cA.copy(C_.sand).lerp(C_.sand2,n1*0.7+n2*0.3);
-    const wildG=ch.kind==='wild'||ch.kind==='mount', g=vnoise(x*0.07,z*0.07,8), gth=0.58-clamp((h-20)/60,0,0.3)-(wildG?0.3:0);
+    const hr=ORBITAL?h-wallBase(z):h;   // the height above the sea, or (Orbital mode) above the rim wall's face on its land
+    const wildG=ch.kind==='wild'||ch.kind==='mount', g=vnoise(x*0.07,z*0.07,8), gth=0.58-clamp((hr-20)/60,0,0.3)-(wildG?0.3:0);
     if (g>gth) cA.lerp(wildG?C_.scrub:C_.grass2,clamp((g-gth)*4,0,wildG?0.85:0.6));
     let rd=roadDist(x,z); for (const A of ch.alleys) rd=Math.min(rd,Math.abs(alleyS(A,x,z))-A.hw);
     let cob=0, flag=0, pv=0;   // pv: how much of the ground here is paved
@@ -5785,7 +5916,8 @@ function genChunk(cx,cz,lod=0){
     if (slope>0.75){ const t=clamp((slope-0.75)*1.6,0,0.85)*(1-cob); cA.lerp(C_.rock,t); }
     // the mountain's garrigue, maquis and rock colour the ground high up, but not its paving: a square, a street or a
     // station's forecourt keeps its stone at any height
-    if (h>120 && pv<1){ mtTint(_gMt.copy(cA),h,slope,n1,vnoise(x*0.025,z*0.025,995)); cA.lerp(_gMt,1-pv); }
+    if (hr>120 && pv<1){ mtTint(_gMt.copy(cA),hr,slope,n1,vnoise(x*0.025,z*0.025,995)); cA.lerp(_gMt,1-pv); }
+    if (hr!==h) wallTint(cA,x,z,h,n1);
     const seaRock=ch.kind==='isle' && h>-1 && !islandNear(x,z);
     if (seaRock) cA.copy(C_.rock).lerp(GREY_ROCK,0.5+0.5*n1).multiplyScalar(0.92+n2*0.14);
     cA.multiplyScalar(1-0.1*(1-pv));   // unpaved ground is a tenth darker than its base colours; the beach is not
@@ -5874,7 +6006,40 @@ function updateOrigin(){
    with them by WRAP_Z in one frame, and the blocks round them are rebuilt as on any long move. WRAP_Z is a whole
    number of blocks and of cells of the distant terrain, so both grids fall in the same places after the move. */
 const WRAP_Z=15840, WRAP_J=WRAP_Z/22, wrapHooks=[];
+/* (Orbital mode) Across the ring the floor is STRIP_N strips (see the ring above), and the generator repeats every
+   WRAP_Z (= STRIP_W). Whoever passes the edge of their strip, z = +-WRAP_Z/2, into the next is carried over to it:
+   moved back across by WRAP_Z and on along by STRIP_K in the generator, which leaves their place on the ring as it was,
+   with the camera and whatever travels with them (wrapHooks across, xWrapHooks along, stripHooks for what depends on
+   the strip), and the blocks round them are rebuilt as on any long move. Beyond the outermost strips the floor ends at
+   the rim walls, which may be climbed up their curve to WALL_E_STAND beyond FLOOR_Z; whatever goes towards a wall is
+   held WALL_PAD short of that line. Along the ring the world is periodic with RING_C: whoever passes the join at
+   x = +-RING_C/2 is moved back by one turn in the same way. */
+const xWrapHooks=[], stripHooks=[], WALL_PAD=3;
+// the limit across of whatever moves in the generator's coordinates of the player's strip: the wall beyond an outer
+// strip, and nothing within the floor. On foot it is the steepest part of the wall that can be stood on; in flight,
+// the top of the wall, 200 km up
+function wallLim(sd){ return sd*STRIP>=STRIP_MAX ? STRIP_W/2+(aerFly?WALL_A:WALL_E_STAND) : Infinity; }
+function wallClamp(o,k='z',pad=WALL_PAD){ const n=wallLim(1)-pad, s=-wallLim(-1)+pad;
+  if (o[k]>n){ o[k]=n; return true; } if (o[k]<s){ o[k]=s; return true; } return false; }
+// the player's coordinates are carried over to the next strip, sg (+1 or -1) further across, their place on the ring
+// unchanged
+function stripStep(sg){
+  const dz=-sg*WRAP_Z, nx=ringW(player.x+sg*STRIP_K), dx=nx-player.x;
+  STRIP+=sg; player.z+=dz; camPos.z+=dz; camera.position.z+=dz; player.x+=dx; camPos.x+=dx; camera.position.x+=dx;
+  for (const f of wrapHooks) f(dz); for (const f of xWrapHooks) f(dx); for (const f of stripHooks) f(sg);
+  farCache.clear(); chunkState=''; farDirty=true; }
+function wrapWorldRing(){
+  wallClamp(player);
+  if (sailD && sailD.state && wallClamp(sailD.state,'z',40)) sailD.state.u=Math.min(sailD.state.u,0.3);
+  if (mode==='swim' && swimmer && swimmer.state) wallClamp(swimmer.state);
+  if (onBoard() || descent.t>=0 || ascent.t>=0) return false;
+  if (Math.abs(player.z)>WRAP_Z/2 && Math.abs(STRIP+Math.sign(player.z))<=STRIP_MAX){ stripStep(Math.sign(player.z)); return true; }
+  if (Math.abs(player.x)<=RING_C/2) return false;
+  const d=-Math.sign(player.x)*RING_C;
+  player.x+=d; camPos.x+=d; camera.position.x+=d; for (const f of xWrapHooks) f(d);
+  chunkState=''; farDirty=true; return true; }
 function wrapWorld(){
+  if (ORBITAL) return wrapWorldRing();
   if (Math.abs(player.z)<=WRAP_Z/2 || onBoard() || descent.t>=0 || ascent.t>=0) return false;
   const d=-Math.sign(player.z)*WRAP_Z;
   player.z+=d; camPos.z+=d; camera.position.z+=d; for (const f of wrapHooks) f(d);
@@ -5890,10 +6055,383 @@ const camera=new THREE.PerspectiveCamera(FOV,1,0.3,3600); world.add(camera);
 const torch=new THREE.SpotLight(0xfff1dc,0,32,0.42,0.55,1.4), torchAim=new THREE.Object3D();
 torchAim.position.set(0,0,-1); camera.add(torch,torchAim); torch.target=torchAim; torch.position.set(0.15,-0.1,0);
 let torchOn=false;
+
+/* ================= the ring in the sky (Orbital mode) =================
+   Beyond the fog the rest of the ring is drawn by the sky itself: each direction is traced from the eye to the ring's
+   floor (a cylinder of radius RING_R whose axis runs across the ring RING_R above sea level) or to the inner face of a
+   rim wall, and the point it meets is coloured from a map of the whole ring sampled from the generator once for each
+   seed: the shores, the mountains, the towns and the islands. Each point is lit by its own sun, which stands as high
+   over it as the turn of the ring allows, and hidden by the far floor or the southern wall (sunVis); where it is night
+   there, the towns are lit. Between the eye and the point lies the air of both ends of the line of sight, worked out
+   from the length of the path within ATM_H of the floor; at low angles the line runs through so much of it that the
+   ring is lost in the haze, and it rises out of the haze a few degrees above the horizon. The rim walls near the eye
+   are meshes (ringWalls) that use the same colouring, bent to the ring's curve in their vertex shader, so that the two
+   meet without a seam. All of it is made by orbitalSky and orbitalScene, which are called in Orbital mode alone (ORB);
+   in the standard mode the sky is Coast's own. */
+let ORB=null;
+function orbitalSky(){
+  // each map holds RMAP_L rows: the samples themselves, then the same blurred over 2, 4, 8 ... samples, from which the
+  // shader reads the row whose blur matches the ground a pixel covers, so that the far ring never shimmers
+  const RMAP_N=8192, RMAP_L=11, ISLE_N=4096;
+  const ringTex=new THREE.DataTexture(new Uint16Array(RMAP_N*RMAP_L*4),RMAP_N,RMAP_L,THREE.RGBAFormat,THREE.HalfFloatType);
+  const townTex=new THREE.DataTexture(new Uint16Array(RMAP_N*RMAP_L*4),RMAP_N,RMAP_L,THREE.RGBAFormat,THREE.HalfFloatType);
+  const isleTex=new THREE.DataTexture(new Uint16Array(ISLE_N*2*4),ISLE_N,2,THREE.RGBAFormat,THREE.HalfFloatType);
+  for (const T of [ringTex,townTex]){ T.wrapS=THREE.RepeatWrapping; T.magFilter=T.minFilter=THREE.LinearFilter; }
+  isleTex.magFilter=isleTex.minFilter=THREE.NearestFilter;
+  function buildRingMap(){
+    const h=THREE.DataUtils.toHalfFloat, I=isleTex.image.data, R=new Float32Array(RMAP_N*4), Tn=new Float32Array(RMAP_N*4);
+    const vil=(x,z)=>{ const cx=Math.floor(x/C), cz=Math.floor(z/C); return fbm(cx*0.12+3.3,cz*0.12+1.7,990,3)>0.5?1:0; };
+    for (let i=0;i<RMAP_N;i++){
+      const x=(i/RMAP_N-0.5)*RING_C, cs=coastZ0(1,x), cn=coastZ0(-1,x), L=mtLevel0(x);
+      const crest=L>0?MT_H*L*(0.5+0.75*Math.pow(smooth((RB1(mtCrestN,x)-0.28)/0.44),1.3)):0;
+      R[i*4]=cs; R[i*4+1]=cn; R[i*4+2]=crest; R[i*4+3]=mtSpine0(x);
+      let tS=0, tN=0; if (!nearJoin(x,6000)) for (const d of [70,190,310,430]){ tS+=vil(x,cs+d); tN+=vil(x,cn-d); }
+      Tn[i*4]=tS/4; Tn[i*4+1]=tN/4; }
+    // the blurred rows, as running means round the ring
+    for (const [src,T] of [[R,ringTex],[Tn,townTex]]){ const out=T.image.data, P=new Float64Array((RMAP_N+1)*4);
+      for (let i=0;i<RMAP_N;i++) for (let c=0;c<4;c++) P[(i+1)*4+c]=P[i*4+c]+src[i*4+c];
+      for (let L=0;L<RMAP_L;L++){ const w=1<<L, a=w>>1;
+        for (let i=0;i<RMAP_N;i++) for (let c=0;c<4;c++){ const lo=i-a, hi=lo+w; let sum;
+          if (lo>=0 && hi<=RMAP_N) sum=P[hi*4+c]-P[lo*4+c];
+          else { const l=((lo%RMAP_N)+RMAP_N)%RMAP_N, hh=((hi%RMAP_N)+RMAP_N)%RMAP_N; sum=l<hh?P[hh*4+c]-P[l*4+c]:P[RMAP_N*4+c]-P[l*4+c]+P[hh*4+c]; }
+          out[(L*RMAP_N+i)*4+c]=h(sum/w); } } }
+    I.fill(0);
+    for (let m=-ISLE_N/2; m<ISLE_N/2; m++) for (const sd of SIDES){ const row=sd>0?0:1, o=(row*ISLE_N+m+ISLE_N/2)*4;
+      if (Math.abs((m+0.5)*ISL)>RING_C/2) continue;
+      const S=islandInfo(sd,m); if (!S) continue;
+      I[o]=h(S.x-m*ISL); I[o+1]=h(S.z); I[o+2]=h(Math.sqrt(S.A*S.B)*0.95); I[o+3]=h(1); }
+    ringTex.needsUpdate=townTex.needsUpdate=isleTex.needsUpdate=true;
+  }
+  const RING_GLSL=`
+  #define RR ${RING_R.toFixed(2)}
+  #define RC ${RING_C.toFixed(1)}
+  #define FZ ${FLOOR_Z.toFixed(1)}
+  #define WS ${WALL_SHORE.toFixed(1)}
+  #define WA ${WALL_A.toFixed(1)}
+  #define WZ ${WALL_Z.toFixed(1)}
+  #define WH ${WALL_H.toFixed(1)}
+  #define WH0 ${WALL_H0.toFixed(1)}
+  #define LAND_H ${WALL_LAND.toFixed(1)}
+  #define WTH ${WALL_TOWN_H.toFixed(1)}
+  #define SW ${STRIP_W.toFixed(1)}
+  #define SMAX ${STRIP_MAX.toFixed(1)}
+  #define ATM_H 6500.0
+  #define HAZE_H 8400.0
+  #define HAZE_L 45000.0
+  uniform sampler2D uRing, uTown, uIsle; uniform vec3 uCamW; uniform float uFogF;
+  vec4 ringMap(sampler2D T, float u, float lod){ lod=clamp(lod,0.0,${(RMAP_L-1).toFixed(1)}); float a=floor(lod);
+    return mix(texture2D(T,vec2(u,(a+0.5)/${RMAP_L.toFixed(1)})),texture2D(T,vec2(u,(min(a+1.0,${(RMAP_L-1).toFixed(1)})+0.5)/${RMAP_L.toFixed(1)})),lod-a); }
+  float rh(vec2 p){ return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453); }
+  float rn(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.-2.*f); return mix(mix(rh(i),rh(i+vec2(1.,0.)),f.x),mix(rh(i+vec2(0.,1.)),rh(i+vec2(1.,1.)),f.x),f.y); }
+  // noise of the given cell size, fading to its mean where a pixel covers px metres or more of a cell, so that it never sparkles
+  float rnL(vec2 p, float cell, float px){ return mix(rn(p/cell),0.5,smoothstep(0.25,0.9,px/cell)); }
+  // the distance along a ray from height h to the floor, or -1
+  float ringHitFloor(float h, vec3 d){
+    float a=d.x*d.x+d.y*d.y, b=d.y*(h-RR), c=h*(h-2.0*RR), D=b*b-a*c; if (D<0.0 || a<1e-10) return -1.0;
+    float sq=sqrt(D); return b>0.0 ? -c/(b+sq) : (-b+sq)/a; }
+  // the length of the part of a path of length t lying within ATM_H of the floor
+  float ringAir(float h, vec3 d, float t){
+    float rho=RR-ATM_H, a=d.x*d.x+d.y*d.y; if (a<1e-10) return t;
+    float b=d.y*(h-RR), c=(h-RR-rho)*(h-RR+rho), D=b*b-a*c; if (D<=0.0) return t;
+    float sq=sqrt(D), t1=(-b-sq)/a, t2=(-b+sq)/a; if (t2<=0.0 || t1>=t) return t;
+    return max(t1,0.0)+max(0.0,t-t2); }
+  // the density of the air, relative to the floor, at a point s along the line of sight from height h: it thins with
+  // height as the spin's pull weakens towards the axis, exp(-y(2R-y)/2RH) for a scale height H at the floor
+  float airRho(float h, vec3 d, float s){ vec2 P=vec2(s*d.x,h+s*d.y-RR); float y=max(RR-length(P),0.0);
+    return exp(-y*(2.0*RR-y)/(2.0*RR*HAZE_H)); }
+  // the haze between the eye and a point at distance t: the optical depth of the air on the way, worked out over the
+  // stretch at each end of the line, where the air is (the middle of a long line runs high above the floor). Points
+  // further off lie behind more air, and points higher up behind less
+  float ringTau(float h, vec3 d, float t){
+    float L=min(t*0.5,1.2e6), a=0.0;
+    for (int i=0;i<10;i++){ float f=(float(i)+0.5)/10.0, w=L*0.2*f, s=L*f*f; a+=(airRho(h,d,s)+airRho(h,d,t-s))*w; }
+    return a/HAZE_L; }
+  // how much of a point at distance t shows through the haze: the floor within the reach of the fog is the ground's
+  // own, drawn as geometry, and is left to it
+  float ringClear(float h, vec3 d, float t){ return exp(-ringTau(h,d,t))*smoothstep(uFogF*0.6,uFogF*1.8,t); }
+  float wallClear(float h, vec3 d, float t){ return exp(-ringTau(h,d,t)); }
+  // the colour of the haze: the sky's own in that direction, paler towards the horizon's
+  vec3 hazeCol(vec3 c, vec3 hor, float T){ return mix(c,hor,0.45*(1.0-T)); }
+  // a point of the floor at x along the ring and z across it, as the generator's x (wrapped) and z within its strip
+  vec2 stripPt(float xr, float z){ float k=clamp(floor(z/SW+0.5),-SMAX,SMAX);
+    float xg=xr+mod(k*${(STRIP_K/20480).toFixed(1)},${(RING_C/20480).toFixed(1)})*20480.0; return vec2(xg-RC*floor(xg/RC+0.5),z-k*SW); }
+  // the share of the sun that reaches a point q (in the plane of the ring, from its axis) at z across it: the light must
+  // pass over the top of the rim wall on the sun's side, and the far floor hides the sun when it stands low
+  float sunVis(vec2 q, float z, vec3 s){ float sz=abs(s.z); if (sz<1e-4) return 1.0;
+    float run=WZ-sign(s.z)*z; if (run<=0.0) return 1.0;
+    return smoothstep(-2500.0,2500.0,RR-WH-length(q+s.xy*(run/sz))); }
+  // the sun on a point whose up is u, at z across the ring and y above the sea
+  float ringSunK(vec3 u, vec3 s, float z, float y){ if (dot(u,s)<=0.0) return 0.0; return sunVis(-(RR-y)*u.xy,z,s); }
+  vec3 ringLight(vec3 col, float lit, float mu, float glow){
+    float day=smoothstep(-0.12,0.25,mu), night=1.0-smoothstep(-0.18,0.04,mu);
+    vec3 amb=vec3(0.32,0.42,0.6)*(0.05+0.55*day);
+    return col*(vec3(1.0,0.95,0.86)*lit*2.4+amb)+vec3(1.0,0.62,0.28)*glow*night*1.4; }
+  // the colour of the floor at xr along the ring and zt across it, seen from distance t (for the size of a pixel)
+  vec3 ringFloor(float xr, float zt, vec3 up, vec3 d, vec3 s, float t){
+    vec2 G=stripPt(xr,zt); float xw=G.x, z=G.y;
+    float u=xw/RC+0.5, px=max(t*0.0016/max(abs(dot(d,up)),0.04),2.0), lod=log2(px/${(RING_C/RMAP_N).toFixed(2)})+0.5;
+    vec4 R=ringMap(uRing,u,lod), Tw=ringMap(uTown,u,lod);
+    float sS=z-R.x, sN=R.y-z, inl=min(sS,sN);
+    float isl=-1e6; float m=floor(xw/1600.0);
+    for (int k=-1;k<=1;k++) for (int r=0;r<2;r++){ float mm=m+float(k); vec4 I=texture2D(uIsle,vec2((mm+${(ISLE_N/2).toFixed(1)}+0.5)/${ISLE_N.toFixed(1)},r==0?0.25:0.75));
+      if (I.w>0.5){ float n=rnL(vec2(xw,z)+mm*806.0,260.0,px)*0.35+0.75; isl=max(isl,I.z*n-length(vec2(xw-(mm*1600.0+I.x),z-I.y))); } }
+    float pz=max(t*0.0016,2.0), land=max(inl,isl), lm=smoothstep(-pz,pz,land);
+    // the mountains, from the spine down to their feet 300 m inland of each shore
+    float foot=z<R.w?R.x+300.0:R.y-300.0, q=clamp(1.0-abs(z-R.w)/max(abs(R.w-foot),150.0),0.0,1.0)*step(300.0,inl);
+    float mh=R.z*pow(q,1.5), slope=R.z*1.5*pow(q,0.5)/max(abs(R.w-foot),150.0);
+    float n1=rnL(vec2(xw,z),420.0,px), n2=rnL(vec2(xw,z),97.0,px);
+    vec3 col=mix(vec3(0.32,0.34,0.13),vec3(0.24,0.29,0.1),n1)*(0.85+0.3*n2);
+    col=mix(col,vec3(0.55,0.5,0.32),0.35*smoothstep(0.55,0.8,rnL(vec2(xw,z),1300.0,px)));
+    col=mix(col,vec3(0.1,0.14,0.055),smoothstep(60.0,180.0,mh)*0.75);
+    col=mix(col,mix(vec3(0.27,0.29,0.26),vec3(0.36,0.38,0.35),n2),0.55*smoothstep(220.0,420.0,mh));
+    col=mix(col,vec3(0.74,0.55,0.3),(1.0-smoothstep(20.0,70.0+px,inl))*min(1.0,120.0/px));
+    float town=(z<R.w?Tw.x:Tw.y)*(1.0-smoothstep(380.0,620.0,inl))*step(0.0,inl), tn=rnL(vec2(xw,z),38.0,px);
+    float tm=smoothstep(0.35,0.65,town+0.35*(n1-0.5));
+    col=mix(col,mix(vec3(0.62,0.12,0.09),vec3(0.86,0.74,0.6),tn),tm*0.85);
+    vec3 sea=mix(vec3(0.016,0.09,0.23),vec3(0.05,0.28,0.36),exp(-max(-land,0.0)/90.0));
+    // the slope of the mountains turns the ground towards the sun or away from it
+    vec3 nrm=normalize(up+vec3(0.0,0.0,1.0)*slope*(z<R.w?-1.0:1.0));
+    float mu=dot(up,s), lit=ringSunK(up,s,zt,mh)*max(dot(nrm,s),0.0), ks=ringSunK(up,s,zt,0.0);
+    float glow=tm*(0.05+1.3*mix(pow(rn(vec2(xw,z)/55.0),3.0),0.17,smoothstep(14.0,50.0,px)));
+    vec3 L=ringLight(col,lit,mu,glow);
+    vec3 r=reflect(d,up); float sp=pow(max(dot(r,s),0.0),300.0)*8.0+pow(max(dot(r,s),0.0),18.0)*0.25;
+    vec3 W=ringLight(sea,ks*max(mu,0.0),mu,0.0)+vec3(1.0,0.93,0.8)*sp*ks;
+    return mix(W,L,lm); }
+  // the height of a rim wall's inner face at u = (distance beyond FZ)/WA, and its normal there (side +1 the north wall)
+  float wallHw(float u){ u=clamp(u,0.0,1.0); return WH0+(WH-WH0)*(1.0-sqrt(1.0-u*u)); }
+  vec3 wallN(float u, float side, vec3 up){ u=clamp(u,0.0,1.0); return normalize(up*WA*sqrt(max(1.0-u*u,0.0))-vec3(0.0,0.0,side*(WH-WH0)*u)); }
+  // the inner face of a rim wall at xr along the ring, hw above the sea and u across its curve, seen along d. The land
+  // runs on up the gentle lower part of the curve, to a ragged edge about LAND_H up where the slope nears 33 degrees:
+  // fields, woods and villages up to WTH, where the face grows too steep to build on (WALL_TOWN_E), then bare rock and
+  // snow. Above it the wall is bare gunmetal: plates with a gallery
+  // every 450 m of height, ribs every 2.4 km along the ring, a ledge every 12 km and a buttress every 30 km, and the lit
+  // windows of the galleries in its lower reaches
+  vec3 ringWall(float xr, float hw, float side, float u, vec3 up, vec3 d, vec3 s, float t){
+    float px=max(t*0.0016,1.0);
+    float n=rnL(vec2(xr,hw*2.2),310.0,px), n1=rnL(vec2(xr,hw*3.0),2600.0,px), n2=rnL(vec2(xr*0.7,hw*4.0),500.0,px);
+    float edge=LAND_H+1200.0*(n1-0.5), land=1.0-smoothstep(edge-250.0-px*0.5,edge+250.0+px*0.5,hw);
+    vec3 g=mix(vec3(0.32,0.34,0.13),vec3(0.24,0.29,0.1),n1)*(0.85+0.3*n2);
+    g=mix(g,vec3(0.55,0.5,0.32),0.35*smoothstep(0.55,0.8,rnL(vec2(xr,hw*2.0),1300.0,px))*(1.0-smoothstep(300.0,900.0,hw)));
+    g=mix(g,vec3(0.1,0.14,0.055),0.7*smoothstep(500.0,1600.0,hw)*smoothstep(0.42,0.62,n2));
+    float vil=smoothstep(0.58,0.72,rnL(vec2(xr,hw*2.0),900.0,px))*(1.0-smoothstep(WTH-600.0,WTH,hw));
+    g=mix(g,vec3(0.66,0.56,0.46),0.5*vil);
+    g=mix(g,mix(vec3(0.36,0.35,0.32),vec3(0.5,0.48,0.44),n2),smoothstep(WTH-500.0,WTH+700.0,hw+600.0*(n-0.5)));
+    g=mix(g,vec3(0.86,0.88,0.92),smoothstep(LAND_H-1500.0,LAND_H-300.0,hw+500.0*(n1-0.5)));
+    float terr=fract(hw/450.0), rib=abs(fract(xr/2400.0)-0.5)*2.0, lg=fract(hw/12000.0), bt=abs(fract(xr/30000.0)-0.5)*2.0;
+    vec3 m=vec3(0.036,0.04,0.047)*(0.9+0.16*n);
+    m*=mix(1.0,mix(0.7,1.0,smoothstep(0.0,0.03,terr)),1.0-smoothstep(60.0,220.0,px));
+    m*=mix(1.0,mix(1.22,0.95,smoothstep(0.012,0.03,rib)),1.0-smoothstep(200.0,900.0,px));
+    m*=mix(0.6,1.0,smoothstep(0.0,0.02+px/12000.0,lg))*mix(1.2,1.0,smoothstep(0.02,0.05+px/30000.0,bt));
+    m=mix(m,vec3(0.09,0.095,0.105),smoothstep(WH-1500.0,WH-1400.0,hw));
+    vec3 col=mix(m,g,land);
+    vec2 c=vec2(xr/28.0,hw/75.0), f=fract(c); float w=step(0.72,rh(floor(c)))*step(abs(f.x-0.5),0.22)*step(abs(f.y-0.5),0.12);
+    float win=mix(w,0.028,smoothstep(4.0,14.0,px))*step(hw,40000.0)*(1.0-land);
+    // the lights of the villages
+    vec2 cv=vec2(xr/70.0,hw/45.0); float hv=step(0.8,rh(floor(cv)))*step(length(fract(cv)-0.5),0.3);
+    win+=land*vil*mix(hv,0.06,smoothstep(20.0,70.0,px));
+    vec3 N=wallN(u,side,up); float mu=dot(up,s), vis=sunVis(-(RR-hw)*up.xy,side*(FZ+u*WA),s);
+    float lit=max(dot(N,s),0.0)*vis;
+    float sp=pow(max(dot(reflect(d,N),s),0.0),28.0)*0.15*(1.0-land)*vis;
+    return ringLight(col,lit,mu,win*2.2)+vec3(1.0,0.95,0.88)*sp; }
+  // how far above a rim wall's inner face (side) the point at t along the line of sight stands: the line runs into the
+  // wall where this falls to 0. It is concave in t, so that it crosses 0 once at most on any stretch where it starts above
+  float wallG(float h, vec3 d, float t, float side){
+    float e=side*(uCamW.z+t*d.z)-FZ; vec2 P=vec2(t*d.x,h+t*d.y-RR); return RR-length(P)-wallHw(e/WA); }
+  // the ships
+  uniform float uTime, uPx;
+  uniform vec3 uShP[12], uShX[12], uShY[12]; uniform vec4 uShI[12];
+  // the ships are built from tapered boxes: a box from lo to hi whose half-width (z) and half-height (y) narrow towards
+  // its bow (+x) to kz and ky of those at its stern, met by the line of sight from o along d; and drums along x
+  float hull(vec3 o, vec3 d, vec3 lo, vec3 hi, float kz, float ky, inout vec3 n){
+    vec3 c=0.5*(lo+hi), h=0.5*(hi-lo); o-=c;
+    float az=h.z*(1.0-kz)/(2.0*h.x), ay=h.y*(1.0-ky)/(2.0*h.x), tn=-1e9, tf=1e9; vec3 nn=vec3(1.0,0.0,0.0);
+    vec3 N[6]; float C[6];
+    N[0]=vec3(1.0,0.0,0.0); C[0]=h.x; N[1]=vec3(-1.0,0.0,0.0); C[1]=h.x;
+    N[2]=vec3(az,0.0,1.0); C[2]=h.z-az*h.x; N[3]=vec3(az,0.0,-1.0); C[3]=C[2];
+    N[4]=vec3(ay,1.0,0.0); C[4]=h.y-ay*h.x; N[5]=vec3(ay,-1.0,0.0); C[5]=C[4];
+    for (int i=0;i<6;i++){ float dn=dot(N[i],d), ds=C[i]-dot(N[i],o);
+      if (abs(dn)<1e-9){ if (ds<0.0) return 1e9; continue; }
+      float tt=ds/dn; if (dn<0.0){ if (tt>tn){ tn=tt; nn=N[i]; } } else tf=min(tf,tt); }
+    if (tn>tf) return 1e9; n=normalize(nn); return tn; }
+  float box(vec3 o, vec3 d, vec3 lo, vec3 hi, inout vec3 n){ return hull(o,d,lo,hi,1.0,1.0,n); }
+  float cylX(vec3 o, vec3 d, float x0, float x1, float r, inout vec3 n){
+    float a=dot(d.yz,d.yz), tb=1e9; if (a>1e-12){ float tca=-dot(o.yz,d.yz)/a; vec2 p=o.yz+tca*d.yz; float D=r*r-dot(p,p);
+      if (D>=0.0){ float t=tca-sqrt(D/a), x=o.x+t*d.x; if (x>x0 && x<x1){ n=vec3(0.0,(o.yz+t*d.yz)/r); tb=t; } } }
+    if (abs(d.x)>1e-6){ float tc=((d.x>0.0?x0:x1)-o.x)/d.x; vec2 p=o.yz+tc*d.yz; if (dot(p,p)<r*r && tc<tb){ n=vec3(d.x>0.0?-1.0:1.0,0.0,0.0); tb=tc; } }
+    return tb; }
+  // an engine bell at (y, z) across the stern
+  float nozzle(vec3 o, vec3 d, float y, float z, float r, float x0, inout vec3 n){ return cylX(o-vec3(0.0,y,z),d,x0-0.06,x0+0.01,r,n); }
+  #define SHIP_P(u,pp) if (u<t){ t=u; n=m; part=pp; }
+  // one ship, in its own frame (length 1 along x, its bow at +x), the line of sight from o along d: the distance along
+  // it, the normal, and the part met (0 hull, 1 superstructure, 2 engine, 3 and up modules)
+  float shipHit(vec3 o, vec3 d, float ty, inout vec3 n, inout float part){
+    float t=1e9, u; vec3 m;
+    if (ty<0.5){
+      // a capital ship: a long hull drawn to a point at the bow, tiers of superstructure stepping up towards a tower near
+      // the stern, a keel beneath, sponsons at the sides, and five engines
+      u=hull(o,d,vec3(-0.5,-0.05,-0.14),vec3(0.5,0.05,0.14),0.04,0.35,m); SHIP_P(u,0.0)
+      u=hull(o,d,vec3(-0.46,0.05,-0.08),vec3(0.1,0.09,0.08),0.35,0.7,m); SHIP_P(u,1.0)
+      u=hull(o,d,vec3(-0.42,0.09,-0.045),vec3(-0.12,0.125,0.045),0.6,0.8,m); SHIP_P(u,1.0)
+      u=box(o,d,vec3(-0.37,0.125,-0.02),vec3(-0.3,0.17,0.02),m); SHIP_P(u,1.0)
+      u=box(o,d,vec3(-0.35,0.162,-0.06),vec3(-0.325,0.176,0.06),m); SHIP_P(u,1.0)
+      u=hull(o,d,vec3(-0.42,-0.085,-0.03),vec3(0.25,-0.05,0.03),0.2,0.5,m); SHIP_P(u,1.0)
+      u=box(o,d,vec3(-0.38,-0.03,0.11),vec3(-0.1,0.03,0.17),m); SHIP_P(u,3.0)
+      u=box(o,d,vec3(-0.38,-0.03,-0.17),vec3(-0.1,0.03,-0.11),m); SHIP_P(u,4.0)
+      u=nozzle(o,d,0.0,0.0,0.042,-0.5,m); SHIP_P(u,2.0)
+      u=nozzle(o,d,0.0,0.075,0.035,-0.5,m); SHIP_P(u,2.0)
+      u=nozzle(o,d,0.0,-0.075,0.035,-0.5,m); SHIP_P(u,2.0)
+      u=nozzle(o,d,0.0,0.14,0.026,-0.38,m); SHIP_P(u,2.0)
+      u=nozzle(o,d,0.0,-0.14,0.026,-0.38,m); SHIP_P(u,2.0)
+    } else if (ty<1.5){
+      // an ark: a spine carrying blocks of holds and two habitat drums, a command section at the bow and an engine block
+      u=box(o,d,vec3(-0.5,-0.02,-0.02),vec3(0.46,0.02,0.02),m); SHIP_P(u,0.0)
+      u=hull(o,d,vec3(0.3,-0.06,-0.07),vec3(0.5,0.06,0.07),0.3,0.4,m); SHIP_P(u,1.0)
+      for (int i=0;i<5;i++){ float x=i<3?-0.33+float(i)*0.105:0.07+float(i-3)*0.105;
+        u=box(o,d,vec3(x-0.045,-0.075,-0.09),vec3(x+0.045,0.075,0.09),m); SHIP_P(u,3.0+float(i)) }
+      u=cylX(o,d,-0.035,-0.005,0.17,m); SHIP_P(u,1.0)
+      u=cylX(o,d,0.18,0.21,0.14,m); SHIP_P(u,1.0)
+      u=box(o,d,vec3(-0.5,-0.08,-0.08),vec3(-0.41,0.08,0.08),m); SHIP_P(u,0.0)
+      u=nozzle(o,d,0.04,0.04,0.033,-0.5,m); SHIP_P(u,2.0)
+      u=nozzle(o,d,0.04,-0.04,0.033,-0.5,m); SHIP_P(u,2.0)
+      u=nozzle(o,d,-0.04,0.04,0.033,-0.5,m); SHIP_P(u,2.0)
+      u=nozzle(o,d,-0.04,-0.04,0.033,-0.5,m); SHIP_P(u,2.0)
+    } else {
+      // a flying wing: a broad blade swept to a point, a ridge along its back, pods beneath, and a row of engines
+      u=hull(o,d,vec3(-0.5,-0.025,-0.5),vec3(0.5,0.025,0.5),0.02,0.6,m); SHIP_P(u,0.0)
+      u=hull(o,d,vec3(-0.46,0.025,-0.09),vec3(0.3,0.06,0.09),0.1,0.5,m); SHIP_P(u,1.0)
+      u=hull(o,d,vec3(-0.4,0.06,-0.04),vec3(-0.05,0.085,0.04),0.4,0.8,m); SHIP_P(u,1.0)
+      u=box(o,d,vec3(-0.35,-0.05,0.18),vec3(0.0,-0.02,0.26),m); SHIP_P(u,3.0)
+      u=box(o,d,vec3(-0.35,-0.05,-0.26),vec3(0.0,-0.02,-0.18),m); SHIP_P(u,4.0)
+      for (int i=0;i<6;i++){ float z=(float(i/2)*0.12+0.1)*(mod(float(i),2.0)<0.5?1.0:-1.0);
+        u=nozzle(o,d,0.0,z,0.022,-0.5,m); SHIP_P(u,2.0) }
+    }
+    return t; }
+  // the lights of a ship's hull at p (its own frame) on a face with normal n, where a pixel covers px of its length:
+  // thousands of windows in decks, some districts dark; where a pixel covers many of them, cells of the size of a pixel
+  // each show the light of their windows together, a few of them bright, so that the hull glitters without shimmering
+  vec3 shipLights(vec3 p, vec3 n, float px, float sd){
+    vec2 f=abs(n.x)>0.5?p.zy:abs(n.y)>0.5?p.xz:p.xy;
+    float dist=step(0.45,rh(floor(f*vec2(14.0,9.0))+sd))*(0.4+0.6*step(0.5,rh(floor(f*vec2(40.0,26.0))+sd+1.7)));
+    vec2 g=f*vec2(700.0,450.0);
+    float L=floor(max(log2(px*700.0)+0.5,0.0)), sc=exp2(L), on;
+    vec2 c=floor(g/sc); float r=rh(c+vec2(sd*13.1,L*7.7));
+    if (L<0.5){ vec2 q=fract(g); on=step(0.86,r)*step(abs(q.x-0.5),0.3)*step(abs(q.y-0.5),0.2); }
+    else { float k=8.0+L*3.0; on=0.012*(k+1.0)*pow(r,k); }
+    vec3 lc=mix(vec3(1.0,0.7,0.4),vec3(0.75,0.88,1.0),step(0.82,rh(c+3.3)));
+    return lc*on*dist; }
+  // a point of light at q (from the eye), of angular size a0, and how far off the line of sight it stands
+  float halo(vec3 d, vec3 q, float a0){ float te=dot(q,d); if (te<=0.0) return 0.0; float a=length(cross(d,q))/te; return exp(-a*a/(a0*a0)); }
+  // the ships along the line of sight d from the eye at h: the distance to the first met, its colour, how much of the sky
+  // behind it it hides, and the glow of their engines and beacons wherever they stand in the open (added to glow)
+  float spaceHit(vec3 d, float h, float tLim, out vec3 col, out float hide, inout vec3 glow){
+    float tb=1e30; vec3 n, nb, P; float kind=-1.0, sb=0.0, part=0.0, pb=0.0, ty=0.0; vec3 lp=vec3(0.0);
+    float t, fb=1.0; vec3 Xs=vec3(1.0,0.0,0.0), Ys=vec3(0.0,1.0,0.0);
+    for (int i=0;i<12;i++){ vec4 I=uShI[i]; if (I.x<=0.0 || I.w<=0.0) continue; vec3 c=uShP[i]; float tca=dot(c,d);
+      if (tca<=0.0) continue;
+      vec3 X=uShX[i], Y=uShY[i], Z=cross(X,Y); float L=I.x, D=length(c);
+      // the engines burn blue-white, with a faint plume astern; a white light flashes at the bow, red and green ones at
+      // the sides
+      if (D<tLim){ float a0=max(0.0016,0.035*L/D), wz=I.y<0.5?0.15:I.y<1.5?0.17:0.48;
+        vec3 e=c-X*0.52*L; float g=halo(d,e,a0)*1.6;
+        for (int k=1;k<5;k++) g+=halo(d,e-X*L*0.18*float(k),a0*(1.0+0.5*float(k)))*0.28/float(k);
+        glow+=vec3(0.55,0.75,1.0)*g*I.w;
+        float bl=step(0.9,fract(uTime*0.5+I.z));
+        glow+=vec3(1.0)*halo(d,c+X*0.5*L,0.0012)*1.8*bl*I.w;
+        float b2=step(0.5,fract(uTime*0.25+I.z*3.0));
+        glow+=vec3(1.0,0.15,0.1)*halo(d,c+Z*wz*L-X*0.3*L,0.0011)*1.4*b2*I.w+vec3(0.15,1.0,0.3)*halo(d,c-Z*wz*L-X*0.3*L,0.0011)*1.4*b2*I.w; }
+      vec3 pp=c-tca*d; if (dot(pp,pp)>0.56*L*L) continue;
+      vec3 o=-pp/L, o2=vec3(dot(o,X),dot(o,Y),dot(o,Z)), d2=vec3(dot(d,X),dot(d,Y),dot(d,Z)); float pt;
+      float u=shipHit(o2,d2,I.y,n,pt); if (u>1e8) continue; t=tca+u*L;
+      if (t>0.0 && t<tb){ tb=t; nb=n; kind=3.0; pb=pt; lp=o2+u*d2; part=I.z; fb=I.w; sb=tb*uPx/L; ty=I.y; Xs=X; Ys=Y; } }
+    hide=0.0;
+    if (kind<0.0 || tb>=tLim) return -1.0;
+    // the normal back in the ring's frame, for the light of the sun
+    vec3 Zs=cross(Xs,Ys), nw=Xs*nb.x+Ys*nb.y+Zs*nb.z;
+    vec3 Pw=tb*d; vec2 q=vec2(Pw.x,Pw.y-(RR-h)); float z=uCamW.z+Pw.z, vis=sunVis(q,z,uSun), lit=max(dot(nw,uSun),0.0)*vis;
+    // a dark hull of plates of slightly differing tone, with a faint sheen of the sun
+    vec2 f=abs(nb.x)>0.5?lp.zy:abs(nb.y)>0.5?lp.xz:lp.xy;
+    float pl=mix(rh(floor(f*vec2(90.0,60.0))+part),0.5,smoothstep(0.004,0.02,sb));
+    vec3 base=vec3(0.02,0.021,0.024)*(0.7+0.6*pl)*(pb>0.5&&pb<1.5?1.15:1.0);
+    if (pb>2.5) base*=0.85+0.4*rh(vec2(pb,part));
+    float sp=pow(max(dot(reflect(d,nw),uSun),0.0),60.0)*0.04*vis;
+    vec3 em=shipLights(lp,nb,sb,part*97.0)*9.0*(pb>1.5&&pb<2.5?0.0:1.0);
+    // the engine bells glow inside
+    if (pb>1.5 && pb<2.5 && nb.x<-0.5) em=vec3(0.35,0.6,1.0)*3.5*(1.0+0.15*sin(uTime*7.0+part*40.0));
+    col=(base*(vec3(1.0,0.96,0.9)*lit*2.4+vec3(0.03,0.035,0.045))+vec3(1.0,0.95,0.88)*sp+em)*fb;
+    hide=0.5*fb;
+    return tb; }
+  `;
+  const uniforms={uRing:{value:ringTex},uTown:{value:townTex},uIsle:{value:isleTex},uCamW:{value:new THREE.Vector3()},uFogF:{value:1500},
+    uTime:{value:0},uPx:{value:0.0013},
+    uShP:{value:Array.from({length:12},()=>new THREE.Vector3())},uShX:{value:Array.from({length:12},()=>new THREE.Vector3(1,0,0))},uShY:{value:Array.from({length:12},()=>new THREE.Vector3(0,1,0))},uShI:{value:Array.from({length:12},()=>new THREE.Vector4())}};
+  // the sky's own shader in Orbital mode: Coast's sky without the moon, its stars turned about the ring's axis, and the ring
+  const skyFrag=`uniform vec3 uTop,uMid,uHor,uSun,uSunCol,uMetA,uMetB,uMet; uniform float uNight,uDay,uRot; varying vec3 vDir;
+    ${RING_GLSL}
+    float h3(vec3 p){ return fract(sin(dot(p,vec3(12.9898,78.233,37.719)))*43758.5453); }
+    void main(){
+      vec3 d=normalize(vDir); float y=d.y;
+      vec3 c = y>0.12 ? mix(uMid,uTop,clamp((y-0.12)/0.6,0.0,1.0)) : mix(uHor,uMid,clamp((y+0.04)/0.16,0.0,1.0));
+      float sd=max(dot(d,uSun),0.0);
+      c += uSunCol*(pow(sd,12.0)*0.35 + pow(sd,3.0)*0.12*(1.0-uDay));
+      vec3 add=uSunCol*pow(sd,900.0)*6.0;
+      // the star field turns about the ring's axis, once a day
+      float cr=cos(uRot), sr=sin(uRot); vec3 ds=vec3(d.x*cr+d.y*sr, -d.x*sr+d.y*cr, d.z);
+      vec3 g=ds*190.0, cell=floor(g); float st=h3(cell);
+      if (st>0.982){
+        vec3 o=vec3(h3(cell+1.7),h3(cell+5.3),h3(cell+9.1))*0.6+0.2;
+        float dd=length(fract(g)-o), size=0.06+0.1*h3(cell+3.3);
+        float b=exp(-dd*dd/(size*size))*(0.35+0.65*h3(cell+7.7));
+        float tw=0.75+0.25*sin(st*900.0+uRot*400.0);
+        add += vec3(0.9,0.93,1.0)*b*tw*uNight*smoothstep(0.02,0.25,y)*1.6;
+      }
+      if (uMet.z>0.0){
+        vec3 hd=normalize(mix(uMetA,uMetB,uMet.x)), tl=normalize(mix(uMetA,uMetB,max(0.0,uMet.x-uMet.y))), ab=hd-tl;
+        float L2=max(dot(ab,ab),1e-10), f=clamp(dot(d-tl,ab)/L2,0.0,1.0); vec3 q=tl+ab*f; float pd=length(d-q);
+        float core=exp(-pd*pd/(0.0011*0.0011)), glow=exp(-pd*pd/(0.004*0.004))*0.25;
+        add += vec3(1.0,0.96,0.88)*(core+glow)*f*f*uMet.z*3.0;
+      }
+      // the ring: its floor, or the inner face of a rim wall, whichever the line of sight meets first. The floor ends
+      // where the wall on either side rises out of the sea; on its way to that wall the line of sight stays above it
+      // unless it is below it where it reaches the top of the wall, or the floor
+      float h=max(uCamW.y,0.5), tf=ringHitFloor(h,d), zf=uCamW.z+tf*d.z, tw=-1.0, side=sign(d.z);
+      bool fl=tf>0.0 && abs(zf)<=FZ+WS;
+      // where the line of sight meets the floor between the walls within six tenths of the fog's reach, the floor is
+      // wholly hidden by the haze (ringClear is nil there), and so is anything beyond it. Those pixels, mostly under
+      // scenery drawn over the sky, are given the haze at once instead of the walls and ships being sought
+      if (tf>0.0 && tf<uFogF*0.6 && abs(zf)<FZ){ gl_FragColor=vec4(hazeCol(c,uHor,0.0)+add,1.0);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+        return; }
+      if (abs(d.z)>1e-7){ float t0=max((side*FZ-uCamW.z)/d.z,0.0), t1=(side*WZ-uCamW.z)/d.z; if (tf>0.0) t1=min(t1,tf);
+        if (t1>t0 && wallG(h,d,t1,side)<=0.0){ float a=t0, b=t1; for (int i=0;i<26;i++){ float m=0.5*(a+b); if (wallG(h,d,m,side)>0.0) a=m; else b=m; } tw=b; } }
+      // from over a rim wall the line of sight may meet that wall's face even while it is turned away from it across the
+      // ring, or runs along it: the face rises across its path as the ring curves up ahead
+      { float sc=sign(uCamW.z); if (tw<0.0 && abs(uCamW.z)>FZ && (sc!=side || abs(d.z)<=1e-7)){
+          float t1=tf>0.0?tf:4e6; if (abs(d.z)>1e-7) t1=min(t1,(sc*FZ-uCamW.z)/d.z);
+          if (wallG(h,d,t1,sc)<=0.0){ float a=0.0, b=t1; for (int i=0;i<26;i++){ float m=0.5*(a+b); if (wallG(h,d,m,sc)>0.0) a=m; else b=m; } tw=b; side=sc; } } }
+      float t=-1.0; vec3 surf;
+      if (fl && (tw<0.0 || tf<tw)){ t=tf; vec2 P=vec2(tf*d.x,h+tf*d.y);
+        float psi=atan(P.x,RR-P.y); vec3 up=vec3(-sin(psi),cos(psi),0.0); surf=ringFloor(uCamW.x+psi*RR,zf,up,d,uSun,t); }
+      else if (tw>0.0){ t=tw; vec2 P=vec2(tw*d.x,h+tw*d.y); float psi=atan(P.x,RR-P.y); vec3 up=vec3(-sin(psi),cos(psi),0.0);
+        float e=side*(uCamW.z+tw*d.z)-FZ; surf=ringWall(uCamW.x+psi*RR,RR-length(P-vec2(0.0,RR)),side,e/WA,up,d,uSun,t); }
+      // the ships, seen through the air as the moon is by day
+      vec3 oc, glow=vec3(0.0); float hide; float to=spaceHit(d,h,t>0.0?t:1e30,oc,hide,glow);
+      if (to>0.0){ float T=exp(-ringTau(h,d,to)); c=c*(1.0-hide*T)+oc*T; add=vec3(0.0); }
+      else if (t>0.0){ float T=t==tw?wallClear(h,d,t):ringClear(h,d,t); c=mix(hazeCol(c,uHor,T),surf,T); add*=1.0-smoothstep(0.0,0.02,T); if (t==tw) add*=0.0; }
+      add+=glow*exp(-ringTau(h,d,4e6));
+      c+=add;
+      gl_FragColor=vec4(c,1.0);
+      #include <tonemapping_fragment>
+      #include <colorspace_fragment>
+    }`;
+  return {ringTex,townTex,isleTex,buildRingMap,RING_GLSL,uniforms,skyFrag};
+}
+if (ORBITAL) ORB=orbitalSky();
 const skyU={uTop:{value:new THREE.Color()},uMid:{value:new THREE.Color()},uHor:{value:new THREE.Color()},uSun:{value:new THREE.Vector3(0,1,0)},uSunCol:{value:new THREE.Color()},uNight:{value:0},uDay:{value:1},uRot:{value:0},uCres:{value:0},uMetA:{value:new THREE.Vector3(0,1,0)},uMetB:{value:new THREE.Vector3(0,1,0)},uMet:{value:new THREE.Vector3()}};
-const sky=new THREE.Mesh(new THREE.SphereGeometry(500,48,24),new THREE.ShaderMaterial({uniforms:skyU,side:THREE.BackSide,depthWrite:false,fog:false,
+if (ORBITAL) Object.assign(skyU,ORB.uniforms);
+const sky=new THREE.Mesh(ORBITAL?new THREE.SphereGeometry(500,64,32):new THREE.SphereGeometry(500,48,24),new THREE.ShaderMaterial({uniforms:skyU,side:THREE.BackSide,depthWrite:false,fog:false,
   vertexShader:`varying vec3 vDir; void main(){ vDir=normalize(position); gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
-  fragmentShader:`uniform vec3 uTop,uMid,uHor,uSun,uSunCol,uMetA,uMetB,uMet; uniform float uNight,uDay,uRot,uCres; varying vec3 vDir;
+  fragmentShader:ORBITAL?ORB.skyFrag:`uniform vec3 uTop,uMid,uHor,uSun,uSunCol,uMetA,uMetB,uMet; uniform float uNight,uDay,uRot,uCres; varying vec3 vDir;
     float h3(vec3 p){ return fract(sin(dot(p,vec3(12.9898,78.233,37.719)))*43758.5453); }
     void main(){
       vec3 d=normalize(vDir); float y=d.y;
@@ -5932,13 +6470,98 @@ const sky=new THREE.Mesh(new THREE.SphereGeometry(500,48,24),new THREE.ShaderMat
       #include <colorspace_fragment>
     }`}));
 sky.renderOrder=-1; world.add(sky);
+// (Orbital mode) the sky's view of the ring, the ships and the rim walls near the eye, made once the sky exists
+function orbitalScene(){
+  const RING_GLSL=ORB.RING_GLSL, _skyP=new THREE.Vector3(); let SPACE, ringWalls, updateWalls;
+  sky.onBeforeRender=()=>{ const p=camera.getWorldPosition(_skyP), X=trueX(p.x+ORIGIN.x), Z=trueZ(p.z+ORIGIN.z), h=p.y+ORIGIN.y;
+    skyU.uCamW.value.set(X,h,Z); skyU.uFogF.value=scene.fog.far; skyU.uPx.value=camera.fov*Math.PI/180/Math.max(1,renderer.domElement.height); SPACE.update(X,Z,h); };
+  /* ---------- the ships ----------
+     They are drawn by the sky (spaceHit), from their places relative to the eye, set here each frame. They are out in
+     space and do not turn with the ring: each runs straight and slowly, at a few hundred metres a second, so that the
+     turning of the ring carries them round its axis as it carries the stars. */
+  SPACE=(()=>{
+    const U=skyU, RR=RING_R, SH=[], R=rng(SEED^0x5a17);
+    const RUN=5200e3;   // a ship's run, from 2,600 km off one side of the ring, out of sight below the far wall's top, to as far off the other
+    // seven, 70 to 220 km long, run along the axis, 30 to 250 km off it, through the middle of the ring, where they pass
+    // high overhead against the arch; three giants, 300 to 550 km long, cross it broadside 450 to 900 km off the
+    // ring's sides. Each fades into the distance at either end of its run
+    const CROSS=5000e3, LEN=[150e3,90e3,220e3,70e3,120e3,80e3,160e3,400e3,300e3,550e3];
+    for (let i=0;i<10;i++){ const r=30e3+R()*220e3, th=R()*Math.PI*2, dir=i%2?1:-1;
+      SH.push({L:LEN[i], type:i%3, r, th, dir, v:200+R()*300, z0:R()*RUN, roll:R()*Math.PI*2, seed:R(),
+        cross:i>=7, zc:dir*(450e3+R()*450e3), b:(R()-0.5)*800e3}); }
+    const v=new THREE.Vector3(), X=new THREE.Vector3(), Y=new THREE.Vector3();
+    function update(Xc,Zc,h){
+      const ang=(hour-6)/24*Math.PI*2, ca=Math.cos(ang), sa=Math.sin(ang); U.uTime.value=time%10000;
+      // a ship's place in space, turned into the ring's frame as the stars are: (x, y) about the axis, z along it
+      const put=(k,px,py,pz,ax,ay,az,bx,by,bz,S,ty,seed,rot)=>{
+        const c=rot?ca:1, s=rot?sa:0;
+        U.uShP.value[k].set(px*c-py*s,px*s+py*c+RR-h,pz-Zc);
+        U.uShX.value[k].set(ax*c-ay*s,ax*s+ay*c,az); U.uShY.value[k].set(bx*c-by*s,bx*s+by*c,bz);
+        U.uShI.value[k].set(S,ty,seed,1); };
+      const fade=(w,W)=>Math.min(1,Math.min(w,W-w)/(0.08*W));
+      SH.forEach((S,k)=>{
+        if (S.cross){ const W=CROSS, w=(((S.z0+S.v*time)%W)+W)%W, a=w-W/2, cx=Math.cos(S.th), sx=Math.sin(S.th);
+          put(k,a*cx-S.b*sx,a*sx+S.b*cx,S.zc, cx,sx,0, -sx*Math.cos(S.roll),cx*Math.cos(S.roll),Math.sin(S.roll), S.L,S.type,S.seed,true); U.uShI.value[k].w=fade(w,W); return; }
+        const w=(((S.z0+S.v*time)%RUN)+RUN)%RUN, pz=S.dir*(w-RUN/2);
+        put(k,S.r*Math.cos(S.th),S.r*Math.sin(S.th),pz, 0,0,S.dir, Math.cos(S.roll),Math.sin(S.roll),0, S.L,S.type,S.seed,true); U.uShI.value[k].w=fade(w,RUN); });
+    }
+    return {update,ships:SH};
+  })();
+  // the rim walls near the eye: the wall beyond an outer strip, 12 km long and up its curve to the top, following the eye along the ring in 400 m steps; it stands in the depth of the near world, and
+  // the sky draws the rest. Within about 2 km of the eye, where the land on the wall is built in blocks and the distant
+  // terrain, the face is let down 40 m beneath them, so that it shows nowhere through their hollows; across the bare band
+  // beyond the land (WALL_E_BARE to WALL_E_FACE) it rises again to meet them where they end
+  const wallU={uSun:skyU.uSun,uTop:skyU.uTop,uMid:skyU.uMid,uHor:skyU.uHor,uSunCol:skyU.uSunCol,uRing:skyU.uRing,uTown:skyU.uTown,uIsle:skyU.uIsle,uCamW:skyU.uCamW,uFogF:skyU.uFogF,uCamS:{value:new THREE.Vector3()}};
+  const wallMat=new THREE.ShaderMaterial({uniforms:wallU,fog:false,side:THREE.DoubleSide,
+    vertexShader:`uniform vec3 uCamS; varying vec3 vRel; varying float vHw; varying float vXr; varying vec2 vSE;
+      void main(){ vec4 w=modelMatrix*vec4(position,1.0); float dx=w.x-uCamS.x, th=dx/${RING_R.toFixed(2)}, r=${RING_R.toFixed(2)}-w.y, s2=sin(th*0.5);
+        float y=w.y-40.0*(1.0-smoothstep(1900.0,2300.0,length(w.xz-uCamS.xz)))*(1.0-smoothstep(${WALL_E_BARE.toFixed(1)},${(WALL_E_FACE-50).toFixed(1)},uv.y));
+        vec3 b=vec3(uCamS.x+r*sin(th), 2.0*${RING_R.toFixed(2)}*s2*s2+y*cos(th), w.z);
+        vRel=b-cameraPosition; vHw=w.y; vXr=dx; vSE=uv; gl_Position=projectionMatrix*viewMatrix*vec4(b,1.0); }`,
+    fragmentShader:`uniform vec3 uTop,uMid,uHor,uSun,uSunCol; varying vec3 vRel; varying float vHw; varying float vXr; varying vec2 vSE;
+      ${RING_GLSL}
+      void main(){ float t=length(vRel); vec3 d=vRel/t; float y=d.y, h=max(uCamW.y,0.5);
+        vec3 c = y>0.12 ? mix(uMid,uTop,clamp((y-0.12)/0.6,0.0,1.0)) : mix(uHor,uMid,clamp((y+0.04)/0.16,0.0,1.0));
+        float sd=max(dot(d,uSun),0.0); c += uSunCol*pow(sd,12.0)*0.35;
+        float psi=vXr/RR; vec3 up=vec3(-sin(psi),cos(psi),0.0), surf=ringWall(uCamW.x+vXr,max(vHw,0.0),vSE.x,vSE.y/WA,up,d,uSun,t);
+        float T=wallClear(h,d,t);
+        gl_FragColor=vec4(mix(hazeCol(c,uHor,T),surf,T),1.0);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }`});
+  ringWalls=new THREE.Group(); world.add(ringWalls);
+  // (its rows run from the foot to the top of the wall, 200 km up, spaced along the curve of the face (e = WALL_A sin q),
+  // closest at the foot, where the land lies, and about 1 km apart near the top, where each row stands no more than about
+  // 0.3 m off the true curve, well within the 1.6 m that flight keeps clear of it)
+  for (const sd of [1,-1]){ const NX=120, NE=480, E=[0]; for (let i=0;i<=NE;i++) E.push(WALL_A*Math.sin(Math.PI/2*Math.pow(i/NE,1.5)));
+    const pos=[], uv=[], idx=[];
+    E.forEach((e,j)=>{ const y=j===0?-600:wallHw(e); for (let i=0;i<=NX;i++){ pos.push(-6000+12000*i/NX,y,sd*e); uv.push(sd,e); } });
+    for (let j=0;j<E.length-1;j++) for (let i=0;i<NX;i++){ const a=j*(NX+1)+i, c=a+NX+1; idx.push(a,c,a+1,a+1,c,c+1); }
+    const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3)); g.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2)); g.setIndex(idx);
+    const m=new THREE.Mesh(g,wallMat); m.userData.sd=sd; m.frustumCulled=false; ringWalls.add(m); }
+  for (const m of ringWalls.children) m.onBeforeRender=()=>wallU.uCamS.value.copy(camera.getWorldPosition(_skyP));
+  updateWalls=function(){ const p=camera.getWorldPosition(_skyP); ringWalls.position.x=Math.round((p.x+ORIGIN.x)/400)*400;
+    // on a wall's land the fog thins as the air does with height (HAZE_H, 8.4 km, in the sky's haze)
+    FOG_K.x=Math.exp(-wallBase(p.z+ORIGIN.z)/8400);
+    for (const m of ringWalls.children){ const sd=m.userData.sd; m.visible=sd*STRIP>=STRIP_MAX; m.position.z=sd*STRIP_W/2; } };
+  ORB.buildRingMap();
+  Object.assign(ORB,{SPACE,ringWalls,updateWalls,wallU});
+}
+if (ORBITAL) orbitalScene();
 // the moon's phase, as last chosen (Shift+N), kept in the browser
-try{ if (localStorage.getItem('coast.moon')==='crescent') skyU.uCres.value=1; }catch(_){}
+try{ if (!ORBITAL && localStorage.getItem('coast.moon')==='crescent') skyU.uCres.value=1; }catch(_){}
 const hemi=new THREE.HemisphereLight(hex('#d8cde0'),hex('#f0c49a'),2.3); world.add(hemi);
 const sun=new THREE.DirectionalLight(hex('#fff1dc'),2.6);
-const SUN_DIR=new THREE.Vector3(-0.35,0.62,-0.7).normalize(), LIGHT_DIR=new THREE.Vector3();
+const SUN_DIR=new THREE.Vector3(-0.35,0.62,-0.7).normalize(), LIGHT_DIR=new THREE.Vector3(), SUN_TILT=0.44;
+let WALL_SUN=1;
+// (Orbital mode) how much of the sun reaches a point at z across the ring (true), height y: its light must pass over the
+// top of the rim wall on its side, and the far floor hides it when it stands low (sunVis in the sky)
+function wallSun(z,y){ const S=SUN_DIR, sz=Math.abs(S.z); if (sz<=1e-4 || S.y<=0) return 1;
+  const run=WALL_Z-Math.sign(S.z)*z; if (run<=0) return 1; const l=run/sz;
+  return smooth((RING_R-WALL_H-Math.hypot(S.x*l,-(RING_R-y)+S.y*l))/5000+0.5); }
 // clock: a full day lasts 12 minutes; hold T to speed it up
-let hour=5.85; const HOUR_SEC=75;   // a whole day passes in 30 minutes, and it begins just before sunrise
+// (in Orbital mode a day is one turn of the ring, about 33 minutes)
+let hour=5.85; const HOUR_SEC=ORBITAL?SPIN_T/24:75;   // a whole day passes in 30 minutes, and it begins just before sunrise
 const SKY={
   day:{top:hex('#1f5c9c'),mid:hex('#5f95c4'),hor:hex('#9fc0dc'),hs:hex('#d8cde0'),hg:hex('#f0c49a')},
   dusk:{top:hex('#2c3f74'),mid:hex('#9b7898'),hor:hex('#f2a477'),hs:hex('#d9a08c'),hg:hex('#8a5f55')},
@@ -5949,17 +6572,29 @@ const mix3=(out,k,wd,wk,wn)=>out.setRGB(SKY.day[k].r*wd+SKY.dusk[k].r*wk+SKY.nig
 function updateDaylight(){
   // the sun rises over the south sea at 06:00 and sets over the north sea at 18:00
   const ang=(hour-6)/24*Math.PI*2;
-  SUN_DIR.set(0.32,Math.sin(ang)*0.94,-Math.cos(ang)).normalize();
+  // In Orbital mode the ring's axis is tilted SUN_TILT from the plane of its orbit, so that the star stands that far to
+  // the south of the ring's own plane and its light reaches the floor over the southern wall. As the ring turns, the sun
+  // rises out of the haze beside the arch to the east at 06:00, crosses the southern sky at SUN_TILT from the zenith
+  // and sets beside the arch to the west; the night is the half turn the floor spends facing away from it. The
+  // southern wall hides the sun when it stands lower, seen across the ring, than the wall's top
+  if (ORBITAL){ SUN_DIR.set(Math.cos(ang)*Math.cos(SUN_TILT),Math.sin(ang)*Math.cos(SUN_TILT),-Math.sin(SUN_TILT)); WALL_SUN=wallSun(trueZ(player.z),Math.max(0,player.y)); }
+  else SUN_DIR.set(0.32,Math.sin(ang)*0.94,-Math.cos(ang)).normalize();
   const e=SUN_DIR.y;
   const wd=smooth((e-0.04)/0.3), wn=smooth((-e-0.02)/0.2), wk=Math.max(0,1-wd-wn);
   mix3(skyU.uTop.value,'top',wd,wk,wn); mix3(skyU.uMid.value,'mid',wd,wk,wn); mix3(skyU.uHor.value,'hor',wd,wk,wn);
   skyU.uSun.value.copy(SUN_DIR); skyU.uNight.value=wn; skyU.uDay.value=wd; skyU.uRot.value=ang;
   skyU.uSunCol.value.copy(_c1.set('#ffb070').lerp(_c2.set('#fff4e0'),wd)).multiplyScalar(smooth((e+0.06)/0.1));
   scene.fog.color.copy(skyU.uHor.value); scene.background.copy(skyU.uHor.value); skyU.uMid.value.getRGB(FOG_MID);
+  // (Orbital mode) up on a wall's land what lies beyond the land, above the eye, is the wall itself, and the haze over it
+  // is the pale haze of the horizon rather than the blue of the sky overhead
+  if (ORBITAL){ const k=smooth(wallE(player.z)/1500); if (k>0){ const F=scene.fog.color; FOG_MID.r+=(F.r-FOG_MID.r)*k; FOG_MID.g+=(F.g-FOG_MID.g)*k; FOG_MID.b+=(F.b-FOG_MID.b)*k; } }
   mix3(hemi.color,'hs',wd,wk,wn); mix3(hemi.groundColor,'hg',wd,wk,wn); hemi.intensity=2.3*wd+1.5*wk+1.0*wn;
   // one shadow-casting light: the sun by day, the moon (opposite the sun) by night
-  const sunUp=smooth((e+0.02)/0.12), moonUp=smooth((-e-0.04)/0.12);
+  // (in Orbital mode there is no moon: by night the light comes from the arch overhead, whose far side is then in full
+  // sun, brighter than any moon and falling from almost straight above)
+  const sunUp=smooth((e+0.02)/0.12)*(ORBITAL?WALL_SUN:1), moonUp=smooth((-e-0.04)/0.12);
   if (sunUp>0.01){ LIGHT_DIR.copy(SUN_DIR); sun.color.set('#ff9a5a').lerp(_c2.set('#fff1dc'),wd); sun.intensity=sunUp*(1.1+1.5*wd); }
+  else if (ORBITAL){ LIGHT_DIR.set(0.08,1,-0.12).normalize(); sun.color.set('#c9d6ff'); sun.intensity=moonUp*1.15; }
   else { LIGHT_DIR.copy(SUN_DIR).multiplyScalar(-1); sun.color.set('#9fb3ff'); sun.intensity=moonUp*(1.0-0.65*skyU.uCres.value); }
   if (LIGHT_DIR.y<0.05) LIGHT_DIR.y=0.05;
   nightU.value=smooth((0.1-e)/0.22); glowU.uNight.value=nightU.value;
@@ -7126,8 +7761,16 @@ function updateMask(){
 }
 // the haze over the distant land, as shader code in place of three.js's own fog, for a material whose fragment shader
 // has the world position (relative to the floating origin) in the varying named by v and the uniforms of LAND_HAZE_U;
-// the trains take it too, so that a distant train is as hazy as the land it runs over (see farMat below)
-function landHaze(v){ return `float _lum=dot(gl_FragColor.rgb,vec3(0.3,0.59,0.11));
+// the trains take it too, so that a distant train is as hazy as the land it runs over (see farMat below). In Orbital
+// mode the edge does not fade to the sky's colour: the land (and a train on it) thins away by dither between 1.95 and
+// 2.15 km, so that the ring drawn by the sky behind it shows through
+function landHaze(v){ if (ORBITAL) return `float _lum=dot(gl_FragColor.rgb,vec3(0.3,0.59,0.11));
+    #include <fog_fragment>
+    { float fk=${v}.y<0.0?1.0:1.0-uFarEdge*smoothstep(1950.0,2150.0,length(${v}.xz-uFarC));
+      if (fk<0.999 && fk<fract(sin(dot(gl_FragCoord.xy,vec2(12.9898,78.233)))*43758.5453)) discard;
+      float dd=length(${v}.xz-cameraPosition.xz), w=smoothstep(700.0,1400.0,dd)*(1.0-smoothstep(1950.0,2170.0,dd))*smoothstep(8.0,80.0,${v}.y)*uDay;
+      gl_FragColor.rgb*=mix(1.0,clamp(0.9+0.75*(_lum-0.55),0.68,1.12),w)*mix(vec3(1.0),vec3(0.93,0.96,1.0),w); }`;
+  return `float _lum=dot(gl_FragColor.rgb,vec3(0.3,0.59,0.11));
     #include <fog_fragment>
     { vec3 d=normalize(${v}-cameraPosition); float y=d.y, fk=${v}.y<0.0?1.0:1.0-uFarEdge*smoothstep(1400.0,2150.0,length(${v}.xz-uFarC));   // the sea floor, under the sea, is left alone
       vec3 sk = y>0.12 ? mix(uMid,uTop,clamp((y-0.12)/0.6,0.0,1.0)) : mix(uHor,uMid,clamp((y+0.04)/0.16,0.0,1.0));
@@ -7182,11 +7825,13 @@ function rebuildOut(px,pz){
   const gx=Math.round(px/OUT_S)*3, gz=Math.round(pz/OUT_S)*3, k=gx+','+gz+','+originMoved; if (k===outKey) return; outKey=k;
   const P=outGeo.attributes.position.array, W=OUT_N+1;
   for (let j=0;j<=OUT_N;j++) for (let i=0;i<=OUT_N;i++){
-    const gi=gx+(i-OUT_N/2)*3, gj=gz+(j-OUT_N/2)*3, F=farPoint(gi,gj-WRAP_J*Math.round(gj/WRAP_J)), o=(j*W+i)*3;
+    const gi=gx+(i-OUT_N/2)*3, gj=gz+(j-OUT_N/2)*3, F=farPoint(gi,ORBITAL?gj:gj-WRAP_J*Math.round(gj/WRAP_J)), o=(j*W+i)*3;
     // under the whole square of the distant terrain (to its corners, 3.1 km out) the outline is sunk out of its way,
     // so the two never fight for the same depth
     const x=gi*FS, z=gj*FS, inFar=Math.max(Math.abs(x-Math.round(px/FS)*FS),Math.abs(z-Math.round(pz/FS)*FS))<FN/2*FS+FS*2;
-    P[o]=x-ORIGIN.x; P[o+1]=Math.max(F.h,-1)-0.6-(inFar?60:0); P[o+2]=z-ORIGIN.z; }
+    // (Orbital mode) on a rim wall it lies under the wall's near face, which draws that land itself
+    const e=ORBITAL?wallE(z):-1;
+    P[o]=x-ORIGIN.x; P[o+1]=e>0?Math.min(Math.max(F.h,-1)-0.6-(inFar?60:0),wallHw(e)-80):Math.max(F.h,-1)-0.6-(inFar?60:0); P[o+2]=z-ORIGIN.z; }
   outGeo.attributes.position.needsUpdate=true; outMesh.position.copy(ORIGIN); }
 const farGlowGeo=new THREE.BufferGeometry();
 const farGlow=new THREE.Points(farGlowGeo,glowMat); farGlow.frustumCulled=false; farGlow.renderOrder=3; world.add(farGlow);
@@ -7197,19 +7842,21 @@ const chunks=new Map();
 const farCache=new Map();
 function farPoint(gi,gj){
   const k=gi*1e6+gj; let F=farCache.get(k); if (F) return F;
-  const x=gi*FS, z=gj*FS, h=baseH(x,z), c=new THREE.Color();
+  // (in Orbital mode, beyond an outer strip the land runs on up the rim wall, and is judged by its height above the wall's face, hr)
+  const x=gi*FS, z=gj*FS, h=baseH(x,z), hr=ORBITAL?h-wallBase(z):h, c=new THREE.Color();
   if (h<0) c.copy(C_.seabed);
   else if (h<1.6) c.copy(C_.beach);
   // one even tone of gardens and roofs, as the whole island's coarse mesh colours a village: colours picked at random for
   // each point of the 22 m grid smeared into blotches, and the pale walls alone, seen from above beside the built blocks,
   // read as bare cream patches
-  else if (h<220 && isVillage(Math.floor(x/C),Math.floor(z/C))){ c.copy(C_.sand2).lerp(C_.olive,0.4).lerp(C_.roofs[3],0.18).multiplyScalar(0.92); }
-  else if (h<80){ const r=hash(gi,gj,901); c.copy(r<0.5?C_.olive:DRYGRASS).lerp(C_.sand2,0.2).multiplyScalar(0.9); }
-  else { c.copy(C_.scrub).lerp(C_.rock,clamp((h-80)/80,0,0.5)).multiplyScalar(0.9); if (hash(gi,gj,903)<0.45) c.lerp(FLC.holm,0.32*(1-clamp((h-80)/140,0,1)));   // the stands of Aleppo pine and holm oak on the lower hills
+  else if (hr<220 && isVillage(Math.floor(x/C),Math.floor(z/C))){ c.copy(C_.sand2).lerp(C_.olive,0.4).lerp(C_.roofs[3],0.18).multiplyScalar(0.92); }
+  else if (hr<80){ const r=hash(gi,gj,901); c.copy(r<0.5?C_.olive:DRYGRASS).lerp(C_.sand2,0.2).multiplyScalar(0.9); }
+  else { c.copy(C_.scrub).lerp(C_.rock,clamp((hr-80)/80,0,0.5)).multiplyScalar(0.9); if (hash(gi,gj,903)<0.45) c.lerp(FLC.holm,0.32*(1-clamp((hr-80)/140,0,1)));   // the stands of Aleppo pine and holm oak on the lower hills
     // the mountains as the blocks colour them, from the slope across the cell
-    if (h>110){ const sl=Math.hypot(baseH(x+FS/2,z)-baseH(x-FS/2,z),baseH(x,z+FS/2)-baseH(x,z-FS/2))/FS; mtTint(c,h,sl,hash(gi,gj,904),vnoise(x*0.025,z*0.025,995)); } }
+    if (hr>110){ const sl=Math.hypot(baseH(x+FS/2,z)-baseH(x-FS/2,z),baseH(x,z+FS/2)-baseH(x,z-FS/2))/FS; mtTint(c,hr,sl,hash(gi,gj,904),vnoise(x*0.025,z*0.025,995)); } }
+  if (hr!==h) wallTint(c,x,z,h,hash(gi,gj,904));
   let lights=null;
-  if (h>=1.6 && h<=80 && isVillage(Math.floor(x/C),Math.floor(z/C)) && hash(gi,gj,905)<=0.55){ lights=[];
+  if (h>=1.6 && hr<=80 && isVillage(Math.floor(x/C),Math.floor(z/C)) && hash(gi,gj,905)<=0.55){ lights=[];
     for (let q=0;q<3;q++){ const jx=(hash(Math.round(x),q,906)-0.5)*FS, jz=(hash(Math.round(z),q,907)-0.5)*FS; lights.push(x+jx,baseH(x+jx,z+jz)+2.5+q,z+jz); } }
   if (farCache.size>400000) farCache.clear();
   F={h,r:c.r,g:c.g,b:c.b,lights}; farCache.set(k,F); return F;
@@ -7221,8 +7868,10 @@ function rebuildFar0(px,pz){
   const gx=Math.round(px/FS), gz=Math.round(pz/FS), P=farGeo.attributes.position.array, Co=farGeo.attributes.color.array, W=FN+1;
   if (farOrigin!==gx+','+gz+','+originMoved){ farOrigin=gx+','+gz+','+originMoved; farLit=[]; farMesh.position.copy(ORIGIN); farGlow.position.copy(ORIGIN); farU.uFarC.value.set(gx*FS-ORIGIN.x,gz*FS-ORIGIN.z);
     for (let j=0;j<=FN;j++) for (let i=0;i<=FN;i++){
-      const gi=gx+i-FN/2, gj=gz+j-FN/2, F=farPoint(gi,gj-WRAP_J*Math.round(gj/WRAP_J)), o=(j*W+i)*3;   // across the wrap, the far shore
-      P[o]=gi*FS-ORIGIN.x; P[o+1]=F.h-0.35; P[o+2]=gj*FS-ORIGIN.z; Co[o]=F.r; Co[o+1]=F.g; Co[o+2]=F.b; if (F.lights) farLit.push(F.lights,gi*FS,gj*FS);
+      const gi=gx+i-FN/2, gj=gz+j-FN/2, F=farPoint(gi,ORBITAL?gj:gj-WRAP_J*Math.round(gj/WRAP_J)), o=(j*W+i)*3;   // across the wrap, the far shore
+      // (Orbital mode) beyond WALL_E_FACE, up a rim wall, it is sunk behind the wall's face, which draws the ground there
+      const ew=ORBITAL?wallE(gj*FS):-1;
+      P[o]=gi*FS-ORIGIN.x; P[o+1]=ew>WALL_E_FACE?wallHw(ew)-80:F.h-0.35; P[o+2]=gj*FS-ORIGIN.z; Co[o]=F.r; Co[o+1]=F.g; Co[o+2]=F.b; if (F.lights) farLit.push(F.lights,gi*FS,gj*FS);
     }
     // normals straight from the height grid, by central differences
     const Nn=farGeo.attributes.normal.array;
@@ -7445,7 +8094,10 @@ function camRingSet(){
   // a turn
   const s16=Math.round(Math.atan2(player.x-camera.position.x,player.z-camera.position.z)/(Math.PI/8));
   if (!camRing || camRing.cx!==cx || camRing.cz!==cz || camRing.h!==h || camRing.s!==s16) camRing={cx,cz,h,s:s16,fx:Math.sin(s16*Math.PI/8),fz:Math.cos(s16*Math.PI/8)}; }
-function wantAt(cx,cz,pcx,pcz){ let w=wantLod(cx-pcx,cz-pcz);
+function wantAt(cx,cz,pcx,pcz){
+  // (Orbital mode) no block is built up a rim wall beyond WALL_E_FACE, where the wall's face draws the ground
+  if (ORBITAL && wallE((cz+0.5)*C)>WALL_E_FACE-C/2) return -1;
+  let w=wantLod(cx-pcx,cz-pcz);
   if (camRing && (cx-camRing.cx)*camRing.fx+(cz-camRing.cz)*camRing.fz>=-1.5){ const d=Math.max(Math.abs(cx-camRing.cx),Math.abs(cz-camRing.cz),camRing.h), t=d<=LOD0?0:d<=VIEW?1:d<=lodRing()?2:-1; if (t>=0&&(w<0||t<w)) w=t; }
   if (teleRing){ const d=teleD(cx,cz), t=d<=teleRing.r0?0:d<=teleRing.r1?1:d<=teleRing.r2?2:-1; if (t>=0&&(w<0||t<w)) w=t; }
   if (skipRing){ const d=Math.max(Math.abs(cx-skipRing.cx),Math.abs(cz-skipRing.cz)), t=d<=skipRing.r0?0:d<=skipRing.r1?1:d<=skipRing.r2?2:-1; if (t>=0&&(w<0||t<w)) w=t; }
@@ -7478,7 +8130,7 @@ function trackMotion(dt){
 // of all. The order is worked out again whenever the rings change, every third of a
 // second while blocks are waiting, and at once when the camera has turned through more than 20 degrees
 function inView(cx,cz){
-  const gj=Math.round((cz+0.5)*C/FS), F=farPoint(Math.round((cx+0.5)*C/FS),gj-WRAP_J*Math.round(gj/WRAP_J)), h=Math.max(F.h,0);   // the distant terrain's height there, as a guide to the block's
+  const gj=Math.round((cz+0.5)*C/FS), F=farPoint(Math.round((cx+0.5)*C/FS),ORBITAL?gj:gj-WRAP_J*Math.round(gj/WRAP_J)), h=Math.max(F.h,0);   // the distant terrain's height there, as a guide to the block's
   _vb.min.set(cx*C-8,h-40,cz*C-8); _vb.max.set(cx*C+C+8,h+60,cz*C+C+8); return _vf.intersectsBox(_vb); }
 // loading (a whole island at once, as at the start or while a new one is seeded) builds every block outright,
 // without fading, in slices of budgetMs
@@ -7555,7 +8207,7 @@ window.__chunkProbe=()=>{
   _pmx.compose(camera.position,camera.quaternion,camera.scale).invert().premultiply(camera.projectionMatrix); _pv.setFromProjectionMatrix(_pmx);
   const fw=new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion), P=camera.position;
   const r={cam:{p:{x:P.x,y:P.y,z:P.z},t:{x:P.x+fw.x*10,y:P.y+fw.y*10,z:P.z+fw.z*10}},q:queue.length,miss:0,miss400:0,coarse:0,coarse400:0,coarse0:0,fading:0,view:0,missAll:0,coarseAll:0,arr:[]};
-  const seen=(cx,cz)=>{ const gj=Math.round((cz+0.5)*C/FS), F=farPoint(Math.round((cx+0.5)*C/FS),gj-WRAP_J*Math.round(gj/WRAP_J)), h=Math.max(F.h,0);
+  const seen=(cx,cz)=>{ const gj=Math.round((cz+0.5)*C/FS), F=farPoint(Math.round((cx+0.5)*C/FS),ORBITAL?gj:gj-WRAP_J*Math.round(gj/WRAP_J)), h=Math.max(F.h,0);
     _vb.min.set(cx*C,h-25,cz*C); _vb.max.set(cx*C+C,h+40,cz*C+C); return _pv.intersectsBox(_vb); };
   COVE_FAST++;
   try {
@@ -7571,12 +8223,19 @@ window.__chunkProbe=()=>{
     for (const k of probeSeen.keys()) if (!chunks.has(k)) probeSeen.delete(k);
   } finally { COVE_FAST--; }
   return r; };
+// (Orbital mode) The land on a rim wall is there only in an outer strip, where the generator's coordinates beyond the
+// floor's edge lie on the wall; in the next strip in they lie in its neighbour's open sea. What has been kept of the
+// ground there, and of the blocks' kinds, villages, squares, streets and galleries that follow from it, is therefore
+// forgotten whenever the player's strip changes
+function wallForget(){ hgTiles.clear(); hgCache.clear(); vgCache.clear(); vmCache.clear(); ckCache.clear(); pzCache.clear(); alCache.clear(); sgCache.clear(); galSites.clear();
+  farCache.clear(); farOrigin=''; outKey=''; chunkState=''; farDirty=true; }
+stripHooks.push(()=>wallForget());
 function resetWorld(){ chunkState=''; galSites.clear(); galSpawn=null; farCache.clear(); hgTiles.clear(); clearXMemos(); spCache.clear(); lhCache.clear(); hbCache.clear(); rxCache.clear(); farOrigin=''; for (const T of tiles.values()) disposeTile(T); tiles.clear(); tilesDirty.clear(); tilesUrgent.clear(); for (const ch of chunks.values()) disposeChunk(ch); chunks.clear(); chunkVer++; cats.states.clear(); cats.near=[]; for (const k of cats.list){ if (k.s) k.s.inst=null; k.s=null; } for (const ch of dying) disposeChunk(ch); dying.length=0; pkCache.clear(); pzCache.clear(); alCache.clear(); hbCache.clear(); vgCache.clear(); vmCache.clear(); ckCache.clear(); ryCache.clear(); rzCache.clear(); rrCache.clear(); rsCache.clear(); stCache.clear(); rxCache.clear(); lhCache.clear(); rkCache.clear(); ruCache.clear(); cvCache.clear(); icvCache.clear(); cvSlots.clear(); cvMemoN=NaN; cvMemoL=[];
   // the goods lines, the offshore islands, the ferry ports and the ferries' routes all belong to the old island
   brZones.clear(); brBucket.clear(); isCache.clear(); fpCache.clear(); irCache.clear(); hgCache.clear(); sgCache.clear(); mtxCache.clear();
   goods.R=null; goods.check=0; for (const c of goods.cars) c.m.visible=false;
   for (const F of ferries) if (F!==ridden){ F.R=null; F.m.visible=false; }
-  beams.t=0; train.init=false; farDirty=true; }
+  beams.t=0; train.init=false; farDirty=true; if (ORBITAL) ORB.buildRingMap(); }
 
 /* ================= dolphins =================
    Pods of bottlenose dolphins for Coast. Everything below this line and above the matching closing line is
@@ -10836,6 +11495,7 @@ function updateDinghies(dt,wdt){
     Object.defineProperty(window.__village,'sailD',{get:()=>sailD}); }
 }
 wrapHooks.push(d=>{ if (sailD) sailD.shift(0,d); for (const e of [...dinghies.values()]) dgyDrop(e); });
+xWrapHooks.push(d=>{ if (sailD) sailD.shift(d,0); for (const e of [...dinghies.values()]) dgyDrop(e); });
 /* ---------- wind wisps: streaks of moving air that drift past the boat ----------
    Up to WISP_N thin white ribbons, each a few metres long, carried over the ground by the true wind (WIND.at) at the
    wind's own speed, so that the boat's motion reads against them and their direction follows the wind's shifts.
@@ -10907,7 +11567,7 @@ function updateWisps(dt,wdt){
   for (const k2 of ['iPos','iDir','iP']) wispGeo.attributes[k2].needsUpdate=true;
   wispU.uBright.value=surfMat.uniforms.uBright.value; wispU.uFocus.value.set(fx-ORIGIN.x,0,fz-ORIGIN.z);
 }
-wrapHooks.push(d=>{ for (let i=0;i<WISP_N;i++) WZ[i]+=d; });
+wrapHooks.push(d=>{ for (let i=0;i<WISP_N;i++) WZ[i]+=d; }); xWrapHooks.push(d=>{ for (let i=0;i<WISP_N;i++) WX[i]+=d; });
 /* ================= boats under sail along the coast ================= */
 const sailers=[];
 // how far offshore a boat must keep at x to stay clear of any harbour's moles, with 12 m to spare
@@ -11542,20 +12202,31 @@ function buildFerry(){
 
   const gb=new GB(), GL=new GB(), white=hex('#f1ede4'), red=hex('#b8392f'), blue=hex('#2d5f9e'), anti=hex('#7a2f26'), dark=hex('#2a2a2e'), glass=hex('#30363c'), deck=hex('#9c8a72'), orange=hex('#e2702e');
   const zs=FZS, ze=FZE, hl=ze-zs, hc=(zs+ze)/2;
-  gb.add(T.box, mat(0,-1.1,hc,FB-0.5,0.95,hl-0.4), anti, null);
-  gb.add(T.box, mat(0,-0.2,hc,FB,1.7,hl), white, null);
+  gb.add(T.box, mat(0,-0.15,hc,FB,1.65,hl), white, null);
+  // below the waterline the hull has the bow's section, a flat bottom 1.8 m down turning up through a rounded bilge
+  // to the sides, lofted aft from the bow; over its last 6 m the bottom rises in a run to a transom 0.95 m down, so
+  // that the hull meets the bow without a step and ends in a stern rather than a square box. It is in antifouling
+  // red to 0.15 m below the waterline, where the white topsides begin
+  { const h=FB/2, N=8, run=6, yAt=z=>-1.8+1.05*smooth(clamp((zs+run-z)/run,0,1)),
+      sec=z=>{ const yb=yAt(z); return [[0,yb],[0.62*h,yb+0.04],[0.93*h,Math.min(yb+0.32,-0.3)],[h,Math.min(yb+0.75,-0.2)],[h,-0.15]]; };
+    const Z=[ze]; for (let k=0;k<=N;k++) Z.push(zs+run*(1-k/N)); Z.sort((a,b)=>b-a);
+    for (let k=0;k<Z.length-1;k++){ const A=sec(Z[k]), B=sec(Z[k+1]), zc=(Z[k]+Z[k+1])/2;
+      for (const sx of [-1,1]) for (let i=0;i<A.length-1;i++){ const a=A[i], b=A[i+1], c=B[i+1], d=B[i];
+        gb.quadOut([sx*a[0],a[1],Z[k]],[sx*b[0],b[1],Z[k]],[sx*c[0],c[1],Z[k+1]],[sx*d[0],d[1],Z[k+1]],[0,0.5,zc],anti,0); } }
+    const E=sec(zs); for (let i=0;i<E.length-1;i++){ const a=E[i], b=E[i+1];
+      gb.quadOut([-a[0],a[1],zs],[a[0],a[1],zs],[b[0],b[1],zs],[-b[0],b[1],zs],[0,-0.5,zs+3],anti,0); } }
   gb.add(T.box, mat(0,1.1,hc,FB+0.03,0.32,hl+0.02), blue, null);
   // the bow: one smooth surface lofted through sections from the end of the hull to the stem, narrowing as ferryBW
   // and with the sheer rising towards the stem; each section has a rounded bilge, the white topsides, the blue band
   // and the foredeck over it, and the stem is closed by a narrow face
   const bw=ferryBW, NB=9, NL=16;
   const sec=t=>{ const h=bw(t)/2, yb=-1.8+0.575*t, yw=0.94+0.35*t, yt=1.26+0.35*t, z=ze+t*4.5;
-    return {z,yt,h,P:[[0,yb],[0.62*h,yb+0.04],[0.93*h,yb+0.32],[h,yb+0.75],[h,yw],[h,yt]],C:[anti,anti,white,white,blue]}; };
+    return {z,yt,h,P:[[0,yb],[0.62*h,yb+0.04],[0.93*h,yb+0.32],[h,yb+0.75],[h,-0.15],[h,yw],[h,yt]],C:[anti,anti,anti,anti,white,blue]}; };
   for (let k=0;k<NL;k++){ const A=sec(k/NL), B=sec((k+1)/NL), zc=(A.z+B.z)/2;
-    for (const sx of [-1,1]) for (let i=0;i<5;i++){ const a=A.P[i], b=A.P[i+1], c=B.P[i+1], d=B.P[i];
+    for (const sx of [-1,1]) for (let i=0;i<6;i++){ const a=A.P[i], b=A.P[i+1], c=B.P[i+1], d=B.P[i];
       gb.quadOut([sx*a[0],a[1],A.z],[sx*b[0],b[1],A.z],[sx*c[0],c[1],B.z],[sx*d[0],d[1],B.z],[0,0.2,zc-0.6],A.C[i],0); }
     gb.quadOut([-(A.h-0.1),A.yt+0.21,A.z],[A.h-0.1,A.yt+0.21,A.z],[B.h-0.1,B.yt+0.21,B.z],[-(B.h-0.1),B.yt+0.21,B.z],[0,-5,zc],deck,0); }
-  { const E=sec(1); for (let i=0;i<5;i++){ const a=E.P[i], b=E.P[i+1];
+  { const E=sec(1); for (let i=0;i<6;i++){ const a=E.P[i], b=E.P[i+1];
       gb.quadOut([-a[0],a[1],E.z],[a[0],a[1],E.z],[b[0],b[1],E.z],[-b[0],b[1],E.z],[0,(a[1]+b[1])/2,E.z-3],E.C[i],0); } }
   // bulwarks following the taper of the bow up to the stem
   for (const sx of [-1,1]) for (let k=0;k<NB;k++){ const t0=k/NB, t1=(k+1)/NB;
@@ -12856,7 +13527,7 @@ function sndUpdate(dt){
   /* footsteps: a loop for the surface underfoot, heard while the player walks on the ground, a deck or a coach floor.
      Grass uses the earth loop, and decks and floors the pavement loop */
   let fx=null, fz=null, ground=true, quiet=1, surf='pavement';
-  if (mode==='street' || (mode==='above'&&dist<60)){ fx=player.x; fz=player.z; ground=player.grounded; quiet=mode==='above'?clamp(8/dist,0,0.6):1; surf=surfaceAt(player.x,player.z,player.y); }
+  if (mode==='street' || (mode==='above'&&!aerFly&&dist<60)){ fx=player.x; fz=player.z; ground=player.grounded; quiet=mode==='above'?clamp(8/dist,0,0.6):1; surf=surfaceAt(player.x,player.z,player.y); }
   else if (mode==='ferry'){ fx=fe.lx; fz=fe.lz; }
   else if (inCoach){ fx=co.lx; fz=co.lz; }
   let spd=0; if (fx!==null && SNDS.prevX!==null && dt>0){ const dd=Math.hypot(fx-SNDS.prevX,fz-SNDS.prevZ); if (dd<3) spd=dd/dt; }
@@ -12991,7 +13662,8 @@ addEventListener('keydown',e=>{ keys[e.code]=true;
   const inWater=mode==='swim';
   if (inWater && !e.repeat && ['KeyR','KeyF','KeyG','KeyY'].includes(code)) swimLeaveHere();
   if (code==='KeyJ' && !e.repeat) jumpKey();
-  if (code==='KeyV' && !e.repeat && !inWater) toggleView();
+  if (code==='KeyV' && !e.repeat && flying()) flyLand();
+  else if (code==='KeyV' && !e.repeat && !inWater) toggleView();
   // sailing, 0 changes between the helm and a view from astern of the dinghy, and the train and ferry keys wait until
   // the player is ashore
   if (sailD && ['KeyR','KeyC','KeyF','KeyG'].includes(code)){
@@ -13015,7 +13687,7 @@ addEventListener('keydown',e=>{ keys[e.code]=true;
   if (code==='Escape' && !aboutEl.hidden) aboutEl.hidden=true;
   else if (code==='Escape' && !helpEl.hidden){ helpEl.hidden=true; lastCell=null; }
   if (code==='KeyI' && !e.repeat) openIsland();
-  if (code==='KeyZ' && !e.repeat) crouch=!crouch;
+  if (code==='KeyZ' && !e.repeat && !flying()) crouch=!crouch;
   if (code==='KeyX' && !e.repeat) sitKey();
   if (e.code==='KeyR' && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) campKey();
   // on a Mac without these keys, Fn with an arrow gives them: matched by the key as well as by its code
@@ -13024,7 +13696,8 @@ addEventListener('keydown',e=>{ keys[e.code]=true;
   if (code==='Home'||(e.key==='Home'&&code!=='Home')){ e.preventDefault(); if (!e.repeat) setDrawLvl(0); }
   if (code==='KeyO' && !e.repeat){ statsEl.hidden=!statsEl.hidden; statsT=0; }
   // Shift and N: the moon a crescent, or full again
-  if (code==='KeyN' && e.shiftKey && !e.repeat){ skyU.uCres.value=skyU.uCres.value>0.5?0:1; updateDaylight(); toast('Moon',skyU.uCres.value>0.5?'Crescent':'Full');
+  if (code==='KeyN' && e.shiftKey && !e.repeat && ORBITAL){}
+  else if (code==='KeyN' && e.shiftKey && !e.repeat){ skyU.uCres.value=skyU.uCres.value>0.5?0:1; updateDaylight(); toast('Moon',skyU.uCres.value>0.5?'Crescent':'Full');
     try{ localStorage.setItem('coast.moon',skyU.uCres.value>0.5?'crescent':'full'); }catch(_){} }
   else if (code==='KeyN' && !e.repeat){ hour=nightU.value>0.5?10:22; SNDS.hour=Math.floor(hour); }   // to night, or back to day, without the bells striking the jump
   if (code==='KeyM' && !e.repeat) setMuted(!muted);
@@ -13137,7 +13810,7 @@ function galleryGo(m){
   return true; }
 canvas.addEventListener('mousemove',e=>{ if (document.pointerLockElement===canvas){ if (canvas.style.cursor) canvas.style.cursor=''; return; }
   const c=galleryPick(e)?'pointer':''; if (canvas.style.cursor!==c) canvas.style.cursor=c; });
-canvas.addEventListener('mousedown',e=>{ if (e.button===0 && galleryClick(e)) return; dragging=true; lx=e.clientX; ly=e.clientY; if (mode!=='above'&&started&&!PHOTO.on&&document.pointerLockElement!==canvas) lockPointer(); });
+canvas.addEventListener('mousedown',e=>{ if (e.button===0 && galleryClick(e)) return; dragging=true; lx=e.clientX; ly=e.clientY; if ((mode!=='above'||aerFly)&&started&&!PHOTO.on&&document.pointerLockElement!==canvas) lockPointer(); });
 addEventListener('mouseup',()=>dragging=false);
 /* a double click on the ground in the bird's-eye view goes down to street level at that spot, facing the same way */
 function surfaceTopAt(x,z){ let g=walkGround(x,z,1e4); const cx=Math.floor(x/C), cz=Math.floor(z/C);
@@ -13154,7 +13827,7 @@ const ascent={t:-1,dur:1.2,p:new THREE.Vector3(),q:new THREE.Quaternion(),fov:70
 let aerUp=0;   // how far the bird's-eye view is raised above the player, looking out towards the sky
 function startAscent(tilt){ pitch=0.25; aerUp=0;   // the bird's-eye view opens at its shallowest tilt, looking out ahead rather than down
   Object.assign(ascent,{t:0,fov:camera.fov,fogN:scene.fog.near,fogF:scene.fog.far}); ascent.p.copy(camera.position); ascent.q.copy(camera.quaternion); }
-canvas.addEventListener('dblclick',e=>{ if (mode==='above') aerGoDown(e.clientX,e.clientY); });
+canvas.addEventListener('dblclick',e=>{ if (mode==='above'&&!aerFly) aerGoDown(e.clientX,e.clientY); });
 // through the telescope the mouse is captured, so the double click is taken from two presses of its left button
 let teleClickT=0;
 canvas.addEventListener('mousedown',e=>{ if (e.button!==0 || !TELE.on) return; const now=performance.now();
@@ -13170,6 +13843,10 @@ function aerCamera(dt,moving){
     // of it, rising over about a second; it settles back more slowly once past, but only while the view is being
     // moved, so that it never moves while left alone. The camera is never let below 0.5 m above the ground directly
     // beneath it. While the view is being moved by the pointer (dt 0) the lift is held as it is
+    // in flight the camera is the eye itself, and the distance is its height above the ground beneath, so that the
+    // land is drawn below it as the bird's-eye view draws it from that height
+    if (aerFly && voy && voy.high){ dist=AER_MAX; camPos.copy(voy.cam); camera.position.copy(camPos); camera.rotation.set(fpPitch,yaw,0,'YXZ'); }
+    else if (aerFly){ dist=Math.max(7,flyY-flyGround(player.x,player.z)); camPos.set(player.x,flyY,player.z); camera.position.copy(camPos); camera.rotation.set(fpPitch,yaw,0,'YXZ'); } else {
     if (aboveY===null || firstCam){ if (aerRestore){ aboveY=aerRestore.y; aerLift=aerRestore.lift; aerRestore=null; } else { aboveY=eyeY; aerLift=0; } }
     const ty=aboveY+1.2, cx=player.x+Math.sin(yaw)*Math.cos(pitch)*dist, cz=player.z+Math.cos(yaw)*Math.cos(pitch)*dist, cy=ty+Math.sin(pitch)*dist;
     if (dt>0){ const h=gullTopAt(cx,cz);
@@ -13180,12 +13857,14 @@ function aerCamera(dt,moving){
     const lift=Math.max(aerLift,heightAt(cx,cz)+0.5-cy);
     camTarget.set(player.x,ty+lift,player.z);
     camPos.set(cx,cy+lift,cz);
-    camera.position.copy(camPos); camLookAt(camTarget); if (aerUp>0) camera.rotateX(aerUp);
+    camera.position.copy(camPos); camLookAt(camTarget); if (aerUp>0) camera.rotateX(aerUp); }
     // the view widens with the zoom: fog, far plane and sea grow so nothing is clipped
     const far=Math.max(3600,dist*6), fogFar=Math.max(1800,dist*4), near=Math.max(0.3,dist*0.004);
     if (camera.far!==far||camera.near!==near){ camera.far=far; camera.near=near; camera.updateProjectionMatrix(); }
     updateIsland(); farMesh.visible=farGlow.visible=dist<2500;
     scene.fog.near=Math.max(160,dist*1.1); scene.fog.far=fogFar;
+    // (Orbital mode) high on a long flight only the sky is drawn, and it draws the floor right up to the eye
+    if (aerFly && voy && voy.high){ scene.fog.near=0.5; scene.fog.far=1; }
     sea.scale.setScalar(Math.max(1,dist*8/9000));
   camera.updateMatrixWorld(); }
 /* ---------- the bird's-eye view: moving over the land and turning the view ----------
@@ -13214,9 +13893,11 @@ function aerShift(dx,dz){ if (!Number.isFinite(dx)||!Number.isFinite(dz)) return
 function aerHold(P,cx,cy){ if (!P) return;
   // (repeated, as the camera may rise or fall over the ground where the view has moved to)
   for (let k=0;k<4;k++){ const Q=aerAtLevel(cx,cy,P.y); if (!Q) return; const dx=P.x-Q.x, dz=P.z-Q.z; if (Math.hypot(dx,dz)<0.02) return; aerShift(dx,dz); } }
-function aerZoom(f,cx,cy){ const P=cx==null?null:aerGround(cx,cy); dist=clamp(dist*f,7,60000); aerCamera(0,true); if (P) aerHold(P,cx,cy); }
+// (in Orbital mode the near world is drawn flat, and the bird's-eye view keeps low enough for it to hold, AER_MAX)
+const AER_MAX=ORBITAL?5200:60000;
+function aerZoom(f,cx,cy){ const P=cx==null?null:aerGround(cx,cy); dist=clamp(dist*f,7,AER_MAX); aerCamera(0,true); if (P) aerHold(P,cx,cy); }
 function aerOrbit(dx,dy){ yaw-=dx*0.005; pitch=clamp(pitch+dy*0.005,AER_PMIN,AER_PMAX); aerUp=0; aerCamera(0,true); }
-canvas.addEventListener('mousedown',e=>{ if (mode!=='above') return;
+canvas.addEventListener('mousedown',e=>{ if (mode!=='above'||aerFly) return;
   aer.drag={x:e.clientX,y:e.clientY,orbit:e.button!==0||e.shiftKey||e.altKey||e.ctrlKey}; if (!aer.drag.orbit) aer.drag.P=aerGround(e.clientX,e.clientY); });
 addEventListener('mouseup',()=>{ aer.drag=null; });
 // touch: one finger holds the land; two pinch to zoom, twist to turn and slide up or down together to tilt
@@ -13250,6 +13931,7 @@ function aerGoDown(cx,cy){
 // The player is brought to the ground at (x, z), seen along the direction d, from the bird's-eye view or through the
 // telescope: the camera flies from where it is to the eye of the player standing there, over dur seconds
 function goDownAt(x,z,d,dur){
+  if (ORBITAL) return goDownAtRing(x,z,d,dur);
   const from={p:camera.position.clone(),q:camera.quaternion.clone(),fov:camera.fov,far:camera.far,fogN:scene.fog.near,fogF:scene.fog.far};
   let top=surfaceTopAt(x,z);
   // through the telescope from a train, a coach, the ferry or the dinghy, the player first leaves it
@@ -13269,10 +13951,51 @@ function goDownAt(x,z,d,dur){
   if (mode==='above') toggleView(); else yaw=Math.atan2(-d.x,-d.z);
   Object.assign(descent,{t:0,dur,fov:from.fov,far:from.far,fogN:from.fogN,fogF:from.fogF}); descent.p.copy(from.p); descent.q.copy(from.q);
   if (started) lockPointer(); }
+// (Orbital mode) as goDownAt, the point being given in the player's strip's coordinates and lying in whichever strip it does
+function goDownAtRing(x,z,d,dur){
+  const S=stripPoint(x,z);
+  // through the telescope from a train, a coach, the ferry or the dinghy, the player first leaves it
+  const leave=()=>{ if (TELE.on) teleLower(); if (sit) sit=null; if (mode!=='above' && mode!=='street') leaveModes(); };
+  // a point in another strip is reached by carrying the player across to that strip first (wrapWorld), so that the
+  // blocks are built round the place itself and the flight ends where it began on the ring
+  const cross=()=>{ if (!S.k) return; ridden=null; descent.t=ascent.t=-1; player.x=x; player.z=z;
+    for (let i=0;i<4 && wrapWorld();i++); x=player.x; z=player.z; };
+  // on open water at least 1.5 m deep, the nearest harbour's dinghy is brought there, heading the way the view looks,
+  // and the player takes the helm
+  if (S.h<0.1 && (S.k || surfaceTopAt(x,z)<0.1)){ if ((sailD && mode==='above') || S.h>-1.5) return;
+    leave(); if (sailD) return; cross();
+    const H=dgyHarbourNear(x,z), e=H&&dgyMake(H); if (!e) return;
+    e.D.moor({x,z,head:Math.atan2(d.x,d.z)}); e.D.moor(null);
+    ridden=null; player.x=x; player.z=z; player.y=0; player.vy=0; eyeY=null; startSwoop(camera); dinghyBoard(e); return; }
+  if (mode!=='above') leave();
+  cross();
+  // (the camera's flight begins where it is once the player has been carried across)
+  const from={p:camera.position.clone(),q:camera.quaternion.clone(),fov:camera.fov,far:camera.far,fogN:scene.fog.near,fogF:scene.fog.far};
+  let top=surfaceTopAt(x,z);
+  // never inside a building: the nearest open ground outside its walls, within 25 m
+  { const o=openSpotNear(x,z); if (o){ x=o.x; z=o.z; top=o.y; } }
+  ridden=null;
+  player.x=x; player.z=z; player.y=top; player.vy=0; player.grounded=true; player.holdT=2; eyeY=null; fpPitch=0;
+  if (mode==='above') toggleView(); else yaw=Math.atan2(-d.x,-d.z);
+  Object.assign(descent,{t:0,dur,fov:from.fov,far:from.far,fogN:from.fogN,fogF:from.fogF}); descent.p.copy(from.p); descent.q.copy(from.q);
+  if (started) lockPointer(); }
+// the height of the land or the sea bed at a point given in the generator's coordinates of the player's strip, read
+// from the strip in which it truly lies: beyond the player's own strip the generator repeats that strip, whereas the
+// next strip is the same generator read STRIP_K further along the ring; beyond the outermost strip the land runs up
+// the rim wall. The strip the point lies in is returned with it (relative to the player's), and the point in its own
+// generator's coordinates
+function stripPoint(x,z){
+  const k=clamp(STRIP+Math.round(z/STRIP_W),-STRIP_MAX,STRIP_MAX)-STRIP; if (!k) return {k:0,x,z,h:heightAt(x,z)};
+  const gx=ringW(x+k*STRIP_K), gz=z-k*STRIP_W; let h=heightAt(gx,gz);
+  // (heightAt lays the wall's land over the generator only in the player's own strip)
+  const sd=Math.sign(STRIP+k), e=Math.abs(STRIP+k)>=STRIP_MAX&&!wallSd()?sd*gz-STRIP_W/2:0;
+  if (e>0) h=Math.max(h,wallLandH(gx,gz,e));
+  return {k,x:gx,z:gz,h}; }
 // a double click through the telescope, wherever it is raised, takes the player to the ground or the sea at the middle of its view, as a
 // double click does from the bird's-eye view; the flight there takes longer the further it is, up to four seconds
 function teleGoThere(){
   if (!TELE.on || !started) return false;
+  if (ORBITAL) return teleGoThereRing();
   const P=camera.position, D=camera.getWorldDirection(new THREE.Vector3()), near={k:Infinity,s:0}; let t=-1;
   COVE_FAST++;
   // the line of sight is followed to the ground, a quay, a terrace or the sea, whichever it meets first
@@ -13289,12 +14012,79 @@ function teleGoThere(){
   if (t<0) return false;
   goDownAt(P.x+D.x*t,P.z+D.z*t,D,clamp(1.2+t/700,1.5,4));
   return true; }
+/* (Orbital mode) A double click through the telescope follows the line of sight out to 20 km, across into the
+   neighbouring strips, the floor being taken to rise with the ring's curve along it (x²/2R, 200 m at 20 km), as the sky
+   draws it beyond the fog; where it meets nothing within 20 km, it is followed on round the whole ring (teleGoFar) */
+function teleGoThereRing(){
+  const P=camera.position, D=camera.getWorldDirection(new THREE.Vector3()), near={k:Infinity,s:0}; let t=-1;
+  const lift=s=>{ const a=D.x*s; return a*a/(2*RING_R); };
+  // the ground, a quay, a terrace or the sea, whichever it meets first: within the player's strip as they are built,
+  // beyond it from the land of the strip it lies in
+  const ground=s=>{ const x=P.x+D.x*s, z=P.z+D.z*s, k=Math.round(z/STRIP_W);
+    return Math.max(0,(k?stripPoint(x,z).h:walkGround(x,z,1e4)))+lift(s); };
+  const below=s=>P.y+D.y*s<=ground(s);
+  COVE_FAST++;
+  // where it meets nothing, the land it passes closest over, within a twentieth of the field of view, is taken: a far
+  // island is drawn more coarsely than it is. The steps lengthen with the distance, to 80 m at the furthest, less
+  // than the width of the smallest island
+  try { for (let s=4, s0=0; s<=20000; s0=s, s+=Math.max(2,s*0.004)){ if (P.y+D.y*s>800+lift(s)) break;
+      if (below(s)){ let a=s0, b=s; for (let i=0;i<12;i++){ const m=(a+b)/2; if (below(m)) b=m; else a=m; } t=b; break; }
+      if (s>300){ const g=stripPoint(P.x+D.x*s,P.z+D.z*s).h; if (g>0){ const k=(P.y+D.y*s-g-lift(s))/s; if (k<near.k){ near.k=k; near.s=s; } } } } }
+  finally { COVE_FAST--; }
+  if (t<0 && near.k<camera.fov*Math.PI/180*0.05) t=near.s;
+  if (t<0) return teleGoFar(P,D);
+  goDownAt(P.x+D.x*t,P.z+D.z*t,D,clamp(1.2+t/700,1.5,4));
+  return true; }
+// the height of the ground at a place on the ring, X along it and Z across it: the land of the strip in which it lies,
+// read from the generator STRIP_K further along for each strip, or the land and the bare face of a rim wall
+function ringGround(X,Z){
+  const k=clamp(Math.round(Z/STRIP_W),-STRIP_MAX,STRIP_MAX), gx=ringW(X+k*STRIP_K), gz=Z-k*STRIP_W, e=Math.abs(Z)-FLOOR_Z;
+  return e>0?wallLandH(gx,gz,e):baseH0(gx,gz); }
+// the distance along a line of sight from height h to the floor, as the sky finds it (ringHitFloor), or -1
+function ringHitFloorJS(h,d){
+  const a=d.x*d.x+d.y*d.y, b=d.y*(h-RING_R), c=h*(h-2*RING_R), q=b*b-a*c; if (q<0 || a<1e-10) return -1;
+  const sq=Math.sqrt(q); return b>0?-c/(b+sq):(-b+sq)/a; }
+// Beyond 20 km the land seen through the telescope is the rest of the ring, drawn by the sky. The line of sight is
+// followed on round the ring's curve, as the sky follows it, from 20 km to where it meets the floor, a rim wall or
+// leaves the ring over a wall's top; the land it meets, or failing that the land it passes closest over, within a
+// twentieth of the field of view, is gone to, wherever on the ring it lies. The player is carried across to the strip
+// in which it lies and set down there: the player takes off and flies there (voyBegin). Ground too steep to stand on,
+// high on a wall, is not gone to
+function teleGoFar(P,D){
+  const X0=trueX(P.x), Z0=trueZ(P.z), h=P.y, tf=ringHitFloorJS(h,D), end=tf>0?tf:4e6; if (end<=20000) return false;
+  // along the line of sight at s: the height above the floor beneath it, and its place on the ring
+  const alt=s=>RING_R-Math.hypot(s*D.x,h+s*D.y-RING_R);
+  const at=s=>({X:X0+Math.atan2(s*D.x,RING_R-(h+s*D.y))*RING_R,Z:Z0+s*D.z});
+  const below=s=>{ const q=at(s); return alt(s)<=Math.max(0,ringGround(q.X,q.Z)); };
+  let t=-1; const near={k:Infinity,s:0};
+  COVE_FAST++;
+  // (the steps lengthen with the distance, to 4 km 2,000 km off; no land on the floor stands 12 km high, so the ground is
+  // looked at only below that, or over a wall)
+  try { for (let s=20000, s0=s;;){
+      const q=at(s); if (Math.abs(q.Z)>WALL_Z) break;
+      const a=alt(s);
+      if (a<12000 || Math.abs(q.Z)>FLOOR_Z){ const g=Math.max(0,ringGround(q.X,q.Z));
+        if (a<=g){ let lo=s0, hi=s; for (let i=0;i<20;i++){ const m=(lo+hi)/2; if (below(m)) hi=m; else lo=m; } t=hi; break; }
+        if (g>0){ const k=(a-g)/s; if (k<near.k){ near.k=k; near.s=s; } } }
+      if (s>=end) break; s0=s; s=Math.min(end,s+Math.max(20,s*0.002)); } }
+  finally { COVE_FAST--; }
+  if (t<0 && near.k<camera.fov*Math.PI/180*0.05) t=near.s;
+  if (t<0) return false;
+  const Q=at(t), gq=ringGround(Q.X,Q.Z); if (Math.abs(Q.Z)-FLOOR_Z>WALL_E_STAND-WALL_PAD) return false;
+  // shallow water, where no dinghy is brought and nobody stands, is not gone to (as goDownAt)
+  if (gq<0.1 && gq>-1.5) return false;
+  // the player takes off from the eye and flies there (voyBegin)
+  if (TELE.on) teleLower(); sit=null;
+  flyStart(); if (!flying()) return false;
+  voyBegin(Q.X,Q.Z,Math.max(0,gq));
+  return true; }
+// through the telescope the mouse is captured, so the double click is taken from two presses of its left button
 canvas.addEventListener('contextmenu',e=>{ if (mode==='above') e.preventDefault(); });
 addEventListener('mousemove',e=>{
   const locked=document.pointerLockElement===canvas; if (!locked&&!dragging) return;
   const dx=locked?e.movementX:e.clientX-lx, dy=locked?e.movementY:e.clientY-ly; lx=e.clientX; ly=e.clientY; const k=PHOTO.lookScale();
   // (in the bird's-eye view the drag holds the land, or turns and tilts the view: see aerOrbit)
-  if (mode==='above'){ const D=aer.drag; if (!D) return;
+  if (mode==='above'&&!aerFly){ const D=aer.drag; if (!D) return;
     if (D.orbit) aerOrbit(e.clientX-D.x,e.clientY-D.y); else aerHold(D.P,e.clientX,e.clientY); D.x=e.clientX; D.y=e.clientY; return; }
   look(dx*k,dy*k);
 });
@@ -13985,30 +14775,30 @@ function tunnelLight(dt,on,RT=rideTrain()){
 function look(dx,dy){
   // through the telescope the mouse turns the view less, so that the scene moves across the eyepiece at the usual rate
   if (TELE.on){ const s=Math.tan(camera.fov*Math.PI/360)/Math.tan(TELE.base*Math.PI/360); dx*=s; dy*=s; }
-  if (mode==='dinghy'){ dgyLook.yaw-=dx*0.0026; dgyLook.pitch=clamp(dgyLook.pitch-dy*0.0026,-1.1,1.1); return; } if (mode==='coach'){ co.yaw-=dx*0.0026; co.pitch=clamp(co.pitch-dy*0.0026,-1.1,1.1); return; } if (mode==='ferry' && feChase){ feLook.yaw-=dx*0.004; feLook.pitch=clamp(feLook.pitch+dy*0.003,0.02,1.3); return; } if (mode==='ferry'){ fe.yaw-=dx*0.0026; fe.pitch=clamp(fe.pitch-dy*0.0026,-1.1,1.1); return; } if (mode==='chase'){ chase.yaw-=dx*0.004; chase.pitch=clamp(chase.pitch+dy*0.003,0.02,1.3); return; } if (mode==='follow'){ FOL.yaw-=dx*0.004; FOL.pitch=clamp(FOL.pitch+dy*0.003,-0.3,1.3); return; } if (mode==='train'){ tYaw=clamp(tYaw-dx*0.0026,-2.6,2.6); tPitch=clamp(tPitch-dy*0.0026,-1,1); return; } if (mode==='above'){ aerOrbit(dx*1.25,dy*1.25); } else { const pl=mode==='swim'?1.5:1.2; yaw-=dx*0.0026; fpPitch=clamp(fpPitch-dy*0.0026,-pl,pl); } }
+  if (mode==='dinghy'){ dgyLook.yaw-=dx*0.0026; dgyLook.pitch=clamp(dgyLook.pitch-dy*0.0026,-1.1,1.1); return; } if (mode==='coach'){ co.yaw-=dx*0.0026; co.pitch=clamp(co.pitch-dy*0.0026,-1.1,1.1); return; } if (mode==='ferry' && feChase){ feLook.yaw-=dx*0.004; feLook.pitch=clamp(feLook.pitch+dy*0.003,0.02,1.3); return; } if (mode==='ferry'){ fe.yaw-=dx*0.0026; fe.pitch=clamp(fe.pitch-dy*0.0026,-1.1,1.1); return; } if (mode==='chase'){ chase.yaw-=dx*0.004; chase.pitch=clamp(chase.pitch+dy*0.003,0.02,1.3); return; } if (mode==='follow'){ FOL.yaw-=dx*0.004; FOL.pitch=clamp(FOL.pitch+dy*0.003,-0.3,1.3); return; } if (mode==='train'){ tYaw=clamp(tYaw-dx*0.0026,-2.6,2.6); tPitch=clamp(tPitch-dy*0.0026,-1,1); return; } if (mode==='above'&&!aerFly){ aerOrbit(dx*1.25,dy*1.25); } else { const pl=mode==='swim'||aerFly?1.5:1.2; yaw-=dx*0.0026; fpPitch=clamp(fpPitch-dy*0.0026,-pl,pl); } }
 // bird's-eye: the wheel and a pinch zoom towards the pointer; two fingers on a trackpad move the land with them, and
 // with Shift or Alt held turn and tilt the view. Safari gives a trackpad's pinch and twist as gestures of their own
 let aerGest=null;
-canvas.addEventListener('gesturestart',e=>{ if (mode!=='above') return; e.preventDefault(); aerGest={s:1,r:0}; });
-canvas.addEventListener('gesturechange',e=>{ if (mode!=='above' || !aerGest) return; e.preventDefault();
+canvas.addEventListener('gesturestart',e=>{ if (mode!=='above'||aerFly) return; e.preventDefault(); aerGest={s:1,r:0}; });
+canvas.addEventListener('gesturechange',e=>{ if (mode!=='above' || aerFly || !aerGest) return; e.preventDefault();
   if (e.scale>0) aerZoom(aerGest.s/e.scale,e.clientX,e.clientY);
   yaw+=(e.rotation-aerGest.r)*Math.PI/180; aerCamera(0,true); aerGest={s:e.scale,r:e.rotation}; });
 canvas.addEventListener('gestureend',e=>{ if (aerGest){ e.preventDefault(); aerGest=null; } });
-canvas.addEventListener('wheel',e=>{ e.preventDefault(); if (mode!=='above') return;
+canvas.addEventListener('wheel',e=>{ e.preventDefault(); if (mode!=='above'||aerFly) return;
   if (e.shiftKey||e.altKey){ aerOrbit(e.deltaX||0,e.deltaY||0); return; }
   if (e.ctrlKey){ if (aerGest) return; aerZoom(Math.exp(clamp(e.deltaY,-60,60)*0.012),e.clientX,e.clientY); return; }
   const mouseWheel=e.deltaMode===1 || (e.deltaX===0 && Math.abs(e.deltaY)>=50 && Math.abs(e.deltaY%1)<1e-6 && Math.abs(e.deltaY)%10===0);
   if (mouseWheel){ aerZoom(Math.exp(clamp(e.deltaY*(e.deltaMode===1?33:1),-150,150)*0.0012),e.clientX,e.clientY); return; }
   aerHold(aerGround(e.clientX,e.clientY),e.clientX-e.deltaX,e.clientY-e.deltaY); },{passive:false});
 const joyEl=document.getElementById('joy'); const joy={id:null,x:0,y:0,ox:0,oy:0}; let lookTouch=null;
-canvas.addEventListener('touchstart',e=>{ if (mode==='above'){ aerTouchStart(e); e.preventDefault(); return; } for (const t of e.changedTouches){
+canvas.addEventListener('touchstart',e=>{ if (mode==='above'&&!aerFly){ aerTouchStart(e); e.preventDefault(); return; } for (const t of e.changedTouches){
   if (t.clientX<innerWidth*0.45&&joy.id===null){ joy.id=t.identifier; joy.ox=t.clientX; joy.oy=t.clientY; joyEl.hidden=false; joyEl.style.left=t.clientX+'px'; joyEl.style.top=t.clientY+'px'; }
   else if (lookTouch===null) lookTouch={id:t.identifier,x:t.clientX,y:t.clientY,sx:t.clientX,sy:t.clientY,t0:performance.now()}; } e.preventDefault(); },{passive:false});
-canvas.addEventListener('touchmove',e=>{ if (mode==='above'){ aerTouchMove(e); e.preventDefault(); return; } for (const t of e.changedTouches){
+canvas.addEventListener('touchmove',e=>{ if (mode==='above'&&!aerFly){ aerTouchMove(e); e.preventDefault(); return; } for (const t of e.changedTouches){
   if (t.identifier===joy.id){ let dx=t.clientX-joy.ox, dy=t.clientY-joy.oy; const l=Math.hypot(dx,dy), m=50; if (l>m){dx*=m/l;dy*=m/l;}
     joy.x=dx/m; joy.y=dy/m; joyEl.firstElementChild.style.transform=`translate(${dx}px,${dy}px)`; }
   else if (lookTouch&&t.identifier===lookTouch.id){ look((t.clientX-lookTouch.x)*1.4,(t.clientY-lookTouch.y)*1.4); lookTouch.x=t.clientX; lookTouch.y=t.clientY; } } e.preventDefault(); },{passive:false});
-const endTouch=e=>{ if (aer.touch.size){ aerTouchEnd(e); if (mode==='above') return; } for (const t of e.changedTouches){ if (t.identifier===joy.id){ joy.id=null; joy.x=joy.y=0; joyEl.hidden=true; joyEl.firstElementChild.style.transform=''; }
+const endTouch=e=>{ if (aer.touch.size){ aerTouchEnd(e); if (mode==='above'&&!aerFly) return; } for (const t of e.changedTouches){ if (t.identifier===joy.id){ joy.id=null; joy.x=joy.y=0; joyEl.hidden=true; joyEl.firstElementChild.style.transform=''; }
   if (lookTouch&&t.identifier===lookTouch.id){
     // a short tap, hardly moved, on a dinghy within 100 m takes her helm, as 6 does beside her
     if (performance.now()-lookTouch.t0<350 && Math.hypot(t.clientX-lookTouch.sx,t.clientY-lookTouch.sy)<14) tapDinghy(t.clientX,t.clientY);
@@ -14125,6 +14915,7 @@ function leaveTrain(to){
 }
 function toggleView(){
   if (mode==='coach') return;
+  aerFly=false;
   // sailing, the bird's-eye view leaves the dinghy where she is, afloat, and rises over her as the ordinary view does,
   // high enough to fly over the water, so that the view can be moved and a double click goes anywhere
   if (sailD){ const head=sailD.state.head;
@@ -14146,6 +14937,123 @@ function toggleView(){
   camera.fov=mode==='above'?31:70; camera.updateProjectionMatrix(); glowScale();
   if (mode==='above'&&document.pointerLockElement) document.exitPointerLock();
 }
+/* ---------- flight ----------
+   Space pressed twice in quick succession takes off from wherever the view is, on foot, in the water, aboard anything
+   or from the bird's-eye view, and pressed twice again lands. The flight is seen from the eye: it is a first-person
+   form of the bird's-eye view (mode 'above' with aerFly set), its distance (dist) being the height above the ground,
+   so that the land below is drawn as the bird's-eye view draws it from that height. The mouse looks about; W and S
+   (or the up and down arrows) fly forward and back the way the view looks, up and down included, A and D sideways,
+   Space rises and Z descends, Shift goes three times as fast and, on a Mac, Shift with Ctrl ten times (elsewhere Ctrl
+   with W closes the browser's tab or window, and a page cannot prevent it). The pace grows with the height, from
+   8 m/s near the ground to about 3 km/s at the greatest height, FLY_MAX above the ground. The eye keeps 1.6 m clear of
+   the ground, the roofs and the sea, measured square to the slope; descending steeply onto land sets the player down
+   there, and so does 2. Landing, the camera flies down to the eye of the player standing below (goDownAt), at the
+   helm of a dinghy over deep water. */
+const FLY_MAX=5200, FLY_MAC=/Mac/.test(navigator.platform||navigator.userAgent||'');
+const flying=()=>aerFly&&mode==='above';
+// the ground, a roof or the sea under the eye
+const flyGround=(x,z)=>Math.max(0,gullTopAt(x,z));
+function flyStart(){
+  if (!started || seeding || flying() || PHOTO.on || voy) return;
+  const P=camera.position.clone(), D=camera.getWorldDirection(new THREE.Vector3());
+  if (TELE.on) teleLower(); sit=null;
+  if (mode!=='street') leaveModes();
+  if (mode!=='street') return;   // (should anything have kept the player from leaving it)
+  mode='above'; aerFly=true; ascent.t=descent.t=-1; aerUp=0; aer.drag=null; aer.touch.clear(); aer.one=aer.two=null; crouch=false;
+  player.x=P.x; player.z=P.z; player.y=Math.max(heightAt(P.x,P.z),0); player.vy=0; eyeY=player.y;
+  flyY=clamp(P.y,flyGround(P.x,P.z)+1.6,flyGround(P.x,P.z)+FLY_MAX);
+  yaw=Math.atan2(-D.x,-D.z); fpPitch=Math.asin(clamp(D.y,-1,1));
+  camera.fov=FOV; camera.updateProjectionMatrix(); glowScale();
+  if (document.pointerLockElement!==canvas) lockPointer();
+  toast('View','Flight'); }
+function flyLand(dur){
+  if (!flying() || voy) return;
+  const D=new THREE.Vector3(-Math.sin(yaw),0,-Math.cos(yaw)), h=flyY-flyGround(player.x,player.z);
+  // (Orbital mode) over the face of a rim wall where it is too steep to stand on, the player is set down at the highest
+  // point of it that can be stood on, below
+  const sd=ORBITAL?wallSd():0, zs=sd*(STRIP_W/2+WALL_E_STAND-WALL_PAD), z=sd&&sd*player.z>sd*zs?zs:player.z;
+  goDownAt(player.x,z,D,dur||clamp(1+h/500+Math.abs(z-player.z)/20000,1.2,sd?5:4));
+  // where it cannot be done (shallow water), the player is set down at once
+  if (flying()) toggleView(); }
+function flyStep(dt,mx,mz){
+  if (!flying()) return;
+  if (voy){ voyStep(dt); return; }
+  const ml=Math.hypot(mx,mz); if (ml>1){ mx/=ml; mz/=ml; }
+  const up=(keys.Space?1:0)-(keys.KeyZ?1:0), g0=flyGround(player.x,player.z);
+  const sh=keys.ShiftLeft||keys.ShiftRight, ct=FLY_MAC&&(keys.ControlLeft||keys.ControlRight);
+  const sp=Math.max(8,(flyY-g0)*0.6)*(sh&&ct?10:sh?3:1), cp=Math.cos(fpPitch);
+  // forward is the way the view looks, as the camera is turned (rotation fpPitch, yaw in the order YXZ)
+  const fx=-Math.sin(yaw)*cp, fy=Math.sin(fpPitch), fz=-Math.cos(yaw)*cp, rx=Math.cos(yaw), rz=-Math.sin(yaw);
+  const vx=(fx*mz+rx*mx)*sp, vz=(fz*mz+rz*mx)*sp, vy=(fy*mz+up)*sp;
+  player.x+=vx*dt; player.z+=vz*dt; flyY+=vy*dt;
+  // the eye keeps 1.6 m clear of the ground measured square to its slope, not straight down: on a cliff or a steep
+  // mountain face 1.6 m straight up would leave the eye a few centimetres from the rock, inside the camera's near plane
+  const g=flyGround(player.x,player.z), gx=flyGround(player.x+2,player.z)-flyGround(player.x-2,player.z), gz=flyGround(player.x,player.z+2)-flyGround(player.x,player.z-2);
+  const clr=1.6*Math.min(40,Math.hypot(1,gx/4,gz/4));
+  // a steep descent onto land sets the player down there; over the sea the eye skims the water
+  // (in Orbital mode not onto the face of a rim wall too steep to stand on)
+  if (flyY<g+clr){ flyY=g+clr; if (vy<-0.5*sp && g>0.1 && !(ORBITAL && wallE(player.z)>=WALL_E_STAND-WALL_PAD)){ flyLand(0.6); return; } }
+  flyY=Math.min(flyY,g+FLY_MAX);
+  player.y=Math.max(heightAt(player.x,player.z),0); player.vy=0; player.grounded=false; eyeY=player.y;
+  if (vx||vz) player.face=Math.atan2(vx,vz); }
+/* (Orbital mode) A long flight (voy), begun by a double click through the telescope on land more than 20 km off: the camera flies
+   from the eye to the place in one arc, rising and falling with the ring's floor beneath it and climbing in the middle
+   to about an eighth of the distance (up to 250 km), facing the place all the way, and is then set down there as
+   from the bird's-eye view (goDownAt). It is worked out in the ring's own coordinates (X along, Z across, H above the
+   floor), so that it follows the ring's curve. Below 6 km the player is carried with it, as in any flight, and the
+   world is built beneath it. Above that only the sky is drawn (the camera sees layer VOY_LAYER alone), since the
+   flat world near the eye no longer agrees with the ring the sky draws, and the player is left where they were, so
+   that nothing is built for the places passed over; on the way down the player is carried across to the strip in
+   which the camera is (stripStep) and set beneath it, and the place is built during the last of the descent. The
+   flight takes 3 s and 2.5 s more for each factor of e in its length over 5 km: 8 s for 30 km, 18 s for 1,800 km. */
+let voy=null;
+const VOY_LAYER=5;
+if (ORBITAL){ sky.layers.enable(VOY_LAYER); for (const m of ORB.ringWalls.children) m.layers.enable(VOY_LAYER); }
+const ease=x=>x<=0?0:x>=1?1:x*x*(3-2*x), _voyA=new THREE.Vector3(), _voyB=new THREE.Vector3();
+function voyBegin(X1,Z1,G1){
+  const P=camera.position, d0=camera.getWorldDirection(new THREE.Vector3());
+  const X0=trueX(P.x), Z0=trueZ(P.z), dX=ringW(X1-X0), dZ=Z1-Z0, L=Math.hypot(dX,dZ);
+  voy={X0,Z0,H0:P.y,X1,Z1,G1,dX,dZ,t:0,T:3+2.5*Math.log(1+L/5000),Hp:clamp(L*0.12,1500,250000),d0,high:false,cam:new THREE.Vector3()};
+  voyStep(0); }
+// the player is carried across to the strip in which ring place (X, Z) lies, and set there, the camera with them
+function voyPlace(X,Z){
+  const k=clamp(Math.round(Z/STRIP_W),-STRIP_MAX,STRIP_MAX); while (STRIP!==k) stripStep(Math.sign(k-STRIP));
+  player.x=ringW(X+STRIP*STRIP_K); player.z=Z-STRIP*STRIP_W; player.y=Math.max(heightAt(player.x,player.z),0); player.vy=0; eyeY=player.y; }
+function voyStep(dt){
+  const V=voy; V.t+=dt; const u=ease(V.t/V.T), R=RING_R;
+  const X=V.X0+V.dX*u, Z=V.Z0+V.dZ*u, b=1-Math.pow(2*u-1,4);
+  let H=lerp(V.H0,V.G1+300,u)+V.Hp*b;
+  const high=H>6000+Math.max(0,V.G1);
+  if (high!==V.high){ V.high=high; camera.layers.set(high?VOY_LAYER:0); }
+  if (high){ V.cam.set(ringW(X+STRIP*STRIP_K),H,Z-STRIP*STRIP_W); }
+  else { voyPlace(X,Z); H=Math.max(H,flyGround(player.x,player.z)+1.6); flyY=H; }
+  // facing the place: where it lies from the eye, round the ring's curve, turned to from the way the eye looked at first
+  const a=V.dX*(1-u), psi=a/R, tv=_voyB.set((R-V.G1)*Math.sin(psi),R-(R-V.G1)*Math.cos(psi)-H,V.Z1-Z).normalize();
+  const w=ease(V.t/1.2), dv=_voyA.copy(V.d0).multiplyScalar(1-w).addScaledVector(tv,w).normalize();
+  yaw=Math.atan2(-dv.x,-dv.z); fpPitch=Math.asin(clamp(dv.y,-1,1));
+  if (V.t>=V.T) voyEnd(true); }
+// the end of the flight: set down at the place, or (cut short by a change of view) left where the camera is
+function voyEnd(land){
+  const V=voy; if (!V) return; voy=null; camera.layers.set(0);
+  if (V.high){ const X=trueX(V.cam.x), Z=trueZ(V.cam.z); voyPlace(X,Z); flyY=V.cam.y; }
+  if (!land || !flying()) return;
+  const D=new THREE.Vector3(-Math.sin(yaw),0,-Math.cos(yaw));
+  goDownAt(player.x,player.z,D,1.5);
+  if (flying()) toggleView(); }
+// Ctrl+O changes between Orbital mode and the standard one: the page is loaded afresh in the other mode with the same
+// seed, the player starting at the origin, since the mode is fixed for the life of a page. Taken before the game's own
+// keys, so that O alone still shows the statistics, and before the browser's own Ctrl+O, which opens a file
+addEventListener('keydown',e=>{
+  if (e.code!=='KeyO' || !e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+  e.preventDefault(); e.stopImmediatePropagation(); if (e.repeat || seeding) return;
+  try{ const u=new URL(location.href); u.search=''; u.searchParams.set('seed',SEED_TEXT); if (!ORBITAL) u.searchParams.set('orbital','');
+    location.assign(u.href.replace('orbital=','orbital')); }catch(_){} },true);
+// Space twice within 300 ms, taken before the game's own keys. A Space taken by a picture in a gallery (galleryAhead,
+// whose listener is registered earlier and stops the event) never reaches this one, and so never counts as the first
+addEventListener('keydown',e=>{
+  if (e.code!=='Space' || e.repeat || islandShown() || shareShown() || PHOTO.on || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target&&e.target.tagName||'')) return;
+  const now=performance.now(); if (now-spaceT>300){ spaceT=now; return; }
+  spaceT=0; if (flying()) flyLand(); else flyStart(); },true);
 // a new island is seeded a slice at a time, with the share of its blocks built so far shown on the screen; the
 // world stands still until it is complete
 let seeding=false;
@@ -14162,6 +15070,7 @@ async function newIsland(text){ if (seeding) return; seeding=true; PEOPLE.reset(
     if (mode==='ferry'||ridden) leaveFerry('street');
     if (mode!=='street'&&mode!=='above'){ mode='street'; camera.fov=FOV; camera.updateProjectionMatrix(); glowScale(); }
     SEED_TEXT=seedText(text); SEED=seedNumber(SEED_TEXT); seedToAddress();
+    if (ORBITAL && STRIP){ STRIP=0; wallForget(); }   // (Orbital mode) a new orbital is begun in its middle strip
     resetWorld(); spawnPlayer(); player.vy=0; player.holdT=1.5; eyeY=null; lastCell=null;
     let total=0;
     for (;;){ updateChunks(player.x,player.z,40,true); total=Math.max(total,queue.length+1);
@@ -14179,6 +15088,9 @@ function seedToAddress(){ try{ const u=new URL(location.href); u.searchParams.de
 // I opens the island panel, where a seed is typed or drawn at random and the island generated from it; Esc or I closes
 // it unchanged. While it is open the game sees no keys, and a printable key goes to the seed
 const islandEl=document.getElementById('island'), seedIn=document.getElementById('seedIn'), seedGo=document.getElementById('seedGo');
+// in Orbital mode the page, the About box and the seed panel say so
+if (ORBITAL){ document.title='Orbital'; islandEl.setAttribute('aria-label','New orbital'); islandEl.querySelector('h3').textContent='New orbital';
+  const ab=document.querySelector('#about h2'); if (ab) ab.textContent='Orbital'; canvas.setAttribute('aria-label','Procedurally generated orbital habitat'); }
 function islandShown(){ return !islandEl.hidden; }
 function islandSync(){ const v=seedText(seedIn.value); seedGo.disabled=!v || v===SEED_TEXT; }
 function openIsland(){ if (seeding) return; if (document.pointerLockElement) document.exitPointerLock();
@@ -14298,6 +15210,7 @@ function sceneState(){
   const o={v:1,s:SEED_TEXT,h:sr2(hour)}; if (paused) o.z=1;
   const P=(x,y,z)=>[sr1(x),sr1(y),sr1(z)], A=(...a)=>a.map(sr2);
   o.p=P(player.x,player.y,player.z);
+  if (ORBITAL){ o.o=1; if (STRIP) o.k=STRIP; }   // (Orbital mode, and the strip of the floor counted from the middle one towards +z)
   const T=()=>{ o.T=[sr1(train.x),train.dir,sr1(train.v),sr1(Math.max(0,train.wait))]; };
   const G=()=>{ const g=goods, L=g.legs[0]; o.G=[g.R.sd,sr1(g.R.x0),sr1(g.x),g.dir,g.lead,sr1(g.v),sr1(Math.max(0,g.wait)),g.toB?1:0]; if (L) o.G.push(sr1(L.x),sr1(L.wait)); };
   const Fy=()=>{ const F=ridden; o.F=[sr1(F.R.I.x),sr1(F.R.I.z),sr1(F.s),F.at,F.next,sr2(F.v),sr1(Math.max(0,F.wait))]; o.E=A(fe.lx,fe.lz,fe.lv,fe.ey); };
@@ -14305,7 +15218,8 @@ function sceneState(){
     if (sit.fr==='world') o.x=[...A(s.x,s.y,s.z),sr2(sit.L0)];
     else { const i=(sit.fr==='coach'?COACH_SEATS:FERRY_SEATS).indexOf(s); if (i>=0) o.x=[i,sr2(sit.L0)]; } };
   const ret=R=>{ if (R) o.r=[...P(R.x,R.y,R.z),sr2(R.yaw)]; };
-  if (mode==='above'){ o.m='above'; o.l=[sr2(yaw),sr2(pitch),Math.round(dist),sr2(aerUp)]; if (aboveY!==null) o.l.push(sr1(aboveY),sr1(aerLift)); if (ridden) Fy(); }
+  if (flying()){ o.m='fly'; o.l=[...A(yaw,fpPitch),sr1(flyY)]; }   // (a page that does not know flight opens it on foot, looking the same way)
+  else if (mode==='above'){ o.m='above'; o.l=[sr2(yaw),sr2(pitch),Math.round(dist),sr2(aerUp)]; if (aboveY!==null) o.l.push(sr1(aboveY),sr1(aerLift)); if (ridden) Fy(); }
   else if (mode==='swim'){ const S=swimmer.state; o.m='swim'; o.p=P(S.x,S.y,S.z); o.l=[...A(yaw,fpPitch),S.under?1:0]; ret(uwReturn); }
   else if (mode==='train'||mode==='chase'){
     if (rideGoods){ if (!goods.R){ o.m='walk'; o.l=A(yaw,fpPitch); return o; } G(); } else T();
@@ -14339,6 +15253,14 @@ async function sceneLinkOf(o){
    the gallery to close itself, or false when the place could not be gone to. */
 async function goThere(o,pic){
   if (seeding) return false;
+  // a picture taken in the other mode (Orbital mode or the standard one) is gone to by loading the page afresh in that
+  // mode, the picture being left for the new page to show while its world is built, as before Go there kept to the page
+  if ((o && o.o===1)!==ORBITAL){ try{
+      if (pic && pic.ready) await pic.ready.catch(()=>{});
+      const sc={...o}; delete sc.c; const link=await sceneLinkOf(sc);
+      try{ if (pic && pic.canvas) sessionStorage.setItem('coast.goThere',JSON.stringify({t:Date.now(),src:pic.canvas.toDataURL('image/jpeg',0.9),fov:pic.fov,aspect:pic.aspect||pic.canvas.width/pic.canvas.height})); }catch(_){}
+      location.assign(link); return true; }
+    catch(err){ console.warn('The place could not be gone to:',err); return false; } }
   try{
     const sc={...o}; delete sc.c;
     if (pic && pic.ready) await pic.ready.catch(()=>{});
@@ -14360,6 +15282,7 @@ async function goThereBuild(o){
     leaveModes(); uwReturn=null; sit=null; crouch=false; mode='street';
     camera.fov=FOV; camera.near=0.1; camera.far=3600; camera.updateProjectionMatrix(); glowScale();
     const sd=typeof o.s==='string' && o.s.trim() ? seedText(o.s) : SEED_TEXT;
+    if (ORBITAL && sd!==SEED_TEXT && STRIP){ STRIP=0; wallForget(); }
     if (sd!==SEED_TEXT){ SEED_TEXT=sd; SEED=seedNumber(sd); PEOPLE.reset(); resetWorld(); spawnPlayer(); }
     try{ history.replaceState(history.state,'',await sceneLinkOf(o)); }catch(_){}
     scenePlace(o); eyeY=null; lastCell=null;
@@ -14414,10 +15337,12 @@ const sceneNum=(a,i,d=0)=>Array.isArray(a) && Number.isFinite(+a[i]) ? +a[i] : d
 function scenePlace(o){
   if (Number.isFinite(o.h)){ hour=((o.h%24)+24)%24; SNDS.hour=Math.floor(hour); }
   const p=o.p;
+  if (ORBITAL && Number.isInteger(o.k) && Math.abs(o.k)<=STRIP_MAX && o.k!==STRIP){ STRIP=o.k; wallForget(); }
+  else if (ORBITAL && !o.k && STRIP){ STRIP=0; wallForget(); }
   if (Array.isArray(p) && [0,1,2].every(i=>Number.isFinite(+p[i]))){ player.x=+p[0]; player.y=+p[1]-(o.m==='swim'?1.62:0); player.z=+p[2]; }
   player.vy=0; player.holdT=3; player.grounded=true; eyeY=null; }
 // once the blocks round the player are built: the vehicles where they were, and the player in the same mode and view.
-// l is, by mode: walk and swim [yaw,pitch(,under)], above [yaw,pitch,distance,rise(,height of the point it looks at, lift)], cab [yaw,pitch] in the cab,
+// l is, by mode: walk and swim [yaw,pitch(,under)], fly [yaw,pitch,height of the eye], above [yaw,pitch,distance,rise(,height of the point it looks at, lift)], cab [yaw,pitch] in the cab,
 // chase [yaw,pitch,distance], coach and ferry [yaw,pitch] in the vehicle's frame, stern and astern [yaw,pitch,
 // distance], helm [yaw,pitch] from the bow, gull and dolphin [yaw,pitch,distance]
 function sceneRestore(o){
@@ -14442,10 +15367,13 @@ function sceneRestore(o){
     const [L,p]=sitLookGet(fr); sitKey({s,fr,home}); if (!sit) return; sit.L0=N(o.x,1,sit.L0); sitLookSet(fr,L,p); sit.k=1; };
   if (m==='above'){
     if (F){ deck(); toggleView(); } else { walk(); toggleView(); }
-    yaw=N(l,0,yaw); pitch=clamp(N(l,1,0.25),0.06,1.5); dist=clamp(N(l,2,45),7,60000); aerUp=clamp(N(l,3),0,1.2);
+    yaw=N(l,0,yaw); pitch=clamp(N(l,1,0.25),0.06,1.5); dist=clamp(N(l,2,45),7,AER_MAX); aerUp=clamp(N(l,3),0,1.2);
     ascent.t=descent.t=-1; firstCam=true; aboveY=null;
     // the height the view stood at and its lift over the ground, where the scene records them
     aerRestore=l.length>=6 && Number.isFinite(+l[4]) ? {y:+l[4],lift:Math.max(0,N(l,5))} : null; }
+  else if (m==='fly'){ walk(); mode='above'; aerFly=true; ascent.t=descent.t=-1; aerUp=0;
+    fpPitch=clamp(N(l,1),-1.5,1.5); { const g=flyGround(player.x,player.z); flyY=clamp(N(l,2,g+50),g+1.6,g+FLY_MAX); }
+    player.y=Math.max(heightAt(player.x,player.z),0); eyeY=player.y; camera.fov=FOV; camera.updateProjectionMatrix(); glowScale(); }
   else if (m==='swim'){ walk(); mode='swim'; swimmer.enter({x:player.x,y:player.y+1.62,z:player.z,yaw,pitch:fpPitch});
     if (N(l,2)){ const S=swimmer.state; S.mode='under'; S.under=true; S.underT=2; diveQuiet=true; }
     uwReturn=Array.isArray(o.r)?{x:N(o.r,0),y:N(o.r,1),z:N(o.r,2),yaw:N(o.r,3)}:null; }
@@ -14725,7 +15653,15 @@ function seaDepthPass(){
   scene.updateMatrixWorld(); scene.matrixWorldAutoUpdate=false; renderer.setRenderTarget(seaDepth.rt); scene.overrideMaterial=seaDepth.mat; renderer.render(scene,seaDepth.cam); scene.overrideMaterial=null;
   renderer.shadowMap.autoUpdate=au; renderer.setRenderTarget(null);
 }
+// (Orbital mode) high on a rim wall, where the whole square of the distant terrain lies beyond WALL_E_FACE, it is sunk
+// behind the face and, past the top of the wall, would lie level 80 m beneath the top: neither it nor its outline is
+// drawn there. It is applied here, last, since several paths set their visibility
+let farWallHid=false;
+function farWallHide(){
+  if (wallE(player.z)>WALL_E_FACE+FN/2*FS+300){ if (farMesh.visible||outMesh.visible){ farWallHid=true; farMesh.visible=farGlow.visible=outMesh.visible=false; } }
+  else if (farWallHid){ farWallHid=false; farMesh.visible=farGlow.visible=!(mode==='above'&&dist>=2500); } }
 function render(){
+  if (ORBITAL) farWallHide();
   SEA.mesh.material.visible=!seaHidden; surfMat.visible=!seaHidden; bedViewU.value=seaHidden?1:0; if (UW.surface.material) UW.surface.material.visible=!seaHidden;
   seaDepthPass();
   // in the water, under it or with the waterline across the lens, the water draws the frame
@@ -14939,7 +15875,7 @@ function swimSound(k,v){
   else if (k==='gasp'){ f.type='bandpass'; f.frequency.value=1700; f.Q.value=1.2; g.gain.setValueAtTime(0.001,t); g.gain.linearRampToValueAtTime(0.3*v,t+0.12); g.gain.exponentialRampToValueAtTime(0.001,t+0.7); }
   else return;
   src.start(t,Math.random()*2); src.stop(t+1.0); }
-wrapHooks.push(d=>{ if (mode==='swim') swimmer.state.z+=d; });
+wrapHooks.push(d=>{ if (mode==='swim') swimmer.state.z+=d; }); xWrapHooks.push(d=>{ if (mode==='swim') swimmer.state.x+=d; });
 // the programs and targets of the water are made ready at the start, so that the first dive does not stall
 function divePrewarm(){ const L=seabedLifeNow(), M=[...Object.values(L.meshes),...Object.values(L.fishMeshes).map(F=>F.m)], v=M.map(m=>m.visible);
   M.forEach(m=>m.visible=true); UW.uniforms.uUnderOn.value=1; UW.prewarm(renderer,scene,camera,diveAbove,world); UW.uniforms.uUnderOn.value=0; M.forEach((m,i)=>m.visible=v[i]); }
@@ -15086,7 +16022,7 @@ const PEOPLE=createPeople({ world, origin:ORIGIN, camera, C, topAt, heightAt,
 // the population level, 0 to 9, is kept in the browser and restored at the start
 function setPeopleLevel(v){ PEOPLE.setLevel(v); try{ localStorage.setItem('coast.people',String(PEOPLE.level)); }catch(_){} toast('Population level',`${PEOPLE.level}`); }
 try{ const v=parseInt(localStorage.getItem('coast.people'),10); if (v>0 && v<=9) PEOPLE.setLevel(v); }catch(_){}
-wrapHooks.push(()=>PEOPLE.reset());
+wrapHooks.push(()=>PEOPLE.reset()); xWrapHooks.push(()=>PEOPLE.reset());
 const mobPerf={t:0,n:0,sum:0,good:0};
 let paused=false, last=performance.now(), time=0, firstCam=true, eyeY=null, aboveY=null; const perf={t:0,n:0,sum:0,good:0};
 // a frame that fails part way is reported once and the next frame still comes, so that one fault does not stop the
@@ -15104,22 +16040,25 @@ function frame0(now){
   pollPad(dt);
   const turn=(keys.KeyQ||keys.ArrowLeft?1:0)-(keys.KeyE||keys.ArrowRight?1:0);
   yaw+=turn*dt*1.8;
+  if (aerFly && mode!=='above') aerFly=false;   // any change of view ends a flight
+  if (voy && !flying()){ voy=null; camera.layers.set(0); }   // (Orbital mode) and cuts a long flight short
   // in the bird's-eye view the up and down arrows tilt the view; with Shift they raise and lower it, the whole view
   // at its tilt, faster the further out it is, the camera kept above the ground and the buildings as ever
-  if (mode==='above'){ const vk=(keys.ArrowUp?1:0)-(keys.ArrowDown?1:0);
+  if (mode==='above' && !aerFly){ const vk=(keys.ArrowUp?1:0)-(keys.ArrowDown?1:0);
     if (vk && (keys.ShiftLeft||keys.ShiftRight)){ if (aboveY!==null){ aboveY+=vk*dt*Math.max(6,dist*0.6);
       // no lower than keeps the camera 1.5 m clear of what is beneath it
       const cx=player.x+Math.sin(yaw)*Math.cos(pitch)*dist, cz=player.z+Math.cos(yaw)*Math.cos(pitch)*dist;
       if (vk<0) aboveY=Math.max(aboveY,gullTopAt(cx,cz)+1.5-1.2-Math.sin(pitch)*dist); } }
     else { if (keys.ArrowUp) pitch=clamp(pitch-dt*0.9,AER_PMIN,AER_PMAX); if (keys.ArrowDown) pitch=clamp(pitch+dt*0.9,AER_PMIN,AER_PMAX); if (vk) aerUp=0; }
     const zk=((keys.Minus||keys.NumpadSubtract)?1:0)-((keys.Equal||keys.NumpadAdd)?1:0);
-    if (zk) dist=clamp(dist*Math.exp(zk*dt*1.8),7,60000); }
-  let mx=(keys.KeyD?1:0)-(keys.KeyA?1:0)+joy.x+pad.x, mz=(keys.KeyW||(mode!=="above"&&keys.ArrowUp)?1:0)-(keys.KeyS||(mode!=="above"&&keys.ArrowDown)?1:0)-joy.y-pad.y;
+    if (zk) dist=clamp(dist*Math.exp(zk*dt*1.8),7,AER_MAX); }
+  let mx=(keys.KeyD?1:0)-(keys.KeyA?1:0)+joy.x+pad.x, mz=(keys.KeyW||((mode!=="above"||aerFly)&&keys.ArrowUp)?1:0)-(keys.KeyS||((mode!=="above"||aerFly)&&keys.ArrowDown)?1:0)-joy.y-pad.y;
   if (sit && sit.dir>0 && Math.hypot(mx,mz)>0.3) sitStand();   // a step stands the sitter up
   const ml=Math.hypot(mx,mz), moving=started&&ml>0.05&&!onBoard()&&!sailD&&mode!=='swim'&&!(sit&&sit.dir>0);
   player.ox=player.x; player.oz=player.z;
   crouchK+=((crouch&&(mode==='street'||mode==='coach'||mode==='ferry')?1:0)-crouchK)*(1-Math.exp(-dt*10));
-  if (moving){
+  if (aerFly && started) flyStep(dt,mx,mz);
+  if (moving && !aerFly){
     if (ml>1){ mx/=ml; mz/=ml; }
     const fly=mode==='above', sp=Math.min((fly?Math.max(6,dist*0.45):4.6)*((keys.ShiftLeft||keys.ShiftRight)?(fly?2.5:1.96):1)*(fly?1:1-0.55*crouchK),fly||player.grounded||mode!=='street'?1e9:AIR_SP);
     const fx=-Math.sin(yaw), fz=-Math.cos(yaw), rx=Math.cos(yaw), rz=-Math.sin(yaw);
@@ -15272,7 +16211,7 @@ function frame0(now){
   // T runs the clock forty times as fast; with Shift it runs back at that rate, and the bells do not strike the hours
   // passed backwards
   const back=keys.KeyT&&(keys.ShiftLeft||keys.ShiftRight);
-  hour=(((hour+wdt/HOUR_SEC*(back?-40:keys.KeyT?40:1))%24)+24)%24; if (back) SNDS.hour=Math.floor(hour); updateDaylight(); updateClocks();
+  hour=(((hour+wdt/HOUR_SEC*(back?-40:keys.KeyT?40:1))%24)+24)%24; if (back) SNDS.hour=Math.floor(hour); updateDaylight(); updateClocks(); if (ORBITAL) ORB.updateWalls();
   if (mode==='ferry'){
     // walking about the main deck relative to where one looks; the eye rides the ferry's gentle motion
     fe.yaw+=turn*dt*1.8;
@@ -16046,7 +16985,7 @@ function updateGulls(dt){
   GULLS.update(dt,gullCtx);
 }
 // the world repeats from north to south every WRAP_Z metres: the flock moves with it
-wrapHooks.push(d=>{ GULLS.shift(0,d); gullPerch.x=NaN; });
+wrapHooks.push(d=>{ GULLS.shift(0,d); gullPerch.x=NaN; }); xWrapHooks.push(d=>{ GULLS.shift(d,0); gullPerch.x=NaN; });
 // for automated checks: the flock, its context, and a switch that removes the gulls entirely
 window.__gulls={G:GULLS,ctx:gullCtx,get on(){ return gullsOn; },set on(v){ gullsOn=v; GULLS.mesh.visible=v; }};
 
@@ -16218,7 +17157,7 @@ function updateFleet(dt){
   if (fishVoice){ if (near) sndVoice(fishVoice,dt,0.35,near.x,1.2,near.z+near.dz,1.25); else sndVoice(fishVoice,dt,0,_sl.x,_sl.y,_sl.z); }
 }
 // across the join the boats need nothing more than to be listed again
-wrapHooks.push(()=>{ fleetKey=''; });
+wrapHooks.push(()=>{ fleetKey=''; }); xWrapHooks.push(()=>{ fleetKey=''; });
 // the deck and wheelhouse of a trawler, where gulls may stand once it has berthed (in the boat's own frame)
 const FISH_PERCH=[[0,2.86,-1.3],[0.6,2.86,-1.9],[-0.6,2.86,-0.7],[0,1.8,4.1],[0.85,1.2,-4.3],[-0.85,1.2,-4.3]];
 // for automated checks
@@ -16333,7 +17272,10 @@ requestAnimationFrame(()=>setTimeout(async ()=>{
     // on a desktop, a greeting naming the help key, once the world is on the screen (not on arriving by Go there)
     if (!MOBILE && !went) toast('','Welcome! Press H for help',6000); }));
 },30));
-window.__village={ get seed(){ return SEED_TEXT; }, aerGround:(x,y)=>aerGround(x,y), get aerView(){ return {yaw,pitch,dist,x:player.x,z:player.z,cy:camPos.y,gy:heightAt(camPos.x,camPos.z),lift:aerLift}; }, TELE, teleRaise, teleLower, teleMag, get teleRing(){ return teleRing; }, viewZoom, get origin(){ return ORIGIN; }, share:{state:sceneState,link:sceneLink,qrEncode,get shared(){ return SCENE; }}, get paused(){ return paused; }, set paused(v){ if (!!v!==paused){ paused=!!v; lastClock=null; } }, goods, glZone, branchesAt, get mantle(){ return mantle; }, get colRoof(){ return colRoof; }, roofAt, roofSlope, topAt, get sit(){ return sit; }, get indoors(){ return indoors; }, roomFns:{flight,localToWorld,obbLocal,roomCeil}, sitKey, sitFind, sitStand, sitSpotOk, get camp(){ return CAMP; }, campKey, campPitch, campStrike, campWhyNot, campFit, campBuild, campLight, beachStretch, BCH_SP, COACH_SEATS, FERRY_SEATS, coachEnter, genChunk, coastRoadZ, brZ, brY, heightAt, player, chunks, rooms, doorMesh, keys, setYaw:v=>{yaw=v;}, get yaw(){return yaw;}, fe, co, lightsNear, beams, ruinIn, cats, catHome, PEOPLE, get ridden(){ return ridden; },
+// (Orbital mode) for automated checks
+if (ORBITAL) window.__orbital={ORB,skyU,get STRIP(){ return STRIP; },setStrip(k){ STRIP=k; wallForget(); },stripStep,trueX,trueZ,wallE,wallBase,ringGround,stripPoint,get voy(){ return voy; },get ORIGIN(){ return ORIGIN; },
+  look(p){ fpPitch=p; },aim(i){ const p=skyU.uShP.value[i], L=p.length(); yaw=Math.PI+Math.atan2(p.x,p.z); fpPitch=Math.asin(p.y/L); return [L/1000,Math.asin(p.y/L)*57.3,skyU.uShI.value[i].x/1000,skyU.uShI.value[i].w]; }};
+window.__village={ get seed(){ return SEED_TEXT; }, __gen:{isVillage,kind0,baseH,coastZ,highGround,seaDist,islandInfo,peakInfo,railZ,railY,coastRoadZ,heightAt}, sceneState:()=>sceneState(), get fly(){ return {aerFly,flyY,flying:flying(),mode,dist,fpPitch,yaw,crouch}; }, flyStart, flyLand, flyGround, gullTopAt:(x,z)=>gullTopAt(x,z), set fpPitchV(v){ fpPitch=v; }, set flyYV(v){ flyY=v; }, aerGround:(x,y)=>aerGround(x,y), get aerView(){ return {yaw,pitch,dist,x:player.x,z:player.z,cy:camPos.y,gy:heightAt(camPos.x,camPos.z),lift:aerLift}; }, TELE, teleRaise, teleLower, teleMag, get teleRing(){ return teleRing; }, viewZoom, get origin(){ return ORIGIN; }, share:{state:sceneState,link:sceneLink,qrEncode,get shared(){ return SCENE; }}, get paused(){ return paused; }, set paused(v){ if (!!v!==paused){ paused=!!v; lastClock=null; } }, goods, glZone, branchesAt, get mantle(){ return mantle; }, get colRoof(){ return colRoof; }, roofAt, roofSlope, topAt, get sit(){ return sit; }, get indoors(){ return indoors; }, roomFns:{flight,localToWorld,obbLocal,roomCeil}, sitKey, sitFind, sitStand, sitSpotOk, get camp(){ return CAMP; }, campKey, campPitch, campStrike, campWhyNot, campFit, campBuild, campLight, beachStretch, BCH_SP, COACH_SEATS, FERRY_SEATS, coachEnter, genChunk, coastRoadZ, brZ, brY, heightAt, player, chunks, rooms, doorMesh, keys, setYaw:v=>{yaw=v;}, get yaw(){return yaw;}, fe, co, lightsNear, beams, ruinIn, cats, catHome, PEOPLE, get ridden(){ return ridden; },
   findHarbour(){ for (let d=0;d<12;d++) for (const sd of SIDES) for (const n of [Math.floor(player.x/HARB)+d,Math.floor(player.x/HARB)-d]){ const H=harbourInfo(sd,n); if (H) return {x:H.x,z:coastZ(sd,H.x)+sd*7,W:H.W,sd,qz:coastZ(sd,H.x+H.W/2-1)+sd*2.5}; } return null; },
   findBeach(){ for (let x=player.x; x<player.x+3000; x+=10) for (const sd of SIDES){ const z=coastZ(sd,x)+sd*5; if (heightAt(x,z)<0.6 && heightAt(x,z)>0.1 && !harbourAt(sd,x)) return {x,z,sd}; } return null; },
   ridge(x){ return {x,z:ridgeZ(x)}; },
@@ -16401,7 +17343,7 @@ if (TOUCH){
   const acts=el('div','tacts'); document.body.appendChild(acts);
   const menu=el('aside','tmenu'); menu.hidden=true; menu.setAttribute('aria-label','Menu'); document.body.appendChild(menu);
   // the menu: its sections, each a grid of buttons or a row of sliders
-  menu.innerHTML=`<header><h2>Coast</h2><button type="button" data-a="close" aria-label="Close">${IC.close}</button></header>`;
+  menu.innerHTML=`<header><h2>${ORBITAL?'Orbital':'Coast'}</h2><button type="button" data-a="close" aria-label="Close">${IC.close}</button></header>`;
   const sec=(title)=>{ menu.appendChild(el('h3',null,title)); const g=el('div','grid'); menu.appendChild(g); return g; };
   const item=(g,label,f,{toggle=null,stay=false}={})=>{ const b=el('button',null,label); b.type='button'; g.appendChild(b);
     if (toggle) b.dataset.t='1', b._t=toggle;
@@ -16412,7 +17354,7 @@ if (TOUCH){
     return {sync(){ const v=get(); inp.value=v; out.textContent=fmt(v); }}; };
 
   const places=sec('Places');
-  item(places,'Start',()=>press('Digit1')); item(places,'Aerial',()=>press('Digit2')); item(places,'Passenger train',()=>press('Digit3'));
+  item(places,'Start',()=>press('Digit1')); item(places,'Aerial',()=>press('Digit2')); item(places,'Fly',()=>{ if (flying()) flyLand(); else flyStart(); },{toggle:()=>flying()}); item(places,'Passenger train',()=>press('Digit3'));
   item(places,'Freight train',()=>press('Digit4')); item(places,'Ferry',()=>press('Digit5')); item(places,'Sailing dinghy',()=>press('Digit6'));
   item(places,'Whale',()=>press('Digit7')); item(places,'Dolphin',()=>press('Digit8')); item(places,'Shipwreck',()=>press('Digit9'));
   item(places,'Next view',()=>press('Digit0')); item(places,'Jump in the sea',()=>press('KeyJ')); item(places,'Torch',()=>press('KeyF'));
@@ -16452,8 +17394,8 @@ if (TOUCH){
   let runOn=false;
   const ROW=[
     ['run','Run',()=>['street','swim','coach','ferry','above'].includes(mode)?{toggle:1}:null],
-    ['up','Jump',()=>mode==='swim'||mode==='street'?{hold:'Space'}:null],
-    ['down','Crouch',()=>mode==='swim'?{hold:'KeyC'}:['street','coach','ferry'].includes(mode)?{tap:()=>press('KeyZ')}:null],
+    ['up','Jump',()=>mode==='swim'||mode==='street'||flying()?{hold:'Space'}:null],
+    ['down','Crouch',()=>mode==='swim'?{hold:'KeyC'}:flying()?{hold:'KeyZ'}:['street','coach','ferry'].includes(mode)?{tap:()=>press('KeyZ')}:null],
     ['sit','Sit',()=>['street','coach','ferry'].includes(mode)&&sitNear()?{tap:()=>press('KeyX')}:null],
     ['view','Next view',()=>['dinghy','ferry','train','chase','coach'].includes(mode)?{tap:()=>press('Digit0')}:null],
     ['cam','Camera',()=>({tap:()=>PHOTO.api.toggle()})]];
