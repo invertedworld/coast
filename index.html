@@ -15726,15 +15726,15 @@ addEventListener('resize',resize); resize();
 const camPos=new THREE.Vector3(), camTarget=new THREE.Vector3();
 let crouch=false, crouchK=0;   // Z: crouching at street level, in a coach and aboard the ferry, the eye at 0.95 m instead of 1.62 m and the pace slowed
 /* ---------- the telescope ----------
-   V raises a telescope to the eye at street level, aboard the ferry, in a coach, in the cab and at the dinghy's helm,
-   and lowers it again. It narrows the field of view by its magnification, from 8 to 60 times (20 at first), which
+   V raises a telescope to the eye at street level, aboard the ferry, in a coach, in the cab, at the dinghy's helm and
+   in flight, and lowers it again. It narrows the field of view by its magnification, from 8 to 60 times (20 at first), which
    + and − and the mouse wheel change, and the frame is seen through a round eyepiece. The fog draws back while it is
    raised, so that the far shore is clear. What lies at the point it looks at is built as though the player stood
    there (teleAim): the blocks round the point are given full detail, the people's places round it come to life, the
    passengers of a ferry or a train within the far terrain are aboard, and the shadow map is centred on the point. The
    camera raised with a long lens gets the same detail at the point it looks at. A change of view lowers the telescope. */
 const teleEl=document.getElementById('tele'), teleMagEl=document.getElementById('teleMag');
-const teleModes=()=>mode==='street'||mode==='coach'||mode==='train'||(mode==='ferry'&&!feChase)||(mode==='dinghy'&&!dgyChase);
+const teleModes=()=>mode==='street'||flying()||mode==='coach'||mode==='train'||(mode==='ferry'&&!feChase)||(mode==='dinghy'&&!dgyChase);
 // how many times the view is magnified, by the telescope or by the camera's lens, against the field of view at street level
 function viewZoom(){
   if (TELE.on) return TELE.k;
@@ -15779,7 +15779,7 @@ function teleFieldUpdate(Z){
   let same=!!teleView && teleView.size===V.size; if (same) for (const [k,v] of V) if (teleView.get(k)!==v){ same=false; break; }
   if (!same){ teleView=V; teleViewVer++; } }
 function teleAim(){
-  const Z=viewZoom(); if (Z<3 || !started || mode==='above'){ teleRing=null; teleView=null; return; }
+  const Z=viewZoom(); if (Z<3 || !started || (mode==='above'&&!aerFly)){ teleRing=null; teleView=null; return; }
   COVE_FAST++; try { teleFieldUpdate(Z); } finally { COVE_FAST--; }
   const P=camera.position, D=camera.getWorldDirection(_ta), ht=Math.tan(FOV*Math.PI/360)/Z, sea=y=>Math.max(0,y);
   let d=-1, y=0;

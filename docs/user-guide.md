@@ -46,6 +46,8 @@ The speed grows with the height above the ground: 8 m/s near the ground, about 6
 
 Landing with **Space** twice, or with **2**, brings the camera down to the eye of the player standing on the ground below, outside any building, over between one and four seconds according to the height. Over open water at least 1.5 m deep, the dinghy of the nearest harbour is brought there and the player takes its helm; over shallower water the player is set down at once. A steep descent onto land, with **Z** or by flying forward while looking down, also lands. Over the sea it does not, and the eye skims the water. Any other view key ends the flight.
 
+The telescope may be raised in flight with **V**, as on foot. The flight continues while it is raised, and a double click through it brings the camera down to the place at the middle of its view.
+
 > **Example:** To cross to an offshore island, press **Space** twice, hold **Space** until the island comes into view, turn towards it, hold **Shift** and **W** until it lies below, and press **Space** twice to land on it.
 
 On a touch screen, **Fly** in the menu takes off and lands, the joystick flies in the direction in which the view looks, and the jump and crouch buttons rise and descend. On a game controller, **A** pressed twice takes off and lands.
@@ -136,7 +138,7 @@ A camp, if one is pitched, is recorded with the link, and so is the player lying
 
 ## The telescope
 
-**V** raises a telescope to the eye, and **V** again lowers it. It may be raised on foot, aboard the ferry, in a coach, in the cab of a train and at the helm of the dinghy. The view is then seen through a round eyepiece, with the magnification shown beneath it. **+** and **−**, and the mouse wheel, set the magnification, from 8 to 60 times. The telescope is always raised looking straight ahead, level, at its least magnification of 8 times. The mouse turns the view more slowly at a higher magnification, so that the scene moves across the eyepiece at the usual rate. Any key that changes the view, and **C** and **Esc**, lower the telescope first; **C** then raises the camera in its place, and **V** with the camera raised changes back to the telescope.
+**V** raises a telescope to the eye, and **V** again lowers it. It may be raised on foot, aboard the ferry, in a coach, in the cab of a train, at the helm of the dinghy and in flight. The view is then seen through a round eyepiece, with the magnification shown beneath it. **+** and **−**, and the mouse wheel, set the magnification, from 8 to 60 times. The telescope is always raised looking straight ahead, level, at its least magnification of 8 times. The mouse turns the view more slowly at a higher magnification, so that the scene moves across the eyepiece at the usual rate. Any key that changes the view, and **C** and **Esc**, lower the telescope first; **C** then raises the camera in its place, and **V** with the camera raised changes back to the telescope.
 
 On foot, a double click while the telescope is raised takes the player to the point at the middle of its view, as a double click does in the bird's-eye view: the telescope is lowered and the view flies there, over one and a half to four seconds according to the distance, ending at street level facing the same way. A building at that point is left for the nearest open ground beside it.
 
