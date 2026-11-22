@@ -4652,7 +4652,8 @@ function buildBridge(gb,ch,R,X){
     { const [ax,az]=localToWorld({x:xc,z:zc,rot},0,ac); ch.obbs.push({x:ax,z:az,hw:(W+0.6)/2,hd:al/2,rot,top:deck-0.9}); }
     gb.add(T.box, mm(H,mat(sg*(W/2+0.2),deck,0,0.42,1.0,2*F)), stone, null, SS);
     gb.add(T.box, mm(H,mat(sg*(W/2+0.2),deck+1.0,0,0.55,0.12,2*F+0.1)), C_.trim, null, SS);
-    const [px,pz]=localToWorld({x:xc,z:zc,rot},sg*(W/2+0.2),0); ch.obbs.push({x:px,z:pz,hw:0.21,hd:F,rot,top:Infinity,bot:deck});
+    // (the parapet may be stood on: its top is the coping's, 1.12 m above the deck, and it is as wide as the coping)
+    const [px,pz]=localToWorld({x:xc,z:zc,rot},sg*(W/2+0.2),0); ch.obbs.push({x:px,z:pz,hw:0.275,hd:F+0.05,rot,top:deck+1.12,bot:deck});
   }
   // voussoirs along both faces of the arch
   const faces=[-W/2-0.05,W/2+0.05];
@@ -5685,12 +5686,13 @@ function genChunk(cx,cz,lod=0){
         const piece=(a,o,w,h,d,yb,top,col,wall)=>{ const [px,pz]=P(a,o); if (!inChunk(px,pz)) return; gb.add(T.box, mat(px,yb,pz,w,h,d,rot), col, null, col===stone?SS:undefined);
           ch.obbs.push(wall?{x:px,z:pz,hw:w/2,hd:d/2,rot,top:Infinity,bot:wall}:{x:px,z:pz,hw:w/2,hd:d/2,rot,top,bot:top-Math.max(h,0.4)}); };
         piece(0,0,8.4,0.4,1.8,yd-0.4,yd,stone);
-        piece(-f*0.85,0,8.4,1.0,0.12,yd,yd+1.0,stone,yd-0.4);
-        piece(f*0.85,0,5.0,1.0,0.12,yd,yd+1.0,stone,yd-0.4);
+        // (the parapets may be stood on, as the street bridges' are)
+        piece(-f*0.85,0,8.4,1.0,0.12,yd,yd+1.0,stone);
+        piece(f*0.85,0,5.0,1.0,0.12,yd,yd+1.0,stone);
         const n=Math.ceil((yd-g0)/0.19), h=(yd-g0)/n, run=(n-1)*0.3;
         for (const o of [-1,1]){
           piece(0,o*3.3,1.6,yd-g0+0.3,1.8,g0-0.3,yd,stone);
-          piece(0,o*4.2,0.12,1.0,1.8,yd,yd+1.0,stone,yd-0.4);
+          piece(0,o*4.2,0.12,1.0,1.8,yd,yd+1.0,stone);
           for (let k=1;k<n;k++){ const top=yd-k*h; piece(f*(0.9+(k-0.5)*0.3),o*3.3,1.6,top-g0+0.3,0.3,g0-0.3,top,stone); }
           for (const e of [2.5,4.1]){ const [ax,az]=P(f*0.9,o*e), [bx,bz]=P(f*(0.9+run),o*e);
             if (inChunk((ax+bx)/2,(az+bz)/2)){ segBox(gb,[ax,yd+1.0,az],[bx,g0+h+1.0,bz],0.06,0.06,iron);
@@ -11907,7 +11909,9 @@ function updateGoods(dt){
     c.m.position.set((xf+xr)/2,(fy+ry)/2+0.35,(fz+rz)/2); c.m.rotation.set(back?-pt:pt,Math.atan2(dx,dz)+(back?Math.PI:0),0);
     xf=routeBack(R,xr,0.8,g.dir); }
   g.tail=routeBack(R,xf,-0.8,g.dir);
-  const lead=g.cars[g.lead?g.cars.length-1:0];
+  // the white lamps (and after dusk the headlight) are on the shunter that leads; standing at a quay before it reverses,
+  // on the one that will lead away, as the cab is (rideTrain), so that the cab is always the end with the white lamps
+  const lead=g.cars[goodsLeadEnd()?g.cars.length-1:0];
   for (const c of g.cars) if (c.lamps) for (const l of c.lamps) l.material=c===lead?lampWhite:lampRed;
   // the leading shunter's headlight, after dusk; its nose is its +z end, as the passenger locomotive's is
   const m=lead.m; m.updateMatrixWorld();
@@ -12864,6 +12868,8 @@ function buildRoomGeo(D){
         gb.add(T.box, mm(H2,mat(0,0.42,0.02,2*bw-0.06,0.14,1.94)), cover, ao);
         gb.add(T.box, mm(H2,mat(0,0,-0.98,2*bw+0.04,1.0,0.06)), dark, ao, SW);
         for (const px of (bw>0.6?[-0.35,0.35]:[0])) gb.add(T.box, mm(H2,mat(px,0.56,-0.75,0.5,0.1,0.3)), hex('#f4efe6'), ao);
+        // a place to lie on it (X): on the cover, the head on the pillow and the eye looking along the bed to its foot
+        { const S=seatOf(mm(H2,mat(0,0.56,0,1,1,1)),0,0,0,0,0.56,'bed',0.75); S.hw=bw; S.hl=1.0; D.seats.push(S); }
         take(x,z,w2,d2,0.05);
         const tx=x+(rotB?0:bw+0.3), tz=rotB?z+bw+0.3:zb+0.25; if (fits(tx,tz,0.22,0.22)){ B(tx,F,tz,0.4,0.55,0.4,wood,SW);
           gb.add(T.cyl8, mm(H,mat(tx,F+0.55,tz,0.1,0.2,0.1)), hex('#e9e2cf'), null); take(tx,tz,0.2,0.2); }
@@ -13519,7 +13525,7 @@ addEventListener('keydown',e=>{ keys[e.code]=true;
   if (code==='Dolphin' && !e.repeat) followKey('dolphin');
   if (code==='ToStart' && !e.repeat) homeKey();
   if (code==='KeyB' && e.shiftKey){ if (!e.repeat){ setAO(!aoOn); toast('Ambient occlusion',aoOn?'on':'off'); } }
-  else if (code==='KeyB') setTilt(!tiltShift);
+  else if (code==='KeyB'){ setTilt(!tiltShift); toast('Tilt-shift',tiltShift?'on':'off'); }
   if (code==='KeyP' && !e.repeat){ paused=!paused; lastClock=null; }
   // the help panel frees the mouse, so that its tabs can be clicked
   if (code==='KeyH' && !e.repeat){ helpEl.hidden=!helpEl.hidden; aboutEl.hidden=true; lastCell=null; if (!helpEl.hidden && document.pointerLockElement) document.exitPointerLock(); }
@@ -13970,7 +13976,7 @@ function jumpToGoods(){
     for (let k=0;k<60 && !A;k++) for (const sg of (k?[1,-1]:[1])){ const zi=Math.floor(player.x/GL_ZONE)+sg*k; for (const sd of SIDES){ const Z=glZone(sd,zi); if (Z.length && !A) A=Z[sg>0?0:Z.length-1]; } }
     if (!A) return;
     goodsStart(A,15+Math.random()*15); g.check=2; updateGoods(0); }
-  const m=g.cars[g.lead?g.cars.length-1:0].m, ry=m.rotation.y; let nx=Math.cos(ry), nz=-Math.sin(ry); if (Math.sign(nz)!==g.R.sd){ nx=-nx; nz=-nz; }
+  const m=g.cars[goodsLeadEnd()?g.cars.length-1:0].m, ry=m.rotation.y; let nx=Math.cos(ry), nz=-Math.sin(ry); if (Math.sign(nz)!==g.R.sd){ nx=-nx; nz=-nz; }
   const px=m.position.x+Math.sin(ry)*6+nx*7, pz=m.position.z+Math.cos(ry)*6+nz*7;   // ahead of the shunter and to its landward side
   player.x=px; player.z=pz; player.y=Math.max(heightAt(px,pz),m.position.y-0.35); player.vy=0; player.holdT=3; eyeY=null;
   yaw=Math.atan2(px-m.position.x,pz-m.position.z); fpPitch=-0.2;
@@ -14073,7 +14079,8 @@ function coachStep(dt,turnIn){
 }
 /* ---------- sitting ----------
    X sits on the nearest free seat within SIT_REACH that the player is turned towards: a chair, a bench, a pew, the
-   ledge round a great elm, a lounger, or a seat in a coach or in the ferry's saloon. The eye eases over SIT_T to the
+   ledge round a great elm, a lounger, a bed in a house (lain on, the head on the pillow), or a seat in a coach or in
+   the ferry's saloon. The eye eases over SIT_T to the
    sitter's height, 0.7 m above the seat (1.15 m above the floor on a chair), or 0.8 m above the sand and leaning back
    on a lounger, and turns to the way the seat faces; the mouse then looks about within SIT_YAW either way. X again, or
    a step with W A S D, stands the player up beside the seat, at the first place there that the walking rules allow,
@@ -14083,7 +14090,7 @@ function coachStep(dt,turnIn){
    fe.pitch on the ferry, with L the heading in the frame (yaw-π at street level). */
 const SIT_T=0.4, SIT_YAW=2.09, SIT_REACH=1.5, SIT_EXTRA={lounger:0.4,tent:0.7};
 // where the eye lies above the floor on the seats that are lain on rather than sat on
-const SIT_LIE={lounger:0.8,tent:0.3};
+const SIT_LIE={lounger:0.8,tent:0.3,bed:0.8};
 let sit=null;
 const _sm=new THREE.Matrix4(), _sq=new THREE.Quaternion(), _sq2=new THREE.Quaternion(), _stP=new THREE.Vector3(), _sp2=new THREE.Vector3(), _se=new THREE.Euler(), _sY=new THREE.Vector3(0,1,0);
 function sitM(fr){
@@ -14118,9 +14125,11 @@ function sitFind(){
   else if (mode==='ferry' && ridden){ fr='ferry'; px=fe.lx; pz=fe.lz; py=fe.ey; L=fe.yaw; list=FERRY_SEATS; }
   else return null;
   const lx=Math.sin(L), lz=Math.cos(L); let best=null, bs=1e9;
-  for (const s of list){ const dx=s.x-px, dz=s.z-pz, d=Math.hypot(dx,dz);
+  for (const s of list){ const dx=s.x-px, dz=s.z-pz, dc=Math.hypot(dx,dz);
+    // (a bed, hw across and hl along, is as near as the nearest point of its edge)
+    const d=s.hw?Math.hypot(Math.max(0,Math.abs(dx*s.fz-dz*s.fx)-s.hw),Math.max(0,Math.abs(dx*s.fx+dz*s.fz)-s.hl)):dc;
     if (d>SIT_REACH+(SIT_EXTRA[s.kind]||0) || Math.abs(s.y-s.h-py)>0.7) continue;   // a lounger is reached from either end, the tent from its door
-    const c=d>1e-3?(dx*lx+dz*lz)/d:1; if (d>0.45 && c<0.45) continue;
+    const c=dc>1e-3?(dx*lx+dz*lz)/dc:1; if (d>0.45 && c<0.45) continue;
     if (fr==='world' && s.ppl) continue;
     if (fr==='world' && catOnSeat(s)) continue;
     const sc=d-0.6*c; if (sc<bs){ bs=sc; best=s; } }
@@ -14137,7 +14146,7 @@ function sitKey(f0){
   const inv=_sm.clone().invert();
   sit={s,fr,home:f.home,mode,seed:SEED,k:0,dir:1,L0:Math.atan2(s.fx,s.fz),
     fp:camera.position.clone().applyMatrix4(inv), fq:_sq.clone().invert().multiply(camera.quaternion), sp:new THREE.Vector3(), sq:new THREE.Quaternion()};
-  sitLookSet(fr,sit.L0,s.kind==='lounger'?0.14:s.kind==='tent'?0.06:s.kind==='ground'?-0.3:-0.04); crouch=false;
+  sitLookSet(fr,sit.L0,s.kind==='lounger'?0.14:s.kind==='bed'?0.3:s.kind==='tent'?0.06:s.kind==='ground'?-0.3:-0.04); crouch=false;
   _stP.set(s.x,s.y,s.z).applyMatrix4(_sm); sndPlay('sit_down','player',[_stP.x,_stP.y,_stP.z]);
 }
 function sitStand(){
@@ -14716,9 +14725,13 @@ function tracksideSpot(RT){
   return null; }
 // the train the cab and chase views ride with: the passenger train, or the goods train when that is the nearer
 let rideGoods=false;
+// the end of the goods train that leads (1 the last car): standing at a quay before it reverses, the shunter that will
+// lead away, at the end clear of the buffers
+function goodsRev(){ const g=goods; return g.wait>0 && !g.legs.length && g.tail!==undefined; }
+function goodsLeadEnd(){ return goodsRev()?1-goods.lead:goods.lead; }
 function rideTrain(){ if (rideGoods){ const g=goods, R=g.R;
     // standing at a quay before it reverses, the cab is the shunter that will lead away, at the end clear of the buffers
-    const rev=g.wait>0 && !g.legs.length && g.tail!==undefined, ld=rev?1-g.lead:g.lead;
+    const rev=goodsRev(), ld=goodsLeadEnd();
     return {x:rev?g.tail:g.x,dir:rev?-g.dir:g.dir,Z:x=>routeZ(R,x),Y:x=>routeY(R,x),st:()=>'open',lead:g.cars[ld?g.cars.length-1:0].m,cars:g.cars}; }
   return {x:train.x,dir:train.dir,Z:railZ,Y:railY,st:railState,lead:leadCar().m,cars:train.cars}; }
 // the height a camera at p must keep above the cars beneath it: their roofs, about 4.2 m above each car's centre line,

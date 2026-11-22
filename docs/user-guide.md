@@ -34,7 +34,7 @@ A double click on land in the bird's-eye view brings the camera down to street l
 
 Doors open when they are walked into. A door swings away from the side from which it is pushed, as far as it is pushed, and closes about a second after nobody stands in its way. The interiors of houses, churches and towers may be entered. Indoors, the sound of the world outside is muffled, and a jump stops short of the ceiling.
 
-**X** sits down on the nearest free seat within 1.5 m towards which the player is turned, whether a bench, a chair, a sunbed, a seat in a railway coach or a seat in a ferry's saloon. **X** again, or a step with **W A S D**, stands the player up.
+**X** sits down on the nearest free seat within 1.5 m towards which the player is turned, whether a bench, a chair, a sunbed, a seat in a railway coach or a seat in a ferry's saloon. A bed in a house is lain on, the head on the pillow and the eye looking along the bed towards its foot. **X** again, or a step with **W A S D**, stands the player up.
 
 ## Flight
 
