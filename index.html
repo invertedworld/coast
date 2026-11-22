@@ -6177,18 +6177,13 @@ const nightU={value:0};
 const matB=new THREE.MeshLambertMaterial({vertexColors:true}); patchBuildings(matB,true);
 // the same for things that move (the ferries, boats under sail, at anchor and fishing), whose patterns stay on them
 const matBL=new THREE.MeshLambertMaterial({vertexColors:true}); patchBuildings(matBL,true,true);
-// the trains: the same material, but fading into the sky with distance, most of the way between 0.5 and 1.4 km and
-// the rest by 2.15 km, so that a distant train is as faint as the hills behind it and never stands in the sky
+// the trains: the same material, under the haze of the distant land (landHaze) rather than the fog alone, so that a
+// distant train is as hazy as the hills it runs over, keeps their light and shade, and fades into the sky where they do
 const matTrain=new THREE.MeshLambertMaterial({vertexColors:true}); patchBuildings(matTrain,true,true);
 { const ob=matTrain.onBeforeCompile; matTrain.onBeforeCompile=(sh,r)=>{ ob(sh,r);
-    Object.assign(sh.uniforms,{uTop:skyU.uTop,uMid:skyU.uMid,uHor:skyU.uHor,uSun:skyU.uSun,uSunCol:skyU.uSunCol,uDay:skyU.uDay});
-    sh.fragmentShader=sh.fragmentShader.replace('#include <common>','#include <common>\nuniform vec3 uTop, uMid, uHor, uSun, uSunCol; uniform float uDay;')
-      .replace('#include <fog_fragment>',`#include <fog_fragment>
-      { vec3 d=normalize(vWP-cameraPosition); float y=d.y, fk=1.0-0.85*smoothstep(500.0,1400.0,length(vWP.xz-cameraPosition.xz))-0.15*smoothstep(1400.0,2150.0,length(vWP.xz-cameraPosition.xz));
-        vec3 sk = y>0.12 ? mix(uMid,uTop,clamp((y-0.12)/0.6,0.0,1.0)) : mix(uHor,uMid,clamp((y+0.04)/0.16,0.0,1.0));
-        float sd=max(dot(d,uSun),0.0); sk+=uSunCol*(pow(sd,12.0)*0.35+pow(sd,3.0)*0.12*(1.0-uDay));
-        gl_FragColor.rgb=mix(linearToOutputTexel(vec4(sk,1.0)).rgb,gl_FragColor.rgb,fk); }`); };
-  matTrain.customProgramCacheKey=()=>'train-skyfade'; }
+    Object.assign(sh.uniforms,farU,{uTop:skyU.uTop,uMid:skyU.uMid,uHor:skyU.uHor,uSun:skyU.uSun,uSunCol:skyU.uSunCol,uDay:skyU.uDay});
+    sh.fragmentShader=sh.fragmentShader.replace('#include <common>','#include <common>\n'+LAND_HAZE_DECL).replace('#include <fog_fragment>',landHaze('vWP')); };
+  matTrain.customProgramCacheKey=()=>'train-landhaze'; }
 // rooms are lit by their own light, not the sun: daylight from the doors and windows by day, lamplight at night.
 // MeshBasicMaterial is unlit, so the faces are shaded here by the way they face
 const roomU={value:new THREE.Color(1,1,1)};
@@ -7129,6 +7124,18 @@ function updateMask(){
   for (const ch of chunks.values()){ if (ch.fade<1 && !ch.prev) continue; const i=ch.cx-ox, j=ch.cz-oz; if (i>=0&&j>=0&&i<MASK&&j<MASK) maskData[j*MASK+i]=255; }
   maskTex.needsUpdate=true; maskU.uMaskO.value.set(ox,oz); maskU.uMaskRel.value.set(ox-ORIGIN.x/C,oz-ORIGIN.z/C); maskDirty=false;
 }
+// the haze over the distant land, as shader code in place of three.js's own fog, for a material whose fragment shader
+// has the world position (relative to the floating origin) in the varying named by v and the uniforms of LAND_HAZE_U;
+// the trains take it too, so that a distant train is as hazy as the land it runs over (see farMat below)
+function landHaze(v){ return `float _lum=dot(gl_FragColor.rgb,vec3(0.3,0.59,0.11));
+    #include <fog_fragment>
+    { vec3 d=normalize(${v}-cameraPosition); float y=d.y, fk=${v}.y<0.0?1.0:1.0-uFarEdge*smoothstep(1400.0,2150.0,length(${v}.xz-uFarC));   // the sea floor, under the sea, is left alone
+      vec3 sk = y>0.12 ? mix(uMid,uTop,clamp((y-0.12)/0.6,0.0,1.0)) : mix(uHor,uMid,clamp((y+0.04)/0.16,0.0,1.0));
+      float sd=max(dot(d,uSun),0.0); sk+=uSunCol*(pow(sd,12.0)*0.35+pow(sd,3.0)*0.12*(1.0-uDay));
+      gl_FragColor.rgb=mix(linearToOutputTexel(vec4(sk,1.0)).rgb,gl_FragColor.rgb,fk);
+      float dd=length(${v}.xz-cameraPosition.xz), w=smoothstep(700.0,1400.0,dd)*(1.0-smoothstep(1950.0,2170.0,dd))*smoothstep(8.0,80.0,${v}.y)*uDay;
+      gl_FragColor.rgb*=mix(1.0,clamp(0.9+0.75*(_lum-0.55),0.68,1.12),w)*mix(vec3(1.0),vec3(0.93,0.96,1.0),w); }`; }
+const LAND_HAZE_DECL='uniform vec3 uTop, uMid, uHor, uSun, uSunCol; uniform float uDay, uFarEdge; uniform vec2 uFarC;';
 const farMat=new THREE.MeshLambertMaterial({vertexColors:true});
 // uFarC is the middle of the grid (relative to the floating origin, as the shader's positions are) and uFarEdge whether
 // the land fades into the sky towards the grid's edge: it does not when the coarse whole island lies beyond and beneath it
@@ -7157,14 +7164,7 @@ farMat.onBeforeCompile=(sh)=>{ Object.assign(sh.uniforms,maskU,farU,{uTop:skyU.u
     varying vec3 vFarW; uniform vec3 uTop, uMid, uHor, uSun, uSunCol; uniform float uDay, uFarEdge; uniform vec2 uFarC;
     uniform sampler2D uMask; uniform vec2 uMaskRel;`).replace('#include <clipping_planes_fragment>',`#include <clipping_planes_fragment>
     { vec2 c=floor(vFarW.xz/${C.toFixed(1)})-uMaskRel;
-      if (c.x>=0.0 && c.y>=0.0 && c.x<${MASK.toFixed(1)} && c.y<${MASK.toFixed(1)} && texture2D(uMask,(c+0.5)/${MASK.toFixed(1)}).r>0.5) discard; }`).replace('#include <fog_fragment>',`float _lum=dot(gl_FragColor.rgb,vec3(0.3,0.59,0.11));
-    #include <fog_fragment>
-    { vec3 d=normalize(vFarW-cameraPosition); float y=d.y, fk=vFarW.y<0.0?1.0:1.0-uFarEdge*smoothstep(1400.0,2150.0,length(vFarW.xz-uFarC));   // the sea floor, under the sea, is left alone
-      vec3 sk = y>0.12 ? mix(uMid,uTop,clamp((y-0.12)/0.6,0.0,1.0)) : mix(uHor,uMid,clamp((y+0.04)/0.16,0.0,1.0));
-      float sd=max(dot(d,uSun),0.0); sk+=uSunCol*(pow(sd,12.0)*0.35+pow(sd,3.0)*0.12*(1.0-uDay));
-      gl_FragColor.rgb=mix(linearToOutputTexel(vec4(sk,1.0)).rgb,gl_FragColor.rgb,fk);
-      float dd=length(vFarW.xz-cameraPosition.xz), w=smoothstep(700.0,1400.0,dd)*(1.0-smoothstep(1950.0,2170.0,dd))*smoothstep(8.0,80.0,vFarW.y)*uDay;
-      gl_FragColor.rgb*=mix(1.0,clamp(0.9+0.75*(_lum-0.55),0.68,1.12),w)*mix(vec3(1.0),vec3(0.93,0.96,1.0),w); }`); };
+      if (c.x>=0.0 && c.y>=0.0 && c.x<${MASK.toFixed(1)} && c.y<${MASK.toFixed(1)} && texture2D(uMask,(c+0.5)/${MASK.toFixed(1)}).r>0.5) discard; }`).replace('#include <fog_fragment>',landHaze('vFarW')); };
 farMat.customProgramCacheKey=()=>'farmask-skyfade-haze-cut';
 const farMesh=new THREE.Mesh(farGeo,farMat); farMesh.frustumCulled=false; world.add(farMesh);
 /* ---------- the land beyond the distant terrain, as depth alone: a coarse grid out to 3.6 km, every third point of
@@ -16367,7 +16367,7 @@ window.__village={ get seed(){ return SEED_TEXT; }, aerGround:(x,y)=>aerGround(x
   coveLanding, coveFns:{baseH0,cvOnPath,cvLand,cvU,cvS,cvL2W,cvAxis,cvBuild,coveAtXZ,coveCaveCell,cvCaveLocal,coveNoWalk},
   coveInfo, walkGround, coveMoveOk, standableAt, get spawnInfo(){ return spawnInfo; }, shoreWalk, spawnPlayer, get holdT(){ return player.holdT; },
   findIsland(){ const m0=Math.floor(player.x/ISL); for (let k=0;k<20;k++) for (const m of [m0+k,m0-k]) for (const sd of SIDES){ const I=islandInfo(sd,m); if (I) return I; } return null; },
-  player,chunks,get mode(){return mode},toggleView,teleGoThere,setYaw:v=>yaw=v,setPitch:v=>pitch=v,setFpPitch:v=>fpPitch=v,setDist:v=>dist=v,keys,heightAt,
+  player,chunks,get mode(){return mode},toggleView,teleGoThere,goThere:o=>goThere(o,null),setYaw:v=>yaw=v,setPitch:v=>pitch=v,setFpPitch:v=>fpPitch=v,setDist:v=>dist=v,keys,heightAt,
   // swimming and diving: the swimmer, the water, the seabed's life; swimAt puts the player in the water at (x,z), at the
   // surface or at depth y, under (true) the swimmer's state
   swimmer,UW,get uwWarmMs(){ return uwWarmMs; },get seabedLife(){ return seabedLife; },jumpKey,diveProps,swimLeaveHere,SEA,

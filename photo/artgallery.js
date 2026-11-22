@@ -39,7 +39,7 @@ export function pickPictures(photos) {
 
 // the glow round a frame ow by oh: a plane GLOW wider on every side, lying just off the wall behind the frame, whose
 // light is added to the wall's and falls away from the frame's edge to nothing at GLOW
-const GLOW = 0.22, GLOW_K = 0.09;
+const GLOW = 0.22, GLOW_K = 0.117;
 export function pictureGlow(ow, oh) {
   const W = ow + 2 * GLOW, H = oh + 2 * GLOW;
   const mat = new THREE.ShaderMaterial({
