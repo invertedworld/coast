@@ -28,6 +28,8 @@ A double click on land in the bird's-eye view brings the camera down to street l
 
 **Shift+B** sets ambient occlusion on or off. Ambient occlusion darkens creases, the foot of walls, doorways, the undersides of eaves and the ground beneath benches and people slightly. It is on when the game starts; the new setting is shown briefly a third of the way down the screen.
 
+**U** shows or hides the clouds, a layer of cumulus 1,600 m above the sea that drifts slowly with the wind and casts its shadows over the land, the buildings and the sea. The clouds are hidden when the game starts and fade in or out over two seconds. Seen from above in flight, their sunlit tops cover the land below; in Orbital mode they are seen all the way round the ring.
+
 ## Walking
 
 **W A S D** walk, the up and down arrow keys also walk forward and back, and **Shift** held with them runs. **Q** and **E**, or the left and right arrow keys, turn the view. **Space** jumps; a jump towards a wall, a ledge or the eaves of a roof whose top is within reach climbs onto it, so that roofs may be walked upon. **Z** crouches, lowering the eye to 0.95 m and reducing the speed to 45 per cent, and **Z** again stands up.

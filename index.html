@@ -217,6 +217,7 @@ function goThereShow(src,fov,aspect){
       <div class="row"><span><kbd>Shift</kbd>+<kbd>+</kbd><kbd>−</kbd></span><span>Field of view</span></div>
       <div class="row"><span><kbd>B</kbd></span><span>Tilt-shift effect</span></div>
       <div class="row"><span><kbd>Shift</kbd>+<kbd>B</kbd></span><span>Ambient occlusion</span></div>
+      <div class="row"><span><kbd>U</kbd></span><span>Clouds</span></div>
     </div>
     <div class="group"><h3>Pictures</h3>
       <div class="row"><span><kbd>Enter</kbd></span><span>Take snapshot</span></div>
@@ -405,6 +406,82 @@ THREE.ShaderChunk.lights_fragment_begin=THREE.ShaderChunk.lights_fragment_begin
 \t\t#endif`)
   .replace('irradiance += getHemisphereLightIrradiance( hemisphereLights[ i ], geometryNormal );',`irradiance += getHemisphereLightIrradiance( hemisphereLights[ i ], geometryNormal )*(1.0-${SKY_BLOCK.toFixed(2)}*(1.0-sunShade));`);
 if (!THREE.ShaderChunk.lights_fragment_begin.includes('sunShade=1.0-')) console.warn('the sky light in shadow was not patched');
+/* ---------- clouds ----------
+   One layer of fair-weather cumulus, its base CLOUD_H above the sea, drifting slowly with the wind, shown or hidden
+   with U (it is hidden at the start). Its pattern is four octaves of value noise whose lattices repeat every CLOUD_P
+   metres, baked once into a tiling texture (cloudTex, CLOUD_P/CLOUD_N metres a texel), so that a point of it costs
+   one texture read. It is read at the position in the scene plus an offset (CLOUD.x, CLOUD.y) that carries the
+   drift and the floating origin and is kept within one period. Every lit material darkens the sun's light by the
+   cloud that stands between it and the sun, so that the shadows of the clouds run over the land, the houses and the
+   trees; the sea does the same in its own shader, and the sky draws the layer itself, from below, while a dome drawn
+   over the scene (cloudTop) shows its sunlit top from above. CLOUD is a plain object, as FOG_MID is, so that every
+   material's copy of its uniform refers to it: it holds the offset, the cover (the thickness of the noise at which a
+   cloud begins) and the strength (0 hidden, 1 shown, eased between).
+   The cover itself varies from place to place with the same texture read 16 times larger (CLOUD_BIG), in banks of
+   cloud and clear spells some 40 km across, so that where a pixel spans many clouds, as on the far side of the ring in
+   Orbital mode, they give way to the share of the sky they cover there (uCloudM, by cover) and still show as weather.
+   In Orbital mode the pattern's period along the ring (CLOUD_PX) divides the ring's circumference, so that it closes
+   round it without a seam */
+const CLOUD_H=1600, CLOUD_P=81920, CLOUD_N=1024, CLOUD_BIG=16;
+const CLOUD_PX=ORBITAL?307*20480/(5*CLOUD_BIG):CLOUD_P;   // (RING_C, defined below)
+const CLOUD={x:0,y:0,z:0.5,w:0}, cloudVU={value:CLOUD};
+const CLOUD_HIST=new Float32Array(256);
+const cloudTex=(()=>{ const N=CLOUD_N, acc=new Float32Array(N*N), R=rng(SEED*7919+101);
+  for (const [n,a] of [[32,0.5],[64,0.25],[128,0.15],[256,0.1]]){ const H=new Float32Array(n*n); for (let i=0;i<n*n;i++) H[i]=R(); const s=n/N;
+    for (let j=0;j<N;j++){ const fy=j*s, iy=Math.floor(fy), ty=fy-iy, v=ty*ty*(3-2*ty), y0=iy*n, y1=((iy+1)%n)*n;
+      for (let i=0;i<N;i++){ const fx=i*s, ix=Math.floor(fx), tx=fx-ix, u=tx*tx*(3-2*tx), x1=(ix+1)%n;
+        const h00=H[y0+ix], h10=H[y0+x1], h01=H[y1+ix], h11=H[y1+x1];
+        acc[j*N+i]+=a*(h00+(h10-h00)*u+(h01-h00)*v+(h00-h10-h01+h11)*u*v); } } }
+  const d=new Uint8Array(N*N); for (let i=0;i<N*N;i++){ const b=Math.round(clamp(acc[i],0,1)*255); d[i]=b; CLOUD_HIST[b]+=1/(N*N); }
+  const T=new THREE.DataTexture(d,N,N,THREE.RedFormat,THREE.UnsignedByteType);
+  T.wrapS=T.wrapT=THREE.RepeatWrapping; T.magFilter=THREE.LinearFilter; T.minFilter=THREE.LinearMipmapLinearFilter; T.generateMipmaps=true; T.needsUpdate=true;
+  return T; })();
+const cloudTU={value:cloudTex};
+// the share of the sky covered at a cover c, where a pixel spans many clouds
+function cloudMean(c){ let m=0; for (let b=0;b<256;b++){ const v=b/255, t=clamp((v-c)/0.36,0,1); m+=CLOUD_HIST[b]*t*t*(3-2*t); } return m; }
+// the share at covers 0.1 to 0.9, in steps of 0.025
+const cloudMU={value:[...Array(33)].map((_,i)=>cloudMean(0.1+i*0.025))};
+const CLOUD_GLSL=`
+uniform vec4 uCloud; uniform float uCloudM[33]; uniform sampler2D uCloudTex;
+float cloudMeanAt(float c){ float x=clamp((c-0.1)/0.025,0.0,31.999); int i=int(x); return mix(uCloudM[i],uCloudM[i+1],fract(x)); }
+// the cloud's thickness, 0 to 1, over a point q of the scene (metres, the offset uCloud.xy added here), its texture read
+// at the level of detail lod; where a pixel spans many clouds the thickness eases to the share of the sky they cover
+float cloudAt(vec2 q, float lod){ float b=smoothstep(0.0,3.0,lod);
+  vec2 u=(q+uCloud.xy)*vec2(${(1/CLOUD_PX).toExponential(8)},${(1/CLOUD_P).toExponential(8)});
+  float v=textureLod(uCloudTex,u,lod).r, big=textureLod(uCloudTex,u*${(1/CLOUD_BIG).toFixed(6)}+vec2(0.37,0.61),max(lod-4.0,0.0)).r;
+  float c=uCloud.z+0.9*(big-0.5);
+  return mix(smoothstep(c,c+0.11+0.25*b,v),cloudMeanAt(c),smoothstep(3.0,6.0,lod))*uCloud.w; }
+// the share of the sun's light that reaches a point (view space p, light direction l in view space) past the clouds
+float cloudSh(vec3 p, vec3 l){ if (uCloud.w<=0.0) return 1.0;
+  vec3 w=(vec4(p-viewMatrix[3].xyz,0.0)*viewMatrix).xyz, s=(vec4(l,0.0)*viewMatrix).xyz;
+  float k=max(${CLOUD_H.toFixed(1)}-w.y,0.0)/max(s.y,0.06);
+  return 1.0-0.85*cloudAt(w.xz+s.xz*k,0.0)*step(w.y,${CLOUD_H.toFixed(1)}); }
+`;
+// the cloud layer as the sky sees it, for shaders that declare uSun and uSunCol: its colour and opacity at a point q of
+// the scene, t along the line of sight, which meets the layer at a slope y, sd being how near it runs to the sun, mu
+// the height of the sun over the layer there and sky the colour behind. From below (cloudBase) the base is grey,
+// brightening at its thin edges and silvered towards the sun; from above (cloudTop) the tops are lit by the sun.
+// Both fade into the haze as f falls from 1
+const CLOUD_SKY_GLSL=`
+float cloudLod(float t, float y){ return max(log2(max(t*0.0016/max(y,0.04),1.0)/${(CLOUD_P/CLOUD_N).toFixed(1)}),0.0); }
+vec3 cloudTint(float day){ return mix(vec3(1.0),uSunCol/max(max(uSunCol.r,uSunCol.g),max(uSunCol.b,1e-3)),0.45*day); }
+vec4 cloudBase(vec3 sky, vec2 q, float t, float y, float sd, float mu, float f){
+  float den=cloudAt(q,cloudLod(t,y)); if (den<=0.0) return vec4(0.0);
+  float day=smoothstep(-0.12,0.2,mu), lit=max(mu,0.0);
+  vec3 col=mix(vec3(0.55,0.6,0.68),vec3(0.93,0.93,0.95),1.0-den)*(0.18+0.95*day)*(0.6+0.5*lit)*cloudTint(day);
+  col+=uSunCol*pow(sd,8.0)*0.5*(1.0-den)*day+vec3(0.18,0.2,0.26)*0.15*(1.0-day);
+  return vec4(mix(sky,col,f),den*0.92*mix(0.6,1.0,f)); }
+vec4 cloudTop(vec3 haze, vec2 q, float t, float y, float mu, float f){
+  float den=cloudAt(q,cloudLod(t,y)); if (den<=0.0) return vec4(0.0);
+  float day=smoothstep(-0.12,0.2,mu), lit=max(mu,0.0);
+  vec3 col=vec3(1.0,0.98,0.95)*(0.1+1.25*lit)*cloudTint(day)*(0.8+0.2*den)+vec3(0.3,0.38,0.5)*0.35*day+vec3(0.18,0.2,0.26)*0.25*(1.0-day);
+  return vec4(mix(haze,col,f),den*0.95*mix(0.5,1.0,f)); }
+`;
+THREE.ShaderChunk.lights_pars_begin=CLOUD_GLSL+THREE.ShaderChunk.lights_pars_begin;
+THREE.ShaderChunk.lights_fragment_begin=THREE.ShaderChunk.lights_fragment_begin.replace('\t\tdirectLight.color *= dirSh;','\t\t#if ( UNROLLED_LOOP_INDEX == 0 )\n\t\tdirSh*=cloudSh(geometryPosition,directLight.direction);\n\t\t#endif\n\t\tdirectLight.color *= dirSh;');
+if (!THREE.ShaderChunk.lights_fragment_begin.includes('cloudSh(')) console.warn('the cloud shadows were not patched');
+for (const k in THREE.ShaderLib) if (THREE.ShaderLib[k].uniforms.directionalLights) Object.assign(THREE.ShaderLib[k].uniforms,{uCloud:cloudVU,uCloudM:cloudMU,uCloudTex:cloudTU});
+Object.assign(THREE.UniformsLib.lights,{uCloud:cloudVU,uCloudM:cloudMU,uCloudTex:cloudTU});
 // for the buildings' materials: the sun's and the sky's light scaled by vLit, which dims them inside a tunnel's bore
 const LIGHTS_BORE=THREE.ShaderChunk.lights_fragment_begin.replace('directLight.color *= dirSh;','directLight.color *= dirSh*vLit;')
   .replace('irradiance += getHemisphereLightIrradiance( hemisphereLights[ i ], geometryNormal )','irradiance += vLit*getHemisphereLightIrradiance( hemisphereLights[ i ], geometryNormal )');
@@ -6104,7 +6181,7 @@ function orbitalSky(){
       I[o]=h(S.x-m*ISL); I[o+1]=h(S.z); I[o+2]=h(Math.sqrt(S.A*S.B)*0.95); I[o+3]=h(1); }
     ringTex.needsUpdate=townTex.needsUpdate=isleTex.needsUpdate=true;
   }
-  const RING_GLSL=`
+  const RING_GLSL=CLOUD_GLSL+`
   #define RR ${RING_R.toFixed(2)}
   #define RC ${RING_C.toFixed(1)}
   #define FZ ${FLOOR_Z.toFixed(1)}
@@ -6193,7 +6270,9 @@ function orbitalSky(){
     vec3 sea=mix(vec3(0.016,0.09,0.23),vec3(0.05,0.28,0.36),exp(-max(-land,0.0)/90.0));
     // the slope of the mountains turns the ground towards the sun or away from it
     vec3 nrm=normalize(up+vec3(0.0,0.0,1.0)*slope*(z<R.w?-1.0:1.0));
-    float mu=dot(up,s), lit=ringSunK(up,s,zt,mh)*max(dot(nrm,s),0.0), ks=ringSunK(up,s,zt,0.0);
+    // the shadows of the clouds, cast straight down
+    float cs=1.0-0.7*cloudAt(cameraPosition.xz+vec2(xr-uCamW.x,zt-uCamW.z),log2(px/${(CLOUD_P/CLOUD_N).toFixed(1)}));
+    float mu=dot(up,s), lit=ringSunK(up,s,zt,mh)*max(dot(nrm,s),0.0)*cs, ks=ringSunK(up,s,zt,0.0)*cs;
     float glow=tm*(0.05+1.3*mix(pow(rn(vec2(xw,z)/55.0),3.0),0.17,smoothstep(14.0,50.0,px)));
     vec3 L=ringLight(col,lit,mu,glow);
     vec3 r=reflect(d,up); float sp=pow(max(dot(r,s),0.0),300.0)*8.0+pow(max(dot(r,s),0.0),18.0)*0.25;
@@ -6240,10 +6319,26 @@ function orbitalSky(){
   float wallG(float h, vec3 d, float t, float side){
     float e=side*(uCamW.z+t*d.z)-FZ; vec2 P=vec2(t*d.x,h+t*d.y-RR); return RR-length(P)-wallHw(e/WA); }
   `;
-  const uniforms={uRing:{value:ringTex},uTown:{value:townTex},uIsle:{value:isleTex},uCamW:{value:new THREE.Vector3()},uFogF:{value:1500}};
+  // the cloud layer, a cylinder CLOUD_H above the floor, along the line of sight d from the eye h above the floor, as
+  // far as t (the surface it meets, or none): the line leaves our side of it going up (cl1, its base seen from below)
+  // and comes down through the far side of it (cl2, its sunlit tops) before it meets the far floor. For a shader that
+  // declares uSun and uSunCol after RING_GLSL; c is the sky's colour behind
+  const RING_CLOUDS=CLOUD_SKY_GLSL+`
+  void ringClouds(float h, vec3 d, float t, vec3 c, out vec4 cl1, out vec4 cl2){ cl1=vec4(0.0); cl2=vec4(0.0);
+    if (uCloud.w<=0.0) return;   // (above the layer the eye is inside the cylinder, and only the far side is met)
+    float rho=RR-${CLOUD_H.toFixed(1)}, a=d.x*d.x+d.y*d.y, b=d.y*(h-RR), cc=(h-RR-rho)*(h-RR+rho), D=b*b-a*cc;
+    if (a<1e-10 || D<=0.0) return;
+    float sq=sqrt(D), t1=(-b-sq)/a, t2=(-b+sq)/a, sd=max(dot(d,uSun),0.0);
+    for (int k=0;k<2;k++){ float tc=k==0?t1:t2; if (tc<=0.0 || (t>0.0 && tc>t)) continue;
+      vec2 P=vec2(tc*d.x,h+tc*d.y); float psi=atan(P.x,RR-P.y), zc=uCamW.z+tc*d.z; if (abs(zc)>FZ) continue;
+      vec3 up=vec3(-sin(psi),cos(psi),0.0); float y=abs(dot(d,up)), mu=dot(up,uSun)*ringSunK(up,uSun,zc,${CLOUD_H.toFixed(1)});
+      vec2 q=cameraPosition.xz+vec2(psi*RR,tc*d.z), f=vec2(wallClear(h,d,tc));
+      if (k==0) cl1=cloudBase(c,q,tc,y,sd,mu,f.x); else cl2=cloudTop(hazeCol(c,uHor,f.x),q,tc,y,mu,f.x); } }
+  `;
+  const uniforms={uRing:{value:ringTex},uTown:{value:townTex},uIsle:{value:isleTex},uCamW:{value:new THREE.Vector3()},uFogF:{value:1500},uCloud:cloudVU,uCloudM:cloudMU,uCloudTex:cloudTU};
   // the sky's own shader in Orbital mode: Coast's sky without the moon, its stars turned about the ring's axis, and the ring
   const skyFrag=`uniform vec3 uTop,uMid,uHor,uSun,uSunCol,uMetA,uMetB,uMet; uniform float uNight,uDay,uRot; varying vec3 vDir;
-    ${RING_GLSL}
+    ${RING_GLSL}${RING_CLOUDS}
     float h3(vec3 p){ return fract(sin(dot(p,vec3(12.9898,78.233,37.719)))*43758.5453); }
     void main(){
       vec3 d=normalize(vDir); float y=d.y;
@@ -6291,20 +6386,24 @@ function orbitalSky(){
         float psi=atan(P.x,RR-P.y); vec3 up=vec3(-sin(psi),cos(psi),0.0); surf=ringFloor(uCamW.x+psi*RR,zf,up,d,uSun,t); }
       else if (tw>0.0){ t=tw; vec2 P=vec2(tw*d.x,h+tw*d.y); float psi=atan(P.x,RR-P.y); vec3 up=vec3(-sin(psi),cos(psi),0.0);
         float e=side*(uCamW.z+tw*d.z)-FZ; surf=ringWall(uCamW.x+psi*RR,RR-length(P-vec2(0.0,RR)),side,e/WA,up,d,uSun,t); }
-      if (t>0.0){ float T=t==tw?wallClear(h,d,t):ringClear(h,d,t); c=mix(hazeCol(c,uHor,T),surf,T); add*=1.0-smoothstep(0.0,0.02,T); if (t==tw) add*=0.0; }
+      vec4 cl1, cl2; ringClouds(h,d,t,c,cl1,cl2); add*=1.0-cl1.a;
+      if (t>0.0){ float T=t==tw?wallClear(h,d,t):ringClear(h,d,t); surf=mix(surf,cl2.rgb,cl2.a); c=mix(hazeCol(c,uHor,T),surf,T); add*=1.0-smoothstep(0.0,0.02,T); if (t==tw) add*=0.0; }
+      else c=mix(c,cl2.rgb,cl2.a);
+      c=mix(c,cl1.rgb,cl1.a);
       c+=add;
       gl_FragColor=vec4(c,1.0);
       #include <tonemapping_fragment>
       #include <colorspace_fragment>
     }`;
-  return {ringTex,townTex,isleTex,buildRingMap,RING_GLSL,uniforms,skyFrag};
+  return {ringTex,townTex,isleTex,buildRingMap,RING_GLSL,RING_CLOUDS,uniforms,skyFrag};
 }
 if (ORBITAL) ORB=orbitalSky();
-const skyU={uTop:{value:new THREE.Color()},uMid:{value:new THREE.Color()},uHor:{value:new THREE.Color()},uSun:{value:new THREE.Vector3(0,1,0)},uSunCol:{value:new THREE.Color()},uNight:{value:0},uDay:{value:1},uRot:{value:0},uCres:{value:0},uMetA:{value:new THREE.Vector3(0,1,0)},uMetB:{value:new THREE.Vector3(0,1,0)},uMet:{value:new THREE.Vector3()}};
+const skyU={uTop:{value:new THREE.Color()},uMid:{value:new THREE.Color()},uHor:{value:new THREE.Color()},uSun:{value:new THREE.Vector3(0,1,0)},uSunCol:{value:new THREE.Color()},uNight:{value:0},uDay:{value:1},uRot:{value:0},uCres:{value:0},uMetA:{value:new THREE.Vector3(0,1,0)},uMetB:{value:new THREE.Vector3(0,1,0)},uMet:{value:new THREE.Vector3()},uCloud:cloudVU,uCloudM:cloudMU,uCloudTex:cloudTU};
 if (ORBITAL) Object.assign(skyU,ORB.uniforms);
 const sky=new THREE.Mesh(ORBITAL?new THREE.SphereGeometry(500,64,32):new THREE.SphereGeometry(500,48,24),new THREE.ShaderMaterial({uniforms:skyU,side:THREE.BackSide,depthWrite:false,fog:false,
   vertexShader:`varying vec3 vDir; void main(){ vDir=normalize(position); gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
   fragmentShader:ORBITAL?ORB.skyFrag:`uniform vec3 uTop,uMid,uHor,uSun,uSunCol,uMetA,uMetB,uMet; uniform float uNight,uDay,uRot,uCres; varying vec3 vDir;
+    ${CLOUD_GLSL}${CLOUD_SKY_GLSL}
     float h3(vec3 p){ return fract(sin(dot(p,vec3(12.9898,78.233,37.719)))*43758.5453); }
     void main(){
       vec3 d=normalize(vDir); float y=d.y;
@@ -6338,11 +6437,41 @@ const sky=new THREE.Mesh(ORBITAL?new THREE.SphereGeometry(500,64,32):new THREE.S
         float core=exp(-pd*pd/(0.0011*0.0011)), glow=exp(-pd*pd/(0.004*0.004))*0.25;
         c += vec3(1.0,0.96,0.88)*(core+glow)*f*f*uMet.z*3.0;
       }
+      // the clouds, where the line of sight meets their base from below
+      if (uCloud.w>0.0 && y>0.0 && cameraPosition.y<${CLOUD_H.toFixed(1)}){ float t=(${CLOUD_H.toFixed(1)}-cameraPosition.y)/y;
+        vec4 cl=cloudBase(c,cameraPosition.xz+d.xz*t,t,y,sd,uSun.y,exp(-t/16000.0)); c=mix(c,cl.rgb,cl.a); }
       gl_FragColor=vec4(c,1.0);
       #include <tonemapping_fragment>
       #include <colorspace_fragment>
     }`}));
 sky.renderOrder=-1; world.add(sky);
+// the top of the cloud layer, seen from above it: a dome about the eye drawn over the scene, all of which lies below the
+// layer, after everything else; it is shown only while the clouds are and the eye is above them (updateClouds)
+const cloudTop=new THREE.Mesh(new THREE.SphereGeometry(400,48,24),new THREE.ShaderMaterial({uniforms:{uSun:skyU.uSun,uSunCol:skyU.uSunCol,uHor:skyU.uHor,uCloud:cloudVU,uCloudM:cloudMU,uCloudTex:cloudTU},
+  side:THREE.BackSide,depthWrite:false,depthTest:false,transparent:true,fog:false,
+  vertexShader:`varying vec3 vDir; void main(){ vDir=normalize(position); gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+  fragmentShader:`uniform vec3 uSun,uSunCol,uHor; varying vec3 vDir;
+    ${CLOUD_GLSL}${CLOUD_SKY_GLSL}
+    void main(){ vec3 d=normalize(vDir); float y=-d.y; if (y<=0.0 || cameraPosition.y<=${CLOUD_H.toFixed(1)}) discard;
+      float t=(cameraPosition.y-${CLOUD_H.toFixed(1)})/y; vec4 cl=cloudTop(uHor,cameraPosition.xz+d.xz*t,t,y,uSun.y,exp(-t/24000.0)); if (cl.a<=0.002) discard;
+      gl_FragColor=vec4(cl.rgb,cl.a);
+      #include <tonemapping_fragment>
+      #include <colorspace_fragment>
+    }`}));
+cloudTop.renderOrder=20; cloudTop.frustumCulled=false; cloudTop.visible=false; world.add(cloudTop);
+// the clouds drift with the wind at CLOUD_V (m/s), and the cover thickens and thins over the hours; the offset is kept
+// within one period of the pattern. They are shown or hidden with U, fading in or out over two seconds
+const CLOUD_V=[22,6], cloudDrift=[0,0]; let cloudsOn=false;
+function updateClouds(dt,rdt){ const PX=CLOUD_PX*CLOUD_BIG, PZ=CLOUD_P*CLOUD_BIG, mx=v=>((v%PX)+PX)%PX, mz=v=>((v%PZ)+PZ)%PZ;
+  cloudDrift[0]=(cloudDrift[0]+CLOUD_V[0]*dt)%PX; cloudDrift[1]=(cloudDrift[1]+CLOUD_V[1]*dt)%PZ;
+  CLOUD.w=cloudsOn?Math.min(1,CLOUD.w+rdt*0.5):Math.max(0,CLOUD.w-rdt*0.5);
+  if (CLOUD.w<=0){ cloudTop.visible=false; return; }
+  const ox=ORBITAL?ORIGIN.x-STRIP*STRIP_K:ORIGIN.x, oz=ORBITAL?ORIGIN.z+STRIP*STRIP_W:ORIGIN.z;
+  CLOUD.x=mx(ox-cloudDrift[0]+SEED%997*61); CLOUD.y=mz(oz-cloudDrift[1]);
+  CLOUD.z=0.5+0.07*Math.sin(time/700+SEED%13)+0.04*Math.sin(time/190);
+  cloudTop.visible=camera.getWorldPosition(_cloudP).y>CLOUD_H-1; cloudTop.position.copy(camera.position); }
+function setClouds(on){ cloudsOn=on; }
+const _cloudP=new THREE.Vector3();
 // (Orbital mode) the sky's view of the ring and the rim walls near the eye, made once the sky exists
 function orbitalScene(){
   const RING_GLSL=ORB.RING_GLSL, _skyP=new THREE.Vector3(); let ringWalls, updateWalls;
@@ -6352,7 +6481,7 @@ function orbitalScene(){
   // the sky draws the rest. Within about 2 km of the eye, where the land on the wall is built in blocks and the distant
   // terrain, the face is let down 40 m beneath them, so that it shows nowhere through their hollows; across the bare band
   // beyond the land (WALL_E_BARE to WALL_E_FACE) it rises again to meet them where they end
-  const wallU={uSun:skyU.uSun,uTop:skyU.uTop,uMid:skyU.uMid,uHor:skyU.uHor,uSunCol:skyU.uSunCol,uRing:skyU.uRing,uTown:skyU.uTown,uIsle:skyU.uIsle,uCamW:skyU.uCamW,uFogF:skyU.uFogF,uCamS:{value:new THREE.Vector3()}};
+  const wallU={uSun:skyU.uSun,uTop:skyU.uTop,uMid:skyU.uMid,uHor:skyU.uHor,uSunCol:skyU.uSunCol,uRing:skyU.uRing,uTown:skyU.uTown,uIsle:skyU.uIsle,uCamW:skyU.uCamW,uFogF:skyU.uFogF,uCloud:cloudVU,uCloudM:cloudMU,uCloudTex:cloudTU,uCamS:{value:new THREE.Vector3()}};
   const wallMat=new THREE.ShaderMaterial({uniforms:wallU,fog:false,side:THREE.DoubleSide,
     vertexShader:`uniform vec3 uCamS; varying vec3 vRel; varying float vHw; varying float vXr; varying vec2 vSE;
       void main(){ vec4 w=modelMatrix*vec4(position,1.0); float dx=w.x-uCamS.x, th=dx/${RING_R.toFixed(2)}, r=${RING_R.toFixed(2)}-w.y, s2=sin(th*0.5);
@@ -6360,13 +6489,14 @@ function orbitalScene(){
         vec3 b=vec3(uCamS.x+r*sin(th), 2.0*${RING_R.toFixed(2)}*s2*s2+y*cos(th), w.z);
         vRel=b-cameraPosition; vHw=w.y; vXr=dx; vSE=uv; gl_Position=projectionMatrix*viewMatrix*vec4(b,1.0); }`,
     fragmentShader:`uniform vec3 uTop,uMid,uHor,uSun,uSunCol; varying vec3 vRel; varying float vHw; varying float vXr; varying vec2 vSE;
-      ${RING_GLSL}
+      ${RING_GLSL}${ORB.RING_CLOUDS}
       void main(){ float t=length(vRel); vec3 d=vRel/t; float y=d.y, h=max(uCamW.y,0.5);
         vec3 c = y>0.12 ? mix(uMid,uTop,clamp((y-0.12)/0.6,0.0,1.0)) : mix(uHor,uMid,clamp((y+0.04)/0.16,0.0,1.0));
         float sd=max(dot(d,uSun),0.0); c += uSunCol*pow(sd,12.0)*0.35;
         float psi=vXr/RR; vec3 up=vec3(-sin(psi),cos(psi),0.0), surf=ringWall(uCamW.x+vXr,max(vHw,0.0),vSE.x,vSE.y/WA,up,d,uSun,t);
         float T=wallClear(h,d,t);
-        gl_FragColor=vec4(mix(hazeCol(c,uHor,T),surf,T),1.0);
+        vec4 cl1, cl2; ringClouds(h,d,t,c,cl1,cl2);
+        gl_FragColor=vec4(mix(mix(hazeCol(c,uHor,T),surf,T),cl1.rgb,cl1.a),1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
       }`});
@@ -7009,6 +7139,7 @@ function createSea(parent, opts={}){
         #include <fog_vertex>
       }`,
     fragmentShader:`
+      ${CLOUD_GLSL}
       uniform vec3 uSunDir, uSunCol, uSkyTop, uSkyHor, uDeep, uMid, uThin, uShallow, uFoam; uniform float uTime, uWind, uWhite, uBright, uSwellA;
       uniform vec2 uWindDir, uDrift, uStep; uniform sampler2D uGustTex; uniform vec4 uGust; uniform float uGustAmt;
       uniform sampler2D uScene, uSceneDepth; uniform vec2 uRes; uniform mat4 uProjInv, uCamWorld; uniform float uClarity, uHasScene, uPassFar, uDetail;
@@ -7102,8 +7233,10 @@ function createSea(parent, opts={}){
         vec3 under=bed*Tr+inS*(1.0-Tr.g);
         if (om>0.0){ vec3 TrO=exp(-vec3(0.32,0.13,0.10)*opath*(10.0/clar));
           under=mix(under,vec3(0.04,0.07,0.11)*(0.6+0.4*L)*uBright*TrO+under*(1.0-TrO.g),om); }
-        vec3 col=mix(under,sky*uBright,Fr);
-        float sd=max(dot(Rf,uSunDir),0.0); col+=uSunCol*(pow(sd,900.0)*7.0+pow(sd,90.0)*0.25)*smoothstep(0.0,0.08,uSunDir.y);   // the sun's glitter
+        // the shadow of the clouds on the water, and on the sun's glitter
+        float cldK=uCloud.w>0.0?1.0-0.6*cloudAt(vP.xz+uSunDir.xz*(${CLOUD_H.toFixed(1)}-vP.y)/max(uSunDir.y,0.06),0.0):1.0;
+        vec3 col=mix(under*cldK,sky*uBright,Fr);
+        float sd=max(dot(Rf,uSunDir),0.0); col+=cldK*uSunCol*(pow(sd,900.0)*7.0+pow(sd,90.0)*0.25)*smoothstep(0.0,0.08,uSunDir.y);   // the sun's glitter
         // foam: soft flecks on the swell's crests, lacy whitecaps on the steepest wind crests, and the shore wash
         float fl=n2(q*0.7+vec2(t*0.15,-t*0.1))*0.6+mix(0.5,n2(q*1.9-vec2(t*0.25,t*0.2)),steady(1.9,0.0))*0.4;
         float lace=0.5+0.5*sin(q.x*2.3+q.y*1.1+fl*6.0-t*1.3);
@@ -7121,7 +7254,7 @@ function createSea(parent, opts={}){
         #include <colorspace_fragment>
         #include <fog_fragment>
       }`});
-  Object.assign(mat.uniforms,U);
+  Object.assign(mat.uniforms,U,{uCloud:cloudVU,uCloudM:cloudMU,uCloudTex:cloudTU});
   const mesh=new THREE.Mesh(geo,mat); mesh.frustumCulled=false; mesh.renderOrder=1; parent.add(mesh);
   if (O.gust){ U.uGustTex.value=O.gust.uniforms.uGustTex.value; }
 
@@ -13526,6 +13659,7 @@ addEventListener('keydown',e=>{ keys[e.code]=true;
   if (code==='ToStart' && !e.repeat) homeKey();
   if (code==='KeyB' && e.shiftKey){ if (!e.repeat){ setAO(!aoOn); toast('Ambient occlusion',aoOn?'on':'off'); } }
   else if (code==='KeyB'){ setTilt(!tiltShift); toast('Tilt-shift',tiltShift?'on':'off'); }
+  if (code==='KeyU' && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey){ setClouds(!cloudsOn); toast('Clouds',cloudsOn?'on':'off'); }
   if (code==='KeyP' && !e.repeat){ paused=!paused; lastClock=null; }
   // the help panel frees the mouse, so that its tabs can be clicked
   if (code==='KeyH' && !e.repeat){ helpEl.hidden=!helpEl.hidden; aboutEl.hidden=true; lastCell=null; if (!helpEl.hidden && document.pointerLockElement) document.exitPointerLock(); }
@@ -16051,7 +16185,7 @@ function frame0(now){
     if (camera.far!==3600 || camera.near!==0.1){ camera.far=3600; camera.near=0.1; camera.updateProjectionMatrix(); sea.scale.setScalar(1); scene.fog.near=90; scene.fog.far=1500; islandMesh.visible=false; farMesh.visible=farGlow.visible=true; }
   }
   firstCam=false; farU.uFarEdge.value=islandMesh.visible?0:1;
-  sky.position.copy(camera.position);
+  sky.position.copy(camera.position); updateClouds(wdt,dt);
   seaFrame(wdt);
   diveFrame(dt,wdt);
   seaUniforms.uTime.value=time;
@@ -17127,7 +17261,7 @@ requestAnimationFrame(()=>setTimeout(async ()=>{
 // (Orbital mode) for automated checks
 if (ORBITAL) window.__orbital={ORB,skyU,get STRIP(){ return STRIP; },setStrip(k){ STRIP=k; wallForget(); },stripStep,trueX,trueZ,wallE,wallBase,ringGround,stripPoint,get voy(){ return voy; },get ORIGIN(){ return ORIGIN; },
   look(p){ fpPitch=p; }};
-window.__village={ get seed(){ return SEED_TEXT; }, __gen:{isVillage,kind0,baseH,coastZ,highGround,seaDist,islandInfo,peakInfo,railZ,railY,coastRoadZ,heightAt}, sceneState:()=>sceneState(), get fly(){ return {aerFly,flyY,flying:flying(),mode,dist,fpPitch,yaw,crouch}; }, flyStart, flyLand, flyGround, gullTopAt:(x,z)=>gullTopAt(x,z), set fpPitchV(v){ fpPitch=v; }, set flyYV(v){ flyY=v; }, aerGround:(x,y)=>aerGround(x,y), get aerView(){ return {yaw,pitch,dist,x:player.x,z:player.z,cy:camPos.y,gy:heightAt(camPos.x,camPos.z),lift:aerLift}; }, TELE, teleRaise, teleLower, teleMag, get teleRing(){ return teleRing; }, viewZoom, get origin(){ return ORIGIN; }, share:{state:sceneState,link:sceneLink,qrEncode,get shared(){ return SCENE; }}, get paused(){ return paused; }, set paused(v){ if (!!v!==paused){ paused=!!v; lastClock=null; } }, goods, glZone, branchesAt, get mantle(){ return mantle; }, get colRoof(){ return colRoof; }, roofAt, roofSlope, topAt, get sit(){ return sit; }, get indoors(){ return indoors; }, roomFns:{flight,localToWorld,obbLocal,roomCeil}, sitKey, sitFind, sitStand, sitSpotOk, get camp(){ return CAMP; }, campKey, campPitch, campStrike, campWhyNot, campFit, campBuild, campLight, beachStretch, BCH_SP, COACH_SEATS, FERRY_SEATS, coachEnter, genChunk, coastRoadZ, brZ, brY, heightAt, player, chunks, rooms, doorMesh, keys, setYaw:v=>{yaw=v;}, get yaw(){return yaw;}, fe, co, lightsNear, beams, ruinIn, cats, catHome, PEOPLE, get ridden(){ return ridden; },
+window.__village={ get seed(){ return SEED_TEXT; }, clouds:{CLOUD,cloudDrift,get on(){ return cloudsOn; }}, __gen:{isVillage,kind0,baseH,coastZ,highGround,seaDist,islandInfo,peakInfo,railZ,railY,coastRoadZ,heightAt}, sceneState:()=>sceneState(), get fly(){ return {aerFly,flyY,flying:flying(),mode,dist,fpPitch,yaw,crouch}; }, flyStart, flyLand, flyGround, gullTopAt:(x,z)=>gullTopAt(x,z), set fpPitchV(v){ fpPitch=v; }, set flyYV(v){ flyY=v; }, aerGround:(x,y)=>aerGround(x,y), get aerView(){ return {yaw,pitch,dist,x:player.x,z:player.z,cy:camPos.y,gy:heightAt(camPos.x,camPos.z),lift:aerLift}; }, TELE, teleRaise, teleLower, teleMag, get teleRing(){ return teleRing; }, viewZoom, get origin(){ return ORIGIN; }, share:{state:sceneState,link:sceneLink,qrEncode,get shared(){ return SCENE; }}, get paused(){ return paused; }, set paused(v){ if (!!v!==paused){ paused=!!v; lastClock=null; } }, goods, glZone, branchesAt, get mantle(){ return mantle; }, get colRoof(){ return colRoof; }, roofAt, roofSlope, topAt, get sit(){ return sit; }, get indoors(){ return indoors; }, roomFns:{flight,localToWorld,obbLocal,roomCeil}, sitKey, sitFind, sitStand, sitSpotOk, get camp(){ return CAMP; }, campKey, campPitch, campStrike, campWhyNot, campFit, campBuild, campLight, beachStretch, BCH_SP, COACH_SEATS, FERRY_SEATS, coachEnter, genChunk, coastRoadZ, brZ, brY, heightAt, player, chunks, rooms, doorMesh, keys, setYaw:v=>{yaw=v;}, get yaw(){return yaw;}, fe, co, lightsNear, beams, ruinIn, cats, catHome, PEOPLE, get ridden(){ return ridden; },
   findHarbour(){ for (let d=0;d<12;d++) for (const sd of SIDES) for (const n of [Math.floor(player.x/HARB)+d,Math.floor(player.x/HARB)-d]){ const H=harbourInfo(sd,n); if (H) return {x:H.x,z:coastZ(sd,H.x)+sd*7,W:H.W,sd,qz:coastZ(sd,H.x+H.W/2-1)+sd*2.5}; } return null; },
   findBeach(){ for (let x=player.x; x<player.x+3000; x+=10) for (const sd of SIDES){ const z=coastZ(sd,x)+sd*5; if (heightAt(x,z)<0.6 && heightAt(x,z)>0.1 && !harbourAt(sd,x)) return {x,z,sd}; } return null; },
   ridge(x){ return {x,z:ridgeZ(x)}; },
