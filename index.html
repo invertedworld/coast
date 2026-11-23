@@ -6198,6 +6198,7 @@ function orbitalSky(){
   #define HAZE_H 8400.0
   #define HAZE_L 45000.0
   uniform sampler2D uRing, uTown, uIsle; uniform vec3 uCamW; uniform float uFogF;
+  vec2 gFp=vec2(0.0);   // the ground a pixel of the floor covers, along the ring and across it, where the sky has found it
   vec4 ringMap(sampler2D T, float u, float lod){ lod=clamp(lod,0.0,${(RMAP_L-1).toFixed(1)}); float a=floor(lod);
     return mix(texture2D(T,vec2(u,(a+0.5)/${RMAP_L.toFixed(1)})),texture2D(T,vec2(u,(min(a+1.0,${(RMAP_L-1).toFixed(1)})+0.5)/${RMAP_L.toFixed(1)})),lod-a); }
   float rh(vec2 p){ return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453); }
@@ -6251,10 +6252,15 @@ function orbitalSky(){
     float u=xw/RC+0.5, px=max(t*0.0016/max(abs(dot(d,up)),0.04),2.0), lod=log2(px/${(RING_C/RMAP_N).toFixed(2)})+0.5;
     vec4 R=ringMap(uRing,u,lod), Tw=ringMap(uTown,u,lod);
     float sS=z-R.x, sN=R.y-z, inl=min(sS,sN);
+    // the land a pixel covers: the strip's own, its edge softened over the ground the pixel spans (pz), and each island's,
+    // softened over the pixel's span along the ring (pzI) and, where the island is smaller than that, given only the
+    // share of the pixel it fills, so that the small islands on the far floor neither sparkle nor break into dashes
+    float pz=max(max(t*0.0016,2.0),0.6*(gFp.y+0.4*gFp.x)), pzI=max(pz,0.5*gFp.x), lmI=0.0;
     float isl=-1e6; float m=floor(xw/1600.0);
     for (int k=-1;k<=1;k++) for (int r=0;r<2;r++){ float mm=m+float(k); vec4 I=texture2D(uIsle,vec2((mm+${(ISLE_N/2).toFixed(1)}+0.5)/${ISLE_N.toFixed(1)},r==0?0.25:0.75));
-      if (I.w>0.5){ float n=rnL(vec2(xw,z)+mm*806.0,260.0,px)*0.35+0.75; isl=max(isl,I.z*n-length(vec2(xw-(mm*1600.0+I.x),z-I.y))); } }
-    float pz=max(t*0.0016,2.0), land=max(inl,isl), lm=smoothstep(-pz,pz,land);
+      if (I.w>0.5){ float n=rnL(vec2(xw,z)+mm*806.0,260.0,px)*0.35+0.75, ri=I.z*n, e=ri-length(vec2(xw-(mm*1600.0+I.x),z-I.y));
+        isl=max(isl,e); lmI=max(lmI,smoothstep(-pzI,pzI,e)*min(1.0,ri/pzI)); } }
+    float land=max(inl,isl), lm=max(smoothstep(-pz,pz,inl),lmI);
     // the mountains, from the spine down to their feet 300 m inland of each shore
     float foot=z<R.w?R.x+300.0:R.y-300.0, q=clamp(1.0-abs(z-R.w)/max(abs(R.w-foot),150.0),0.0,1.0)*step(300.0,inl);
     float mh=R.z*pow(q,1.5), slope=R.z*1.5*pow(q,0.5)/max(abs(R.w-foot),150.0);
@@ -6366,6 +6372,10 @@ function orbitalSky(){
       // where the wall on either side rises out of the sea; on its way to that wall the line of sight stays above it
       // unless it is below it where it reaches the top of the wall, or the floor
       float h=max(uCamW.y,0.5), tf=ringHitFloor(h,d), zf=uCamW.z+tf*d.z, tw=-1.0, side=sign(d.z);
+      // the ground a pixel of the floor covers, along the ring and across it, from the change of the point met between
+      // neighbouring pixels (where the line of sight passes the floor's edge the change is not used)
+      { vec2 P=vec2(tf*d.x,h+tf*d.y); vec2 F=vec2(atan(P.x,RR-P.y)*RR,zf), w=fwidth(F);
+        gFp=tf>0.0 && w.x<5e4 && w.y<5e4 ? w : vec2(0.0); }
       bool fl=tf>0.0 && abs(zf)<=FZ+WS;
       // where the line of sight meets the floor between the walls within six tenths of the fog's reach, the floor is
       // wholly hidden by the haze (ringClear is nil there), and so is anything beyond it. Those pixels, mostly under
@@ -7736,12 +7746,13 @@ function updateMask(){
 // the haze over the distant land, as shader code in place of three.js's own fog, for a material whose fragment shader
 // has the world position (relative to the floating origin) in the varying named by v and the uniforms of LAND_HAZE_U;
 // the trains take it too, so that a distant train is as hazy as the land it runs over (see farMat below). In Orbital
-// mode the edge does not fade to the sky's colour: the land (and a train on it) thins away by dither between 1.95 and
-// 2.15 km, so that the ring drawn by the sky behind it shows through
-function landHaze(v){ if (ORBITAL) return `float _lum=dot(gl_FragColor.rgb,vec3(0.3,0.59,0.11));
+// mode the edge does not fade to the sky's colour: between 1.95 and 2.15 km the land grows transparent (blend, for the
+// distant terrain, drawn after the opaque scene for the purpose) or a train on it thins away by dither, so that the
+// ring drawn by the sky behind shows through. A dither on the land left a scatter of dark specks over the sky
+function landHaze(v,blend){ if (ORBITAL) return `float _lum=dot(gl_FragColor.rgb,vec3(0.3,0.59,0.11));
     #include <fog_fragment>
     { float fk=${v}.y<0.0?1.0:1.0-uFarEdge*smoothstep(1950.0,2150.0,length(${v}.xz-uFarC));
-      if (fk<0.999 && fk<fract(sin(dot(gl_FragCoord.xy,vec2(12.9898,78.233)))*43758.5453)) discard;
+      ${blend?'gl_FragColor.a*=fk;':'if (fk<0.999 && fk<fract(sin(dot(gl_FragCoord.xy,vec2(12.9898,78.233)))*43758.5453)) discard;'}
       float dd=length(${v}.xz-cameraPosition.xz), w=smoothstep(700.0,1400.0,dd)*(1.0-smoothstep(1950.0,2170.0,dd))*smoothstep(8.0,80.0,${v}.y)*uDay;
       gl_FragColor.rgb*=mix(1.0,clamp(0.9+0.75*(_lum-0.55),0.68,1.12),w)*mix(vec3(1.0),vec3(0.93,0.96,1.0),w); }`;
   return `float _lum=dot(gl_FragColor.rgb,vec3(0.3,0.59,0.11));
@@ -7753,7 +7764,7 @@ function landHaze(v){ if (ORBITAL) return `float _lum=dot(gl_FragColor.rgb,vec3(
       float dd=length(${v}.xz-cameraPosition.xz), w=smoothstep(700.0,1400.0,dd)*(1.0-smoothstep(1950.0,2170.0,dd))*smoothstep(8.0,80.0,${v}.y)*uDay;
       gl_FragColor.rgb*=mix(1.0,clamp(0.9+0.75*(_lum-0.55),0.68,1.12),w)*mix(vec3(1.0),vec3(0.93,0.96,1.0),w); }`; }
 const LAND_HAZE_DECL='uniform vec3 uTop, uMid, uHor, uSun, uSunCol; uniform float uDay, uFarEdge; uniform vec2 uFarC;';
-const farMat=new THREE.MeshLambertMaterial({vertexColors:true});
+const farMat=new THREE.MeshLambertMaterial({vertexColors:true,transparent:ORBITAL});
 // uFarC is the middle of the grid (relative to the floating origin, as the shader's positions are) and uFarEdge whether
 // the land fades into the sky towards the grid's edge: it does not when the coarse whole island lies beyond and beneath it
 const farU={uFarC:{value:new THREE.Vector2()},uFarEdge:{value:1}};
@@ -7781,7 +7792,7 @@ farMat.onBeforeCompile=(sh)=>{ Object.assign(sh.uniforms,maskU,farU,{uTop:skyU.u
     varying vec3 vFarW; uniform vec3 uTop, uMid, uHor, uSun, uSunCol; uniform float uDay, uFarEdge; uniform vec2 uFarC;
     uniform sampler2D uMask; uniform vec2 uMaskRel;`).replace('#include <clipping_planes_fragment>',`#include <clipping_planes_fragment>
     { vec2 c=floor(vFarW.xz/${C.toFixed(1)})-uMaskRel;
-      if (c.x>=0.0 && c.y>=0.0 && c.x<${MASK.toFixed(1)} && c.y<${MASK.toFixed(1)} && texture2D(uMask,(c+0.5)/${MASK.toFixed(1)}).r>0.5) discard; }`).replace('#include <fog_fragment>',landHaze('vFarW')); };
+      if (c.x>=0.0 && c.y>=0.0 && c.x<${MASK.toFixed(1)} && c.y<${MASK.toFixed(1)} && texture2D(uMask,(c+0.5)/${MASK.toFixed(1)}).r>0.5) discard; }`).replace('#include <fog_fragment>',landHaze('vFarW',true)); };
 farMat.customProgramCacheKey=()=>'farmask-skyfade-haze-cut';
 const farMesh=new THREE.Mesh(farGeo,farMat); farMesh.frustumCulled=false; world.add(farMesh);
 /* ---------- the land beyond the distant terrain, as depth alone: a coarse grid out to 3.6 km, every third point of
