@@ -181,6 +181,7 @@ function goThereShow(src,fov,aspect){
       <div class="row"><span><kbd>A</kbd><kbd>D</kbd></span><span>Sideways</span></div>
       <div class="row"><span><kbd>Space</kbd></span><span>Rise</span></div>
       <div class="row"><span><kbd>Z</kbd></span><span>Descend</span></div>
+      <div class="row"><span><kbd>Shift</kbd>+<kbd>↑</kbd><kbd>↓</kbd></span><span>Rise and descend</span></div>
       <div class="row"><span><kbd>Shift</kbd></span><span>Three times as fast</span></div>
       <div class="row"><span><kbd>Shift</kbd><kbd>Ctrl</kbd></span><span>Ten times as fast (Mac)</span></div>
       <div class="row"><span><kbd>2</kbd></span><span>Land</span></div>
@@ -15070,7 +15071,7 @@ function toggleView(){
    form of the bird's-eye view (mode 'above' with aerFly set), its distance (dist) being the height above the ground,
    so that the land below is drawn as the bird's-eye view draws it from that height. The mouse looks about; W and S
    (or the up and down arrows) fly forward and back the way the view looks, up and down included, A and D sideways,
-   Space rises and Z descends, Shift goes three times as fast and, on a Mac, Shift with Ctrl ten times (elsewhere Ctrl
+   Space rises and Z descends (as do the up and down arrows with Shift, straight up and down), Shift goes three times as fast and, on a Mac, Shift with Ctrl ten times (elsewhere Ctrl
    with W closes the browser's tab or window, and a page cannot prevent it). The pace grows with the height, from
    8 m/s near the ground to about 3 km/s at the greatest height, FLY_MAX above the ground. The eye keeps 1.6 m clear of
    the ground, the roofs and the sea, measured square to the slope; descending steeply onto land sets the player down
@@ -15113,7 +15114,9 @@ function flyStep(dt,mx,mz){
   const sp=Math.max(8,(flyY-g0)*0.6)*(sh&&ct?10:sh?3:1), cp=Math.cos(fpPitch);
   // forward is the way the view looks, as the camera is turned (rotation fpPitch, yaw in the order YXZ)
   const fx=-Math.sin(yaw)*cp, fy=Math.sin(fpPitch), fz=-Math.cos(yaw)*cp, rx=Math.cos(yaw), rz=-Math.sin(yaw);
-  const vx=(fx*mz+rx*mx)*sp, vz=(fz*mz+rz*mx)*sp, vy=(fy*mz+up)*sp;
+  // the up and down arrows with Shift raise and lower the eye at the bird's-eye view's pace, which Shift does not treble
+  const ak=sh?(keys.ArrowUp?1:0)-(keys.ArrowDown?1:0):0;
+  const vx=(fx*mz+rx*mx)*sp, vz=(fz*mz+rz*mx)*sp, vy=(fy*mz+up)*sp+ak*Math.max(8,(flyY-g0)*0.6);
   player.x+=vx*dt; player.z+=vz*dt; flyY+=vy*dt;
   // the eye keeps 1.6 m clear of the ground measured square to its slope, not straight down: on a cliff or a steep
   // mountain face 1.6 m straight up would leave the eye a few centimetres from the rock, inside the camera's near plane
@@ -16182,6 +16185,8 @@ function frame0(now){
     const zk=((keys.Minus||keys.NumpadSubtract)?1:0)-((keys.Equal||keys.NumpadAdd)?1:0);
     if (zk) dist=clamp(dist*Math.exp(zk*dt*1.8),7,AER_MAX); }
   let mx=(keys.KeyD?1:0)-(keys.KeyA?1:0)+joy.x+pad.x, mz=(keys.KeyW||((mode!=="above"||aerFly)&&keys.ArrowUp)?1:0)-(keys.KeyS||((mode!=="above"||aerFly)&&keys.ArrowDown)?1:0)-joy.y-pad.y;
+  // in flight the up and down arrows with Shift raise and lower the eye, as they do the bird's-eye view (flyStep)
+  if (aerFly && (keys.ShiftLeft||keys.ShiftRight)) mz=(keys.KeyW?1:0)-(keys.KeyS?1:0)-joy.y-pad.y;
   if (sit && sit.dir>0 && Math.hypot(mx,mz)>0.3) sitStand();   // a step stands the sitter up
   const ml=Math.hypot(mx,mz), moving=started&&ml>0.05&&!onBoard()&&!sailD&&mode!=='swim'&&!(sit&&sit.dir>0);
   player.ox=player.x; player.oz=player.z;
