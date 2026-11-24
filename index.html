@@ -3369,7 +3369,8 @@ function addGallery(gb,ch,ob,base,open=true){
   if (CR){ const A=[];
     for (const sx of [-1,1]) faceHoles(A,(u,y)=>[sx*hw,y,u],[sx,0,0],-hl,hl,0,h,[],[]);
     faceHoles(A,(u,y)=>[u,y,hl],[0,0,1],-hw,hw,0,h,[],[CHURCH_DOOR]); faceHoles(A,(u,y)=>[u,y,-hl],[0,0,-1],-hw,hw,0,h,[],[]);
-    archReveal(A,(u,y)=>[u,y,hl],(u,y)=>[u,y,hl-WTC],CHURCH_DOOR); q3n(A,[-hw,h,-hl],[hw,h,-hl],[hw,h,hl],[-hw,h,hl],[0,1,0]);
+    archReveal(A,(u,y)=>[u,y,hl],(u,y)=>[u,y,hl-WTC],CHURCH_DOOR); // the tops of the walls only, as a ring: a slab across the room at the eaves would be seen through the skylights
+    for (const s of [-1,1]){ q3n(A,[s*hw,h,-hl],[s*(hw-WTC),h,-hl],[s*(hw-WTC),h,hl],[s*hw,h,hl],[0,1,0]); q3n(A,[-hw,h,s*hl],[hw,h,s*hl],[hw,h,s*(hl-WTC)],[-hw,h,s*(hl-WTC)],[0,1,0]); }
     gb.add(triTpl(A),H,GAL_WHITE,0,SP);
     const S=[]; q3n(S,[-dr,df,hl-WTC],[dr,df,hl-WTC],[dr,df,hl],[-dr,df,hl],[0,1,0]); gb.add(triTpl(S),H,C_.stone,null,SS); }
   else { gb.add(T.box, mm(H,mat(0,0,0,W,h,L)), GAL_WHITE, 0, SP);
@@ -3418,7 +3419,8 @@ function gallerySkylights(W,L){ const hw=W/2, a=Math.atan2(hw*Math.tan(GAL.pitch
 // opening through both for each skylight, its sides, the eave and the verges, and the ridge tiles over the top
 function galleryRoof(gb,H,W,L,h,rise,roofC){
   const hw=W/2, hl=L/2, oh=0.28, a=Math.atan2(rise,hw), ta=Math.tan(a), run=hw+oh, sky=gallerySkylights(W,L);
-  gb.add(T.prism, mm(H,mat(0,h,0,W,rise,L)), GAL_WHITE, null, SP);
+  // the gables as two faces, and nothing under the slopes: a solid block there closed the skylights from above
+  const gab=[]; for (const s of [1,-1]) q3n(gab,[-hw,h,s*hl],[hw,h,s*hl],[0,h+rise,s*hl],[-0.0001,h+rise,s*hl],[0,0,s]); gb.add(triTpl(gab),H,GAL_WHITE,null,SP);
   const top=[], bot=[], side=[];
   for (const s of [1,-1]){ const N=[s*Math.sin(a),Math.cos(a),0], P=off=>(z,X)=>[s*X+N[0]*off,h+(hw-X)*ta+N[1]*off,z], T0=P(0.19), B0=P(0.02);
     faceHoles(top,T0,N,-hl-oh,hl+oh,0,run,sky,[]); faceHoles(bot,B0,[-N[0],-N[1],0],-hl-oh,hl+oh,0,run,sky,[]);
