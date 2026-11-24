@@ -789,15 +789,20 @@ function landProfile(s,x,z,sd){
 // the most of the ground's orange, it reads as a sand dune. The limestone is therefore given a colour a little to the
 // blue of grey, as much as the light warms it, so that it shows grey-white to warm grey; the maquis likewise.
 const MT_D0=300, MT_H=480, MT_SP=360, RAIL_L=9000, MT_ROCK=hex('#a5aba6'), MT_PALE=hex('#c2c8c4'), MT_SCREE=hex('#82877c'),
-  MT_MAQUIS=hex('#56643f'), MT_GARRIGUE=hex('#7d8a6c');
+  MT_MAQUIS=hex('#56643f'), MT_GARRIGUE=hex('#7d8a6c'), MT_SNOW=hex('#f1f4f9'), MT_SNOW_H=570;
 // the colour of high ground (slope as rise over run; n and p noise values from 0 to 1, fine and broad): from 110 m the
 // land's own colour gives way to patches of dark maquis and paler garrigue, and from 170 m to bare limestone, pale on
-// the gentler ground in broad patches and darker scree on the steep, and on the steepest ground lower down too
+// the gentler ground in broad patches and darker scree on the steep, and on the steepest ground lower down too, and from about
+// 580 m, which only the highest summits of the range reach, to snow
 function mtTint(c,h,slope,n=0.5,p=0.5){ if (h<110) return c;
   const m=smooth((h-110)/70)*(1-smooth((h-280)/150))*(1-smooth((slope-0.65)/0.6));
   if (m>0) c.lerp(_mtC.copy(MT_GARRIGUE).lerp(MT_MAQUIS,smooth((n*0.4+p*0.6-0.35)/0.3)),Math.min(0.85,m*0.9));
   const k=Math.max(smooth((h-170)/200),smooth((slope-0.7)/0.6)*smooth((h-120)/60)*0.9);
-  if (k>0) c.lerp(_mtC.copy(MT_ROCK).lerp(MT_PALE,smooth((p-0.45)/0.3)*0.8).lerp(MT_SCREE,clamp((slope-0.5)*1.4,0,1)*0.8+n*0.2),k); return c; }
+  if (k>0) c.lerp(_mtC.copy(MT_ROCK).lerp(MT_PALE,smooth((p-0.45)/0.3)*0.8).lerp(MT_SCREE,clamp((slope-0.5)*1.4,0,1)*0.8+n*0.2),k);
+  // snow on the very highest summits alone: its lower edge wanders between MT_SNOW_H and 50 m above it with the broad
+  // noise, and it lies thinner on the steep faces, where the rock shows through
+  if (h>MT_SNOW_H){ const sn=smooth((h-MT_SNOW_H-p*50-n*8)/30)*(1-0.7*smooth((slope-0.9)/0.7)); if (sn>0) c.lerp(MT_SNOW,sn); }
+  return c; }
 const _mtC=new THREE.Color(), _gMt=new THREE.Color();
 function mtSpine0(x){ return ORBITAL?RB1(mtSpine0r,x):mtSpine0r(x); }
 function mtSpine0r(x){ return ridgeZ(x)+0.35*(halfW(x)-MT_D0)*(fbm(x*0.0011,5.3,471,2)-0.5)*2; }
@@ -8324,6 +8329,9 @@ stripHooks.push(()=>wallForget());
 function resetWorld(){ chunkState=''; islandCols.m.clear(); islandKey=null; galSites.clear(); galSpawn=null; farCache.clear(); hgTiles.clear(); clearXMemos(); spCache.clear(); lhCache.clear(); hbCache.clear(); rxCache.clear(); farOrigin=''; for (const T of tiles.values()) disposeTile(T); tiles.clear(); tilesDirty.clear(); tilesUrgent.clear(); for (const ch of chunks.values()) disposeChunk(ch); chunks.clear(); chunkVer++; cats.states.clear(); cats.near=[]; for (const k of cats.list){ if (k.s) k.s.inst=null; k.s=null; } for (const ch of dying) disposeChunk(ch); dying.length=0; pkCache.clear(); pzCache.clear(); alCache.clear(); hbCache.clear(); vgCache.clear(); vmCache.clear(); ckCache.clear(); ryCache.clear(); rzCache.clear(); rrCache.clear(); rsCache.clear(); stCache.clear(); rxCache.clear(); lhCache.clear(); rkCache.clear(); ruCache.clear(); cvCache.clear(); icvCache.clear(); cvSlots.clear(); cvMemoN=NaN; cvMemoL=[];
   // the goods lines, the offshore islands, the ferry ports and the ferries' routes all belong to the old island
   brZones.clear(); brBucket.clear(); isCache.clear(); itCache.clear(); fpCache.clear(); irCache.clear(); hgCache.clear(); sgCache.clear(); mtxCache.clear();
+  // and so do the ground under the main line, its cuttings and tunnels, the bridges that carry streets over it and the
+  // beaches' furniture, each kept by its place along the island alone
+  raCache.clear(); cwCache.clear(); pdCache.clear(); rbCache.clear(); rgCache.clear(); bchCache.clear();
   goods.R=null; goods.check=0; for (const c of goods.cars) c.m.visible=false;
   for (const F of ferries) if (F!==ridden){ F.R=null; F.m.visible=false; }
   beams.t=0; train.init=false; farDirty=true; if (ORBITAL) ORB.buildRingMap(); }
