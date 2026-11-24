@@ -4764,6 +4764,23 @@ function placeBoat(ch,idx,x,y,z,rot,floating,roll=0,own=false){
 }
 
 /* ================= railway structures ================= */
+/* The parapets of a street bridge carry on along each approach for as long as the ground beside the street lies
+   WING_DROP or more below it, so that the edge of the street is nowhere open to the cutting beyond the end of the
+   deck. Each of the four is a run of points WING_STEP apart along the street, WING_OFF outside its edge, starting from
+   the end of the deck's parapet: the street's height there (y) and the ground's (g). It is worked out from the ground
+   alone and kept on the crossing, so that every block it reaches agrees where it runs. */
+const WING_STEP=1.5, WING_DROP=0.9, WING_OFF=0.3;
+function bridgeWings(X){
+  if (X.wings) return X.wings;
+  const out=[], fr={x:X.x,z:X.z,rot:X.rot}, i=X.i;
+  for (const e of [-1,1]) for (const su of [-1,1]){
+    const [sx,sz]=localToWorld(fr,su*(vRoadW(i,X.z)+0.6),e*(X.flat+0.05)), rl=e<0?X.rN:X.rS, pts=[{x:sx,z:sz,y:X.deck,g:heightAtExact(sx,sz)}];
+    for (let k=1;k<=Math.ceil((rl+10)/WING_STEP);k++){ const z=sz+e*k*WING_STEP, xr=vRoadX(i,z), x=xr+su*(vRoadW(i,z)+WING_OFF), y=vRoadCenterH(i,xr,z);
+      pts.push({x,z,y,g:heightAtExact(x,z)});
+      if (y-heightAtExact(x+su*1.0,z)<WING_DROP) break; }
+    if (pts.length>=3) out.push(pts); }
+  return X.wings=out;
+}
 function buildBridge(gb,ch,R,X){
   const zc=X.z, xc=X.x, rot=X.rot, W=2*vRoadW(X.i,zc)+0.8, F=X.flat;
   const r=Math.min(9,4.6/X.sinT), deck=X.deck, spring=X.ry+1.0, rise=4.6,   // clear of the locomotive, 4.5 m tall and 3.7 m wide, by 0.7 m at its corners
@@ -4782,6 +4799,12 @@ function buildBridge(gb,ch,R,X){
     // (the parapet may be stood on: its top is the coping's, 1.12 m above the deck, and it is as wide as the coping)
     const [px,pz]=localToWorld({x:xc,z:zc,rot},sg*(W/2+0.2),0); ch.obbs.push({x:px,z:pz,hw:0.275,hd:F+0.05,rot,top:deck+1.12,bot:deck});
   }
+  // the parapets carried on along the approaches, their tops following the street's, with the same coping; they
+  // may be stood on as the deck's are
+  for (const Wg of bridgeWings(X)) for (let k=0;k+1<Wg.length;k++){ const A=Wg[k], B=Wg[k+1], L=Math.hypot(B.x-A.x,B.z-A.z), lo=Math.min(A.g,B.g,A.y,B.y)-0.6;
+    shearBox(gb,A.x,A.z,A.y+1.0,B.x,B.z,B.y+1.0,Math.max(A.y,B.y)+1.0-lo,0.42,stone,SS);
+    shearBox(gb,A.x,A.z,A.y+1.12,B.x,B.z,B.y+1.12,0.12,0.55,C_.trim,SS);
+    ch.obbs.push({x:(A.x+B.x)/2,z:(A.z+B.z)/2,hw:L/2+0.02,hd:0.275,rot:Math.atan2(-(B.z-A.z),B.x-A.x),top:Math.max(A.y,B.y)+1.12,bot:lo}); }
   // voussoirs along both faces of the arch
   const faces=[-W/2-0.05,W/2+0.05];
   // arch stones radiate from the curve: long side along the outward normal of the elliptical arch
@@ -5165,7 +5188,10 @@ function genChunk(cx,cz,lod=0){
   // a bridge carrying a street over the railway is straight while the street may curve, so its footprint (deck,
   // parapets and a metre to spare) is reserved in every block it reaches before anything is placed there
   for (let i=cx-2;i<=cx+3;i++){ const X=railCross(i); if (!X) continue; const o={x:X.x,z:X.z,hw:vRoadW(X.i,X.z)+1.4,hd:X.flat+1,rot:X.rot};
-    if (Math.abs(o.x-(cx+0.5)*C)<C/2+o.hd+o.hw && Math.abs(o.z-(cz+0.5)*C)<C/2+o.hd+o.hw) ch.place.push(o); }
+    if (Math.abs(o.x-(cx+0.5)*C)<C/2+o.hd+o.hw && Math.abs(o.z-(cz+0.5)*C)<C/2+o.hd+o.hw) ch.place.push(o);
+    // and the parapets along its approaches
+    for (const Wg of bridgeWings(X)) for (let k=0;k+1<Wg.length;k++){ const A=Wg[k], B=Wg[k+1], q={x:(A.x+B.x)/2,z:(A.z+B.z)/2,hw:Math.hypot(B.x-A.x,B.z-A.z)/2+0.3,hd:0.6,rot:Math.atan2(-(B.z-A.z),B.x-A.x)};
+      if (Math.abs(q.x-(cx+0.5)*C)<C/2+q.hd+q.hw && Math.abs(q.z-(cz+0.5)*C)<C/2+q.hd+q.hw) ch.place.push(q); } }
   buildCitadel(gb,ch,cx,cz);
   const cellOk=(x,z,m)=>insideCell(cx,cz,x,z,m);
   const alleyS=(A,x,z)=>A.dir==='h'?z-A.f(x):x-A.f(z);
@@ -5858,7 +5884,11 @@ function genChunk(cx,cz,lod=0){
         gb.add(T.box, mm(Hp,mat(0,PT,zc,2*PA+2*PW+0.4,0.4,PD+0.4)), C_.trim, null, SS);
         gb.add(T.box, mm(Hp,mat(0,-1.5,zc,2*PA+0.2,1.25,PD)), lining, null);
         for (let k=0;k<13;k++){ const ang=Math.PI*(k+0.5)/13; gb.add(T.boxC, mm(Hp,mat(Math.cos(ang)*(PA+0.22),PS+Math.sin(ang)*(PA+0.22),zf-into*0.02,0.85,0.6,0.14,0,0,ang)), k===6?C_.trim:vsTone(C_.stone,k), null); }
-        for (const sg of [-1,1]){ const [px,pz]=localToWorld({x:xb,z:zb,rot},sg*(PA+PW/2),zc); ch.obbs.push({x:px,z:pz,hw:PW/2,hd:PD/2,rot,top:Infinity}); }
+        // the portal's top may be walked on, the hill's cover meeting it behind: the wing walls up to the coping, and the
+        // masonry over the arch, which is walked and ridden under; it had no top over the arch, where the ground is the
+        // cutting's floor, so that whoever stepped onto the coping there fell to the track
+        for (const sg of [-1,1]){ const [px,pz]=localToWorld({x:xb,z:zb,rot},sg*(PA+PW/2+0.1),zc); ch.obbs.push({x:px,z:pz,hw:PW/2+0.1,hd:PD/2+0.2,rot,top:yb+PT+0.4}); }
+        { const [px,pz]=localToWorld({x:xb,z:zb,rot},0,zc); ch.obbs.push({x:px,z:pz,hw:PA,hd:PD/2+0.2,rot,top:yb+PT+0.4,bot:yb+PS}); }
         // behind the masonry, a slab of stone just under the hill's cover, over the vault, closes the ground left out
         // there around the opening (inPortal), which reaches past the masonry's back where the line is steep; without
         // it the empty inside of the hill showed through behind the coping
@@ -12722,11 +12752,15 @@ function mantleTry(dx,dz){
     if (te===null) return;   // something higher than the reach stands in the way
     if (te<player.y+0.45 || te<0.3) continue;
     // the place to stand, a little beyond the edge: a roof may rise from its eaves, by no more than a step
+    // (on a top as narrow as a parapet's coping, the place nearest the edge climbed, whose far edge is furthest off:
+    // the first place tried from which the surface carries on 0.3 m ahead is taken, or failing that the last)
+    let best=null;
     for (const on of [0.45,0.3,0.15]){ const x=ex+dx*on, z=ez+dz*on, t=topAt(x,z,te+STEP); if (t===null || t<te-0.3) continue;
       // room to stand: the body's width either side, on the same surface or lower
-      let ok=true; for (const [a,b] of [[0.3,0],[-0.3,0],[0,0.3]]){ const qx=x-dz*a+dx*b, qz=z+dx*a+dz*b, q=topAt(qx,qz,t+0.5); if (q===null || q>t+0.45){ ok=false; break; } }
+      let ok=true, far=true; for (const [a,b] of [[0.3,0],[-0.3,0],[0,0.3]]){ const qx=x-dz*a+dx*b, qz=z+dx*a+dz*b, q=topAt(qx,qz,t+0.5); if (q===null || q>t+0.45){ ok=false; break; } if (b && q<t-LEDGE_DROP) far=false; }
       if (!ok) continue;
-      mantle={t:0,x0:player.x,z0:player.z,y0:player.y,x1:x,z1:z,y1:t}; player.vy=0; return; }
+      best={t:0,x0:player.x,z0:player.z,y0:player.y,x1:x,z1:z,y1:t,dx,dz}; if (far) break; }
+    if (best){ mantle=best; player.vy=0; }
     return; }
 }
 // drawn up and over the edge: up first, then forwards
@@ -12735,9 +12769,25 @@ function mantleStep(dt){
   if (mode!=='street'){ mantle=null; return false; }
   const M=mantle; M.t+=dt; const k=Math.min(1,M.t/MANTLE_T), ku=smooth(Math.min(1,k/0.65)), kf=smooth(clamp((k-0.35)/0.65,0,1));
   player.x=M.x0+(M.x1-M.x0)*kf; player.z=M.z0+(M.z1-M.z0)*kf; player.y=M.y0+(M.y1+0.04-M.y0)*ku; player.vy=0; player.grounded=true; eyeY=player.y;
-  if (k>=1){ player.y=M.y1; mantle=null; }
+  if (k>=1){ player.y=M.y1; mantle=null; ledgeTake(M.dx,M.dz); }
   return true;
 }
+/* ---------- the far edge of a ledge just climbed ----------
+   Whoever jumps or climbs onto something higher while pressing on, and finds a long drop within LEDGE_AHEAD of where
+   they come to stand, ahead or to either side of the way they were going (the far side of a bridge's parapet, of a
+   wall or of a narrow roof),
+   is held on it: the keys that carried them up do not carry them on over its far edge. They may walk along it and
+   step back down the way they came. Letting go of the movement keys, or pressing jump afresh, ends the hold, and the
+   edge may then be walked or jumped off as any other. */
+const LEDGE_DROP=1.5, LEDGE_AHEAD=1.2;
+let ledgeHold=null, ledgeSpace=false;
+function ledgeTake(dx,dz){ const l=Math.hypot(dx,dz); if (l<1e-6 || mode!=='street') return;
+  // the way ahead and up to 80 degrees either side of it, so that a ledge met at a slant is held as one met square on
+  for (const w of [0,0.7,-0.7,1.4,-1.4]){ const c=Math.cos(w), s=Math.sin(w), ux=(dx*c-dz*s)/l, uz=(dx*s+dz*c)/l;
+    for (let a=0.3;a<=LEDGE_AHEAD+1e-6;a+=0.3){ const t=topAt(player.x+ux*a,player.z+uz*a,player.y+STEP); if (t===null) break;
+      if (t<player.y-LEDGE_DROP){ ledgeHold={y:player.y}; return; } } } }
+// whether the held player may stand at (x,z): something there to stand on, no more than LEDGE_DROP below the ledge
+function ledgeOk(x,z){ const t=topAt(x,z,Math.max(player.y,ledgeHold.y)+STEP); return t===null || t>=ledgeHold.y-LEDGE_DROP; }
 // standing on a roof steeper than ROOF_GRIP, the player slides down it
 function roofSlide(dt){
   if (!colRoof || !player.grounded || mode!=='street') return;
@@ -16155,12 +16205,19 @@ function frame0(now){
       const g2=player.x===ox?g0:g1; player.z+=vz*dt; const g3=standableAt(player.x,player.z);
       if ((g3<-1.0&&!offOk()) || !coveMoveOk(player.x,oz,player.y,g2,player.x,player.z,g3)) player.z=oz;
       // on a narrow path each step along one axis alone may leave it while the step along both stays on it
-      if (player.x===ox && player.z===oz){ const nx=ox+vx*dt, nz=oz+vz*dt, g4=standableAt(nx,nz); if (g4>=-1.0 && coveMoveOk(ox,oz,player.y,g0,nx,nz,g4)){ player.x=nx; player.z=nz; } } }
+      if (player.x===ox && player.z===oz){ const nx=ox+vx*dt, nz=oz+vz*dt, g4=standableAt(nx,nz); if (g4>=-1.0 && coveMoveOk(ox,oz,player.y,g0,nx,nz,g4)){ player.x=nx; player.z=nz; } }
+      // held on a ledge just climbed, the step is not taken over its far edge: the part of it along the edge is kept
+      if (ledgeHold && mode==='street' && !ledgeOk(player.x,player.z)){
+        if (ledgeOk(player.x,oz)) player.z=oz; else if (ledgeOk(ox,player.z)) player.x=ox; else { player.x=ox; player.z=oz; } } }
     player.face=Math.atan2(vx,vz);
   }
+  if (ledgeHold && (!moving || aerFly || mode!=='street' || player.y<ledgeHold.y-LEDGE_DROP)) ledgeHold=null;
   if (!onBoard() && !sailD && mode!=='above' && mode!=='swim'){
+  if (keys.Space && !ledgeSpace) ledgeHold=null;   // jump pressed afresh
+  ledgeSpace=!!keys.Space;
   if (started && keys.Space && player.grounded && !(sit&&sit.dir>0) && !mantle){ player.vy=JUMP_V; player.grounded=false; }
   playerRadius(dt); doorsStep(dt);
+  const wasG=player.grounded; if (wasG) player.ty=player.y;   // the height last stood at
   const ground=collide();
   // just ashore from a ferry, the player is held at quay height until the ground under them has been built
   let held=false;
@@ -16172,6 +16229,8 @@ function frame0(now){
     if (player.y<=ground){ player.y=ground; player.vy=0; player.grounded=true; } else player.grounded=false;
   }
   if (player.y<ground) player.y=ground;
+  // landed from a jump on something higher than was left, still pressing on: held short of a long drop beyond it
+  if (!wasG && player.grounded && moving && !ledgeHold && player.y>(player.ty??player.y)+0.45) ledgeTake(player.x-player.ox,player.z-player.oz);
   // indoors the head stays below the ceiling, the eye 15 cm under it, over the body's width: a jump stops short of the
   // ceiling or the floor above, and the walker falls back from it
   if (indoors && !held){ let cy=Infinity; for (const [a,b] of [[0,0],[0.3,0],[-0.3,0],[0,0.3],[0,-0.3]]) cy=Math.min(cy,roomCeil(indoors,player.x+a,player.z+b,player.y)-HEAD);
