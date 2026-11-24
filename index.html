@@ -2427,7 +2427,7 @@ const vgCache=new Map();
    middles lie within 55 to 90 m of it, on ground between 2.5 and 70 m that rises no more than 14 m across the block and
    nowhere meets the sea, are its blocks (isleVillage). They are village blocks like any on the mainland, with its houses, squares and streets, and a
    church where there are blocks of houses enough; a block at the water's edge is left to the island. */
-const ISLE_TOWN_R=330, ISLE_TOWN_P=0.6, itCache=new Map();
+const ISLE_TOWN_R=330, ISLE_TOWN_P=0.6, ISLE_TOWN_MIN=5, itCache=new Map();
 function isleTown(sd,m){
   const k=m*4+sd; { const v=itCache.get(k); if (v!==undefined) return v; }
   const I=islandInfo(sd,m); let T=null;
@@ -2436,15 +2436,22 @@ function isleTown(sd,m){
       const x=I.x+g*I.R, z=I.z+sd*f*I.R, h=islandH(sd,x,z); if (h<4 || h>45) continue;
       const a=islandH(sd,x-45,z), b=islandH(sd,x+45,z), c=islandH(sd,x,z-45), d=islandH(sd,x,z+45); if (Math.min(a,b,c,d)<1.5) continue;
       const sl=Math.abs(a-b)+Math.abs(c-d)+0.15*Math.abs(g)*40; if (sl<bs){ bs=sl; T={x,z,r:55+hash(m,sd>0?3:4,1571)*35,sd,m}; } } }
+  if (T){ let n=0;   // a village of fewer than ISLE_TOWN_MIN blocks is not built at all, so that no block stands alone
+    for (let cx=Math.floor((T.x-T.r)/C);cx<=Math.floor((T.x+T.r)/C);cx++) for (let cz=Math.floor((T.z-T.r)/C);cz<=Math.floor((T.z+T.r)/C);cz++)
+      if (!nearJoin(cx*C,6000) && !highGround(cx,cz) && isleBlock(T,cx,cz)) n++;
+    if (n<ISLE_TOWN_MIN) T=null; }
   if (itCache.size>4000) itCache.clear(); itCache.set(k,T); return T;
 }
+// whether a block's ground can take part of the village T: within its reach, clear of the sea and not too steep
+function isleBlock(T,cx,cz){
+  const x=cx*C+C/2, z=cz*C+C/2, sd=T.sd; if (Math.hypot(x-T.x,z-T.z)>T.r || seaDist(x,z)>-150) return false;
+  const h=islandH(sd,x,z); if (h<2.5 || h>70) return false;
+  let lo=h, hi=h; for (const a of [-C/2,C/2]) for (const b of [-C/2,C/2]){ const q=islandH(sd,x+a,z+b); lo=Math.min(lo,q); hi=Math.max(hi,q); }
+  return lo>0.3 && hi-lo<=14; }
 function isleVillage(cx,cz){
   const x=cx*C+C/2, z=cz*C+C/2; if (seaDist(x,z)>-150) return false;
   const sd=shoreSide(x,z), m=Math.floor(x/ISL);
-  for (let k=m-1;k<=m+1;k++){ const T=isleTown(sd,k); if (!T || Math.hypot(x-T.x,z-T.z)>T.r) continue;
-    const h=islandH(sd,x,z); if (h<2.5 || h>70) return false;
-    let lo=h, hi=h; for (const a of [-C/2,C/2]) for (const b of [-C/2,C/2]){ const q=islandH(sd,x+a,z+b); lo=Math.min(lo,q); hi=Math.max(hi,q); }
-    return lo>0.3 && hi-lo<=14; }
+  for (let k=m-1;k<=m+1;k++){ const T=isleTown(sd,k); if (T && Math.hypot(x-T.x,z-T.z)<=T.r) return isleBlock(T,cx,cz); }
   return false; }
 // whether a point lies out at sea, beyond the mainland's streets: not where it is in, or at the edge of, a block of an
 // island's village, whose streets run along the edges of its blocks
