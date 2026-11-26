@@ -67,6 +67,7 @@ function audit(R) {
         const alongU = o.stair === 'bastion' || o.stair === 'citadel', half = alongU ? o.hw : o.hd, side = alongU ? o.hd : o.hw;
         const c = Math.cos(o.rot), s = Math.sin(o.rot), fx = alongU ? c : s, fz = alongU ? -s : c, lx = alongU ? s : c, lz = alongU ? c : -s;
         const g = V.heightAt(o.x, o.z);
+        if (o.stair !== 'yard' && g < 0.3) add('stair-in-sea', 'error', o.x, o.z, o.top, `a ${o.stair} step standing in the sea or at its edge`);
         if (o.top < g - 0.3) add('stair-buried', 'error', o.x, o.z, g, `a ${o.stair} step's tread lies ${(g - o.top).toFixed(2)} m under the ground`);
         for (const sg of [-1, 1]) {
           const ex = o.x + sg * fx * (half + 0.3), ez = o.z + sg * fz * (half + 0.3);
@@ -122,6 +123,8 @@ function audit(R) {
     if (S && !S.peak) { let n = 0, lo = 1e9; for (let k = 0; k < 16; k++) { const a = k / 16 * 6.283, h = V.heightAt(S.x + Math.cos(a) * (S.r + 3), S.z + Math.sin(a) * (S.r + 3)); lo = Math.min(lo, h); if (S.level - h > 4) n++; }
       if (n >= 11) add('square-on-pillar', 'error', S.x, S.z, S.level, `a square with the ground more than 4 m below it on ${n} of 16 sides, ${(S.level - lo).toFixed(2)} m at most`);
       if (V.stCut(S.x, S.z, S.r)) add('yard-intrusion', 'error', S.x, S.z, S.level, `a square in a station's yard`);
+      { let wet = 0; for (let k = 0; k < 24; k++) { const a = k / 24 * 6.283; if (V.heightAt(S.x + Math.cos(a) * (S.r + 1.25), S.z + Math.sin(a) * (S.r + 1.25)) < 0.3) wet++; }
+        if (wet) add('square-in-sea', 'error', S.x, S.z, S.level, `a square whose wall stands in the sea on ${wet} of 24 sides`); }
       // the square's edge: walking out from its paving, a drop of more than 1.5 m with nothing to stop a fall
       for (let k = 0; k < 48; k++) { const a = k / 48 * 6.283, ux = Math.cos(a), uz = Math.sin(a), x = S.x + ux * (S.r - 0.5), z = S.z + uz * (S.r - 0.5);
         if (V.topAt(x, z, S.level + 0.3) === null) continue;   // a building stands at the edge here

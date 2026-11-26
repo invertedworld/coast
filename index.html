@@ -2671,6 +2671,8 @@ function piazzaFor(cx,cz,kind){
       if (!bad) break; p.r-=0.5; }
     if (p.r<(p.small?3.2:(p.peak?10:6))) p=null; }
   if (p && !p.peak && citNear(p.x,p.z,p.r+8)) p=null;   // no square on a citadel's wall
+  // nor one whose wall would stand in the sea or at the water's edge: its whole outline stands on ground 0.6 m above the sea
+  if (p && !p.peak){ for (let k=0;k<24;k++){ const a=k/24*6.283; if (baseH(p.x+Math.cos(a)*(p.r+1.6),p.z+Math.sin(a)*(p.r+1.6))<0.6){ p=null; break; } } }
   if (p && !p.peak && (stCut(p.x,p.z,p.r+3) || [0,1,2,3,4,5,6,7].some(k=>stCut(p.x+Math.cos(k*0.785)*(p.r+3),p.z+Math.sin(k*0.785)*(p.r+3),0)))) p=null;   // nor beside a station's yard
   if (p){ p.outer=Math.min(p.r+6.5,C/2-Math.max(Math.abs(p.x-xc),Math.abs(p.z-zc))-0.01); p.level=baseH(p.x,p.z); if (p.level<1.2) p=null; }
   // no square where levelling it would leave a cliff: the downhill drop and the uphill cut stay modest
@@ -2963,6 +2965,20 @@ function ironRail(gb,ch,ax,az,ay,bx,bz,by,post){ const iron=RAIL_IRON;
   segBox(gb,[ax,ay+0.95,az],[bx,by+0.95,bz],0.05,0.05,iron); segBox(gb,[ax,ay+0.5,az],[bx,by+0.5,bz],0.03,0.03,iron);
   if (post) segBox(gb,[ax,ay,az],[ax,ay+0.95,az],0.045,0.045,iron);
   const L=Math.hypot(bx-ax,bz-az); if (L>0.05) ch.obbs.push({x:(ax+bx)/2,z:(az+bz)/2,hw:0.05,hd:L/2,rot:Math.atan2(bx-ax,bz-az),top:Math.max(ay,by)+1.0,bot:Math.min(ay,by)}); }
+// the coastal road's seaward parapet at x (in lengths of 1.5 m centred on x0+0.75+1.5k): where the ground before it lies
+// 0.9 m or more below the road, down to that ground as shaped (a goods line's cutting included), with no lone post where
+// the ground dips for a moment, and open where a street, a goods line or a cove's path crosses the road. Returns the
+// road's height rh, the wall's middle zs and the ground before it g, or null. hAt is the height function to read: the
+// block's own while it is built, or the exact one for the ground of another block
+function crParapet(sd,x,hAt){
+  const low=x=>{ const zr=coastRoadZ(sd,x); return Math.min(baseH(x,zr-sd*(CR_HW+2.2)),hAt(x,zr-sd*(CR_HW+0.7)),hAt(x,zr-sd*(CR_HW+1.8))); };
+  const zr=coastRoadZ(sd,x), rh=coastRoadH(sd,x), zs=zr-sd*(CR_HW+0.35), g=low(x);
+  if (g>rh-0.9) return null;
+  if (!(low(x-1.5)<=coastRoadH(sd,x-1.5)-0.9) && !(low(x+1.5)<=coastRoadH(sd,x+1.5)-0.9)) return null;
+  const iv=Math.round(x/C); if (vSegOn(iv,vSegAt(x,zs)) && Math.abs(x-vRoadX(iv,zs))<vRoadW(iv,zs)+0.8) return null;
+  if (branchPerp(x,zs)<4.2) return null;
+  { const cv=coveInfo(sd,Math.floor(x/CV_SP)); if (cv && Math.abs(x-cv.X)<cv.UX && Math.abs(cvU(cv,x,zs)-cvBuild(cv).pathTop.u)<cv.Ag0+10) return null; }
+  return {rh,zs,g}; }
 function buildCitadel(gb,ch,cx,cz){
   const xc=cx*C+C/2, zc=cz*C+C/2, c=citAt(xc,zc); if (!c) return;
   if (xc<c.x0-C/2 || xc>c.x1+C/2 || zc<c.z0-C/2 || zc>c.z1+C/2) return;
@@ -5622,7 +5638,7 @@ function genChunk(cx,cz,lod=0){
             let met=false;
             for (let k2=kk; k2<kk+16; k2++){ const d2=P.r+0.95+k2*go+go/2, x2=P.x+dx*d2, z2=P.z+dz*d2, t2=P.level-(k2+1)*ri, ga=heightAt(x2,z2);
               if (t2<=ga+0.05){ met=true; break; }
-              if (ga<0.2) break;
+              if (ga<0.6) break;
               if (!stepIn(x2,z2,dx,dz,go) || roadDist(x2,z2)<0 || railPerp(x2,z2)<5){ ok=false; break; }
               steps.push({x:x2,z:z2,top:t2,g:Math.min(baseH(x2,z2),ga)}); }
             if (!met) ok=false;
@@ -5630,7 +5646,7 @@ function genChunk(cx,cz,lod=0){
               ok=insideCell(cx,cz,P.x+dx*fd,P.z+dz*fd,0.1) && railPerp(P.x+dx*fd,P.z+dz*fd)>=5; }
             break; }
           if (roadDist(x,z)<0 || railPerp(x,z)<5) break;   // nor onto a street, nor the railway's bed (5 m from the line)
-          if (heightAt(x,z)<0.2) break;   // no stair runs down into a harbour's basin or the sea
+          if (heightAt(x,z)<0.6) break;   // no stair runs down into a harbour's basin or the sea, nor to the water's edge
           if (!stepIn(x,z,dx,dz,go)) break;
           steps.push({x,z,top,g}); }
         if (ok){ stairPlan={steps,go}; break; } }
@@ -5991,16 +6007,11 @@ function genChunk(cx,cz,lod=0){
       else flWild(gb,M,RF,r,(lx,lz)=>heightAt(x+lx,z+lz)-h);
       (ch.plants||(ch.plants=[])).push({kind:lav?'lavender':'wild',x,y:h,z}); made++; }
   }
-  /* --- seaward parapet along the coastal road --- */
+  /* --- seaward parapet along the coastal road (crParapet) --- */
   for (const sd of SIDES) for (let x=x0+0.75; x<x0+C; x+=1.5){
     const zr=coastRoadZ(sd,x); if (zr<z0||zr>=z0+C) continue;
-    const lowAt=x=>{ const zr=coastRoadZ(sd,x); return Math.min(baseH(x,zr-sd*(CR_HW+2.2)),heightAt(x,zr-sd*(CR_HW+0.7)),heightAt(x,zr-sd*(CR_HW+1.8)))<=coastRoadH(sd,x)-0.9; };
-    const rh=coastRoadH(sd,x), zs=zr-sd*(CR_HW+0.35), g=Math.min(baseH(x,zr-sd*(CR_HW+2.2)),heightAt(x,zr-sd*(CR_HW+0.7)),heightAt(x,zr-sd*(CR_HW+1.8)));   // down to the ground as shaped, a goods line's cutting included
-    if (g>rh-0.9) continue;
-    if (!lowAt(x-1.5) && !lowAt(x+1.5)) continue;   // no lone post where the ground dips for a moment
-    const iv=Math.round(x/C); if (vSegOn(iv,vSegAt(x,zs)) && Math.abs(x-vRoadX(iv,zs))<vRoadW(iv,zs)+0.8) continue;
-    if (branchPerp(x,zs)<4.2) continue;   // open where a goods line crosses the road
-    { const cv=coveInfo(sd,Math.floor(x/CV_SP)); if (cv && Math.abs(x-cv.X)<cv.UX && Math.abs(cvU(cv,x,zs)-cvBuild(cv).pathTop.u)<cv.Ag0+10) continue; }   // and where it crosses a cove's ravine, and its path leaves it
+    // (read from the exact heights, as the ground of every block reads it, so that the two always agree)
+    const Q=crParapet(sd,x,heightAtExact); if (!Q) continue; const {rh,zs,g}=Q;
     const rot=Math.atan2(-(coastRoadZ(sd,x+0.75)-coastRoadZ(sd,x-0.75)),1.5), bot=g-0.8;
     gb.add(T.box, mat(x,bot,zs,1.56,rh+0.1-bot,0.6,rot), shade(C_.stone,R,0.03), bot, SS);
     gb.add(T.box, mat(x,rh+0.1,zs,1.56,0.78,0.45,rot), shade(C_.terrace,R,0.02), null, SP);
@@ -6282,6 +6293,15 @@ function genChunk(cx,cz,lod=0){
           // its shading and colour, and those of the samples next to it, are those of the ground beyond, not of the fall
           const ex=BP.x+ux*qo, ez=BP.z+uz*qo; dx=(heightAtExact(ex+0.5,ez)-heightAtExact(ex-0.5,ez)); dz=(heightAtExact(ex,ez+0.5)-heightAtExact(ex,ez-0.5));
           nl=Math.hypot(dx,1,dz); slope=Math.hypot(dx,dz); } } }
+    // likewise in front of the coastal road's parapet, which stands at the road's edge where the ground before it falls
+    // 0.9 m or more (crParapet): the samples just beyond its seaward face are moved to just within it, at the height of
+    // the ground beyond, so that the fall from the road to the ground below lies within the masonry
+    // (by the same rule as the parapet's own, read from the exact heights, so that the samples a block shares with its
+    // neighbour come out the same in both, and at the edges of blocks too)
+    if (ph===h) for (const sd of SIDES){ const zr=coastRoadZ(sd,x), e=sd*(zr-z)-(CR_HW+0.65);
+      if (e<=0 || e>=1.5*step) continue; const xb=Math.floor(x/C)*C, xm=xb+0.75+1.5*clamp(Math.round((x-xb-0.75)/1.5),0,26);   // (the length it lies before, counted from the block's edge as the parapet's are)
+      if (!crParapet(sd,xm,heightAtExact)) continue;
+      pz=zr-sd*(CR_HW+0.62); ph=heightAtExact(x,zr-sd*(CR_HW+0.65+1.5*step+0.3)); break; }
     const n1=vnoise(x*0.3,z*0.3,5), n2=vnoise(x*1.1,z*1.1,6);
     cA.copy(C_.sand).lerp(C_.sand2,n1*0.7+n2*0.3);
     const hr=ORBITAL?h-wallBase(z):h;   // the height above the sea, or (Orbital mode) above the rim wall's face on its land
@@ -12286,6 +12306,11 @@ function tunSkipStep(dt){
   player.x+=train.x-x0; player.z=railZ(player.x);
   if (chaseV){ chase.fresh=true; chase.lift=1; S.cut=true; }
   quit(); S.done=true; }
+// a car is drawn only where the block beneath it has been built in full or middle detail and has faded in, with the
+// line's bed, rails and sleepers, cuttings, bridges and viaducts: the furthest blocks leave the rails and sleepers out
+// with the other small pieces, and beyond the built blocks the distant land is a coarse model without any of them, so
+// that a train there would run on bare ground or in the air. The train being ridden is always drawn
+const carGround=p=>{ const ch=chunks.get(key(Math.floor(p.x/C),Math.floor(p.z/C))); return !!ch && ch.lod<=1 && ch.fade>=1; };
 function updateTrain(dt){
   tunWalkStep();
   if (!train.init){ train.init=true; train.x=player.x-train.dir*300; train.v=train.sp; train.wait=0; }
@@ -12313,6 +12338,7 @@ function updateTrain(dt){
     const xr=railBack(xf,c.L,train.dir), fy=railY(xf), fz=railZ(xf), ry=railY(xr), rz=railZ(xr);
     const dx=xf-xr, dy=fy-ry, dz=fz-rz, back=c.flip!==!!train.lead, pt=-Math.atan2(dy,Math.hypot(dx,dz));
     c.m.position.set((xf+xr)/2,(fy+ry)/2+0.35,(fz+rz)/2); c.m.rotation.set(back?-pt:pt,Math.atan2(dx,dz)+(back?Math.PI:0),0);
+    c.m.visible=((riding()&&!rideGoods)||mode==='coach') || carGround(c.m.position);
     xf=railBack(xr,train.GAP,train.dir);
   }
   updateTrainLights(); updateCarDoors(dt);
@@ -12401,6 +12427,7 @@ function updateGoods(dt){
   for (const c of (g.lead?[...g.cars].reverse():g.cars)){
     const xr=routeBack(R,xf,c.L,g.dir), fy=routeY(R,xf), fz=routeZ(R,xf), ry=routeY(R,xr), rz=routeZ(R,xr), dx=xf-xr, dy=fy-ry, dz=fz-rz, back=c.flip!==!!g.lead, pt=-Math.atan2(dy,Math.hypot(dx,dz));
     c.m.position.set((xf+xr)/2,(fy+ry)/2+0.35,(fz+rz)/2); c.m.rotation.set(back?-pt:pt,Math.atan2(dx,dz)+(back?Math.PI:0),0);
+    c.m.visible=(riding()&&rideGoods) || carGround(c.m.position);
     xf=routeBack(R,xr,0.8,g.dir); }
   g.tail=routeBack(R,xf,-0.8,g.dir);
   // the white lamps (and after dusk the headlight) are on the shunter that leads; standing at a quay before it reverses,
@@ -13833,6 +13860,7 @@ function sndUpdate(dt){
   // air are muffled and all but silenced, as far as the lens is under (UW.wet), and the water is heard instead
   SNDS.wet=(SNDS.wet??0)+((wetView()?UW.wet:0)-(SNDS.wet??0))*(1-Math.exp(-dt*10));
   if (SNDS.wet>0.001){ const w=SNDS.wet; for (const g of ['world','train','ferry']){ SND.cut[g]=Math.min(SND.cut[g],20000*Math.pow(500/20000,w)); SND.gmul[g]*=1-0.92*w; } }
+  if (SNDS.dive){ if (ctx.currentTime>SNDS.dive.end) SNDS.dive=null; else sndParam(SNDS.dive.lp.frequency,20000*Math.pow(600/20000,SNDS.wet),0.05); }
   for (const g in SND.bus) sndParam(SND.bus[g].lp.frequency,SND.cut[g],0.15);
   sndParam(SND.revOut.gain,tK>0.01&&!paused?1:0,0.2);
 
@@ -16237,9 +16265,18 @@ function diveAbove(target){ const au=renderer.shadowMap.autoUpdate; renderer.sha
 // the heart as breath runs low, the dive and the surfacing, and a gasp; made here, since they have no recordings.
 // They go through the player's group, which is not muffled under the water
 let swimNoise=null;
+// the plunge of a jump into the water (dive_in), heard with the splash: the player's own sound, through the player's
+// group so that it is not silenced under the water as the world is, but through a low-pass filter of its own that
+// closes as the ears go under (SNDS.wet), so that the rush of the water is heard muffled from below the surface
+function diveIn(gain){ if (!SND.ready || !audioCtx) return; const buf=sndBuf('dive_in'); if (!buf) return;
+  const ac=audioCtx, src=ac.createBufferSource(), g=ac.createGain(), lp=ac.createBiquadFilter();
+  src.buffer=buf; lp.type='lowpass'; lp.Q.value=0.5; lp.frequency.value=20000; g.gain.value=gain*(SOUND_DEF.dive_in?.g??1);
+  src.connect(lp); lp.connect(g); g.connect(SND.bus.player.in); src.start();
+  SNDS.dive={lp,end:ac.currentTime+buf.duration}; }
 function swimSound(k,v){
   if (k==='splash'){ const S=swimmer.state, y=SEA.heightAt(S.x,S.z);
-    sndPlay('splash','world',[S.x,y,S.z],{gain:0.35+0.75*v,rate:1.12-0.3*v+(Math.random()-0.5)*0.06}); UW.splash(S.x-ORIGIN.x,y,S.z-ORIGIN.z,v); return; }
+    sndPlay('splash','world',[S.x,y,S.z],{gain:0.35+0.75*v,rate:1.12-0.3*v+(Math.random()-0.5)*0.06}); UW.splash(S.x-ORIGIN.x,y,S.z-ORIGIN.z,v);
+    diveIn(0.55+0.45*v); return; }
   if (!SND.ready || !audioCtx) return; const ac=audioCtx, t=ac.currentTime, out=SND.bus.player.in;
   if (!swimNoise){ swimNoise=ac.createBuffer(1,ac.sampleRate*3,ac.sampleRate); const d=swimNoise.getChannelData(0); let b=0; for (let i=0;i<d.length;i++){ b=(b+0.02*(Math.random()*2-1))/1.02; d[i]=b*3.5; } }
   if (k==='beat'){ const amp=0.12+0.6*Math.pow(v,1.3);

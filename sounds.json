@@ -55,5 +55,6 @@
     "sounds/whale-song-13.mp3",
     "sounds/whale-song-14.mp3"
   ],
-  "amb_night_quiet": "sounds/night_quiet.mp3"
+  "amb_night_quiet": "sounds/night_quiet.mp3",
+  "dive_in": "sounds/dive-in.mp3"
 }
