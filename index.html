@@ -2298,6 +2298,15 @@ function stationInfo(n){
   if (stCache.size>5000) stCache.clear(); stCache.set(n,S); return S;
 }
 function stationNear(x,m=55){ const n=Math.floor(x/ST_SP); for (const k of [n,n-1,n+1]){ const S=stationInfo(k); if (S && Math.abs(x-S.x)<m) return S; } return null; }
+/* A station's yard: on the platform's side the line's bed is widened to ST_HW from the line, for the platform, the
+   building and its forecourt, narrowing to the ordinary 4 m over the last ST_TAPER m of its 80 m length; the far side
+   keeps the ordinary bed. Where the hill stands more than ST_WALL above the yard, the cut is a retaining wall of stone
+   at its edge (ST_EDGE wide) rather than a slope of earth. stCut tells whether (x,z) lies in the yard or within m of
+   it, so that nothing is placed on ground the yard takes away. */
+const ST_HW=15, ST_TAPER=8, ST_WALL=0.8, ST_EDGE=0.8;
+const stHalf=(S,x)=>4+(ST_HW-4)*clamp((40-Math.abs(x-S.x))/ST_TAPER,0,1);
+const stSide=(S,x,z)=>Math.sign(z-railZ(x))===S.side;
+function stCut(x,z,m=0){ const S=stationNear(x,40+m); if (!S || !stSide(S,x,z)) return false; return mainPerp(x,z)<stHalf(S,clamp(x,S.x-40,S.x+40))+4.5+m; }
 /* ---------- goods lines between pairs of harbours ----------
    A goods line is a railway of its own, quite separate from the main line, joining two harbours 2 to 6 km apart on
    the same shore. Along each quay it is a goods siding at the level of the dock, ending at buffer stops beyond the
@@ -2605,7 +2614,7 @@ function blockSiteOk(cx,cz,o,alleys,circles,piazza,hAt,maxRange,hMin){
     for (const p of pts){ const s=A.dir==='h'?p[1]-A.f(p[0]):p[0]-A.f(p[1]); if (Math.abs(s)<A.hw-0.2) return false; const g=Math.sign(s); if (sg&&g!==sg) return false; sg=g; } }
   if (piazza){ const P=piazza; for (const p of pts) if (Math.hypot(p[0]-P.x,p[1]-P.z)<P.r) return false; if (obbCircleDist(o,P.x,P.z)<P.r) return false; }
   for (const c of circles) if (obbCircleDist(o,c.x,c.z)<c.r) return false;
-  for (const p of pts){ const rp=railPerp(p[0],p[1]); if (rp<5.5 || (rp<19 && stationNear(p[0],48))) return false; }
+  for (const p of pts){ const rp=railPerp(p[0],p[1]); if (rp<5.5 || stCut(p[0],p[1],1)) return false; }
   for (const sd of SIDES){ let cs=0;
     for (const p of pts){
       const dz=sd*(p[1]-coastRoadZ(sd,p[0])); if (Math.abs(dz)<CR_HW+0.15 || (dz<0 && dz>-14)) return false;
@@ -2649,6 +2658,7 @@ function piazzaFor(cx,cz,kind){
       if (!bad) break; p.r-=0.5; }
     if (p.r<(p.small?3.2:(p.peak?10:6))) p=null; }
   if (p && !p.peak && citNear(p.x,p.z,p.r+8)) p=null;   // no square on a citadel's wall
+  if (p && !p.peak && (stCut(p.x,p.z,p.r+3) || [0,1,2,3,4,5,6,7].some(k=>stCut(p.x+Math.cos(k*0.785)*(p.r+3),p.z+Math.sin(k*0.785)*(p.r+3),0)))) p=null;   // nor beside a station's yard
   if (p){ p.outer=Math.min(p.r+6.5,C/2-Math.max(Math.abs(p.x-xc),Math.abs(p.z-zc))-0.01); p.level=baseH(p.x,p.z); if (p.level<1.2) p=null; }
   // no square where levelling it would leave a cliff: the downhill drop and the uphill cut stay modest
   if (p && !p.peak){ let lo=1e9, hi=-1e9; for (let s2=0;s2<16;s2++){ const a=s2/16*6.283, h=baseH(p.x+Math.cos(a)*(p.r+2.6),p.z+Math.sin(a)*(p.r+2.6)); lo=Math.min(lo,h); hi=Math.max(hi,h); }
@@ -2711,13 +2721,13 @@ function heightAtExact(x,z){
   if (wsum>0) h=lerp(h,tsum/wsum,wmax);
   // the line runs on a level bed 8 m wide, cut into the hill or built up on an embankment;
   // over a tunnel the ground is kept level with the portal parapets so the lined bore is always covered
-  { const S=stationNear(x,40), hwL=S?15:4.0, d=mainPerp(x,z); if (d<hwL+CUT_WMAX){ const sl=(railZ(x+1)-railZ(x-1))/2, xp=x+sl*(z-railZ(x))/(1+sl*sl), st=railState(xp), ry=railY(xp);
+  { const S=stationNear(x,40), hwL=S&&stSide(S,x,z)?stHalf(S,x):4.0, d=mainPerp(x,z); if (d<hwL+CUT_WMAX){ const sl=(railZ(x+1)-railZ(x-1))/2, xp=x+sl*(z-railZ(x))/(1+sl*sl), st=railState(xp), ry=railY(xp);
       // the cover over a bore begins 3 m in from the portal along the track, within the depth of its masonry (4 m), so
       // that on a curve, where the line's state is projected across at a slant, its edge never stands out in front of
       // the wing walls; measured along x, on a line running at a slant it began beyond the masonry, and the ground's
       // grid hung down into the bore between the cutting's floor and the cover
       const dIn=3/Math.sqrt(1+sl*sl), deep=st==='tunnel' && railState(xp-dIn)==='tunnel' && railState(xp+dIn)==='tunnel';
-      if (st==='open' || (st==='tunnel' && !deep)){ const fw=S||st!=='open'?4.5:cutW(xp); if (d<hwL+fw){ const w=1-smooth((d-hwL)/fw); h=lerp(h,ry-0.2,w); } }
+      if (st==='open' || (st==='tunnel' && !deep)){ const yard=S&&hwL>4.01, fw=yard&&h>ry-0.2+ST_WALL?ST_EDGE:S||st!=='open'?4.5:cutW(xp); if (d<hwL+fw){ const w=1-smooth((d-hwL)/fw); h=lerp(h,ry-0.2,w); } }
       else if (deep){ const w=1-smooth((d-4)/5);
         // over the bore just behind a portal, the hill is held down to the cover's level, so that where it stands
         // higher its slope down to the cutting does not reach into the arch; it rises again 10 m in
@@ -2893,7 +2903,7 @@ function citRing(P,h0,f){
       const got=[];
       for (const d of [1,-1]){ const u0=d>0?0.3:Lr-0.3, top0=at(u0).walk, steps=[]; let ok=true, u=u0;
         const put=(len,top)=>{ const q=at(u+d*len/2), off=CIT_TH/2+CIT_SW/2, x=q.x-q.nx*off, z=q.z-q.nz*off, l=Math.hypot(q.ux,q.uz)||1;
-          steps.push({x,z,top,len,rot:Math.atan2(-q.uz/l,q.ux/l)}); u+=d*len;
+          steps.push({x,z,top,len,rot:Math.atan2(-q.uz/l,q.ux/l),nx:q.nx,nz:q.nz}); u+=d*len;
           for (const [a,b] of [[0,0],[0,CIT_SW/2],[0,-CIT_SW/2]]){ const px=x-q.nx*b, pz=z-q.nz*b; if (roadDist(px,pz)<0.4) ok=false; } };
         put(0.9,top0);
         for (let j=1;ok;j++){ const top=top0-j*CIT_RISE, q=at(u+d*CIT_GO/2), g=baseH(q.x-q.nx*(CIT_TH/2+CIT_SW/2),q.z-q.nz*(CIT_TH/2+CIT_SW/2));
@@ -2932,6 +2942,14 @@ function shearBox(gb,ax,az,ay,bx,bz,by,hgt,th,col,surf){
   m.set(bx-ax,0,nx,(ax+bx)/2, by-ay,hgt,0,(ay+by)/2-hgt, bz-az,0,nz,(az+bz)/2, 0,0,0,1);
   gb.add(T.box,m,col,null,surf); }
 // the stretches of the wall, the stairs and the gates that block (cx,cz) builds, and the footprint it keeps clear
+// a length of iron railing from (ax,ay,az) to (bx,by,bz), the heights those of the surface it stands on: a top rail
+// 0.95 m above it and a middle rail, a post at its start if asked, and a collider that cannot be stepped over
+const RAIL_IRON=hex('#5c6168'), RAIL_MIN=2.4;
+function ironPost(gb,x,z,y){ segBox(gb,[x,y,z],[x,y+0.95,z],0.045,0.045,RAIL_IRON); }
+function ironRail(gb,ch,ax,az,ay,bx,bz,by,post){ const iron=RAIL_IRON;
+  segBox(gb,[ax,ay+0.95,az],[bx,by+0.95,bz],0.05,0.05,iron); segBox(gb,[ax,ay+0.5,az],[bx,by+0.5,bz],0.03,0.03,iron);
+  if (post) segBox(gb,[ax,ay,az],[ax,ay+0.95,az],0.045,0.045,iron);
+  const L=Math.hypot(bx-ax,bz-az); if (L>0.05) ch.obbs.push({x:(ax+bx)/2,z:(az+bz)/2,hw:0.05,hd:L/2,rot:Math.atan2(bx-ax,bz-az),top:Math.max(ay,by)+1.0,bot:Math.min(ay,by)}); }
 function buildCitadel(gb,ch,cx,cz){
   const xc=cx*C+C/2, zc=cz*C+C/2, c=citAt(xc,zc); if (!c) return;
   if (xc<c.x0-C/2 || xc>c.x1+C/2 || zc<c.z0-C/2 || zc>c.z1+C/2) return;
@@ -2963,12 +2981,26 @@ function buildCitadel(gb,ch,cx,cz){
     { const e=ext+0.03, sl=(bw-aw)/L, ya=aw-sl*e, yb=bw+sl*e, w=L+2*e;
       ch.obbs.push({x:(ax+bx)/2+nx*wo,z:(az+bz)/2+nz*wo,hw:w/2,hd:(CIT_TH-CIT_PT)/2,rot:ry,top:Math.max(ya,yb),
         roof:{kind:'ramp',ya,yb,w,d:CIT_TH-CIT_PT,y0:Math.min(ya,yb),rise:Math.abs(yb-ya)}}); }
+    // an iron railing along the walk's inner edge, over the drop into the town, open where a stair's landing adjoins it
+    { const ri=-(CIT_TH/2-0.06), n=Math.max(1,Math.ceil(L/1.5));
+      const gapAt=i=>{ const tm=(i+0.5)/n, mx=lerp(ax,bx,tm)+nx*ri, mz=lerp(az,bz,tm)+nz*ri;
+        return c.stairs.some(S=>{ const q=S[0], ex=q.x+q.nx*CIT_SW/2, ez=q.z+q.nz*CIT_SW/2; return Math.hypot(mx-ex,mz-ez)<q.len/2+L/n/2+0.1; }); };
+      for (let i=0;i<n;i++){ if (gapAt(i)) continue; const t0=i/n, t1=(i+1)/n;
+        ironRail(gb,ch,lerp(ax,bx,t0)+nx*ri,lerp(az,bz,t0)+nz*ri,lerp(aw,bw,t0),lerp(ax,bx,t1)+nx*ri,lerp(az,bz,t1)+nz*ri,lerp(aw,bw,t1),true);
+        if (i+1<n && gapAt(i+1)) ironPost(gb,lerp(ax,bx,t1)+nx*ri,lerp(az,bz,t1)+nz*ri,lerp(aw,bw,t1)); } }
   }
   // the stairs up to the walk, solid masonry from the ground
   for (const S of c.stairs) for (const st of S){ if (!own(st.x,st.z)) continue;
     const g=Math.min(heightAt(st.x,st.z),baseH(st.x,st.z))-0.4;
     gb.add(T.box, mat(st.x,g,st.z,st.len+0.02,st.top-g,CIT_SW,st.rot), stone, null, SS);
-    ch.obbs.push({x:st.x,z:st.z,hw:st.len/2+0.01,hd:CIT_SW/2,rot:st.rot,top:st.top}); }
+    ch.obbs.push({x:st.x,z:st.z,hw:st.len/2+0.01,hd:CIT_SW/2,rot:st.rot,top:st.top,stair:'citadel'}); }
+  // and up the open side of each stair, sloping with it, from its landing down to where the drop beside it is slight
+  for (const S0 of c.stairs){ const S=S0.length>1?[S0[0],...S0]:S0, E=S.map(st=>[st.x-st.nx*(CIT_SW/2-0.05),st.z-st.nz*(CIT_SW/2-0.05),st.top]);
+    if (S0.length>1){ const dx=E[2][0]-E[1][0], dz=E[2][1]-E[1][1], l=Math.hypot(dx,dz)||1; E[0]=[E[1][0]-dx/l*S0[0].len/2,E[1][1]-dz/l*S0[0].len/2,E[1][2]]; }
+    let m=0, len=0; while (m+1<E.length){ const B=E[m+1], g=heightAt(B[0]-S[m+1].nx*0.4,B[1]-S[m+1].nz*0.4); if (B[2]-g<0.5) break; len+=Math.hypot(B[0]-E[m][0],B[1]-E[m][1]); m++; }
+    if (len<RAIL_MIN) continue;
+    for (let i=0;i<m;i++){ const A=E[i], B=E[i+1]; if (own((A[0]+B[0])/2,(A[1]+B[1])/2)) ironRail(gb,ch,A[0],A[1],A[2],B[0],B[1],B[2],i%3===0); }
+    if (own(E[m][0],E[m][1])) ironPost(gb,E[m][0],E[m][1],E[m][2]); }
   // the gates: a tower over an arched passage, its doors open against the passage's walls
   for (const g of c.gates){ if (!own(g.x,g.z)) continue;
     const H=mat(g.x,0,g.z,1,1,1,g.rot), r=g.r, pw=CIT_PW, D=CIT_GD, spring=g.yR+3.6, W=2*(r+pw);
@@ -4297,6 +4329,67 @@ function addDoorPlants(gb,ch,H,R,o,w,fz,dx,h,lampSide,climber){
   if (R()<0.12){ const cx=(R()<0.5?-1:1)*(w/2-0.15), P=L(cx,0,fz+0.12), g=heightAt(P.x,P.z);
     if (Math.abs(g-(P.y+gb.oy))<0.4) flValerian(gb,new THREE.Matrix4().makeTranslation(P.x,g-gb.oy,P.z),R); }
 }
+// the heights of the ground on the whole-metre grid that a block's own samples use (HG), read from the shared tiles,
+// so that a plan worked out from another block comes out exactly as the block's own
+function heightAt1(x,z){ const i=Math.floor(x), j=Math.floor(z), fu=x-i, fv=z-j;
+  return (hgSample(i,j)*(1-fu)+hgSample(i+1,j)*fu)*(1-fv)+(hgSample(i,j+1)*(1-fu)+hgSample(i+1,j+1)*fu)*fv; }
+/* The stepped streets of a block: wherever its street or alley climbs, it is built as stone steps. The plan is a
+   function of the block alone and is kept, so that the houses of the blocks beside it, which may be built before or
+   after it, can find the step outside their doors (streetTread). Each step: its middle (x,z), width w across the
+   street, length L along it, heading rot, the level top of its tread and the lowest ground under it (low).
+   No step stands over water, where it would bar the way along a quay or a mole. Each flight is planned along its whole
+   length: the ground's profile is first limited to a gradient a stair can climb, then cut into steps of an even rise,
+   so no step is ever steeper or taller than the ones before it. */
+const stpCache=new Map();
+function streetPlan(cx,cz){ const key=cx*1e6+cz; let out=stpCache.get(key); if (out) return out; out=[];
+  if (COUNTRY.has(chunkKind(cx,cz))){ stpCache.set(key,out); return out; }
+  const x0=cx*C, z0=cz*C, flights=[], H=heightAt1;
+  if (vSegOn(cx,cz)) flights.push({pt:u=>[vRoadX(cx,u),u],hw:u=>vRoadW(cx,u),u0:hRoadZ(cz,cx*C)+3.6,u1:hRoadZ(cz+1,cx*C)-3.6});
+  if (hSegOn(cx,cz)) flights.push({pt:u=>[u,hRoadZ(cz,u)],hw:u=>hRoadW(cz,u),u0:vRoadX(cx,cz*C)+3.6,u1:vRoadX(cx+1,cz*C)-3.6});
+  for (const A of alleyInfo(cx,cz)) flights.push(A.dir==='h'?{pt:u=>[u,A.f(u)],hw:()=>A.hw,u0:x0-3,u1:x0+C+3,alley:true}:{pt:u=>[A.f(u),u],hw:()=>A.hw,u0:z0-3,u1:z0+C+3,alley:true});
+  const DU=0.2, RISE=0.18;
+  for (const F of flights){
+    // a street's flight may be carried on up to EXT into the crossroads at either end, but only as far as it stands
+    // clear of the ground, so that it comes down to the ground there rather than ending over a drop
+    const EXT=F.alley?0:3.6, ua=F.u0-EXT, n=Math.max(1,Math.floor((F.u1-F.u0+2*EXT)/DU)), P=[], g=[];
+    for (let i=0;i<=n;i++){ const u=ua+i*DU, [x,z]=F.pt(u); P.push([x,z,u]); g.push(H(x,z)); }
+    // the gentlest gradient, from 0.65 up to 1, at which the flight meets the ground within 0.3 m at both its ends
+    let hp;
+    for (const K of [0.65,0.75,0.85,1.0]){ const k=K*DU; hp=g.slice();
+      for (let pass=0;pass<3;pass++){
+        for (let i=1;i<=n;i++) hp[i]=clamp(hp[i],hp[i-1]-k,hp[i-1]+k);
+        for (let i=n-1;i>=0;i--) hp[i]=clamp(hp[i],hp[i+1]-k,hp[i+1]+k); }
+      if (hp[0]-g[0]<0.3 && hp[n]-g[n]<0.3) break; }
+    const inside=u=>u>=F.u0-1e-6 && u<=F.u1+1e-6;
+    let i0=0;
+    for (let i=1;i<=n;i++){
+      if (Math.abs(hp[i]-hp[i0])<RISE && i<n) continue;
+      // within the crossroads only where the flight stands clear of the ground
+      if (!inside(P[i0][2]) || !inside(P[i][2])){ const um=(P[i0][2]+P[i][2])/2, [ex,ez]=F.pt(um); if (Math.max(hp[i],hp[i0])-H(ex,ez)<0.35){ i0=i; continue; } }
+      if (Math.abs(hp[i]-hp[i0])<0.05){ i0=i; continue; }
+      const [sx,sz]=P[i0], [x,z,u]=P[i], L=Math.hypot(x-sx,z-sz), mx=(sx+x)/2, mz=(sz+z)/2;
+      const ok=L<2.4 && Math.min(hp[i],hp[i0])>0.4 && H(mx,mz)>0.2 && H(sx,sz)>0.2 && H(x,z)>0.2 && SIDES.every(sd=>Math.abs(mz-coastRoadZ(sd,mx))>CR_HW+1.2) && railPerp(mx,mz)>6 && !stCut(mx,mz,0.5) && !(railCross(Math.round(mx/C))&&Math.abs(mz-railCross(Math.round(mx/C)).z)<10) && (!F.alley || (roadDist(mx,mz)>0.4 && insideCell(cx,cz,mx,mz,-0.5)))
+        // and the whole tread over land, not only its middle line, so that no step juts out over a quay's edge
+        && obbSamples({x:mx,z:mz,hw:F.hw((P[i0][2]+u)/2),hd:L/2,rot:Math.atan2(x-sx,z-sz)}).every(c=>H(c[0],c[1])>0.2);
+      if (ok){
+        const w=2*F.hw((P[i0][2]+u)/2)-(F.alley?0.05:0.3), rot=Math.atan2(x-sx,z-sz);
+        // the tread is level at the upper of its two heights; the block runs down into the ground beneath it
+        const top=Math.max(hp[i],hp[i0])+0.02; let low=Math.min(hp[i],hp[i0]);
+        for (const c of obbSamples({x:mx,z:mz,hw:w/2,hd:L/2,rot})) low=Math.min(low,H(c[0],c[1]));
+        out.push({x:mx,z:mz,w,L,rot,top,low,alley:!!F.alley});
+      }
+      i0=i;
+    }
+  }
+  if (stpCache.size>4000) stpCache.delete(stpCache.keys().next().value);
+  stpCache.set(key,out); return out; }
+// the top of the stepped street's tread at (x,z), within m of a step's edges, or null where there is none
+function streetTread(x,z,m=0){ let t=null; const cx=Math.floor(x/C), cz=Math.floor(z/C);
+  for (let j=-1;j<=1;j++) for (let i=-1;i<=1;i++) for (const q of streetPlan(cx+i,cz+j)){
+    if (Math.abs(q.x-x)>q.w/2+q.L/2+m+0.1 || Math.abs(q.z-z)>q.w/2+q.L/2+m+0.1) continue;
+    const dx=x-q.x, dz=z-q.z, c=Math.cos(q.rot), s=Math.sin(q.rot), u=dx*c-dz*s, v=dx*s+dz*c;
+    if (Math.abs(u)<=q.w/2+m && Math.abs(v)<=q.L/2+m) t=Math.max(t??-1e9,q.top); }
+  return t; }
 function addHouse(gb,ch,R,o){
   const w=o.w, d=o.d, h=o.h;
   let base=o.base;
@@ -4309,6 +4402,13 @@ function addHouse(gb,ch,R,o){
     for (let i=0;i<=nu;i++){ const u=(i/nu-0.5)*w; at(u,-d/2); at(u,d/2); }
     for (let j=1;j<nv;j++){ const v=(j/nv-0.5)*d; at(-w/2,v); at(w/2,v); }
     at(0,0);
+    // a house whose front opens onto a stepped street stands with its threshold at the tread outside, on a plinth
+    // where that is above the ground, so that no step stands across its door (streetTread)
+    // (the tread before the middle of the front, where the door is near, or failing a step there, the lower of those
+    // before the quarters of the front)
+    if (!o.tower){ const tq=f=>streetTread(o.x+c*f*w+sn*(d/2+0.6),o.z-sn*f*w+c*(d/2+0.6),0.2);
+      let t=tq(0); if (t===null){ const a=tq(-0.25), b=tq(0.25); t=a===null?b:b===null?a:Math.min(a,b); }
+      if (t!==null && t-DF>base+0.15 && t-DF<base+3) base=t-DF; }
     if (base-hmin>0.05){ const fb=hmin-0.8-gb.oy;
       gb.add(T.box, mat(o.x,fb,o.z,w+0.16,base-hmin+0.8,d+0.16,o.rot), shade(C_.stone,R,0.05), fb, SS);
       gb.add(T.box, mat(o.x,base-gb.oy-0.08,o.z,w+0.24,0.16,d+0.24,o.rot), C_.trim, null); }
@@ -4836,6 +4936,19 @@ function buildStation(gb,ch,R,S){
     for (let k=0;k<4;k++){ const xq=x+k*0.5+0.25, [px,pz,rot]=at(xq,sd*3.4);
       ch.obbs.push({x:px,z:pz,hw:1.5,hd:0.27,rot,top:Math.max(platTop(xq-0.25),platTop(xq+0.25))}); }
   }
+  // the yard's retaining wall, where the hill stands above it: along its edge (stHalf), from below the yard's level up
+  // to the ground behind, with a coping, in lengths of 2 m whose tops follow the ground. Its face stands 1.5 m in front
+  // of the cut, so that the ground's metre grid, whose triangles join the yard to the hill above across the cut, is
+  // hidden within it
+  { const yard=railY(S.x)-0.2;
+    for (let x=S.x-40; x<S.x+40-0.01; x+=2){ const xb=Math.min(x+2,S.x+40), hA=stHalf(S,x), hB=stHalf(S,xb);
+      const FW=1.5, TH=ST_EDGE+0.1+FW, [ax,az]=at(x,sd*(hA+ST_EDGE+0.1-TH/2)), [bx,bz]=at(xb,sd*(hB+ST_EDGE+0.1-TH/2)), [gxa,gza]=at(x,sd*(hA+ST_EDGE+0.6)), [gxb,gzb]=at(xb,sd*(hB+ST_EDGE+0.6));
+      const ya=railY(x)-0.2, yb=railY(xb)-0.2, ta=heightAt(gxa,gza)+0.1, tb=heightAt(gxb,gzb)+0.1;
+      if (Math.max(ta-ya,tb-yb)<ST_WALL+0.1) continue;
+      const A=Math.max(ta,ya+0.3), B=Math.max(tb,yb+0.3), lo=Math.min(ya,yb)-0.8;
+      shearBox(gb,ax,az,A,bx,bz,B,Math.max(A,B)-lo,TH,stone,SS);
+      shearBox(gb,ax,az,A+0.1,bx,bz,B+0.1,0.12,TH+0.16,C_.trim,0);
+      const L=Math.hypot(bx-ax,bz-az); ch.obbs.push({x:(ax+bx)/2,z:(az+bz)/2,hw:TH/2,hd:L/2+0.02,rot:Math.atan2(bx-ax,bz-az),top:Math.max(A,B)+0.1}); } }
   // canopy on iron posts over the middle of the platform
   for (let x=S.x-14; x<=S.x+14; x+=4){ const [px,pz]=at(x,sd*4.1), ry=railY(x); gb.add(T.cyl8, mat(px,platTop(x),pz,0.16,3.3,0.16), posts, null); ch.circles.push({x:px,z:pz,r:0.15,top:Infinity}); }
   for (let x=S.x-15; x<S.x+15; x+=2){ const [px,pz,rot]=at(x+1,sd*3.6), ry=railY(x+1);
@@ -4848,6 +4961,18 @@ function buildStation(gb,ch,R,S){
     for (const sx of [-0.5,0.5]) addSeat(ch,M,gb.oy,sx,0.45,0,0.45,'bench'); }
   for (const dx of [-24,-18,18,24]){ const [lx,lz]=at(S.x+dx,sd*4.4), ry=railY(S.x+dx);
     gb.add(T.cyl8, mat(lx,platTop(S.x+dx),lz,0.14,3.4,0.14), posts, null); gb.add(T.boxC, mat(lx,ry+4.45,lz,0.32,0.4,0.32), BULB, null, 6); glow(ch,lx,ry+4.45,lz,2.8); }
+  // flowers, on their own random sequence so that the rest of the station is laid out as before: a hanging basket on
+  // a bracket from each of the canopy's posts, hung out over the platform towards the track, and groups of pots along
+  // the back of the platform, clear of the posts, the benches and the lamps
+  if (gb.lod<2){ const RF=rng(Math.floor(hash(Math.round(S.x),sd,7301)*4294967296));
+    for (let x=S.x-14; x<=S.x+14; x+=4){ const s=(railZ(x+1)-railZ(x-1))/2, l=Math.hypot(1,s), dx=(s/l)*sd, dz=-(1/l)*sd, [px,pz]=at(x,sd*4.1), y=platTop(x)+2.95;
+      const kind=pick(RF,['geranium','geranium','petunia','ivy']), M=new THREE.Matrix4().makeTranslation(px+dx*0.08,y,pz+dz*0.08).multiply(new THREE.Matrix4().makeRotationY(Math.atan2(dx,dz))).multiply(mat(0,0,0,1.2,1.2,1.2));
+      flBasket(gb,M,RF,kind);
+      if (gb.lod===0) (ch.plants||(ch.plants=[])).push({kind,x:px+dx*0.6,y:y+gb.oy-0.7,z:pz+dz*0.6}); }
+    for (const gx of [-21,-12,-4,4,12,21]){ const n=2+Math.floor(RF()*2);
+      for (let i=0;i<n;i++){ const x=S.x+gx+(i-(n-1)/2)*0.55+(RF()-0.5)*0.1, [px,pz]=at(x,sd*(4.5+(RF()-0.5)*0.1)), sc=1.05+RF()*0.35, y=platTop(x);
+        const r=flPot(gb,new THREE.Matrix4().makeTranslation(px,y,pz).multiply(new THREE.Matrix4().makeRotationY(RF()*6.283)),RF,sc);
+        if (gb.lod===0){ ch.circles.push({x:px,z:pz,r:r.r+0.05,top:Infinity}); (ch.plants||(ch.plants=[])).push({kind:'pot',x:px,y:y+gb.oy,z:pz}); } } } }
   // station building facing the track
   const [hx,hz]=at(S.x,sd*(4.9+3.6)), s=(railZ(S.x+1)-railZ(S.x-1))/2, l=Math.hypot(1,s), fx=(s/l)*sd, fz=-(1/l)*sd;
   // its floor is level with the platform's top, on a plinth down into the ground, so that its door opens onto the
@@ -5410,10 +5535,14 @@ function genChunk(cx,cz,lod=0){
           if (top<=g+0.05){ ok=true;
             // where the ground at the foot lies lower than the hillside (a street levelled into it), further steps carry
             // the flight down to it, so that its last step meets the ground; the flight above is as planned
-            for (let k2=kk; k2<kk+8; k2++){ const d2=P.r+0.95+k2*go+go/2, x2=P.x+dx*d2, z2=P.z+dz*d2, t2=P.level-(k2+1)*ri, ga=heightAt(x2,z2);
-              if (t2<=ga+0.05 || ga<0.2) break;
+            // (up to sixteen of them; a flight that would still end above the ground is not built)
+            let met=false;
+            for (let k2=kk; k2<kk+16; k2++){ const d2=P.r+0.95+k2*go+go/2, x2=P.x+dx*d2, z2=P.z+dz*d2, t2=P.level-(k2+1)*ri, ga=heightAt(x2,z2);
+              if (t2<=ga+0.05){ met=true; break; }
+              if (ga<0.2) break;
               if (!stepIn(x2,z2,dx,dz,go) || roadDist(x2,z2)<0 || railPerp(x2,z2)<5){ ok=false; break; }
               steps.push({x:x2,z:z2,top:t2,g:Math.min(baseH(x2,z2),ga)}); }
+            if (!met) ok=false;
             if (ok){ const n=steps.length, fd=P.r+0.95+n*go+1.5;
               ok=insideCell(cx,cz,P.x+dx*fd,P.z+dz*fd,0.1) && railPerp(P.x+dx*fd,P.z+dz*fd)>=5; }
             break; }
@@ -5455,7 +5584,7 @@ function genChunk(cx,cz,lod=0){
       const SP=stairPlan.steps, ux=Math.cos(stairA), uz=Math.sin(stairA);
       for (const {x,z,top,g} of SP){
         gb.add(T.box, mat(x,g-0.6-P.level,z,2.1,top-g+0.6,go+0.02,rot), shade(C_.stone,R,0.03), g-0.6-P.level, SS);
-        ch.obbs.push({x,z,hw:1.05,hd:go/2,rot,top});
+        ch.obbs.push({x,z,hw:1.05,hd:go/2,rot,top,stair:'belv'});
         ch.placeCircles.push({x,z,r:1.8});
       }
       // a parapet each side, its top 0.9 m above the line of the nosings and sloping with it, under a coping: one
@@ -5466,7 +5595,9 @@ function genChunk(cx,cz,lod=0){
         for (let i=0;i+1<pts.length;i++){ const A=pts[i], B=pts[i+1], cs=Math.hypot(B[0]-A[0],B[2]-A[2])/Math.hypot(B[0]-A[0],B[1]-A[1],B[2]-A[2]);
           const dw=0.9-0.45/cs, dc=0.9+0.05/cs;
           segBox(gb,[A[0],A[1]+dw,A[2]],[B[0],B[1]+dw,B[2]],0.22,0.9,C_.trim,SS);
-          segBox(gb,[A[0],A[1]+dc,A[2]],[B[0],B[1]+dc,B[2]],0.34,0.1,C_.trim,SS); } }
+          segBox(gb,[A[0],A[1]+dc,A[2]],[B[0],B[1]+dc,B[2]],0.34,0.1,C_.trim,SS);
+          // (it bars the way off the side of the flight: in the world's heights, as the square's own are offset by P.level)
+          const Lh=Math.hypot(B[0]-A[0],B[2]-A[2]); ch.obbs.push({x:(A[0]+B[0])/2,z:(A[2]+B[2])/2,hw:0.11,hd:Lh/2,rot:Math.atan2(B[0]-A[0],B[2]-A[2]),top:Math.max(A[1],B[1])+P.level+1.0,bot:Math.min(A[1],B[1])+P.level-0.3}); } }
       // the landing at the foot is kept clear of houses
       const fd=P.r+0.95+SP.length*go+0.9;
       ch.placeCircles.push({x:P.x+Math.cos(stairA)*fd,z:P.z+Math.sin(stairA)*fd,r:1.6}); }
@@ -5548,24 +5679,48 @@ function genChunk(cx,cz,lod=0){
       ch.circles.push({x:b.x,z:b.z,r:b.r,top});
       ch.placeCircles.push({x:b.x,z:b.z,r:b.r+0.35});
       const rr=b.r+0.62, dirn=R()<0.5?1:-1, phi=hiA-dirn*0.4;
-      const g0=heightAt(b.x+Math.cos(phi)*rr,b.z+Math.sin(phi)*rr), n=Math.max(2,Math.ceil((top-g0)/0.27));
+      const g0=heightAt(b.x+Math.cos(phi)*rr,b.z+Math.sin(phi)*rr), n=Math.max(2,Math.ceil((top-g0)/0.27)), da=0.52/rr;
+      // an iron railing guards the drops: up the outer side of the stair, sloping with it from the first step that
+      // stands 0.5 m clear of the ground beside it, and across the stair's head, so that the top step, which is left
+      // sideways onto the terrace, does not end in the air; then round the terrace's rim, open where the stair arrives
+      const iron=RAIL_IRON, rail=[], RO=b.r+1.19, railSeg=(...A)=>ironRail(gb,ch,...A);
       for (let s=0;s<n;s++){
-        const a=phi+dirn*s*0.52/rr, x=b.x+Math.cos(a)*rr, z=b.z+Math.sin(a)*rr, y=g0+(s+1)*(top-g0)/n, gk=heightAt(x,z), rot=Math.atan2(Math.cos(a),Math.sin(a));
+        const a=phi+dirn*s*da, x=b.x+Math.cos(a)*rr, z=b.z+Math.sin(a)*rr, y=g0+(s+1)*(top-g0)/n, gk=heightAt(x,z), rot=Math.atan2(Math.cos(a),Math.sin(a));
         if (y<gk+0.05) continue;
         gb.add(T.box, mat(x,gk-1,z,0.62,y-gk+1,1.24,rot), C_.stone, gk-1, SS);
-        ch.obbs.push({x,z,hw:0.31,hd:0.62,rot,top:y});
+        ch.obbs.push({x,z,hw:0.31,hd:0.62,rot,top:y,stair:'bastion'});
         ch.placeCircles.push({x,z,r:1.9});
+        // the outer edge at the step's lower nosing, and at its upper end for the last
+        const ao=a-dirn*da/2, gO=heightAt(b.x+Math.cos(a)*(RO+0.4),b.z+Math.sin(a)*(RO+0.4));
+        if (rail.length || y-gO>0.5 || (n-s)*0.52<RAIL_MIN) rail.push([b.x+Math.cos(ao)*RO,b.z+Math.sin(ao)*RO,y]);
+        if (s===n-1){ const ae=a+dirn*da/2; rail.push([b.x+Math.cos(ae)*RO,b.z+Math.sin(ae)*RO,y]);
+          // across the head, from the outer edge to the terrace's wall
+          railSeg(b.x+Math.cos(ae)*RO,b.z+Math.sin(ae)*RO,y,b.x+Math.cos(ae)*(b.r+0.02),b.z+Math.sin(ae)*(b.r+0.02),y,false); }
       }
+      for (let i=0;i+1<rail.length;i++){ const A=rail[i], B=rail[i+1]; railSeg(A[0],A[1],A[2],B[0],B[1],B[2],i%3===0); }
+      if (rail.length){ const L=rail[rail.length-1]; segBox(gb,[L[0],L[2],L[1]],[L[0],L[2]+0.95,L[1]],0.045,0.045,iron); }
+      // the landing: room on the terrace beside the top step, kept clear of the houses and the tree
+      const aTop=phi+dirn*(n-1)*da, lx=b.x+Math.cos(aTop)*(b.r-1.1), lz=b.z+Math.sin(aTop)*(b.r-1.1);
       const local=[];
       for (let q=0;q<14 && local.length<3;q++){
         const w=3.4+R()*1.8, d=3.8+R()*2.2, a=R()*6.28, rr2=R()*(b.r-2.2), rot=R()*6.28;
         const o={x:b.x+Math.cos(a)*rr2,z:b.z+Math.sin(a)*rr2,hw:w/2,hd:d/2,rot};
         if (!obbSamples(o).every(p=>Math.hypot(p[0]-b.x,p[1]-b.z)<b.r-0.25)) continue;
         if (local.some(l=>obbOverlap(o,l,-0.6))) continue;
+        if (obbCircleDist(o,lx,lz)<1.3) continue;
         local.push(o); house({x:o.x,z:o.z,rot,w,d,h:(4.2+Math.floor(R()*2.5)*2.4)*hMul,base:top,roof:roofKind()});
       }
       if (R()<0.8) for (let q=0;q<6;q++){ const a=R()*6.28, rr2=R()*(b.r-1.6), x=b.x+Math.cos(a)*rr2, z=b.z+Math.sin(a)*rr2;
-        if (local.every(l=>obbCircleDist(l,x,z)>1.4)){ addTree(gb,ch,x,z,R,0.8,top); break; } }
+        if (local.every(l=>obbCircleDist(l,x,z)>1.4) && Math.hypot(x-lx,z-lz)>2.2){ addTree(gb,ch,x,z,R,0.8,top); break; } }
+      // the railing round the rim, in straight lengths between posts, left out where a house stands at the rim (its
+      // wall is the barrier there) and where the stair arrives
+      { const rI=b.r-0.12, N=Math.max(12,Math.round(2*Math.PI*rI/1.4)), gap=0.95/b.r, on=[];
+        for (let i=0;i<N;i++){ const a0=i/N*6.283, a1=(i+1)/N*6.283, am=(a0+a1)/2, mx=b.x+Math.cos(am)*rI, mz=b.z+Math.sin(am)*rI;
+          on.push(Math.abs(Math.atan2(Math.sin(am-aTop),Math.cos(am-aTop)))>=gap+3.2/N && !local.some(l=>obbCircleDist(l,mx,mz)<0.35)); }
+        for (let i=0;i<N;i++){ if (!on[i]) continue; const a0=i/N*6.283, a1=(i+1)/N*6.283;
+          const ax=b.x+Math.cos(a0)*rI, az=b.z+Math.sin(a0)*rI, bx=b.x+Math.cos(a1)*rI, bz=b.z+Math.sin(a1)*rI;
+          railSeg(ax,az,top,bx,bz,top,true);
+          if (!on[(i+1)%N]) segBox(gb,[bx,top,bz],[bx,top+0.95,bz],0.045,0.045,iron); } }
       if (R()<0.7) addFigure(gb,b.x+Math.cos(phi)*(b.r-0.8),top,b.z+Math.sin(phi)*(b.r-0.8),R,R()*6.28);
       if (!P) ch.desc='Houses raised on a curved terrace wall, reached by an outside stair.';
       break;
@@ -5605,43 +5760,12 @@ function genChunk(cx,cz,lod=0){
     }
   }
 
-  /* --- stepped streets: wherever a street or alley climbs, it is built as stone steps --- */
+  /* --- stepped streets: wherever a street or alley climbs, it is built as stone steps (streetPlan) --- */
   if (!COUNTRY.has(ch.kind)){
-    const flights=[];
-    if (vSegOn(cx,cz)) flights.push({pt:u=>[vRoadX(cx,u),u],hw:u=>vRoadW(cx,u),u0:hRoadZ(cz,cx*C)+3.6,u1:hRoadZ(cz+1,cx*C)-3.6});
-    if (hSegOn(cx,cz)) flights.push({pt:u=>[u,hRoadZ(cz,u)],hw:u=>hRoadW(cz,u),u0:vRoadX(cx,cz*C)+3.6,u1:vRoadX(cx+1,cz*C)-3.6});
-    for (const A of ch.alleys) flights.push(A.dir==='h'?{pt:u=>[u,A.f(u)],hw:()=>A.hw,u0:x0-3,u1:x0+C+3,alley:true}:{pt:u=>[A.f(u),u],hw:()=>A.hw,u0:z0-3,u1:z0+C+3,alley:true});
     const stoneC=shade(C_.stoneDark,R,0.03).multiplyScalar(0.95);
-    // no step stands over water, where it would bar the way along a quay or a mole
-    // each flight is planned along its whole length: the ground's profile is first limited to a gradient a stair
-    // can climb, then cut into steps of an even rise, so no step is ever steeper or taller than the ones before it
-    const DU=0.2, KMAX=0.65, RISE=0.18;
-    for (const F of flights){
-      const n=Math.max(1,Math.floor((F.u1-F.u0)/DU)), P=[], hp=[];
-      for (let i=0;i<=n;i++){ const u=F.u0+i*DU, [x,z]=F.pt(u); P.push([x,z,u]); hp.push(heightAt(x,z)); }
-      const k=KMAX*DU;
-      for (let pass=0;pass<3;pass++){
-        for (let i=1;i<=n;i++) hp[i]=clamp(hp[i],hp[i-1]-k,hp[i-1]+k);
-        for (let i=n-1;i>=0;i--) hp[i]=clamp(hp[i],hp[i+1]-k,hp[i+1]+k); }
-      let i0=0;
-      for (let i=1;i<=n;i++){
-        if (Math.abs(hp[i]-hp[i0])<RISE && i<n) continue;
-        if (Math.abs(hp[i]-hp[i0])<0.05){ i0=i; continue; }
-        const [sx,sz]=P[i0], [x,z,u]=P[i], L=Math.hypot(x-sx,z-sz), mx=(sx+x)/2, mz=(sz+z)/2;
-        const ok=L<2.4 && Math.min(hp[i],hp[i0])>0.4 && heightAt(mx,mz)>0.2 && heightAt(sx,sz)>0.2 && heightAt(x,z)>0.2 && SIDES.every(sd=>Math.abs(mz-coastRoadZ(sd,mx))>CR_HW+1.2) && railPerp(mx,mz)>6 && !(railCross(Math.round(mx/C))&&Math.abs(mz-railCross(Math.round(mx/C)).z)<10) && (!F.alley || (roadDist(mx,mz)>0.4 && insideCell(cx,cz,mx,mz,-0.5)))
-          // and the whole tread over land, not only its middle line, so that no step juts out over a quay's edge
-          && obbSamples({x:mx,z:mz,hw:F.hw((P[i0][2]+u)/2),hd:L/2,rot:Math.atan2(x-sx,z-sz)}).every(c=>heightAt(c[0],c[1])>0.2);
-        if (ok){
-          const w=2*F.hw((P[i0][2]+u)/2)-(F.alley?0.05:0.3), rot=Math.atan2(x-sx,z-sz);
-          // the tread is level at the upper of its two heights; the block runs down into the ground beneath it
-          const top=Math.max(hp[i],hp[i0])+0.02; let low=Math.min(hp[i],hp[i0]);
-          for (const c of obbSamples({x:mx,z:mz,hw:w/2,hd:L/2,rot})) low=Math.min(low,heightAt(c[0],c[1]));
-          gb.add(T.box, mat(mx,low-0.8,mz,w,top-low+0.8,L+0.03,rot), stoneC, low-0.8, SS);
-          ch.obbs.push({x:mx,z:mz,hw:w/2,hd:L/2+0.01,rot,top});
-        }
-        i0=i;
-      }
-    }
+    for (const q of streetPlan(cx,cz)){
+      gb.add(T.box, mat(q.x,q.low-0.8,q.z,q.w,q.top-q.low+0.8,q.L+0.03,q.rot), stoneC, q.low-0.8, SS);
+      ch.obbs.push({x:q.x,z:q.z,hw:q.w/2,hd:q.L/2+0.01,rot:q.rot,top:q.top,stair:'street'}); }
   }
 
   /* --- infill --- */
@@ -5657,7 +5781,7 @@ function genChunk(cx,cz,lod=0){
   /* --- open country --- */
   if (COUNTRY.has(ch.kind) && ch.kind!=='wild'){
     // a tree stands 8 m or more from a railway line, so that its crown, standing on a cutting's side, does not reach over the track
-    const okPt=(x,z,m=1.6)=>cellOk(x,z,-0.5) && roadDist(x,z)>m && railPerp(x,z)>8 && heightAt(x,z)>1 && !coveShaped(x,z);
+    const okPt=(x,z,m=1.6)=>cellOk(x,z,-0.5) && roadDist(x,z)>m && railPerp(x,z)>8 && heightAt(x,z)>1 && !coveShaped(x,z) && !stCut(x,z,1);
     if (ch.kind==='farm'){
       for (let t=0;t<20;t++){ const x=xc+(R()-0.5)*14, z=zc+(R()-0.5)*14, rot=R()*6.28;
         if (canPlace({x,z,hw:4,hd:5,rot},0.1,{maxRange:5})){ house({x,z,rot,w:7.5,d:9.5,h:5.6,roof:'side',stoneWalls:true});
@@ -5856,7 +5980,7 @@ function genChunk(cx,cz,lod=0){
       // handrails, and a parapet across the deck on the side away from the stairs
       for (const F of B.fb){ const y=brY(B,F.x), g0=y-0.2, yd=y+5.0, [cx,cz,rot]=at(F.x,0), sn=Math.sin(rot), cs=Math.cos(rot), f=F.f;
         if (Math.abs(F.x-x0-C/2)>C/2+20) continue;
-        const P=(a,o)=>[cx+sn*a-cs*o, cz+cs*a+sn*o], stone=shade(C_.stone,R,0.03), iron=hex('#3a3d42');
+        const P=(a,o)=>[cx+sn*a-cs*o, cz+cs*a+sn*o], stone=shade(C_.stone,R,0.03), iron=RAIL_IRON;
         const piece=(a,o,w,h,d,yb,top,col,wall)=>{ const [px,pz]=P(a,o); if (!inChunk(px,pz)) return; gb.add(T.box, mat(px,yb,pz,w,h,d,rot), col, null, col===stone?SS:undefined);
           ch.obbs.push(wall?{x:px,z:pz,hw:w/2,hd:d/2,rot,top:Infinity,bot:wall}:{x:px,z:pz,hw:w/2,hd:d/2,rot,top,bot:top-Math.max(h,0.4)}); };
         piece(0,0,8.4,0.4,1.8,yd-0.4,yd,stone);
@@ -8336,10 +8460,10 @@ window.__chunkProbe=()=>{
 // floor's edge lie on the wall; in the next strip in they lie in its neighbour's open sea. What has been kept of the
 // ground there, and of the blocks' kinds, villages, squares, streets and galleries that follow from it, is therefore
 // forgotten whenever the player's strip changes
-function wallForget(){ itCache.clear(); hgTiles.clear(); hgCache.clear(); vgCache.clear(); vmCache.clear(); ckCache.clear(); pzCache.clear(); alCache.clear(); sgCache.clear(); galSites.clear();
+function wallForget(){ itCache.clear(); hgTiles.clear(); stpCache.clear(); hgCache.clear(); vgCache.clear(); vmCache.clear(); ckCache.clear(); pzCache.clear(); alCache.clear(); sgCache.clear(); galSites.clear();
   farCache.clear(); farOrigin=''; outKey=''; chunkState=''; farDirty=true; islandCols.m.clear(); }
 stripHooks.push(()=>wallForget());
-function resetWorld(){ chunkState=''; islandCols.m.clear(); islandKey=null; galSites.clear(); galSpawn=null; farCache.clear(); hgTiles.clear(); clearXMemos(); spCache.clear(); lhCache.clear(); hbCache.clear(); rxCache.clear(); farOrigin=''; for (const T of tiles.values()) disposeTile(T); tiles.clear(); tilesDirty.clear(); tilesUrgent.clear(); for (const ch of chunks.values()) disposeChunk(ch); chunks.clear(); chunkVer++; cats.states.clear(); cats.near=[]; for (const k of cats.list){ if (k.s) k.s.inst=null; k.s=null; } for (const ch of dying) disposeChunk(ch); dying.length=0; pkCache.clear(); pzCache.clear(); alCache.clear(); hbCache.clear(); vgCache.clear(); vmCache.clear(); ckCache.clear(); ryCache.clear(); rzCache.clear(); rrCache.clear(); rsCache.clear(); stCache.clear(); rxCache.clear(); lhCache.clear(); rkCache.clear(); ruCache.clear(); cvCache.clear(); icvCache.clear(); cvSlots.clear(); cvMemoN=NaN; cvMemoL=[];
+function resetWorld(){ chunkState=''; islandCols.m.clear(); islandKey=null; galSites.clear(); galSpawn=null; farCache.clear(); hgTiles.clear(); stpCache.clear(); clearXMemos(); spCache.clear(); lhCache.clear(); hbCache.clear(); rxCache.clear(); farOrigin=''; for (const T of tiles.values()) disposeTile(T); tiles.clear(); tilesDirty.clear(); tilesUrgent.clear(); for (const ch of chunks.values()) disposeChunk(ch); chunks.clear(); chunkVer++; cats.states.clear(); cats.near=[]; for (const k of cats.list){ if (k.s) k.s.inst=null; k.s=null; } for (const ch of dying) disposeChunk(ch); dying.length=0; pkCache.clear(); pzCache.clear(); alCache.clear(); hbCache.clear(); vgCache.clear(); vmCache.clear(); ckCache.clear(); ryCache.clear(); rzCache.clear(); rrCache.clear(); rsCache.clear(); stCache.clear(); rxCache.clear(); lhCache.clear(); rkCache.clear(); ruCache.clear(); cvCache.clear(); icvCache.clear(); cvSlots.clear(); cvMemoN=NaN; cvMemoL=[];
   // the goods lines, the offshore islands, the ferry ports and the ferries' routes all belong to the old island
   brZones.clear(); brBucket.clear(); isCache.clear(); itCache.clear(); fpCache.clear(); irCache.clear(); hgCache.clear(); sgCache.clear(); mtxCache.clear();
   // and so do the ground under the main line, its cuttings and tunnels, the bridges that carry streets over it and the
@@ -11977,10 +12101,17 @@ for (let i=0;i<6;i++){ const loco=i===0||i===5, spec=loco?LOCO:COACH, m=new THRE
 const leadCar=()=>train.cars[train.lead?train.cars.length-1:0], isCoach=i=>!train.cars[i].loco;
 let doorOpen=0;
 // the doors slide open once the train has come to rest at a station, and close again before it leaves
+// only on the platform's side: each coach keeps the side (+1 or -1 along its own x) on which the platform lies at the
+// station where it stands, found as the train comes to rest (pside, 0 away from a station)
 function updateCarDoors(dt){
-  const want=train.wait>2.5?1:0; doorOpen+=clamp(want-doorOpen,-dt*0.9,dt*0.9); const k=smooth(doorOpen);
+  if (train.wait>0 && train.v<0.01 && !train.psideSet){ const S=stationNear(train.x,80);
+    for (const c of train.cars){ const p=c.m.position, sl=(railZ(p.x+1)-railZ(p.x-1))/2, l=Math.hypot(1,sl), r=c.m.rotation.y;
+      c.pside=S?Math.sign(Math.cos(r)*(-sl/l)*S.side+(-Math.sin(r))*(1/l)*S.side)||1:0; }
+    train.psideSet=true; }
+  if (train.wait<=0 && doorOpen<=0) train.psideSet=false;
+  const want=train.wait>2.5 && train.psideSet?1:0; doorOpen+=clamp(want-doorOpen,-dt*0.9,dt*0.9); const k=smooth(doorOpen);
   // shut, a door's edges lie 5 cm into the pocket and 3 cm into the groove; open, it is inside the pocket
-  for (const c of train.cars) for (const d of c.doors){ const {sx,e}=d.userData; d.position.set(sx*CDX,1.31,e*(CDZ-0.01)-e*k*(CDW+0.02)); }
+  for (const c of train.cars) for (const d of c.doors){ const {sx,e}=d.userData, o=sx===c.pside?k:0; d.position.set(sx*CDX,1.31,e*(CDZ-0.01)-e*o*(CDW+0.02)); }
 }
 /* A walker in a railway tunnel is not met by a train that was not already on its way. On going in, the tunnel's two
    portals are found along the line; a train then running towards it within 900 m, or already in it, is let come,
@@ -14334,7 +14465,7 @@ const co={car:1,lx:0,lz:0,yaw:0,pitch:0}, _cm=new THREE.Matrix4(), _cvv=new THRE
 function coachValid(lx,lz){
   const a=Math.abs(lz), b=Math.abs(lx), W2=CW/2-0.5;
   if (a>CL/2-0.25) return b<0.2;                                   // the gangway door in the end wall
-  if (a>=CWZ+0.25) return b<=W2 || (doorOpen>0.85 && Math.abs(a-CDZ)<CDW/2-0.15 && b<=CW/2+1.0);   // vestibule, and an open doorway
+  if (a>=CWZ+0.25) return b<=W2 || (doorOpen>0.85 && Math.sign(lx)===train.cars[co.car].pside && Math.abs(a-CDZ)<CDW/2-0.15 && b<=CW/2+1.0);   // vestibule, and an open doorway on the platform's side
   if (a<=CWZ-0.25) return b<=0.14;                                 // the aisle between the seats
   return b<=0.2;                                                    // the doorway in the partition
 }
@@ -14344,7 +14475,7 @@ function coachStep(dt,turnIn){
     if (doorOpen<0.85) return;
     for (let i=1;i<train.cars.length-1;i++){ const m=train.cars[i].m; m.updateMatrix(); _cm.copy(m.matrix).invert();
       _cvv.set(player.x,player.y+1,player.z).applyMatrix4(_cm); const lx=_cvv.x, lz=_cvv.z;
-      if (Math.abs(_cvv.y)>3 || Math.abs(lx)<CW/2-0.3 || Math.abs(lx)>CW/2+0.6) continue;
+      if (Math.abs(_cvv.y)>3 || Math.abs(lx)<CW/2-0.3 || Math.abs(lx)>CW/2+0.6 || Math.sign(lx)!==train.cars[i].pside) continue;
       // only a step towards the coach boards it, and only inside the place where a step out of the door alights
       // (CW/2+0.75), so that someone who has just stepped out onto the platform is not taken straight back in
       _cvv.set(player.ox,player.y+1,player.oz).applyMatrix4(_cm); if (Math.abs(lx)>=Math.abs(_cvv.x)-1e-4) continue;
@@ -17443,7 +17574,7 @@ requestAnimationFrame(()=>setTimeout(async ()=>{
 // (Orbital mode) for automated checks
 if (ORBITAL) window.__orbital={ORB,skyU,get STRIP(){ return STRIP; },setStrip(k){ STRIP=k; wallForget(); },stripStep,trueX,trueZ,wallE,wallBase,ringGround,stripPoint,get voy(){ return voy; },get ORIGIN(){ return ORIGIN; },
   look(p){ fpPitch=p; }};
-window.__village={ get seed(){ return SEED_TEXT; }, clouds:{CLOUD,cloudDrift,get on(){ return cloudsOn; }}, __gen:{isVillage,kind0,baseH,coastZ,highGround,seaDist,islandInfo,peakInfo,railZ,railY,coastRoadZ,heightAt}, sceneState:()=>sceneState(), get fly(){ return {aerFly,flyY,flying:flying(),mode,dist,fpPitch,yaw,crouch}; }, flyStart, flyLand, flyGround, gullTopAt:(x,z)=>gullTopAt(x,z), set fpPitchV(v){ fpPitch=v; }, set flyYV(v){ flyY=v; }, aerGround:(x,y)=>aerGround(x,y), get aerView(){ return {yaw,pitch,dist,x:player.x,z:player.z,cy:camPos.y,gy:heightAt(camPos.x,camPos.z),lift:aerLift}; }, TELE, teleRaise, teleLower, teleMag, get teleRing(){ return teleRing; }, viewZoom, get origin(){ return ORIGIN; }, share:{state:sceneState,link:sceneLink,qrEncode,get shared(){ return SCENE; }}, get paused(){ return paused; }, set paused(v){ if (!!v!==paused){ paused=!!v; lastClock=null; } }, goods, glZone, branchesAt, get mantle(){ return mantle; }, get colRoof(){ return colRoof; }, roofAt, roofSlope, topAt, get sit(){ return sit; }, get indoors(){ return indoors; }, roomFns:{flight,localToWorld,obbLocal,roomCeil}, sitKey, sitFind, sitStand, sitSpotOk, get camp(){ return CAMP; }, campKey, campPitch, campStrike, campWhyNot, campFit, campBuild, campLight, beachStretch, BCH_SP, COACH_SEATS, FERRY_SEATS, coachEnter, genChunk, coastRoadZ, brZ, brY, heightAt, player, chunks, rooms, doorMesh, keys, setYaw:v=>{yaw=v;}, get yaw(){return yaw;}, fe, co, lightsNear, beams, ruinIn, cats, catHome, PEOPLE, get ridden(){ return ridden; },
+window.__village={ get seed(){ return SEED_TEXT; }, clouds:{CLOUD,cloudDrift,get on(){ return cloudsOn; }}, __gen:{isVillage,kind0,baseH,coastZ,highGround,seaDist,islandInfo,peakInfo,railZ,railY,coastRoadZ,heightAt}, sceneState:()=>sceneState(), get fly(){ return {aerFly,flyY,flying:flying(),mode,dist,fpPitch,yaw,crouch}; }, flyStart, flyLand, flyGround, gullTopAt:(x,z)=>gullTopAt(x,z), set fpPitchV(v){ fpPitch=v; }, set flyYV(v){ flyY=v; }, aerGround:(x,y)=>aerGround(x,y), get aerView(){ return {yaw,pitch,dist,x:player.x,z:player.z,cy:camPos.y,gy:heightAt(camPos.x,camPos.z),lift:aerLift}; }, TELE, teleRaise, teleLower, teleMag, get teleRing(){ return teleRing; }, viewZoom, get origin(){ return ORIGIN; }, share:{state:sceneState,link:sceneLink,qrEncode,get shared(){ return SCENE; }}, get paused(){ return paused; }, set paused(v){ if (!!v!==paused){ paused=!!v; lastClock=null; } }, goods, glZone, branchesAt, get mantle(){ return mantle; }, get colRoof(){ return colRoof; }, roofAt, roofSlope, topAt, get sit(){ return sit; }, get indoors(){ return indoors; }, roomFns:{flight,localToWorld,obbLocal,roomCeil}, sitKey, sitFind, sitStand, sitSpotOk, get camp(){ return CAMP; }, campKey, campPitch, campStrike, campWhyNot, campFit, campBuild, campLight, beachStretch, BCH_SP, COACH_SEATS, FERRY_SEATS, coachEnter, genChunk, streetTread, streetPlan, stCut, stationNear, coastRoadZ, brZ, brY, heightAt, player, chunks, rooms, doorMesh, keys, setYaw:v=>{yaw=v;}, get yaw(){return yaw;}, fe, co, lightsNear, beams, ruinIn, cats, catHome, PEOPLE, get ridden(){ return ridden; },
   findHarbour(){ for (let d=0;d<12;d++) for (const sd of SIDES) for (const n of [Math.floor(player.x/HARB)+d,Math.floor(player.x/HARB)-d]){ const H=harbourInfo(sd,n); if (H) return {x:H.x,z:coastZ(sd,H.x)+sd*7,W:H.W,sd,qz:coastZ(sd,H.x+H.W/2-1)+sd*2.5}; } return null; },
   findBeach(){ for (let x=player.x; x<player.x+3000; x+=10) for (const sd of SIDES){ const z=coastZ(sd,x)+sd*5; if (heightAt(x,z)<0.6 && heightAt(x,z)>0.1 && !harbourAt(sd,x)) return {x,z,sd}; } return null; },
   ridge(x){ return {x,z:ridgeZ(x)}; },
