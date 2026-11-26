@@ -1,0 +1,1156 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coast · streams</title>
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Alegreya+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#9fc0dc;font-family:'Alegreya Sans',system-ui,sans-serif;}
+  canvas{display:block;width:100%;height:100%;touch-action:none;}
+  #panel{position:fixed;top:12px;right:12px;width:272px;padding:12px 14px;border-radius:10px;
+    background:rgba(250,246,238,0.88);color:#2b2b35;font-size:15px;box-shadow:0 2px 14px rgba(0,0,0,0.15);}
+  #panel .row{display:grid;grid-template-columns:84px 1fr 58px;align-items:center;gap:6px;margin:5px 0;}
+  #panel .row.sel{grid-template-columns:84px 1fr;}
+  #panel label{color:#555}
+  #panel output{text-align:right;font-variant-numeric:tabular-nums;}
+  #panel input[type=range]{width:100%;accent-color:#2f5f8f;}
+  #panel input[type=number]{font:inherit;font-size:14px;width:100%;box-sizing:border-box;padding:3px 6px;border:1px solid #c9bda9;border-radius:6px;background:#fffaf2;color:#2b2b35;}
+  #panel button,#panel select{font:inherit;font-size:14px;padding:4px 6px;border:1px solid #c9bda9;border-radius:6px;background:#fffaf2;color:#2b2b35;cursor:pointer;}
+  #panel .stats{margin-top:8px;font-size:13px;color:#555;font-variant-numeric:tabular-nums;line-height:1.35;}
+  #panel.hide{display:none}
+  @media (max-width:520px){ #panel{left:12px;right:12px;width:auto;top:auto;bottom:12px;} }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="panel">
+  <div class="row sel"><label for="view">View</label><select id="view">
+    <option value="overview">From above</option><option value="reach">A reach at 3 m</option><option value="reach15">A reach at 15 m</option>
+    <option value="fall">Waterfall and pool</option><option value="brink">Lip of a fall</option><option value="cascade">Cascades</option><option value="source">Spring</option>
+    <option value="mouth">Mouth</option><option value="village">Village</option></select></div>
+  <div class="row sel"><label for="vil">Village</label><select id="vil">
+    <option value="valley">In the valley</option><option value="across">Across the valley</option><option value="none">None</option></select></div>
+  <div class="row"><label for="seed">Seed</label><input id="seed" type="number" min="1" max="99999" step="1"><button id="next">Next</button></div>
+  <div class="row"><label for="g">Gradient</label><input id="g" type="range" min="0.08" max="0.35" step="0.01"><output id="gV"></output></div>
+  <div class="row"><label for="m">Meanders</label><input id="m" type="range" min="0" max="2" step="0.05"><output id="mV"></output></div>
+  <div class="row"><label for="d">Drop height</label><input id="d" type="range" min="0.4" max="3" step="0.05"><output id="dV"></output></div>
+  <div class="row"><label for="w">Width</label><input id="w" type="range" min="1.5" max="7" step="0.1"><output id="wV"></output></div>
+  <div class="row"><label for="h">Time</label><input id="h" type="range" min="5.5" max="20" step="0.05"><output id="hV"></output></div>
+  <div class="stats" id="stats"></div>
+</div>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"}}</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js';
+import * as FL from './streams-flora.js';
+
+/* Mountain streams: a model for the game.
+
+   The page builds a hillside about 1.8 km long, from a ridge at the north (-z) down to the sea at the south (+z), and
+   one stream that rises at a spring high on it and runs down to the sea. The query string chooses what is shown:
+   ?v=overview|reach|reach15|fall|cascade|source|mouth|village &seed=<n> &g=<gradient> &m=<meanders> &d=<drop height in m>
+   &w=<width in m> &h=<hour> &vil=valley|across|none &panel=0.
+
+   Course. A stream rises at a source placed from the seed high on the slope (in the game, one candidate source to a
+   slot of a coarse grid along the range, like the slots of the islands). From there its course is traced down the
+   uncarved ground, baseH, in steps of 8 m: at each step the next point is the lowest of eleven on a fan of headings
+   within 75 degrees of the present one, read on a slightly smoothed height and with a small cost for turning, so that
+   the course follows the floor of whatever valley it finds. It may not come back within 10 m of itself, and it may
+   rise by no more than 4 m above the lowest point it has reached, which carries it over small hollows. The trace ends
+   1.5 m below the sea. It reads only baseH and the village test, never the carved height, so there is no circularity.
+
+   Villages. A course that passes within 26 m of a village block (isVillage(cx,cz) in the game) is traced again from
+   24 m above that point with village blocks and a margin of 10 m about them forbidden. If that detour comes back to
+   the first course below the village without rising more than 4 m, it is used and the stream bends round the
+   village. Otherwise the stream goes underground for the width of the village, in a culvert with a stone headwall
+   and arch at each end, and keeps its first course beneath the houses, with no channel and no water there.
+
+   Plan. The traced line is smoothed into a valley line, sampled every 2 m, and a meander is laid on it as a sideways
+   offset: a sine of wavelength about fourteen channel widths with an amplitude of 0.15 of that wavelength, and a
+   longer, gentler swing of three wavelengths on the gentlest ground. Both fade on steep ground (above a slope of about
+   0.16 only a sixth of the short meander remains, so the course is straighter there), near a village, round a culvert
+   and at the two ends. The result is resampled every 0.5 m by length; its heading gives the curvature at each sample,
+   smoothed over 6 m, whose sign says which bank is the outer one of a bend.
+
+   Long profile. Along the course the ground is read at the centre and at both banks (the lowest of the three, so that
+   the water is held on both sides), smoothed over 20 m and never allowed to rise downstream. The bed aims to lie an
+   incision depth below this, of 1 m plus a fifth of the width, plus 8 m for each unit of slope, so that the channel is
+   cut deeper where the hillside is steep. The bed itself falls only gently, by 0.4 per cent and a further 3.5 per cent
+   of the hillside's slope, so that each reach is nearly level. Whenever the bed would stand more than about a third of
+   a drop above its aim, and the last drop is far enough upstream, the bed drops: by the drop height, scaled up on
+   steep ground (by a factor of 0.5 plus six times the slope) and varied from drop to drop, with one in eight of the
+   drops on steep ground made over twice as high. So the profile is a staircase of gentle reaches and falls; on steep
+   ground the steps come every 10 to 15 m as a step and pool cascade, on the coastal plain every 50 m or so as low
+   weirs. Below each drop the bed is scoured into a plunge pool, deepest a little beyond where the jet lands and
+   shoaling to a tail, to a depth of 0.25 m plus 0.3 of the drop, and the channel is widened there by up to half.
+
+   Carving. The stream is a modification of the height function: h = smin(ground, channel), a smooth minimum with
+   0.5 m of blending. The channel's height at a point comes from the nearest point of the course (its distance along,
+   t, and signed distance across, n) as a cross-section: a bed slightly deepest at the middle and on the outer side of a
+   bend; on the outer bank a steep cut bank; on the inner bank a point bar of gravel rising gently from the water, then
+   a gentler bank; above the bank top the valley side, at a slope of 0.75 rising to about 2 near a high fall, where it
+   stands as rock walls, and to 3 at a culvert, where it is a walled cut. Where the hillside is steep the cut is deep
+   and narrow, and where it is gentle the channel is a shallow trough in a broad bottom. Near the sea the depth tapers
+   and the bed is held at 0.35 m below the sea, so that the stream cuts a gap through the beach, and a fan of gravel is
+   laid on the sea bed off the mouth.
+
+   Erosion detail. The ground is coloured from the same cross-section: pebbles on the bed, bare bedrock in the steep
+   reaches and on and round every fall, pale gravel on the point bars, dark earth on the cut banks under an overhanging
+   lip of turf, a wet band at the water's edge and a greener strip of grass along the banks. Boulders lie in the bed,
+   more and larger on steep ground, round the rims and tails of the pools and at the foot of the cut banks; pebbles are
+   strewn on the bars and the bed; a lip of rock blocks stands across the head of each fall, with larger blocks in the
+   banks beside it. Oleanders grow along the banks below the high ground, oriental planes beside the lower reaches and
+   giant cane near the sea.
+
+   Water. The water stands 0.14 m plus 3 per cent of the width above the bed's staircase (the pools are therefore deeper,
+   with a level surface), so it lies well below the banks. Its surface is a ribbon along the course whose edges are found
+   where the carved ground rises out of it, and at each fall it pours from the lip as a curtain on a falling arc and
+   lands in the pool. The shader draws ripples moving downstream, a clear shallow tint that shows the bed and a deeper
+   green in the pools, the sky's reflection at a grazing angle, and white water from a foam value carried by each vertex:
+   full on the curtains, spreading and fading over the pool below each fall, and starting at the lip.
+
+   In the game. Every part above is a pure function of the seed and of baseH, so a block can be built alone:
+   - streamInfo(slot), cached like islandInfo, traces the course of the stream of a source slot, its plan, long profile,
+     drops, pools and water edges once, and holds them as arrays every 0.5 m with an index of 32 m cells;
+     streamsNear(cx,cz) lists the streams whose index has a cell within 48 m of a block.
+   - heightAtExact (and so heightAt and the hgTiles cache) applies h = smin(h, streamChannel(x,z)) after baseH and before
+     the streets and squares, which keep away from the channel. baseH itself is not changed, since the courses read it.
+   - isVillage must not read the carved height. The course reads isVillage, and villages, streets, the railway and
+     the station yards are kept off the channel by a margin: the street and rail code would need bridges or culverts
+     where they cross a stream, which this page does not model.
+   - The ground colouring in buildChunk takes the zone, the distance along and the distance across from the same query,
+     as this page's streamColour does; the boulders, pebbles, lips and plants are added to the block's geometry
+     builder (GB) from the course samples inside the block; the water ribbon is built per block from the samples
+     inside it, with its own material, beside the sea's surface.
+   - The bank plants would use the game's own oleander, plane and cane once they exist in the trees testbench. */
+
+/* ---------- from index.html: random numbers, noise and the palette ---------- */
+let SEED=1;
+function hash(a,b,c){
+  let h = Math.imul(a|0,0x27d4eb2d) ^ Math.imul(b|0,0x165667b1) ^ Math.imul(((c|0)+SEED*977)|0,0x9e3779b1);
+  h = Math.imul(h ^ (h>>>15), 0x85ebca6b); h = Math.imul(h ^ (h>>>13), 0xc2b2ae35); h ^= h>>>16;
+  return (h>>>0)/4294967296;
+}
+function rng(seed){ let s = seed>>>0 || 1; return ()=>{ s=(s+0x6D2B79F5)|0; let t=Math.imul(s^s>>>15,1|s); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+function vnoise(x,z,s){
+  const xi=Math.floor(x), zi=Math.floor(z), xf=x-xi, zf=z-zi;
+  const u=xf*xf*(3-2*xf), v=zf*zf*(3-2*zf);
+  const a=hash(xi,zi,s), b=hash(xi+1,zi,s), c=hash(xi,zi+1,s), d=hash(xi+1,zi+1,s);
+  return a+(b-a)*u+(c-a)*v+(a-b-c+d)*u*v;
+}
+function fbm(x,z,s,o=4){ let a=0.5,f=1,sum=0,n=0; for (let i=0;i<o;i++){ sum+=a*vnoise(x*f,z*f,s+i*7); n+=a; a*=0.5; f*=2.03; } return sum/n; }
+const lerp=(a,b,t)=>a+(b-a)*t;
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const smooth=t=>{ t=clamp(t,0,1); return t*t*(3-2*t); };
+const hex=h=>new THREE.Color(h);
+const PAL={
+  walls:['#f3e4d0','#efd6bf','#f6ebdd','#eacbb0','#f1dcc4','#e9c3ab','#f4dfcc','#edd0b8','#f2d8c8'],
+  roofs:['#d65a52','#de6b5b','#cc514c','#d8645a','#c94f48','#dd5f55'], win:'#3a2b2b', door:'#6a4530',
+  stone:'#dcc6ab', stoneDark:'#c4ad92', terrace:'#efd8c1', sand:'#dcb886', sand2:'#e6c99a', road:'#e9d2a6', piazza:'#efdcb6',
+  grass:'#a6a661', grass2:'#8f9a53', scrub:'#9a9a5c', rock:'#b8a48e', beach:'#ecd9ad', seabed:'#4f7f91', foam:'#f4f1e8',
+  leaf:['#4e6a2c','#5b7834','#465f27','#62803a'], olive:'#7f8b55', cypress:'#36502a', trunk:'#6a4a30', water:'#3f86c0',
+};
+const C_={}; for (const k in PAL) C_[k]=Array.isArray(PAL[k])?PAL[k].map(hex):hex(PAL[k]);
+const shade=(c,R,a=0.05)=>c.clone().multiplyScalar(1+(R()-0.5)*2*a);
+const GREY_ROCK=hex('#9a948a'), LIMESTONE=hex('#cfc7b6'), DRYGRASS=hex('#a8a465'), DIRT=hex('#c4a57c'), GRAVEL=hex('#8f8577');
+const MT_ROCK=hex('#a5aba6'), MT_PALE=hex('#c2c8c4'), MT_SCREE=hex('#82877c'), MT_MAQUIS=hex('#56643f'), MT_GARRIGUE=hex('#7d8a6c');
+const _mtC=new THREE.Color();
+// the colour of high ground, as in the game (without the snow, which this hillside does not reach)
+function mtTint(c,h,slope,n=0.5,p=0.5){ if (h<110) return c;
+  const m=smooth((h-110)/70)*(1-smooth((h-280)/150))*(1-smooth((slope-0.65)/0.6));
+  if (m>0) c.lerp(_mtC.copy(MT_GARRIGUE).lerp(MT_MAQUIS,smooth((n*0.4+p*0.6-0.35)/0.3)),Math.min(0.85,m*0.9));
+  const k=Math.max(smooth((h-170)/200),smooth((slope-0.7)/0.6)*smooth((h-120)/60)*0.9);
+  if (k>0) c.lerp(_mtC.copy(MT_ROCK).lerp(MT_PALE,smooth((p-0.45)/0.3)*0.8).lerp(MT_SCREE,clamp((slope-0.5)*1.4,0,1)*0.8+n*0.2),k);
+  return c; }
+// the stream's own colours
+const PEB_A=hex('#8f8169'), PEB_B=hex('#575046'), BAR_A=hex('#ddd5c4'), BAR_B=hex('#a99f8e'), BEDROCK=hex('#c3bdb1'), BEDROCK2=hex('#9c968c'),
+  EARTH=hex('#86694c'), EARTH_D=hex('#6a5340'), RIPARIAN=hex('#6f8a3c'), SHINGLE=hex('#b5ab9b'), SHINGLE2=hex('#d7cfbf');
+
+/* ---------- the settings ---------- */
+const Q=new URLSearchParams(location.search);
+const num=(k,d)=>Q.has(k)&&isFinite(+Q.get(k))?+Q.get(k):d;
+const state={ seed:Math.max(1,Math.round(num('seed',3))), grad:num('g',0.2), mea:num('m',1), drop:num('d',1.4), width:num('w',3),
+  hour:num('h',15), vil:Q.get('vil')||'valley', view:Q.get('v')||'overview' };
+
+/* ---------- the hillside ---------- */
+// The ground rises from the shore, about z=780, to a ridge at z=-1020, steeply near the top and gently near the sea,
+// with a broad valley winding down it, spurs and hollows on its sides, and a beach of 28 m at the foot
+const ZS=780, ZR=-1020, LEN=ZS-ZR, BEACH=28, CB=40;
+let TP={}, HTOP=360;
+function setTerrain(){ SEED=state.seed; const R=rng(state.seed*7919+13);
+  TP={a1:R()*6.28,a2:R()*6.28,a3:R()*6.28,a4:R()*6.28,vx:(R()-0.5)*160,s:Math.floor(R()*900)}; HTOP=state.grad*LEN; }
+function shoreZ(x){ return ZS+22*Math.sin(x*0.0041+TP.a1)+10*Math.sin(x*0.013+TP.a2); }
+function valleyX(z){ return TP.vx+130*Math.sin(z*0.0024+TP.a3)+45*Math.sin(z*0.0067+TP.a4); }
+function hill(u){ return HTOP*(0.1*u+0.9*Math.pow(u,1.75)); }
+function baseH(x,z){
+  const e=shoreZ(x)-z;
+  if (e<=0) return -14*(1-Math.exp(e/280));
+  let u=Math.max(0,e-BEACH)/LEN; if (u>1) u=Math.max(0.25,1-(u-1)*1.4);
+  const hb=hill(u), dx=x-valleyX(z), vw=150+50*vnoise(z*0.004,1.7,TP.s+3);
+  let h=hb*(1-0.2*Math.exp(-dx*dx/(2*vw*vw)));
+  h+=hb*0.16*(fbm(x*0.0035,z*0.0035,TP.s+5,3)-0.5)*2;
+  h+=(1.2+hb*0.012)*(fbm(x*0.03,z*0.03,TP.s+9,2)-0.5)*2*smooth((e-BEACH)/30);
+  return 1.6*Math.min(1,e/BEACH)+Math.max(h,-1);
+}
+function smoothH(x,z){ return (2*baseH(x,z)+baseH(x+6,z)+baseH(x-6,z)+baseH(x,z+6)+baseH(x,z-6))/6; }
+
+/* ---------- the village: a stand-in for the game's isVillage ---------- */
+let VB=[]; const VM=10;
+function isVillage(cx,cz){ for (const b of VB) if (b.cx===cx&&b.cz===cz) return true; return false; }
+function vDist(x,z){ let d=1e9;
+  for (const b of VB){ const dx=Math.max(b.x0-x,0,x-b.x1), dz=Math.max(b.z0-z,0,z-b.z1);
+    d=Math.min(d,dx===0&&dz===0?-Math.min(x-b.x0,b.x1-x,z-b.z0,b.z1-z):Math.hypot(dx,dz)); }
+  return d; }
+
+/* ---------- the course ---------- */
+const RISE=4;
+function gradDir(x,z){ const gx=smoothH(x+4,z)-smoothH(x-4,z), gz=smoothH(x,z+4)-smoothH(x,z-4); return Math.atan2(-gz,-gx); }
+function trace(x,z,avoid,join){
+  const STEP=8, pts=[[x,z]]; let hd=gradDir(x,z), low=smoothH(x,z);
+  for (let k=0;k<700;k++){
+    let best=null;
+    for (let d=-75;d<=75;d+=15){ const a=hd+d*Math.PI/180, nx=x+Math.cos(a)*STEP, nz=z+Math.sin(a)*STEP;
+      if (avoid && vDist(nx,nz)<VM) continue;
+      const h=smoothH(nx,nz); let c=h+Math.abs(d)*0.004;
+      for (let q=0;q<pts.length-2;q++){ const p=pts[q]; if ((p[0]-nx)**2+(p[1]-nz)**2<100){ c+=1e4; break; } }
+      if (!best||c<best.c) best={c,a,x:nx,z:nz,h}; }
+    if (!best||best.c>=1e4||best.h>low+RISE) return {pts,stuck:true};
+    low=Math.min(low,best.h); x=best.x; z=best.z; pts.push([x,z]); hd=best.a;
+    if (join){ const j=join(x,z); if (j>=0) return {pts,stuck:false,join:j}; }
+    if (baseH(x,z)<-1.5) return {pts,stuck:false};
+  }
+  return {pts,stuck:true};
+}
+function findCourse(){
+  const R=rng(state.seed*31+7), zs=ZR+170+R()*50, xs=valleyX(zs)+(R()-0.5)*50;
+  const nat=trace(xs,zs,false,null).pts;
+  // the village stands on the first course where it crosses z=235, on the valley floor or across the whole valley
+  VB=[];
+  if (state.vil!=='none'){ let best=nat[0]; for (const p of nat) if (Math.abs(p[1]-235)<Math.abs(best[1]-235)) best=p;
+    const [l,r]=state.vil==='across'?[-260,260]:[-30,50];
+    for (let cx=Math.floor((best[0]+l)/CB); cx<=Math.floor((best[0]+r)/CB); cx++) for (let cz=(state.vil==='across'?4:5);cz<=6;cz++) VB.push({cx,cz,x0:cx*CB,z0:cz*CB,x1:cx*CB+CB,z1:cz*CB+CB}); }
+  let pts=nat, culv=null, route='none';
+  if (VB.length){ let a=-1, b=-1; nat.forEach((p,i)=>{ if (vDist(p[0],p[1])<VM+16){ if (a<0) a=i; b=i; } });
+    if (a>=0){ const s0=Math.max(0,a-3);
+      const det=trace(nat[s0][0],nat[s0][1],true,(x,z)=>{ if (vDist(x,z)<VM+16) return -1;
+        for (let i=b+1;i<nat.length;i++) if ((nat[i][0]-x)**2+(nat[i][1]-z)**2<144) return i; return -1; });
+      if (!det.stuck && (det.join===undefined || det.pts.length<4*(det.join-s0)+10)){
+        pts=nat.slice(0,s0).concat(det.pts, det.join!==undefined?nat.slice(det.join+1):[]); route='round'; }
+      else { let ca=-1, cb=-1; nat.forEach((p,i)=>{ if (vDist(p[0],p[1])<VM){ if (ca<0) ca=i; cb=i; } }); culv=[ca-1,cb+1]; route='culvert'; } } }
+  return {pts,culv,route};
+}
+
+// the course's samples, every 0.5 m along it
+const DS=0.5;
+let OBS=[], NS=0, DRS=null, X,Z,TX,TZ,S,U,KAP,HW,BED,BANKB,SPRAY,SC,WID,BH,KV,BAR,WL,ROCK,CULV,SLOPE,GM,EL,ER, DROPS=[], CULVR=null, ROUTE='none', ISEA=0, MOUTH=null, RKAP=6, DRUN=0.23;
+const F32=n=>new Float32Array(n);
+function boxSmooth(A,r,lo=0,hi=A.length-1){ const B=A.slice(); for (let i=lo;i<=hi;i++){ let s=0,n=0; for (let k=Math.max(lo,i-r);k<=Math.min(hi,i+r);k++){ s+=A[k]; n++; } B[i]=s/n; } return B; }
+function buildCourse(){
+  const fc=findCourse(); CULVR=fc.culv; ROUTE=fc.route;
+  let P=fc.pts.map(p=>[p[0],p[1]]);
+  for (let it=0;it<2;it++){ const Qp=P.map(p=>p.slice()); for (let i=1;i<P.length-1;i++) for (let k=0;k<2;k++) Qp[i][k]=(P[i-1][k]+2*P[i][k]+P[i+1][k])/4; P=Qp; }
+  // the valley line, every 2 m
+  let cx=[], cz=[]; const cu=[];
+  for (let i=0;i<P.length-1;i++){ const d=Math.hypot(P[i+1][0]-P[i][0],P[i+1][1]-P[i][1]), n=Math.max(1,Math.round(d/2));
+    for (let k=0;k<n;k++){ const f=k/n; cx.push(lerp(P[i][0],P[i+1][0],f)); cz.push(lerp(P[i][1],P[i+1][1],f)); cu.push(i+f); } }
+  cx.push(P[P.length-1][0]); cz.push(P[P.length-1][1]); cu.push(P.length-1);
+  const n0=cx.length, inCulv=u=>CULVR && u>=CULVR[0] && u<=CULVR[1];
+  for (let it=0;it<2;it++){ cx=boxSmooth(cx,6); cz=boxSmooth(cz,6); }
+  for (let pass=0;pass<2;pass++){
+    if (VB.length) for (let k=0;k<n0;k++){ if (inCulv(cu[k])) continue;
+      for (let it=0;it<8;it++){ const d=vDist(cx[k],cz[k]); if (d>=VM+2) break;
+        const gx=vDist(cx[k]+1,cz[k])-vDist(cx[k]-1,cz[k]), gz=vDist(cx[k],cz[k]+1)-vDist(cx[k],cz[k]-1), l=Math.hypot(gx,gz)||1;
+        cx[k]+=gx/l*(VM+2.2-d); cz[k]+=gz/l*(VM+2.2-d); } }
+    if (pass===0){ cx=boxSmooth(cx,2); cz=boxSmooth(cz,2); } }
+  const s0=[0], nx0=[], nz0=[];
+  for (let k=1;k<n0;k++) s0.push(s0[k-1]+Math.hypot(cx[k]-cx[k-1],cz[k]-cz[k-1]));
+  for (let k=0;k<n0;k++){ const a=Math.max(0,k-2), b=Math.min(n0-1,k+2), tx=cx[b]-cx[a], tz=cz[b]-cz[a], l=Math.hypot(tx,tz)||1; nx0.push(-tz/l); nz0.push(tx/l); }
+  // the slope of the ground along the valley line, over 40 m
+  const hv=[]; for (let k=0;k<n0;k++) hv.push(smoothH(cx[k],cz[k]));
+  let sl0=[]; for (let k=0;k<n0;k++){ const a=Math.max(0,k-10), b=Math.min(n0-1,k+10); sl0.push(Math.max(0,(hv[a]-hv[b])/Math.max(1,s0[b]-s0[a]))); }
+  sl0=boxSmooth(sl0,10);
+  // the meander: a sideways offset of the valley line, strongest on gentle ground
+  const W=state.width, Stot=s0[n0-1], off=[]; let ph=state.seed*1.7, ph2=state.seed*0.7;
+  for (let k=0;k<n0;k++){
+    const f=s0[k]/Stot, hw=W/2*(0.45+0.55*smooth(f*1.4)), lam=14*2*hw*(0.8+0.4*vnoise(s0[k]*0.004,1.3,TP.s+21)), lam2=3*lam;
+    if (k>0){ const d=s0[k]-s0[k-1]; ph+=2*Math.PI*d/lam; ph2+=2*Math.PI*d/lam2; }
+    const gentle=1-smooth((sl0[k]-0.03)/0.13);
+    let damp=smooth(s0[k]/40)*smooth((Stot-s0[k])/50);
+    if (VB.length) damp*=smooth((vDist(cx[k],cz[k])-VM-4)/45);
+    if (CULVR){ const du=Math.max(CULVR[0]-cu[k],cu[k]-CULVR[1],0)*8; damp*=smooth((du-20)/30); }
+    off.push(state.mea*damp*(0.15*lam*(0.15+0.85*gentle)*(Math.sin(ph)+0.12*Math.sin(3*ph+0.8)) + 0.1*lam2*gentle*gentle*Math.sin(ph2)));
+  }
+  // the course itself, dense, then resampled every 0.5 m by length
+  const dx=[], dz=[], du=[];
+  for (let k=0;k<n0-1;k++) for (let q=0;q<4;q++){ const f=q/4, nx=lerp(nx0[k],nx0[k+1],f), nz=lerp(nz0[k],nz0[k+1],f), l=Math.hypot(nx,nz)||1, o=lerp(off[k],off[k+1],f);
+    dx.push(lerp(cx[k],cx[k+1],f)+nx/l*o); dz.push(lerp(cz[k],cz[k+1],f)+nz/l*o); du.push(lerp(cu[k],cu[k+1],f)); }
+  dx.push(cx[n0-1]+nx0[n0-1]*off[n0-1]); dz.push(cz[n0-1]+nz0[n0-1]*off[n0-1]); du.push(cu[n0-1]);
+  const ox=[dx[0]], oz=[dz[0]], ou=[du[0]]; let acc=0;
+  for (let k=1;k<dx.length;k++){ const l=Math.hypot(dx[k]-dx[k-1],dz[k]-dz[k-1]); let rem=l;
+    while (acc+rem>=DS){ const f=(l-rem+(DS-acc))/l; ox.push(lerp(dx[k-1],dx[k],f)); oz.push(lerp(dz[k-1],dz[k],f)); ou.push(lerp(du[k-1],du[k],f)); rem-=DS-acc; acc=0; }
+    acc+=rem; }
+  NS=ox.length; X=Float64Array.from(ox); Z=Float64Array.from(oz); U=Float32Array.from(ou);
+  TX=F32(NS); TZ=F32(NS); S=F32(NS); CULV=new Uint8Array(NS); let th=F32(NS);
+  for (let i=0;i<NS;i++){ S[i]=i*DS; const a=Math.max(0,i-2), b=Math.min(NS-1,i+2), tx=X[b]-X[a], tz=Z[b]-Z[a], l=Math.hypot(tx,tz)||1; TX[i]=tx/l; TZ[i]=tz/l; th[i]=Math.atan2(TZ[i],TX[i]); CULV[i]=inCulv(U[i])?1:0; }
+  let kap=F32(NS); for (let i=0;i<NS;i++){ const a=Math.max(0,i-3), b=Math.min(NS-1,i+3); let d=th[b]-th[a]; d=Math.atan2(Math.sin(d),Math.cos(d)); kap[i]=d/Math.max(DS,S[b]-S[a]); }
+  KAP=boxSmooth(boxSmooth(kap,6),6);
+}
+
+/* ---------- the long profile: a staircase of gentle reaches, drops and pools ---------- */
+function groundAt(x,z){ let g=baseH(x,z);
+  // a fan of gravel on the sea bed off the mouth
+  if (MOUTH && g<0.2){ const ux=x-MOUTH.x, uz=z-MOUTH.z, u=ux*MOUTH.tx+uz*MOUTH.tz, v=-ux*MOUTH.tz+uz*MOUTH.tx;
+    if (u>-20){ const r2=((u-14)/MOUTH.R)**2+(v/(0.75*MOUTH.R))**2; if (r2<1){ const f=-0.3-1.9*r2-0.25*vnoise(x*0.3,z*0.3,41); if (f>g) g=lerp(g,f,smooth((u+20)/14)); } } }
+  return g; }
+function profile(){
+  const W=state.width, Stot=S[NS-1], R=rng(state.seed*97+5);
+  HW=F32(NS); SPRAY=F32(NS); BED=F32(NS); SC=F32(NS); WID=F32(NS); BH=F32(NS); KV=F32(NS); BAR=F32(NS); WL=F32(NS); ROCK=F32(NS); EL=F32(NS); ER=F32(NS); GM=F32(NS);
+  RKAP=1.9*W; DRUN=0.14+0.03*W; DROPS=[];
+  for (let i=0;i<NS;i++){ HW[i]=W/2*(0.45+0.55*smooth(S[i]/Stot*1.4))*(0.4+0.6*smooth(S[i]/70)); BAR[i]=0.9*W*smooth(S[i]/120); BH[i]=(0.55+0.12*W)*(0.5+0.5*smooth(S[i]/60)); }
+  // the mouth, where the course crosses the shore
+  ISEA=NS-1; for (let i=Math.floor(NS*0.5);i<NS;i++) if (baseH(X[i],Z[i])<0){ ISEA=i; break; }
+  MOUTH={x:X[ISEA],z:Z[ISEA],tx:TX[ISEA],tz:TZ[ISEA],R:30+2*W};
+  // the ground under the course and at both its banks, the lowest of the three, smoothed and never rising downstream
+  let G=F32(NS);
+  for (let i=0;i<NS;i++){ const kk=Math.min(1,Math.abs(KAP[i])*RKAP), r=1.5*HW[i]+BAR[i]*kk+1, nx=-TZ[i], nz=TX[i];
+    G[i]=Math.min(groundAt(X[i],Z[i]),groundAt(X[i]+nx*r,Z[i]+nz*r),groundAt(X[i]-nx*r,Z[i]-nz*r)); }
+  const GS=boxSmooth(G,20);
+  let m=1e9; for (let i=0;i<NS;i++){ m=Math.min(m,GS[i]); GM[i]=m; }
+  SLOPE=F32(NS); for (let i=0;i<NS;i++){ const a=Math.max(0,i-40), b=Math.min(NS-1,i+40); SLOPE[i]=Math.max(0,(GS[a]-GS[b])/Math.max(1,S[b]-S[a])); }
+  SLOPE=boxSmooth(SLOPE,20);
+  // the aim of the bed: an incision depth below the ground, deeper on steep ground, shallower at the source and the sea
+  const T=F32(NS);
+  for (let i=0;i<NS;i++){ let D=Math.min(5.5,1+0.2*W+8*SLOPE[i])*(0.3+0.7*smooth(S[i]/40));
+    D*=0.25+0.75*smooth((GM[i]-0.5)/3); T[i]=Math.max(GM[i]-D,-0.35); }
+  // the staircase
+  let b=T[0], lastS=-1e9, lastH=0;
+  for (let i=0;i<NS;i++){
+    if (i>0) b-=(0.004+0.035*SLOPE[i]+0.78*SLOPE[i]*(1-smooth((SLOPE[i]-0.06)/0.1)))*DS;
+    b=Math.max(b,-0.4);
+    if (CULV[i]){ b=Math.min(b,T[i]); BED[i]=b; continue; }
+    const big=SLOPE[i]>0.18 && hash(i,2,71)<0.12 ? 2.2 : 1;
+    const hd=Math.min(8,state.drop*(0.5+9*SLOPE[i])*(0.7+0.6*hash(i,1,71))*big);
+    const up=0.3*hd+0.15, gap=S[i]-lastS, Lmin=2.2*W+lastH+2, forced=b>GM[i]-0.45;
+    if (S[i]<20){ b=Math.min(b,T[i]+0.1); BED[i]=b; continue; }
+    if ((b>T[i]+up && gap>Lmin) || forced){
+      let H=Math.min(14,Math.max(hd,b-T[i]+(forced?0:0.3*hd)));
+      if (b-H<-0.4) H=b+0.4;
+      if (H>=0.25){ DROPS.push({i,H,top:b}); b-=H; lastS=S[i]; lastH=H; } }
+    BED[i]=b;
+  }
+  STEPB=new Uint8Array(NS); for (const d of DROPS) STEPB[d.i]=1;
+  // the spring rises into a small pool of its own
+  for (let i=0;i<NS && S[i]<4;i++){ const u=S[i]/4; SC[i]=Math.max(SC[i],0.4*(1-u*u)); WID[i]=Math.max(WID[i],0.5*(1-u)); }
+  // the level from which the banks rise: the bed, but below a fall the banks keep the height of the bed above it and come
+  // down to the bed below over 3 m and twice the fall's height, so that a fall stands in a rock-walled bay and the
+  // valley sides above the banks have no step in them
+  BANKB=BED.slice(); for (const d of DROPS){ const La=3+2*d.H; for (let j=d.i;j<NS && S[j]<=S[d.i]+La;j++) BANKB[j]=Math.max(BANKB[j],d.top-d.H*smooth((S[j]-S[d.i])/La)); }
+  // a plunge pool below each drop, and bare rock round it
+  for (let k=0;k<DROPS.length;k++){ const d=DROPS[k], id=d.i, H=d.H, next=k+1<DROPS.length?S[DROPS[k+1].i]:S[NS-1];
+    const Lp=Math.max(1.5,Math.min(3*HW[id]+0.8*H+1.5,next-S[id]-1.2)), pd=Math.min(2.2,0.25+0.3*H), wd=0.25+0.25*Math.min(1,H/2.5);
+    for (let j=id;j<NS && S[j]<=S[id]+Lp;j++){ const u=(S[j]-S[id])/Lp, sh=smooth(u/0.06)*(1-smooth((u-0.4)/0.6)); SC[j]=Math.max(SC[j],pd*sh); WID[j]=Math.max(WID[j],wd*sh); }
+    const ra=3+0.6*H, rb=1.5+0.4*H, rk=Math.min(1,0.3+H/1.5);
+    for (let j=Math.max(0,id-Math.ceil(ra/DS));j<Math.min(NS,id+Math.ceil(rb/DS));j++){ const r=S[j]<S[id]?1-(S[id]-S[j])/ra:1-(S[j]-S[id])/rb; ROCK[j]=Math.max(ROCK[j],r*rk); }
+    d.s=S[id-1]+0.25; d.sLip=S[id-1]+0.55;
+    if (H>0.7) for (let j=Math.max(0,id-4);j<NS && S[j]<=S[id]+Lp+2;j++) SPRAY[j]=Math.max(SPRAY[j],Math.min(1,H/2.5)*(1-smooth((S[j]-S[id]-Lp)/2))); d.th=0.35+0.5*Math.sqrt(H); d.bot=BED[id]; d.pd=pd; d.Lp=Lp;
+  }
+  // the slope of the valley sides: steeper on steep ground, rock walls about a high fall, a walled cut at a culvert
+  for (let i=0;i<NS;i++){ let kv=0.75+1.6*SLOPE[i]; kv=Math.max(kv,lerp(kv,2.1,ROCK[i])); if (GM[i]<2) kv=lerp(0.45,kv,smooth((GM[i]-0.5)/1.5)); KV[i]=kv; }
+  if (CULVR) for (let i=0;i<NS;i++) if (!CULV[i]){ let dd=1e9; for (let j=Math.max(0,i-60);j<Math.min(NS,i+60);j++) if (CULV[j]) dd=Math.min(dd,Math.abs(S[j]-S[i])); if (dd<25){ const t=1-smooth((dd-8)/17); KV[i]=lerp(KV[i],3.2,t); ROCK[i]=Math.max(ROCK[i],t*0.9); } }
+  KV=boxSmooth(KV,3);
+  // the water, a constant depth above the staircase, so that the pools stand level and deeper
+  for (let i=0;i<NS;i++){ WL[i]=BED[i]+DRUN; if (i>ISEA-120) WL[i]=Math.max(WL[i],0.05); }
+  for (const d of DROPS){ d.wlTop=BED[d.i-1]+DRUN; d.wlBot=WL[d.i]; }
+  // the water's edges: where the carved ground rises out of it on each side
+  for (let i=0;i<NS;i++){ if (CULV[i]) continue; EL[i]=edge(i,1); ER[i]=edge(i,-1); }
+  // how far each valley side runs, beyond the bank top, before it meets the hillside: the channel's own mesh covers it
+  // all, and the grid is sunk beneath it. Smoothed along the course, so that neighbouring rows of the mesh never cross
+  DRS=[F32(NS),F32(NS)];
+  for (let i=0;i<NS;i++) for (const [q,sd] of [[0,1],[1,-1]]){ const s=sec(i,sd); if (!s){ DRS[q][i]=1.4; continue; }
+    const tb=Math.max(s.y1,s.top), a0=s.aB+s.mb+0.5, gs=groundAt(X[i]-TZ[i]*sd*(a0+3),Z[i]+TX[i]*sd*(a0+3));
+    DRS[q][i]=clamp((gs-tb-s.kv*0.5)/Math.max(0.35,s.kv-0.25)+1.5,1.4,30); }
+  for (const q of [0,1]){ for (let i=1;i<NS;i++) DRS[q][i]=Math.max(DRS[q][i],DRS[q][i-1]-0.25); for (let i=NS-2;i>=0;i--) DRS[q][i]=Math.max(DRS[q][i],DRS[q][i+1]-0.25); DRS[q]=boxSmooth(DRS[q],6); }
+}
+function edge(i,side){
+  const nx=-TZ[i], nz=TX[i], wl=WL[i], cap=HW[i]*(1+WID[i])*1.4+BAR[i]+3;
+  const hT=a=>smin(groundAt(X[i]+nx*side*a,Z[i]+nz*side*a),prof(i,side*a),0.5);
+  let lo=0, a=0.15; while (a<cap && hT(a)<wl){ lo=a; a+=0.15; } if (a>=cap) return cap;
+  let hi=a; for (let k=0;k<6;k++){ const mid=(lo+hi)/2; if (hT(mid)<wl) lo=mid; else hi=mid; } return hi;
+}
+function smin(a,b,k){ const h=Math.max(k-Math.abs(a-b),0)/k; return Math.min(a,b)-h*h*k*0.25; }
+
+/* ---------- the cross-section: the channel's height at a distance along (t, in samples) and across (n, in m) ---------- */
+// The section on one side of the course at t: the bed, the edge of the bed (hs), the point bar out to aB, the bank
+// rising at bs to its top at aB+mb, and the valley side above it at kv. The bed steps down sharply half way between
+// the two samples either side of a drop, so that a fall has a vertical face.
+const SEC={}; let STEPB=null;
+function sec(t,side){
+  const i=Math.max(0,Math.min(NS-2,Math.floor(t))), f=Math.max(0,Math.min(1,t-i));
+  if (CULV[i]||CULV[i+1]) return null;
+  const L=A=>A[i]+(A[i+1]-A[i])*f, s=SEC;
+  s.b=STEPB[i+1]?(f<0.5?BED[i]:BED[i+1]):L(BED); s.sc=L(SC); s.hwE=L(HW)*(1+L(WID));
+  const k=L(KAP), kk=Math.min(1,Math.abs(k)*RKAP), outer=(k>0?-1:1)===side;
+  s.o=outer?kk:0; s.inr=outer?0:kk; s.hs=s.hwE*(1-0.15*s.o+0.1*s.inr);
+  s.bar=s.inr*L(BAR); s.aB=s.hs+s.bar; s.y0=s.b-0.3*s.o+0.12*s.inr; s.y1=s.y0+0.07*s.bar;
+  s.bs=2+2*s.o-0.6*s.inr; s.top=Math.max(s.b,L(BANKB))+L(BH); s.mb=Math.max(0,(s.top-s.y1)/s.bs); s.kv=L(KV);
+  // a cut bank high enough to be undercut: its foot is worn back under a lip of turf
+  s.r=0.5*s.o*smooth((s.top-s.y1-0.5)/0.4);
+  return s;
+}
+let PZ=0, PO=0, PT=0, PR=0, PK=1;   // the zone of the last call (0 bed, 1 cut bank, 2 point bar, 3 inner bank, 4 valley side), the bend's sense there, the bank top and the undercut
+function bedY(s,u){ const q=1-u*u; return s.b-s.sc*q-0.1*s.hwE*q-0.3*s.o*u*u+0.12*s.inr*u*u; }
+function sideY(s,a){
+  if (a<s.hs){ PZ=0; return bedY(s,a/s.hs); }
+  if (a<s.aB){ PZ=2; return s.y0+0.07*(a-s.hs); }
+  const mm=a-s.aB; if (mm<s.mb){ PZ=s.o>0.05?1:3; return s.y1+s.bs*mm; }
+  PZ=4; return Math.max(s.y1,s.top)+s.kv*(mm-s.mb)+Math.max(0,a-36)*1.5;
+}
+function prof(t,n){ const s=sec(t,n>=0?1:-1); if (!s) return 1e9; PO=s.o-s.inr; PT=s.aB+s.mb; PR=s.r; PK=s.kv; return sideY(s,Math.abs(n)); }
+
+/* ---------- finding the nearest points of the course ---------- */
+const CELL=32, RQ=48; let CG=null, NCO=0;
+const ckey=(i,j)=>(i+2000)*5000+(j+2000);
+function buildIndex(){ CG=new Map(); NCO=Math.ceil((NS-1)/8);
+  for (let j=0;j<NCO;j++){ const a=j*8, b=Math.min(NS-1,a+8);
+    const x0=Math.min(X[a],X[b])-RQ, x1=Math.max(X[a],X[b])+RQ, z0=Math.min(Z[a],Z[b])-RQ, z1=Math.max(Z[a],Z[b])+RQ;
+    for (let ci=Math.floor(x0/CELL);ci<=Math.floor(x1/CELL);ci++) for (let cj=Math.floor(z0/CELL);cj<=Math.floor(z1/CELL);cj++){ const k=ckey(ci,cj); let L=CG.get(k); if (!L) CG.set(k,L=[]); L.push(j); } } }
+// the result of a query: the lowest channel height QY, at QT along and QN across, its zone QZ and the bend's sense QO,
+// the ground QG and the distance to the course QD
+let QY=1e9, QT=0, QN=0, QZ=-1, QO=0, QG=0, QD=1e9, QDEP=0;
+function segD2(x,z,a,b){ const vx=X[b]-X[a], vz=Z[b]-Z[a], l2=vx*vx+vz*vz||1e-9, t=clamp(((x-X[a])*vx+(z-Z[a])*vz)/l2,0,1), ex=x-X[a]-vx*t, ez=z-Z[a]-vz*t; return [ex*ex+ez*ez,t]; }
+function refine(x,z,j){
+  let bd=1e18, bt=0; const i0=Math.max(0,j*8-8), i1=Math.min(NS-2,j*8+16);
+  for (let i=i0;i<=i1;i++){ const [d2,t]=segD2(x,z,i,i+1); if (d2<bd){ bd=d2; bt=i+t; } }
+  const i=Math.min(NS-2,Math.floor(bt)), f=bt-i, px=lerp(X[i],X[i+1],f), pz=lerp(Z[i],Z[i+1],f), d=Math.sqrt(bd);
+  const nx=-lerp(TZ[i],TZ[i+1],f), nz=lerp(TX[i],TX[i+1],f), sgn=((x-px)*nx+(z-pz)*nz)>=0?1:-1;
+  if (d<QD) QD=d;
+  const y=prof(bt,sgn*d);
+  // the grid is sunk under the channel's own mesh, which covers the bed and the banks and 1.8 m beyond the bank top
+  // (but not round the two ends of the course, where the channel mesh stops)
+  if (y<QY){ QY=y; QT=bt; QN=sgn*d; QZ=PZ; QO=PO; QDEP=0;
+    if (bt>0.01 && bt<NS-1.01 && DRS){ const ti=Math.min(NS-2,Math.floor(bt)), q=sgn>0?0:1, dr=lerp(DRS[q][ti],DRS[q][ti+1],bt-ti), end=PT+0.5+dr-0.15;
+      QDEP=Math.max(1.2*(1-smooth((d-PT-PR)/0.6)),Math.min(3,0.5+0.6*PK)*(1-smooth((d-end+1.2)/1.2))); } }
+}
+function courseQuery(x,z){
+  QY=1e9; QD=1e9; QZ=-1; QDEP=0; const L=CG.get(ckey(Math.floor(x/CELL),Math.floor(z/CELL))); if (!L) return false;
+  let run=-1, runD=1e18, prev=-10;
+  for (const j of L){ const a=j*8, b=Math.min(NS-1,a+8), [d2]=segD2(x,z,a,b); if (d2>RQ*RQ) continue;
+    if (j>prev+2 && run>=0){ refine(x,z,run); runD=1e18; run=-1; }
+    if (d2<runD){ runD=d2; run=j; } prev=j; }
+  if (run>=0) refine(x,z,run);
+  return QY<1e9;
+}
+function terrainAt(x,z){ const g=groundAt(x,z); QG=g; if (!courseQuery(x,z)) return g; return smin(g,QY,0.5); }
+
+/* ---------- the colours of the ground ---------- */
+function landColour(x,z,h,slope,c){
+  const n1=vnoise(x*0.3,z*0.3,5), n2=vnoise(x*1.1,z*1.1,6);
+  c.copy(C_.sand).lerp(C_.sand2,n1*0.7+n2*0.3);
+  const g=vnoise(x*0.07,z*0.07,8), gth=0.58-clamp((h-20)/60,0,0.3)-0.3;
+  if (g>gth) c.lerp(C_.scrub,clamp((g-gth)*4,0,0.85));
+  { const d=vnoise(x*0.05,z*0.05,991); c.lerp(d>0.55?LIMESTONE:DRYGRASS,0.3); }
+  if (slope>0.75) c.lerp(C_.rock,clamp((slope-0.75)*1.6,0,0.85));
+  if (h>120) mtTint(c,h,slope,n1,vnoise(x*0.025,z*0.025,995));
+  c.multiplyScalar(0.9);
+  return c; }
+function shoreColour(x,z,h,c){
+  const near=MOUTH?Math.hypot(x-MOUTH.x,z-MOUTH.z):1e9;
+  if (h<1.6){ const t=clamp((1.6-h)/1.2,0,1); c.lerp(C_.beach,t);
+    // a shingle beach either side of the mouth, of the stones the stream brings down
+    if (near<70) c.lerp(_t2.copy(SHINGLE).lerp(SHINGLE2,hash(Math.floor(x*3),Math.floor(z*3),61)),t*(1-smooth((near-40)/30))); }
+  if (h<0){ if (near<MOUTH.R+15) c.lerp(_t2.copy(SHINGLE).lerp(SHINGLE2,hash(Math.floor(x*3),Math.floor(z*3),62)),0.6*(1-smooth((near-MOUTH.R)/15)));
+    c.lerp(C_.seabed,clamp(-h/2.2,0,1)); }
+  if (h>-0.45 && h<0.12) c.lerp(C_.foam,0.55*(1-Math.abs(h+0.15)/0.3));
+}
+const _t=new THREE.Color(), _t2=new THREE.Color();
+// rock, as the game colours its cliffs: beds of slightly different tints, darker in the joints, streaks of rust, dark
+// and wet at the water's edge; and moss on the rock kept wet by the spray of a fall
+const CV_ROCK=[hex('#9c968b'),hex('#8f877a'),hex('#857b6c'),hex('#6f695f'),hex('#3f3c37'),hex('#94785a'),hex('#a7a299')], MOSS=hex('#5f7a3c');
+function rockCol(x,y,z,wl,spray,c){
+  const by=(y+1.4*vnoise(x*0.05,z*0.05,23))/0.75, bedN=Math.floor(by), bf=by-bedN, bh=hash(bedN,7,2301);
+  c.copy(CV_ROCK[0]).lerp(CV_ROCK[6],0.2+0.6*hash(bedN,8,2302)).lerp(CV_ROCK[bh<0.5?1:2],0.15+0.45*bh);
+  // the joint at the foot of each bed, in the shadow of the ledge above it
+  if (bf<0.18) c.multiplyScalar(0.72+1.5*bf);
+  c.multiplyScalar(0.88+0.22*vnoise(x*0.7+z*0.5,y*1.1,26));
+  const n1=vnoise(x*0.09+z*0.07,y*0.3,20), n2=vnoise((x-z)*0.12,y*0.25,21), n3=vnoise((x+z)*0.9,y*1.3,22);
+  c.lerp(CV_ROCK[3],0.3*smooth((n1-0.5)/0.3));
+  if (n2>0.7 && bf>0.3) c.lerp(CV_ROCK[5],(n2-0.7)*1.2);
+  c.multiplyScalar(0.93+0.14*n3);
+  const wet=wl+0.25+0.35*n1; if (y<wet) c.lerp(CV_ROCK[4],smooth((wet-y)/0.6)*0.55);
+  if (spray>0){ const m=spray*smooth((y-wl+0.1)/0.3)*(1-smooth((y-wl-0.8-1.4*spray)/1.2))*smooth((vnoise(x*0.8,z*0.8+y,24)-0.25)/0.35); if (m>0) c.lerp(MOSS,m*0.75); }
+  return c; }
+// the stream's colours, from the zone of the cross-section at the point (QZ, QT, QN, QO from the query)
+function streamColour(x,z,h,slope,c){
+  const i=clamp(Math.round(QT),0,NS-1); if (CULV[i]) return;
+  const wl=WL[i], above=h-wl, cut=QG-h, sp=hash(Math.floor(x*4),Math.floor(z*4),77), sp2=hash(Math.floor(x*1.3),Math.floor(z*1.3),78);
+  // a greener strip of grass along the banks, where the roots reach the water
+  if (QD<HW[i]*2+BAR[i]+7 && above>0 && above<4 && slope<0.9) c.lerp(RIPARIAN,0.45*(1-smooth((QD-HW[i]*2-BAR[i])/7))*(1-smooth((above-2)/2)));
+  if (cut<0.03 && QZ!==0) return;
+  const rk=Math.max(ROCK[i],smooth((SLOPE[i]-0.12)/0.2)*0.8);
+  const spr=SPRAY[i];
+  if (QZ===0){ _t.copy(PEB_A).lerp(PEB_B,sp*0.8+sp2*0.2);
+    _t.lerp(rockCol(x,h,z,wl,spr,_t2),rk);
+    c.copy(_t).multiplyScalar(above<0?0.72:0.85); }
+  else if (QZ===2){ // the bar is pale and dry above the water, and wet pebbles below it
+    if (above>0.02) c.copy(BAR_A).lerp(BAR_B,sp*0.7+sp2*0.3); else c.copy(PEB_A).lerp(PEB_B,sp*0.7+sp2*0.3).multiplyScalar(0.8); }
+  else if (QZ===1 || QZ===3){ const t=smooth((slope-0.6)/0.8);
+    c.lerp(_t.copy(QZ===1?EARTH_D:EARTH).lerp(DIRT,sp2*0.3),QZ===1?0.85:0.55*t+0.2);
+    c.lerp(rockCol(x,h,z,wl,spr,_t2),rk*0.95); }
+  else { // the valley side: bare rock where it is steep and about the falls
+    const t=Math.max(smooth((slope-0.85)/0.6),rk*smooth((slope-0.5)/0.5));
+    if (t>0) c.lerp(rockCol(x,h,z,wl,spr,_t),t*0.95);
+    else if (spr>0 && above<2.5) c.lerp(MOSS,0.35*spr*(1-above/2.5)); }
+  // the wet band at the water's edge
+  if (above>-0.05 && above<0.14) c.multiplyScalar(0.8);
+}
+
+/* ---------- the ground meshes ---------- */
+let KIND=null;   // the kind of each block: 2 within reach of the channel (0.5 m grid), 1 of the valley sides (1 m), 0 beyond
+const PX0=-2400, PX1=2400, PZ0=-1800, PZ1=1400;
+const bkey=(cx,cz)=>(cx+100)*1000+(cz+100);
+function classify(){ KIND=new Map();
+  for (let i=0;i<NS;i+=4){ const hsMax=HW[i]*1.6+BAR[i]+12;
+    for (const [r,kd] of [[54,1],[hsMax,2]]){ for (let cx=Math.floor((X[i]-r)/CB);cx<=Math.floor((X[i]+r)/CB);cx++) for (let cz=Math.floor((Z[i]-r)/CB);cz<=Math.floor((Z[i]+r)/CB);cz++){
+      const dx=Math.max(cx*CB-X[i],0,X[i]-cx*CB-CB), dz=Math.max(cz*CB-Z[i],0,Z[i]-cz*CB-CB); if (dx*dx+dz*dz>r*r) continue;
+      const k=bkey(cx,cz); if ((KIND.get(k)||0)<kd) KIND.set(k,kd); } } } }
+const groundMat=new THREE.MeshLambertMaterial({vertexColors:true});
+function blockMesh(cx,cz,step){
+  const x0=cx*CB, z0=cz*CB, N=Math.round(CB/step), G=N+3, hg=new Float32Array(G*G), nv=(N+1)*(N+1), hs=new Float32Array(nv);
+  const qz=new Int8Array(nv), qt=F32(nv), qn=F32(nv), qo=F32(nv), qg=F32(nv), qd=F32(nv);
+  for (let j=0;j<G;j++) for (let i=0;i<G;i++){ const x=x0+(i-1)*step, z=z0+(j-1)*step; hg[j*G+i]=terrainAt(x,z);
+    if (i>=1&&i<=N+1&&j>=1&&j<=N+1){ const v=(j-1)*(N+1)+(i-1); hs[v]=QDEP>0?smin(QG,QY-QDEP,0.5):hg[j*G+i]; qz[v]=QY<1e9?QZ:-1; qt[v]=QT; qn[v]=QN; qo[v]=QO; qg[v]=QG; qd[v]=QD; } }
+  const pos=[], nor=[], col=[], idx=[], c=new THREE.Color(), vil=isVillage(cx,cz);
+  for (let j=0;j<=N;j++) for (let i=0;i<=N;i++){
+    const gi=(j+1)*G+(i+1), x=x0+i*step, z=z0+j*step, h=hg[gi], v=j*(N+1)+i;
+    const dx=(hg[gi+1]-hg[gi-1])/(2*step), dz=(hg[gi+G]-hg[gi-G])/(2*step), nl=Math.hypot(dx,1,dz), slope=Math.hypot(dx,dz);
+    landColour(x,z,h,slope,c);
+    if (vil) villageColour(x,z,c);
+    if (qz[v]>=0){ QZ=qz[v]; QT=qt[v]; QN=qn[v]; QO=qo[v]; QG=qg[v]; QD=qd[v]; streamColour(x,z,h,slope,c); }
+    shoreColour(x,z,h,c);
+    pos.push(x,hs[v],z); nor.push(-dx/nl,1/nl,-dz/nl); col.push(c.r,c.g,c.b); }
+  for (let j=0;j<N;j++) for (let i=0;i<N;i++){ const a=j*(N+1)+i, b=a+1, cc=a+N+1, d=cc+1; idx.push(a,cc,b,b,cc,d); }
+  // a skirt hanging from the edges, over any crack against a neighbour of another grid
+  const edgeV=[]; for (let i=0;i<=N;i++) edgeV.push([i,0]); for (let j=0;j<=N;j++) edgeV.push([N,j]); for (let i=N;i>=0;i--) edgeV.push([i,N]); for (let j=N;j>=0;j--) edgeV.push([0,j]);
+  let prevTop=-1, prevBot=-1;
+  for (const [i,j] of edgeV){ const v=j*(N+1)+i, b=pos.length/3; pos.push(pos[v*3],pos[v*3+1]-2.5,pos[v*3+2]); nor.push(nor[v*3],nor[v*3+1],nor[v*3+2]); col.push(col[v*3],col[v*3+1],col[v*3+2]);
+    if (prevTop>=0){ idx.push(prevTop,v,prevBot,v,b,prevBot); } prevTop=v; prevBot=b; }
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3)); g.setAttribute('normal',new THREE.Float32BufferAttribute(nor,3)); g.setAttribute('color',new THREE.Float32BufferAttribute(col,3));
+  g.setIndex(idx); g.computeBoundingSphere();
+  const m=new THREE.Mesh(g,groundMat); m.receiveShadow=true; m.castShadow=true; m.name='grid'; return m;
+}
+function villageColour(x,z,c){ const n=vnoise(x*0.4,z*0.4,55); c.lerp(_t.copy(C_.piazza).lerp(C_.road,n),0.75); }
+function coarseMesh(){
+  const step=8, nx=Math.round((PX1-PX0)/step), nz=Math.round((PZ1-PZ0)/step), G=nx+3, hg=new Float32Array(G*(nz+3));
+  for (let j=0;j<nz+3;j++) for (let i=0;i<G;i++) hg[j*G+i]=groundAt(PX0+(i-1)*step,PZ0+(j-1)*step);
+  const pos=new Float32Array((nx+1)*(nz+1)*3), nor=new Float32Array(pos.length), col=new Float32Array(pos.length), idx=[], c=new THREE.Color();
+  for (let j=0;j<=nz;j++) for (let i=0;i<=nx;i++){ const gi=(j+1)*G+(i+1), x=PX0+i*step, z=PZ0+j*step, h=hg[gi], v=(j*(nx+1)+i)*3;
+    const dx=(hg[gi+1]-hg[gi-1])/(2*step), dz=(hg[gi+G]-hg[gi-G])/(2*step), nl=Math.hypot(dx,1,dz), slope=Math.hypot(dx,dz);
+    landColour(x,z,h,slope,c); if (isVillage(Math.floor(x/CB),Math.floor(z/CB)) && isVillage(Math.floor((x-0.1)/CB),Math.floor((z-0.1)/CB))) villageColour(x,z,c); shoreColour(x,z,h,c);
+    pos[v]=x; pos[v+1]=h; pos[v+2]=z; nor[v]=-dx/nl; nor[v+1]=1/nl; nor[v+2]=-dz/nl; col[v]=c.r; col[v+1]=c.g; col[v+2]=c.b; }
+  for (let j=0;j<nz;j++) for (let i=0;i<nx;i++){ const xm=PX0+(i+0.5)*step, zm=PZ0+(j+0.5)*step; if (KIND.get(bkey(Math.floor(xm/CB),Math.floor(zm/CB)))) continue;
+    const a=j*(nx+1)+i, b=a+1, cc=a+nx+1, d=cc+1; idx.push(a,cc,b,b,cc,d); }
+  const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.BufferAttribute(pos,3)); g.setAttribute('normal',new THREE.BufferAttribute(nor,3)); g.setAttribute('color',new THREE.BufferAttribute(col,3));
+  g.setIndex(idx); g.computeBoundingSphere(); const m=new THREE.Mesh(g,groundMat); m.receiveShadow=true; m.castShadow=true; return m;
+}
+
+/* ---------- the channel's own mesh ---------- */
+// Rows across the course every 0.5 m, and a pair of rows at the face of each fall, each of 25 points: the middle of the
+// bed and, on each side, three across the bed, two on the point bar, four on the bank (the foot, worn back under the
+// lip where the bank is cut, and the lip), the bank top and three on the valley side. The rows follow the edges of the
+// bed, bar and bank, so that these stay sharp at any angle to the grid, and the cut bank can overhang the water.
+const chanMat=new THREE.MeshLambertMaterial({vertexColors:true,flatShading:true,polygonOffset:true,polygonOffsetFactor:-1,polygonOffsetUnits:-2});
+const NCOL=23;
+function sectionCols(t,sd,out,drA){
+  const s=sec(t,sd); out.length=0; if (!s) return false;
+  const tb=Math.max(s.y1,s.top), r=s.r, k=s.o>0.05?1:3;
+  out.push([s.hs*0.4,bedY(s,0.4),0],[s.hs*0.75,bedY(s,0.75),0],[s.hs,bedY(s,1),0],[s.hs+s.bar*0.5,s.y0+0.035*s.bar,2],[s.aB,s.y1,2],
+    [s.aB+s.mb*0.3+r,s.y1+(s.top-s.y1)*0.3,k],[s.aB+s.mb*0.65+r*0.9,s.y1+(s.top-s.y1)*0.7,k],[s.aB+s.mb*0.9+r*0.1,tb-0.12*s.o,k],[s.aB+s.mb,tb,4],
+    [s.aB+s.mb+0.5,tb+s.kv*0.5,4]);
+  // the valley side, up to a little beyond where it meets the hillside, so that a steep rock wall is never left to the grid
+  const a0=s.aB+s.mb+0.5, ti=Math.max(0,Math.min(NS-2,Math.floor(t))), dr=lerp(drA[ti],drA[ti+1],t-ti);
+  for (const f of [0.04,0.09,0.15,0.22,0.3,0.38,0.47,0.56,0.65,0.74,0.83,0.92,1]){ const a=a0+dr*f; out.push([a,sideY(s,a),4,1-f]); }
+  // on rock, the face is broken into beds that jut out at their foot, with ledges between them, and into facets along
+  // its length; the columns only ever move out over the channel, so the face stays in front of the grid behind it
+  const i=Math.max(0,Math.min(NS-1,Math.round(t))), rk=Math.max(ROCK[i],smooth((s.kv-1.1)/0.7)*0.9);
+  if (rk>0.05) for (let k=5;k<out.length-1;k++){ const q=out[k], y=q[1], w=k<9?0.6:(q[3]??0.9);
+    const bed=((y+1.4*vnoise(t*0.03,sd,23))/0.75)%1, ledge=(bed<0?bed+1:bed), jut=0.45*(1-ledge)+0.55*vnoise(t*DS/1.4,k*0.8+sd*5,25);
+    q[0]-=rk*w*jut; }
+  out.c=bedY(s,0); return true; }
+function channelMesh(){
+  const pos=[], col=[], idx=[], c=new THREE.Color(), L=[], Rr=[], W=2*NCOL+1;
+  let prev=-1;
+  const DR=DRS;
+  const row=t=>{ const i=Math.min(NS-2,Math.floor(t)), f=t-i, x=lerp(X[i],X[i+1],f), z=lerp(Z[i],Z[i+1],f), tx=lerp(TX[i],TX[i+1],f), tz=lerp(TZ[i],TZ[i+1],f), l=Math.hypot(tx,tz), nx=-tz/l, nz=tx/l;
+    if (!sectionCols(t,1,L,DR[0]) || !sectionCols(t,-1,Rr,DR[1])) return false;
+    const pts=[]; for (let k=NCOL-1;k>=0;k--) pts.push([-Rr[k][0],Rr[k][1],Rr[k][2]]); pts.push([0,L.c,0]); for (let k=0;k<NCOL;k++) pts.push([L[k][0],L[k][1],L[k][2]]);
+    const base=pos.length/3, ys=[];
+    for (const [n,y0] of pts){ const px=x+nx*n, pz=z+nz*n; ys.push(smin(groundAt(px,pz),y0,0.5)); }
+    for (let k=0;k<pts.length;k++){ const [n,,zone]=pts[k], px=x+nx*n, pz=z+nz*n, y=ys[k];
+      const a=Math.max(0,k-1), b=Math.min(W-1,k+1), slope=Math.abs(ys[b]-ys[a])/Math.max(0.05,Math.abs(pts[b][0]-pts[a][0]));
+      landColour(px,pz,y,slope,c);
+      QZ=zone; QT=t; QN=n; QO=(n>=0?1:-1)*0; QG=groundAt(px,pz); QD=Math.abs(n); streamColour(px,pz,y,slope,c); shoreColour(px,pz,y,c);
+      pos.push(px,y,pz); col.push(c.r,c.g,c.b); }
+    if (prev>=0) for (let k=0;k<W-1;k++){ const a=prev+k, b=base+k; idx.push(a,a+1,b,a+1,b+1,b); }
+    prev=base; return true; };
+  for (let i=0;i<NS-1;i++){
+    if (CULV[i]||CULV[i+1]){ prev=-1; continue; }
+    row(i); if (STEPB[i+1]){ row(i+0.5-1e-3); row(i+0.5+1e-3); } }
+  // each triangle takes one colour, the mean of its corners, so that the rock and the gravel read as facets, as the
+  // game's cliffs do, rather than as smooth gradients
+  const P=new Float32Array(idx.length*3), Cc=new Float32Array(idx.length*3);
+  // (only on steep faces, the rock walls and cut banks: on the bed, the bars and the gentle ground the colours blend)
+  for (let t=0;t<idx.length;t+=3){ let r=0,gg=0,b=0; const A=idx[t]*3, B=idx[t+1]*3, D=idx[t+2]*3;
+    const ux=pos[B]-pos[A], uy=pos[B+1]-pos[A+1], uz=pos[B+2]-pos[A+2], vx=pos[D]-pos[A], vy=pos[D+1]-pos[A+1], vz=pos[D+2]-pos[A+2];
+    const nx=uy*vz-uz*vy, ny=uz*vx-ux*vz, nz=ux*vy-uy*vx, steep=Math.abs(ny)/(Math.hypot(nx,ny,nz)||1)<0.6;
+    for (let k=0;k<3;k++){ const v=idx[t+k]; r+=col[v*3]; gg+=col[v*3+1]; b+=col[v*3+2]; }
+    for (let k=0;k<3;k++){ const v=idx[t+k], o=(t+k)*3; P[o]=pos[v*3]; P[o+1]=pos[v*3+1]; P[o+2]=pos[v*3+2];
+      if (steep){ Cc[o]=r/3; Cc[o+1]=gg/3; Cc[o+2]=b/3; } else { Cc[o]=col[v*3]; Cc[o+1]=col[v*3+1]; Cc[o+2]=col[v*3+2]; } } }
+  const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.BufferAttribute(P,3)); g.setAttribute('color',new THREE.BufferAttribute(Cc,3));
+  g.computeVertexNormals(); g.computeBoundingSphere();
+  const m=new THREE.Mesh(g,chanMat); m.receiveShadow=true; m.castShadow=true; m.name='channel'; return m;
+}
+
+/* ---------- the water ---------- */
+const WATER_VS=`uniform float uTime; attribute vec2 flow; attribute float foam; attribute float wdepth; attribute float fade; attribute float speed; attribute float edge; attribute vec2 lat;
+varying vec2 vFlow; varying float vFoam, vDepth, vFade, vSpeed, vEdge; varying vec3 vW, vN;
+#include <common>
+#include <fog_pars_vertex>
+void main(){ vFlow=flow; vFoam=foam; vDepth=wdepth; vFade=fade; vSpeed=speed; vEdge=edge;
+  vec3 p=position;
+  // the face of a falling curtain bulges a little, in waves running down it; its edges fall straight
+  if (foam>=1.0){ float aer=clamp(foam-1.0,0.0,1.0);
+    p+=normal*(0.015+0.03*aer)*sin(flow.x*2.2-uTime*8.0+flow.y*1.7); }
+  vec4 wp=modelMatrix*vec4(p,1.0); vW=wp.xyz; vN=normalize(mat3(modelMatrix)*normal);
+  vec4 mvPosition=viewMatrix*wp; gl_Position=projectionMatrix*mvPosition;
+  #include <fog_vertex>
+}`;
+const WATER_FS=`uniform float uTime, uSea; uniform vec3 uSun, uSunC, uSkyC, uRefl, uReflTop, uShallow, uDeep;
+varying vec2 vFlow; varying float vFoam, vDepth, vFade, vSpeed, vEdge; varying vec3 vW, vN;
+#include <common>
+#include <fog_pars_fragment>
+float h2(vec2 p){ return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453); }
+float vn(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f); return mix(mix(h2(i),h2(i+vec2(1,0)),f.x),mix(h2(i+vec2(0,1)),h2(i+vec2(1,1)),f.x),f.y); }
+float rip(vec2 q){ return vn(q*vec2(1.1,2.3))+0.5*vn(q*vec2(3.3,4.7)+vec2(5.2,1.3))+0.3*vn(q*vec2(7.9,9.1)+vec2(1.7,8.2)); }
+// standing wavelets: rows of little crests, bowed downstream like chevrons from the banks to the thread of the current,
+// that stay where they are while the water runs through them, as they do over a riffle or the tail of a pool
+float wav(vec2 p){ float k=p.x*5.5+abs(p.y)*2.6+2.2*vn(p*vec2(0.7,1.4)); return (0.5+0.5*sin(k))*(0.35+0.65*vn(p*vec2(1.1,1.9)+3.0)); }
+vec2 ripG(vec2 q){ float e=0.04, r0=rip(q); return vec2(rip(q+vec2(e,0.0))-r0,rip(q+vec2(0.0,e))-r0)/e; }
+float foamN(vec2 fq){ return vn(fq*vec2(1.6,2.4))*0.5+vn(fq*vec2(4.5,5.5)+3.1)*0.32+vn(fq*vec2(11.0,13.0)+7.7)*0.18; }
+float lineN(vec2 fq){ return vn(fq*vec2(0.35,4.0)+1.3)*0.6+vn(fq*vec2(0.9,9.0)+5.1)*0.4; }
+float strandN(vec2 cq){ return vn(cq*vec2(0.8,5.0))*0.55+vn(cq*vec2(2.1,12.0)+4.7)*0.3+vn(cq*vec2(5.0,23.0)+1.9)*0.15; }
+void main(){
+  // The patterns are carried downstream at the speed held by each vertex (fast over a lip and down a curtain, slow in
+  // a pool), by the two-phase method of a flow map: each is drawn twice, half a cycle apart, each phase sliding with
+  // the current and jumping back at the end of its cycle, and the two are cross-faded so that neither jump is seen.
+  // The speed may then differ from place to place without the patterns being torn apart as time goes on.
+  float L=1.5, tc=uTime/L, pA=fract(tc), pB=fract(tc+0.5), wA=1.0-abs(1.0-2.0*pA), wB=1.0-wA;
+  vec2 qA=vec2(vFlow.x-vSpeed*L*(pA-0.5),vFlow.y)+floor(tc)*vec2(3.71,1.93), qB=vec2(vFlow.x-vSpeed*L*(pB-0.5),vFlow.y)+floor(tc+0.5)*vec2(2.37,2.91)+0.5;
+  vec2 g2;
+  if (uSea>0.5) g2=ripG(vec2(vFlow.x*0.35+uTime*0.05, vFlow.y*0.35-uTime*0.03)); else g2=wA*ripG(qA)+wB*ripG(qB);
+  float gx=g2.x, gy=g2.y, e=0.04;
+  float cu0=step(1.0,vFoam), ws=(1.0-uSea)*(1.0-cu0)*(0.3+1.6*clamp(vFoam,0.0,1.0));
+  if (ws>0.0){ vec2 p=vFlow; float w0=wav(p); gx+=ws*(wav(p+vec2(e,0.0))-w0)/e*0.2; gy+=ws*(wav(p+vec2(0.0,e))-w0)/e*0.2; }
+  // the frame of the flow coordinates on the surface, from the screen derivatives
+  vec3 dpx=dFdx(vW), dpy=dFdy(vW); vec2 dux=dFdx(vFlow), duy=dFdy(vFlow);
+  vec3 n0=normalize(vN), p2=cross(dpy,n0), p1=cross(n0,dpx);
+  vec3 T=p2*dux.x+p1*duy.x, B=p2*dux.y+p1*duy.y; float im=inversesqrt(max(1e-12,max(dot(T,T),dot(B,B)))); T*=im; B*=im;
+  float amp=mix(0.1,0.035,uSea)*(1.0+1.2*min(vFoam,1.0));
+  vec3 N=normalize(n0-(gx*T+gy*B)*amp);
+  vec3 V=normalize(cameraPosition-vW);
+  float ndv=max(dot(N,V),0.0), fr=0.02+0.98*pow(1.0-ndv,5.0);
+  vec3 base=mix(uShallow,uDeep,smoothstep(0.05,1.6,vDepth));
+  vec3 col=base*(uSkyC+uSunC*max(dot(N,uSun),0.0))*0.3183;
+  // the sky in the reflection: paler towards the horizon, deeper overhead, so that each ripple shows as it tilts
+  vec3 Rf=reflect(-V,N);
+  col=mix(col,mix(uRefl,uReflTop,smoothstep(0.02,0.5,Rf.y)),fr*0.7);
+  float rv=max(dot(reflect(-uSun,N),V),0.0);
+  col+=uSunC*(pow(rv,160.0)*0.45+pow(rv,900.0)*1.6*(1.0-uSea*0.5));
+  // white water: a pattern moving faster than the ripples, shown where the foam value carried by the vertex is high
+  // (the foam moves a little faster than the ripples, riding on the surface)
+  vec2 fA=qA*vec2(1.0,1.0)-vec2(vSpeed*L*0.3*(pA-0.5),0.0), fB=qB-vec2(vSpeed*L*0.3*(pB-0.5),0.0);
+  float fn=wA*foamN(fA)+wB*foamN(fB);
+  fn=0.5+(fn-0.5)*1.35;   // the cross-fade flattens the pattern a little; this restores its contrast
+  float fm=smoothstep(0.42,0.72,fn+vFoam-0.5)*step(0.01,vFoam);
+  // lines of foam drawn out along the current, behind a boulder, below a fall and at a riffle
+  float fl=0.5+(wA*lineN(fA)+wB*lineN(fB)-0.5)*1.35;
+  fm=max(fm,smoothstep(0.62,0.8,fl+vFoam*0.55)*step(0.01,vFoam)*(1.0-step(1.0,vFoam)));
+  // on a falling curtain (foam 1 + how far the water has aerated) the white water runs in streaks down the fall,
+  // sparse and glassy at the lip, whiter as it falls, with clear water between the streaks
+  float cu=step(1.0,vFoam), aer=clamp(vFoam-1.0,0.0,1.0);
+  float st=0.5+(wA*strandN(qA)+wB*strandN(qB)-0.5)*1.35;
+  float fc=smoothstep(0.62-0.32*aer,0.78-0.2*aer,st);
+  // white along both edges of a strand, where it frays and takes in air
+  fc=max(fc,smoothstep(0.7,0.95,vEdge)*0.5*aer);
+  // drawn in three steps of white, as the game's flat colours are, rather than a smooth blend
+  fc=(floor(fc*3.0)+smoothstep(0.35,0.65,fract(fc*3.0)))/3.0;
+  fm=mix(fm,fc,cu);
+  vec3 white=vec3(0.92,0.93,0.91)*(uSkyC*0.85+uSunC*(0.25+0.75*max(dot(n0,uSun),0.0)))*0.3183;
+  col=mix(col,white,fm);
+  float a=mix(mix(0.24,0.32,uSea),0.9,smoothstep(0.08,1.7,vDepth)); a=max(a,fr*0.85);
+  a=mix(a,0.22,cu); a=max(a,fm*0.95); a*=vFade;
+  gl_FragColor=vec4(col,a);
+  #include <tonemapping_fragment>
+  #include <colorspace_fragment>
+  #include <fog_fragment>
+}`;
+function waterMat(sea){ return new THREE.ShaderMaterial({ vertexShader:WATER_VS, fragmentShader:WATER_FS, transparent:true, depthWrite:false, fog:true,
+  uniforms:Object.assign(THREE.UniformsUtils.clone(THREE.UniformsLib.fog),{ uTime:{value:0}, uSea:{value:sea?1:0}, uSun:{value:new THREE.Vector3(0,1,0)},
+    uSunC:{value:new THREE.Color()}, uSkyC:{value:new THREE.Color()}, uRefl:{value:new THREE.Color()}, uReflTop:{value:new THREE.Color()},
+    uShallow:{value:hex(sea?'#4fb0ad':'#5c9c8c')}, uDeep:{value:hex(sea?'#2c6aa6':'#17615e')} }) }); }
+const streamMat=waterMat(false), seaMat=waterMat(true);
+// the course at a distance s along it
+function at(s){ const t=clamp(s/DS,0,NS-1.001), i=Math.floor(t), f=t-i;
+  const tx=lerp(TX[i],TX[i+1],f), tz=lerp(TZ[i],TZ[i+1],f), l=Math.hypot(tx,tz)||1;
+  return {x:lerp(X[i],X[i+1],f), z:lerp(Z[i],Z[i+1],f), tx:tx/l, tz:tz/l, nx:-tz/l, nz:tx/l, t}; }
+function waterMesh(){
+  const K=8, pos=[], flw=[], fom=[], dep=[], fad=[], idx=[], spd=[], edg=[], lat=[];
+  // the boulders that break the surface, by the sample nearest them, for the foam that trails behind each
+  const OB=new Map(); for (const o of OBS){ const k=Math.round(o.t); if (!OB.has(k)) OB.set(k,[]); OB.get(k).push(o); }
+  const trail=(t,n)=>{ let f=0; const i0=Math.floor(t);
+    for (let k=i0-18;k<=i0+1;k++){ const L=OB.get(k); if (!L) continue;
+      for (const o of L){ const ds=(t-o.t)*DS; if (ds<-o.r) continue; const w=o.r*(0.8+0.13*Math.max(0,ds)), la=Math.abs(n-o.n); if (la>w) continue;
+        f=Math.max(f,(ds<0.4?0.75:0.55*Math.exp(-ds/(1.5+3*o.r)))*smooth(1-la/w)); } }
+    return f; };
+  const dropAt=new Map(); for (const d of DROPS) dropAt.set(d.i,d);
+  const sEnd=S[Math.min(NS-1,ISEA+12)];
+  let strip=null;   // the rows of the present strip of water
+  const flush=()=>{ if (strip && strip.length>1){ let acc=0;
+      for (let r=0;r<strip.length;r++){ const R=strip[r]; if (r>0){ const P=strip[r-1]; acc+=Math.hypot(R.p.x-P.p.x,R.y-P.y,R.p.z-P.p.z); }
+        const b=pos.length/3;
+        for (let k=0;k<=K;k++){ const n=lerp(-R.nR,R.nL,k/K);
+          pos.push(R.p.x+R.p.nx*n,R.y,R.p.z+R.p.nz*n); flw.push(acc,n);
+          const w=Math.max(R.nL,R.nR), ef=1-Math.abs(n)/(w+0.01);
+          fom.push(R.curtain?R.foam:clamp(Math.max(R.foam*(0.7+0.3*ef),trail(R.p.t,n)),0,0.99)); dep.push(R.curtain?0.5:Math.max(0,R.y-prof(R.p.t,n)));
+          // a strand thins out at its very edges rather than ending in a hard line
+          const ek=Math.abs(2*k/K-1); fad.push(R.fade*(R.curtain?Math.min(1,(1-ek)*5):1));
+          // the current runs fastest in midstream; a strand at the speed it has gathered in its fall
+          spd.push(R.curtain?R.spd:R.spd*(0.55+0.45*Math.sqrt(Math.max(0,ef)))); edg.push(ek); lat.push(R.p.nx*Math.sign(2*k/K-1),R.p.nz*Math.sign(2*k/K-1));
+          if (r>0 && k<K){ const a=b-(K+1)+k; idx.push(a,a+1,b+k,a+1,b+k+1,b+k); } } } }
+    strip=null; };
+  const fadeAt=s=>smooth(s/8)*(1-smooth((s-(S[ISEA]-22))/30));
+  const row=(s,y,nL,nR,foam,curtain=false,pad=0.2,spdv)=>{ const p=at(s); const kk=Math.abs(KAP[Math.round(p.t)]);
+      // the speed of the current: slow in a deep pool, quicker in the shallow runs and where the surface falls steeply
+      if (spdv===undefined){ const i=Math.round(p.t), dc=Math.max(0.05,y-BED[i]+SC[i]), sl=Math.max(0,(WL[Math.max(0,i-2)]-WL[Math.min(NS-1,i+2)])/2); spdv=clamp(0.25+0.16/(0.15+dc)+8*sl,0.2,2.5); }
+      // the inner side of a tight bend is held within its radius, so that the surface does not fold over
+      if (kk>0.02){ const lim=0.85/kk; if (KAP[Math.round(p.t)]>0) nL=Math.min(nL,lim); else nR=Math.min(nR,lim); }
+      (strip||(strip=[])).push({p,y,nL:nL+pad,nR:nR+pad,foam,curtain,fade:fadeAt(s),spd:spdv}); };
+  // riffles: where the thread of the current crosses from one bank to the other between bends, and at each pool's tail
+  const RIF=F32(NS);
+  const bell=(sc,amp,w)=>{ for (let j=Math.max(0,Math.floor((sc-3*w)/DS));j<Math.min(NS,Math.ceil((sc+3*w)/DS));j++) RIF[j]=Math.max(RIF[j],amp*Math.exp(-(((S[j]-sc)/w)**2))); };
+  for (let i=1;i<NS;i++) if (SLOPE[i]<0.15 && Math.sign(KAP[i])!==Math.sign(KAP[i-1])) bell(S[i],0.17,1.4);
+  for (const d of DROPS) bell(S[d.i]+d.Lp*0.95,0.2,1.0);
+  let skipTo=-1, pool=null;
+  for (let i=0;i<NS && S[i]<=sEnd;i++){
+    if (CULV[i]){ flush(); pool=null; continue; }
+    if (S[i]<skipTo) continue;
+    const d=dropAt.get(i);
+    if (d && i>0 && !CULV[i-1]){
+      // the curtain: from the lip on a falling arc to the pool below
+      const nLt=EL[i-1]*0.92, nRt=ER[i-1]*0.92, Hw=d.wlTop-d.wlBot, sl=d.sLip, th=d.th;
+      // the brink: over the last metre the surface is drawn down and bends over the lip, as the water speeds up
+      const dd=Math.min(0.14,0.5*DRUN);
+      for (const u of [0.42,0.3,0.2,0.12,0.05]) row(sl-u,d.wlTop-dd*(1-u/1.2)**2,nLt,nRt,0.35+0.3*(1-u/0.42),false,0.2*u/0.42,1.0+1.2*(1-u/0.42));
+      row(sl,d.wlTop-dd,nLt,nRt,0.6,false,0,2.3); flush();
+      // the water leaves the lip in strands, glassy at first and whiter as it falls and takes in air, spreading a little,
+      // with the rock of the lip showing between them; each reaches below the pool's surface, where the foam hides its end
+      const Rd=rng(d.i*7+3), wid=nLt+nRt, ns=Math.max(1,Math.min(5,Math.round(wid/1.0))), cell=wid/ns, nc=Math.max(5,Math.min(16,Math.ceil(Hw*3.5)));
+      // each strand leaves the lip level and curves down on the arc of a jet, x growing with time and the fall with its
+      // square; the rows are closer near the lip, where the curve is tightest
+      for (let k=0;k<ns;k++){ const mid=-nRt+(k+0.5)*cell+(Rd()-0.5)*cell*0.3, hw=cell*(0.22+0.22*Rd()), tk=th*(0.8+0.35*Rd()), drop=Hw+0.15-dd, a0=0.15+0.3*Rd(), n2=nc+6;
+        // the strands leave the lip together as one sheet and part within the first third of the fall
+        const cm=-nRt+(k+0.5)*cell;
+        for (let q=0;q<=n2;q++){ const f=Math.pow(q/n2,1.5), sp=smooth(f*3), w=lerp(cell*0.52,hw*(1+0.4*f),sp), mc=lerp(cm,mid,sp);
+          row(sl-0.06+tk*f,d.wlTop-dd-drop*f*f,mc+w,w-mc,1+Math.min(1,a0+f*f*(1-a0)*Math.min(1,0.4+Hw/2)),true,0,2.2+Math.sqrt(2*9.8*drop*f*f)); }
+        flush(); }
+      pool={s:sl+th,H:d.H}; skipTo=sl+th+0.15; continue; }
+    let foam=0;
+    // white water gathering above a lip, and spreading and fading over the pool below a fall
+    const nd=DROPS.find(q=>q.i>i && q.i-i<5); if (nd) foam=Math.max(foam,0.35*(1-(nd.i-i)/5)*Math.min(1,nd.H));
+    if (pool){ const u=S[i]-pool.s; foam=Math.max(foam,Math.exp(-u/(0.7+0.55*pool.H))*Math.min(1,0.45+0.35*pool.H)); if (u>8) pool=null; }
+    const sl=(WL[Math.max(0,i-2)]-WL[Math.min(NS-1,i+2)])/2; foam=Math.max(foam,clamp((sl-0.04)*4,0,0.5),RIF[i]);
+    // the fresh water meeting the sea: a line of small breaking wavelets across the mouth
+    foam=Math.max(foam,0.4*Math.exp(-(((S[i]-S[ISEA]+2)/3)**2)));
+    { const nl=DROPS.find(q=>q.i>i && q.sLip-S[i]<1.2 && q.sLip>S[i]); const dd=Math.min(0.14,0.5*DRUN);
+      row(S[i],nl?WL[i]-dd*(1-(nl.sLip-S[i])/1.2)**2:WL[i],EL[i],ER[i],foam); }
+  }
+  flush();
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3)); g.setAttribute('flow',new THREE.Float32BufferAttribute(flw,2));
+  g.setAttribute('foam',new THREE.Float32BufferAttribute(fom,1)); g.setAttribute('wdepth',new THREE.Float32BufferAttribute(dep,1)); g.setAttribute('fade',new THREE.Float32BufferAttribute(fad,1));
+  g.setAttribute('speed',new THREE.Float32BufferAttribute(spd,1)); g.setAttribute('edge',new THREE.Float32BufferAttribute(edg,1)); g.setAttribute('lat',new THREE.Float32BufferAttribute(lat,2));
+  g.setIndex(idx); g.computeVertexNormals(); g.computeBoundingSphere();
+  const m=new THREE.Mesh(g,streamMat); m.renderOrder=2; m.name='water'; return m;
+}
+/* ---------- spray: droplets falling with each strand, splashes and drifting mist at the foot of each fall ---------- */
+const SPRAY_VS=`uniform float uTime, uScale; attribute vec3 a0, a1; attribute vec4 a2; varying float vA, vK;
+#include <common>
+#include <fog_pars_vertex>
+void main(){ float T=a2.y, t=mod(uTime+a2.x*T,T), u=t/T; vK=a2.z;
+  vec3 p=a0+a1*t+vec3(0.0,(a2.z<0.5?-4.9*t*t:0.25*t),0.0);
+  vA=a2.z<0.5 ? (1.0-smoothstep(0.8,1.0,u))*smoothstep(0.0,0.08,u) : sin(3.1416*u)*0.3;
+  vec4 mvPosition=viewMatrix*vec4(p,1.0); gl_Position=projectionMatrix*mvPosition;
+  gl_PointSize=clamp(a2.w*(a2.z<0.5?1.0:0.6+0.9*u)*uScale/max(0.2,-mvPosition.z),1.0,256.0);
+  #include <fog_vertex>
+}`;
+const SPRAY_FS=`uniform vec3 uCol; varying float vA, vK;
+#include <common>
+#include <fog_pars_fragment>
+void main(){ float d=length(gl_PointCoord-0.5)*2.0; if (d>1.0) discard;
+  float a=vA*(vK<0.5?1.0-smoothstep(0.55,1.0,d):(1.0-smoothstep(0.0,1.0,d))*(1.0-smoothstep(0.0,1.0,d)));
+  gl_FragColor=vec4(uCol,a);
+  #include <tonemapping_fragment>
+  #include <colorspace_fragment>
+  #include <fog_fragment>
+}`;
+const sprayMat=new THREE.ShaderMaterial({vertexShader:SPRAY_VS,fragmentShader:SPRAY_FS,transparent:true,depthWrite:false,fog:true,
+  uniforms:Object.assign(THREE.UniformsUtils.clone(THREE.UniformsLib.fog),{uTime:{value:0},uScale:{value:600},uCol:{value:new THREE.Color(1,1,1)}})});
+function sprayMesh(){
+  const A0=[], A1=[], A2=[], R=rng(state.seed*53+11);
+  const add=(p,v,phase,life,kind,size)=>{ A0.push(...p); A1.push(...v); A2.push(phase,life,kind,size); };
+  for (const d of DROPS){ const i=d.i; if (CULV[i]||CULV[i-1]) continue;
+    const Hw=d.wlTop-d.wlBot, lip=at(d.sLip), land=at(d.sLip+d.th), wid=(EL[i-1]+ER[i-1])*0.9, life=Math.sqrt(2*(Hw+0.15)/9.8), v=d.th/Math.max(0.15,life);
+    if (Hw<0.08) continue;
+    // droplets thrown from the lip, falling beside and in front of the strands
+    const nd=Math.round((3+wid*2.5)*Math.min(3,0.6+Hw*0.6));
+    for (let k=0;k<nd;k++){ const n=(R()-0.5)*wid, vv=v*(0.85+0.35*R()), side=(R()-0.5)*0.35;
+      add([lip.x+lip.nx*n,d.wlTop-0.02,lip.z+lip.nz*n],[lip.tx*vv+lip.nx*side,0,lip.tz*vv+lip.nz*side],R(),life*(0.95+0.1*R()),0,0.05+0.06*R()); }
+    // splashes thrown up where the strands strike the pool
+    const ns=Math.round(5+6*Math.min(3,Hw));
+    for (let k=0;k<ns;k++){ const n=(R()-0.5)*wid, up=0.8+1.6*R()*Math.min(1.5,Math.sqrt(Hw)), a=R()*6.28, h=0.3+0.8*R();
+      add([land.x+land.nx*n,d.wlBot,land.z+land.nz*n],[Math.cos(a)*h,up,Math.sin(a)*h],R(),2*up/9.8+0.05,0,0.04+0.05*R()); }
+    // mist drifting slowly downstream from the foot of a fall of some height
+    if (Hw>0.3){ const nm=Math.round(4+5*Math.min(4,Hw));
+      for (let k=0;k<nm;k++){ const n=(R()-0.5)*wid*1.2, along=R()*(0.6+0.4*Hw), dr=0.15+0.2*R();
+        add([land.x+land.nx*n+land.tx*along,d.wlBot+0.1+R()*0.3*Hw,land.z+land.nz*n+land.tz*along],[land.tx*dr,0,land.tz*dr],R(),2.5+2*R(),1,(0.6+0.8*R())*(1+Hw/4)); } }
+  }
+  // where the water runs steeply between the steps of a cascade, a fine spray thrown up from the rocks
+  for (let i=2;i<NS-2;i+=2){ if (CULV[i]) continue; const sl=(WL[i-2]-WL[i+2])/2; if (sl<0.06) continue;
+    const p=at(S[i]), wid=(EL[i]+ER[i])*0.8, k=Math.round(Math.min(2,sl*12));
+    for (let q=0;q<k;q++){ const n=(R()-0.5)*wid, up=0.6+1.2*R(), a=R()*6.28, h=0.2+0.5*R();
+      add([p.x+p.nx*n,WL[i],p.z+p.nz*n],[Math.cos(a)*h+p.tx*0.6,up,Math.sin(a)*h+p.tz*0.6],R(),2*up/9.8+0.05,0,0.035+0.04*R()); } }
+  const g=new THREE.BufferGeometry(), n=A2.length/4;
+  g.setAttribute('position',new THREE.Float32BufferAttribute(A0,3)); g.setAttribute('a0',new THREE.Float32BufferAttribute(A0,3));
+  g.setAttribute('a1',new THREE.Float32BufferAttribute(A1,3)); g.setAttribute('a2',new THREE.Float32BufferAttribute(A2,4));
+  g.computeBoundingSphere(); if (g.boundingSphere) g.boundingSphere.radius+=20;
+  const m=new THREE.Points(g,sprayMat); m.renderOrder=3; m.frustumCulled=false; m.name='spray'; return m;
+}
+/* ---------- the foam at the foot of each fall: a ring of lumpy white masses, boiling ---------- */
+// In the manner of the stylised waterfalls of other games: low white shapes whose surfaces heave with noise, rather than
+// a cloud of particles; drawn flat, in the light of the sky and the sun, like the game's other surfaces
+const FOAM_VS=`uniform float uTime; attribute float amp; attribute float ph; varying vec3 vW;
+#include <common>
+#include <fog_pars_vertex>
+void main(){ vec3 p=position;
+  p+=normal*amp*(0.6*sin(dot(p,vec3(7.1,5.3,6.7))+uTime*5.0+ph)+0.4*sin(dot(p,vec3(-4.3,8.9,3.1))-uTime*3.7+ph*1.7));
+  vec4 wp=modelMatrix*vec4(p,1.0); vW=wp.xyz; vec4 mvPosition=viewMatrix*wp; gl_Position=projectionMatrix*mvPosition;
+  #include <fog_vertex>
+}`;
+const FOAM_FS=`uniform vec3 uCol, uSun; varying vec3 vW;
+#include <common>
+#include <fog_pars_fragment>
+void main(){ vec3 n=normalize(cross(dFdx(vW),dFdy(vW))); if (n.y<0.0) n=-n;
+  gl_FragColor=vec4(uCol*(0.8+0.25*max(dot(n,uSun),0.0)),0.92);
+  #include <tonemapping_fragment>
+  #include <colorspace_fragment>
+  #include <fog_fragment>
+}`;
+const foamMat=new THREE.ShaderMaterial({vertexShader:FOAM_VS,fragmentShader:FOAM_FS,transparent:true,fog:true,
+  uniforms:Object.assign(THREE.UniformsUtils.clone(THREE.UniformsLib.fog),{uTime:{value:0},uCol:{value:new THREE.Color(1,1,1)},uSun:{value:new THREE.Vector3(0,1,0)}})});
+function foamRingMesh(){
+  const R=rng(state.seed*71+3), P=[], N=[], A=[], PH=[], ico=new THREE.IcosahedronGeometry(1,1), ip=ico.attributes.position, inn=ico.attributes.normal;
+  for (const d of DROPS){ const i=d.i; if (CULV[i]||CULV[i-1]) continue; const Hw=d.wlTop-d.wlBot; if (Hw<0.25) continue;
+    const land=at(d.sLip+d.th), wid=(EL[i-1]+ER[i-1])*0.85, nb=4+Math.round(wid*2.5*Math.min(1.6,0.6+Hw*0.4));
+    for (let k=0;k<nb;k++){ const n=(R()-0.5)*wid, along=-0.15+R()*(0.4+0.25*Math.min(3,Hw)), r=(0.16+0.16*R())*(0.7+0.3*Math.min(2.5,Hw)), ph=R()*6.28;
+      const cx=land.x+land.nx*n+land.tx*along, cz=land.z+land.nz*n+land.tz*along, cy=d.wlBot+0.02, sy=0.4+0.2*R();
+      for (let v=0;v<ip.count;v++){ P.push(cx+ip.getX(v)*r,cy+ip.getY(v)*r*sy,cz+ip.getZ(v)*r); N.push(inn.getX(v),inn.getY(v),inn.getZ(v)); A.push(r*0.22); PH.push(ph); } } }
+  const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.Float32BufferAttribute(P,3)); g.setAttribute('normal',new THREE.Float32BufferAttribute(N,3));
+  g.setAttribute('amp',new THREE.Float32BufferAttribute(A,1)); g.setAttribute('ph',new THREE.Float32BufferAttribute(PH,1)); g.computeBoundingSphere();
+  const m=new THREE.Mesh(g,foamMat); m.renderOrder=2; m.name='foam'; return m;
+}
+function seaMesh(){
+  const step=10, x0=-3400, x1=3400, z0=560, z1=3800, nx=(x1-x0)/step, nz=(z1-z0)/step, pos=[], flw=[], dep=[], fom=[], fad=[], idx=[], spd=[], edg=[], lat=[];
+  for (let j=0;j<=nz;j++) for (let i=0;i<=nx;i++){ const x=x0+i*step, z=z0+j*step, g=(z<PZ1&&x>PX0&&x<PX1)?groundAt(x,z):-14-(z-PZ1)*0.01;
+    pos.push(x,0,z); flw.push(x,z); dep.push(Math.max(0,-g)); fom.push(0); fad.push(1); spd.push(0); edg.push(0); lat.push(0,0); }
+  for (let j=0;j<nz;j++) for (let i=0;i<nx;i++){ const a=j*(nx+1)+i, b=a+1, c=a+nx+1, d=c+1; idx.push(a,c,b,b,c,d); }
+  const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3)); g.setAttribute('flow',new THREE.Float32BufferAttribute(flw,2));
+  g.setAttribute('wdepth',new THREE.Float32BufferAttribute(dep,1)); g.setAttribute('foam',new THREE.Float32BufferAttribute(fom,1)); g.setAttribute('fade',new THREE.Float32BufferAttribute(fad,1));
+  g.setAttribute('speed',new THREE.Float32BufferAttribute(spd,1)); g.setAttribute('edge',new THREE.Float32BufferAttribute(edg,1)); g.setAttribute('lat',new THREE.Float32BufferAttribute(lat,2));
+  g.setIndex(idx); g.computeVertexNormals(); const m=new THREE.Mesh(g,seaMat); m.renderOrder=1; return m;
+}
+
+/* ---------- stones, plants and houses: one merged geometry ---------- */
+function tplOf(geo){ const g=geo.index?geo.toNonIndexed():geo; g.computeVertexNormals(); return {p:g.attributes.position.array,n:g.attributes.normal.array}; }
+function jitter(geo,amt,seed){ const g=geo.index?geo.toNonIndexed():geo, p=g.attributes.position;
+  for (let i=0;i<p.count;i++){ const x=p.getX(i), y=p.getY(i), z=p.getZ(i), kx=Math.round(x*1000), ky=Math.round(y*1000), kz=Math.round(z*1000);
+    p.setXYZ(i,x*(1+amt*(hash(kx,ky,kz+seed)-0.5)),y*(1+amt*(hash(ky,kz,kx+seed+5)-0.5)),z*(1+amt*(hash(kz,kx,ky+seed+9)-0.5))); }
+  return tplOf(g); }
+const TB={
+  box:tplOf(new THREE.BoxGeometry(1,1,1).translate(0,0.5,0)),
+  boxC:tplOf(new THREE.BoxGeometry(1,1,1)),
+  cyl:tplOf(new THREE.CylinderGeometry(0.5,0.5,1,7).translate(0,0.5,0)),
+  cone:tplOf(new THREE.ConeGeometry(0.5,1,7).translate(0,0.5,0)),
+  ico:tplOf(new THREE.IcosahedronGeometry(0.5,0)),
+  prism:(()=>{ const P=[-.5,0,-.5, 0,1,-.5, .5,0,-.5,   .5,0,.5, 0,1,.5, -.5,0,.5,  0,1,-.5, 0,1,.5, .5,0,.5,   0,1,-.5, .5,0,.5, .5,0,-.5,
+    0,1,.5, 0,1,-.5, -.5,0,-.5,  0,1,.5, -.5,0,-.5, -.5,0,.5]; const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.Float32BufferAttribute(P,3)); return tplOf(g); })(),
+  arch:tplOf(new THREE.CylinderGeometry(0.5,0.5,1,12,1,false,-Math.PI/2,Math.PI).rotateX(Math.PI/2)),
+};
+const BOULDER=[0,1,2,3,4,5].map(k=>jitter(new THREE.IcosahedronGeometry(0.5,1),0.45,k*13+1));
+const BLOCK=[0,1,2,3].map(k=>jitter(new THREE.BoxGeometry(1,1,1,2,2,2),0.22,k*17+3));
+const _m=new THREE.Matrix4(), _q=new THREE.Quaternion(), _e=new THREE.Euler(), _v=new THREE.Vector3(), _s=new THREE.Vector3(), _n3=new THREE.Matrix3(), _p=new THREE.Vector3();
+function M(x,y,z,sx,sy,sz,ry=0,rx=0,rz=0){ _e.set(rx,ry,rz,'YXZ'); _q.setFromEuler(_e); return _m.compose(_v.set(x,y,z),_q,_s.set(sx,sy,sz)); }
+class MB{ constructor(){ this.p=[]; this.n=[]; this.c=[]; }
+  add(t,m,c){ const P=t.p, N=t.n; _n3.getNormalMatrix(m);
+    for (let k=0;k<P.length;k+=3){ _p.set(P[k],P[k+1],P[k+2]).applyMatrix4(m); this.p.push(_p.x,_p.y,_p.z); _p.set(N[k],N[k+1],N[k+2]).applyMatrix3(_n3).normalize(); this.n.push(_p.x,_p.y,_p.z); this.c.push(c.r,c.g,c.b); } }
+  mesh(mat){ const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.Float32BufferAttribute(this.p,3)); g.setAttribute('normal',new THREE.Float32BufferAttribute(this.n,3)); g.setAttribute('color',new THREE.Float32BufferAttribute(this.c,3)); g.computeBoundingSphere(); const m=new THREE.Mesh(g,mat); m.castShadow=true; m.receiveShadow=true; return m; } }
+const propMat=new THREE.MeshLambertMaterial({vertexColors:true,flatShading:true});
+const STONE_A=hex('#d3ccbd'), STONE_B=hex('#a49d91'), STONE_C=hex('#c2b49c');
+const stoneCol=(R)=>_t.copy(STONE_A).lerp(STONE_B,R()).lerp(STONE_C,R()*0.4).clone();
+function slopeAt(x,z){ const a=terrainAt(x+0.6,z), b=terrainAt(x-0.6,z), c=terrainAt(x,z+0.6), d=terrainAt(x,z-0.6); return Math.hypot(a-b,c-d)/1.2; }
+function buildProps(){
+  const gb=new MB(), R=rng(state.seed*131+17), W=state.width;
+  const P=(i,n)=>{ const nx=-TZ[i], nz=TX[i]; return [X[i]+nx*n, Z[i]+nz*n]; };
+  const yaw=i=>Math.atan2(-TZ[i],TX[i]);
+  const rock=(x,z,s,ry,sink=0.35)=>{ gb.add(BOULDER[Math.floor(R()*6)],M(x,terrainAt(x,z)-s*sink*0.6,z,s*1.4,s*(1.0+0.3*R()),s*1.2,ry+R()*6.28,(R()-0.5)*0.3,(R()-0.5)*0.3),_t.copy(C_.rock).lerp(GREY_ROCK,0.3+0.5*R()).multiplyScalar(0.9+0.15*R()).clone()); };
+  OBS=[];
+  const boulder=(x,z,y,r,ry,elong=1.3,t=-1,n=0)=>{ if (t>=0 && y+r*0.85>WL[Math.round(t)]-0.08) OBS.push({t,n,r:r*1.1}); gb.add(BOULDER[Math.floor(R()*6)],M(x,y,z,r*2*elong,r*1.5*(0.7+0.4*R()),r*2,ry+R()*0.5,(R()-0.5)*0.4,(R()-0.5)*0.4),stoneCol(R)); };
+  for (let i=4;i<NS-2;i++){ if (CULV[i]) continue;
+    const hs=HW[i]*(1+WID[i]), kk=Math.min(1,Math.abs(KAP[i])*RKAP), inner=KAP[i]>0?1:-1, sl=SLOPE[i];
+    // boulders in the bed: more and larger on steep ground
+    if (R()<0.03+0.22*Math.min(0.5,sl)){ const n=(R()-0.5)*2*hs*0.85, [x,z]=P(i,n), r=(0.14+0.4*R())*(0.5+W/6)*(1+1.8*Math.min(0.5,sl));
+      boulder(x,z,terrainAt(x,z)-r*0.25,r,yaw(i),1.3,i,n); }
+    // the stones of a point bar, and pebbles on the bed
+    if (kk>0.15 && S[i]<S[ISEA]+4){ const nb=Math.floor(kk*5*R()+kk*2);
+      for (let k=0;k<nb;k++){ const n=inner*(hs+R()*BAR[i]*kk), [x,z]=P(i,n+(R()-0.5)*0.4), r=(0.05+0.1*R()*R())*Math.sqrt(W/3)*(1+sl);
+        gb.add(BOULDER[Math.floor(R()*6)],M(x,terrainAt(x,z)-r*0.15,z,r*2.2,r*1.1,r*1.8,R()*6.28),stoneCol(R)); } }
+    if (R()<0.7){ const n=(R()-0.5)*2*hs, [x,z]=P(i,n), r=(0.05+0.09*R())*Math.sqrt(W/3)*(1+sl);
+      gb.add(BOULDER[Math.floor(R()*6)],M(x,terrainAt(x,z)-r*0.2,z,r*2.2,r*1.1,r*1.8,R()*6.28),stoneCol(R)); }
+    // stones fallen from the foot of a cut bank
+    if (i%2===0 && kk>0.4 && GM[i]>1.5){ const outer=-inner, nb=hs*(1-0.15*kk)+(BH[i]+0.3*kk)/(2+2*kk), [lx,lz]=P(i,outer*(nb+0.45)), ly=terrainAt(lx,lz);
+      if (ly>WL[i]+0.45){
+        if (R()<0.25){ const [bx,bz]=P(i,outer*(hs*0.8)), r=0.15+0.2*R(); boulder(bx,bz,terrainAt(bx,bz)-r*0.3,r,yaw(i)); } } }
+  }
+  // the lip of rock blocks across the head of each fall, larger blocks in the banks beside it, and boulders in its pool
+  for (const d of DROPS){ const i=d.i-1; if (CULV[i]) continue; const hs=HW[i], H=d.H, p=at(d.sLip), ry=yaw(i);
+    const nb=Math.max(2,Math.round(2*hs/1.1)), w=2*hs/nb, hb=0.45+0.35*Math.min(4,H), db=0.9+0.25*Math.min(4,H);
+    for (let k=0;k<nb;k++){ const n=-hs+(k+0.5)*w+(R()-0.5)*0.15, x=p.x+p.nx*n-p.tx*(db/2-0.02), z=p.z+p.nz*n-p.tz*(db/2-0.02);
+      gb.add(BLOCK[Math.floor(R()*4)],M(x,d.top+0.03-hb/2,z,db,hb,w*1.2,ry+(R()-0.5)*0.2,(R()-0.5)*0.08,(R()-0.5)*0.08),_t.copy(CV_ROCK[3]).lerp(CV_ROCK[0],0.3*R()).clone()); }
+    for (const sd of [-1,1]) for (let k=0;k<1+Math.min(2,Math.floor(H*0.6));k++){ const n=sd*(hs+0.6+k*1.0+R()*0.5), along=-0.6-R()*(0.8+0.4*H), x=p.x+p.nx*n+p.tx*along, z=p.z+p.nz*n+p.tz*along;
+      rock(x,z,0.5+0.25*Math.min(3,H)*R()+0.3*R(),ry,0.45); }
+    for (let k=0;k<2+Math.min(4,Math.floor(H*1.2));k++){ const u=d.sLip+d.th+R()*d.Lp, q=at(u), side=R()<0.5?-1:1, n=side*HW[Math.round(q.t)]*(1+WID[Math.round(q.t)])*(0.6+0.5*R()), x=q.x+q.nx*n, z=q.z+q.nz*n, r=(0.25+0.35*R())*(0.6+W/6)*(1+0.2*Math.min(4,H));
+      boulder(x,z,terrainAt(x,z)-r*0.3,r,ry,1.3,q.t,n); }
+  }
+  // the spring: water rising from under a bank of blocks
+  { const p=at(0), ry=yaw(0);
+    for (let k=0;k<3;k++){ const n=(k-1)*1.6+(R()-0.5)*0.4, along=-2.6-R()*0.8, x=p.x+p.nx*n+p.tx*along, z=p.z+p.nz*n+p.tz*along; rock(x,z,1.3+R()*0.6,ry,0.35); }
+    for (let k=0;k<7;k++){ const a=Math.PI*(0.1+0.8*k/6), r=1.5+R()*0.5, x=p.x-p.tx*Math.sin(a)*r+p.nx*Math.cos(a)*r*1.2, z=p.z-p.tz*Math.sin(a)*r+p.nz*Math.cos(a)*r*1.2;
+      rock(x,z,0.35+R()*0.45,ry,0.3); } }
+  // the culvert's headwalls, each with an arch over the water
+  if (CULVR){ let a=-1, b=-1; for (let i=0;i<NS;i++) if (CULV[i]){ if (a<0) a=i; b=i; }
+    for (const [i,dir] of [[a-1,1],[b+1,-1]]){ if (i<0||i>=NS) continue; const p=at(S[i]), hs=HW[i], top=Math.max(BED[i]+2.4,GM[i]+0.6), base=BED[i]-0.4, ry=yaw(i);
+      const wx=p.x+p.tx*dir*0.6, wz=p.z+p.tz*dir*0.6;
+      gb.add(TB.box,M(wx,base,wz,0.9,top-base,2*hs+5,ry),C_.stoneDark);
+      gb.add(TB.box,M(wx,top,wz,1.1,0.25,2*hs+5.3,ry),C_.stone);
+      const ar=Math.max(0.7,hs*0.9), ax=wx-p.tx*dir*0.47, az=wz-p.tz*dir*0.47;
+      gb.add(TB.boxC,M(ax,BED[i]+ar*0.5,az,0.06,ar,2*ar,ry),hex('#2f2a25'));
+      gb.add(TB.arch,M(ax,BED[i]+ar,az,2*ar,2*ar,0.06,ry+Math.PI/2),hex('#2f2a25'));
+      for (let k=0;k<9;k++){ const an=k/8*Math.PI, vx=Math.cos(an)*(ar+0.15), vy=Math.sin(an)*(ar+0.15);
+        gb.add(TB.boxC,M(ax-p.tx*dir*0.02+p.nx*vx,BED[i]+ar+vy,az-p.tz*dir*0.02+p.nz*vx,0.1,0.32,0.3,ry,0,-an+Math.PI/2),C_.stone); } } }
+  return gb;
+}
+// the plants of the hillside and the banks, built by the game's own addFlora and addTree (in streams-flora.js), at full
+// detail near the stream, simplified further off and in outline far away, as the game draws them by distance
+function buildPlants(){
+  const R=rng(state.seed*211+3), ht=(x,z)=>KIND.get(bkey(Math.floor(x/CB),Math.floor(z/CB)))?terrainAt(x,z):groundAt(x,z);
+  FL.setGround(ht);
+  const gbs=[new FL.GB(0),new FL.GB(1),new FL.GB(2)], ch={circles:[],treeSpots:[]};
+  const plant=(x,z,y,kind,sc)=>{ courseQuery(x,z); const d=QD, gb=gbs[d<90?0:d<320?1:2];
+    if (kind==='olive'||kind==='cypress') FL.addTree(gb,ch,x,z,rng(Math.floor(R()*1e9)),sc,y,kind); else FL.addFlora(gb,ch,x,z,sc,y,kind); };
+  for (let gx=-1100;gx<1100;gx+=13) for (let gz=ZR-260;gz<ZS+20;gz+=13){
+    const x=gx+(R()-0.5)*11, z=gz+(R()-0.5)*11, n=vnoise(x*0.012,z*0.012,301), r=R(), q=R(), sc=0.8+0.4*R();
+    if (isVillage(Math.floor(x/CB),Math.floor(z/CB))) continue;
+    const y=ht(x,z); if (y<2.2) continue;
+    if (KIND.get(bkey(Math.floor(x/CB),Math.floor(z/CB))) && (QD<HW[clamp(Math.round(QT),0,NS-1)]*2+6 || QG-y>0.3)) continue;
+    const sl=Math.hypot(groundAt(x+2,z)-groundAt(x-2,z),groundAt(x,z+2)-groundAt(x,z-2))/4; if (sl>0.95) continue;
+    const dens=(0.15+0.5*n)*(1-smooth((y-HTOP*0.85)/(HTOP*0.2))); if (r>dens) continue;
+    if (y<70 && q<0.3) plant(x,z,y,'olive',sc);
+    else if (y<45 && q<0.38) plant(x,z,y,'stonepine',sc);
+    else if (y>40 && y<HTOP*0.7 && q<0.5) plant(x,z,y,'aleppo',sc);
+    else if (q<0.62 && y<HTOP*0.75) plant(x,z,y,'holm',sc);
+    else plant(x,z,y,'maquis',y>HTOP*0.55?0.7:1);
+  }
+  // along the banks below the high ground: figs, which seek the water, lentisk and holm oak
+  for (let i=60;i<Math.min(NS,ISEA-10);i+=12){ if (CULV[i] || GM[i]>HTOP*0.65) continue;
+    const kk=Math.min(1,Math.abs(KAP[i])*RKAP), inner=KAP[i]>0?1:-1, side=kk>0.3?-inner:R()<0.5?-1:1, hs=HW[i]*(1+WID[i]), q=R();
+    if (q>0.6) continue;
+    const kind=q<0.15&&GM[i]<HTOP*0.4?'fig':q<0.45?'maquis':'holm', nx=-TZ[i], nz=TX[i], n=side*(hs+BH[i]/1.8+(kind==='maquis'?0.8:2.5)+R()*2), x=X[i]+nx*n, z=Z[i]+nz*n, y=terrainAt(x,z);
+    if (y<WL[i]+0.3 || slopeAt(x,z)>0.9 || isVillage(Math.floor(x/CB),Math.floor(z/CB))) continue;
+    plant(x,z,y,kind,0.8+0.3*R());
+  }
+  const out=new THREE.Group();
+  for (const gb of gbs){ if (!gb.p.length) continue; const m=new THREE.Mesh(gb.geometry(0,0),floraMat); m.castShadow=true; m.receiveShadow=true; out.add(m); }
+  return out;
+}
+const floraMat=new THREE.MeshLambertMaterial({vertexColors:true}); let VG=null;
+function buildLand(gb){
+  const R=rng(state.seed*211+5);
+  // the houses: blocks of plaster with tiled roofs, set round small yards in each village block
+  for (const b of VB){ const placed=[];
+    for (let k=0;k<40 && placed.length<9;k++){ const w=6+R()*3.5, d=6+R()*3, x=b.x0+3+w/2+R()*(CB-6-w), z=b.z0+3+d/2+R()*(CB-6-d);
+      if (placed.some(p=>Math.abs(p.x-x)<(p.w+w)/2+2.2 && Math.abs(p.z-z)<(p.d+d)/2+2.2)) continue; placed.push({x,z,w,d});
+      let lo=1e9, hi=-1e9; for (const [ax,az] of [[x-w/2,z-d/2],[x+w/2,z-d/2],[x-w/2,z+d/2],[x+w/2,z+d/2],[x,z]]){ const y=groundAt(ax,az); lo=Math.min(lo,y); hi=Math.max(hi,y); }
+      const h=(hi-lo)+3.2+(R()<0.6?2.9:0), wall=C_.walls[Math.floor(R()*C_.walls.length)];
+      gb.add(TB.box,M(x,lo-0.6,z,w,h+0.6,d),wall);
+      gb.add(TB.prism,M(x,lo+h,z,w+0.5,1.7,d+0.5,d>w?Math.PI/2:0),C_.roofs[Math.floor(R()*C_.roofs.length)]);
+      for (let f=0;f<(h>5?2:1);f++) for (const sd of [-1,1]) gb.add(TB.boxC,M(x+sd*w*0.25,hi+1.3+f*2.8,z+d/2+0.03,0.8,1.1,0.08),C_.win);
+      if (R()<0.4) FL.addTree(VG,{circles:[]},x+w/2+1.6,z,rng(Math.floor(R()*1e9)),1,groundAt(x+w/2+1.6,z),'cypress'); } }
+}
+/* ---------- the scene ---------- */
+const canvas=document.getElementById('c');
+const renderer=new THREE.WebGLRenderer({canvas,antialias:true,preserveDrawingBuffer:true});
+renderer.setPixelRatio(Math.min(2,devicePixelRatio));
+renderer.outputColorSpace=THREE.SRGBColorSpace; renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.toneMappingExposure=1.0;
+renderer.shadowMap.enabled=true; renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+const scene=new THREE.Scene();
+const FOG=hex('#9fc0dc'); scene.fog=new THREE.Fog(FOG,150,2200); scene.background=FOG.clone();
+const camera=new THREE.PerspectiveCamera(55,1,0.1,6000);
+const controls=new OrbitControls(camera,canvas); controls.enableDamping=true;
+// the game's sky colours and lights
+const SKY={ day:{top:hex('#1f5c9c'),mid:hex('#5f95c4'),hor:hex('#9fc0dc'),hs:hex('#d8cde0'),hg:hex('#f0c49a')},
+  dusk:{top:hex('#2c3f74'),mid:hex('#9b7898'),hor:hex('#f2a477'),hs:hex('#d9a08c'),hg:hex('#8a5f55')},
+  night:{top:hex('#040a1a'),mid:hex('#0a1632'),hor:hex('#16264a'),hs:hex('#3a4f86'),hg:hex('#141a2c')} };
+const skyU={uTop:{value:new THREE.Color()},uMid:{value:new THREE.Color()},uHor:{value:new THREE.Color()},uSun:{value:new THREE.Vector3(0,1,0)}};
+const sky=new THREE.Mesh(new THREE.SphereGeometry(5000,32,16),new THREE.ShaderMaterial({uniforms:skyU,side:THREE.BackSide,depthWrite:false,fog:false,
+  vertexShader:`varying vec3 vDir; void main(){ vDir=normalize(position); gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+  fragmentShader:`uniform vec3 uTop,uMid,uHor,uSun; varying vec3 vDir;
+    void main(){ vec3 d=normalize(vDir); float y=d.y;
+      vec3 c = y>0.12 ? mix(uMid,uTop,clamp((y-0.12)/0.6,0.0,1.0)) : mix(uHor,uMid,clamp((y+0.04)/0.16,0.0,1.0));
+      float sd=max(dot(d,uSun),0.0); c += vec3(1.0,0.95,0.85)*(pow(sd,900.0)*6.0 + pow(sd,12.0)*0.35);
+      gl_FragColor=vec4(c,1.0);
+      #include <tonemapping_fragment>
+      #include <colorspace_fragment>
+    }`}));
+sky.renderOrder=-1; scene.add(sky);
+const hemi=new THREE.HemisphereLight(hex('#d8cde0'),hex('#f0c49a'),2.3); scene.add(hemi);
+const sun=new THREE.DirectionalLight(hex('#fff1dc'),2.6); sun.castShadow=true; sun.shadow.mapSize.set(4096,4096);
+sun.shadow.bias=-0.0004; sun.shadow.normalBias=0.03; scene.add(sun,sun.target);
+const SUN_DIR=new THREE.Vector3();
+const mix3=(out,k,wd,wk,wn)=>out.setRGB(SKY.day[k].r*wd+SKY.dusk[k].r*wk+SKY.night[k].r*wn, SKY.day[k].g*wd+SKY.dusk[k].g*wk+SKY.night[k].g*wn, SKY.day[k].b*wd+SKY.dusk[k].b*wk+SKY.night[k].b*wn);
+function daylight(){
+  const ang=(state.hour-6)/24*Math.PI*2; SUN_DIR.set(0.32,Math.sin(ang)*0.94,-Math.cos(ang)).normalize();
+  const e=SUN_DIR.y, wd=smooth((e-0.04)/0.3), wn=smooth((-e-0.02)/0.2), wk=Math.max(0,1-wd-wn);
+  mix3(skyU.uTop.value,'top',wd,wk,wn); mix3(skyU.uMid.value,'mid',wd,wk,wn); mix3(skyU.uHor.value,'hor',wd,wk,wn); skyU.uSun.value.copy(SUN_DIR);
+  scene.fog.color.copy(skyU.uHor.value); scene.background.copy(skyU.uHor.value);
+  mix3(hemi.color,'hs',wd,wk,wn); mix3(hemi.groundColor,'hg',wd,wk,wn); hemi.intensity=2.3*wd+1.5*wk+1.0*wn;
+  const sunUp=smooth((e+0.02)/0.12); sun.color.set('#ff9a5a').lerp(new THREE.Color('#fff1dc'),wd); sun.intensity=sunUp*(1.1+1.5*wd);
+  renderer.toneMappingExposure=1.0+0.35*wn;
+  for (const m of [streamMat,seaMat]){ const u=m.uniforms; u.uSun.value.copy(SUN_DIR); u.uSunC.value.copy(sun.color).multiplyScalar(sun.intensity);
+    sprayMat.uniforms.uCol.value.copy(hemi.color).multiplyScalar(hemi.intensity*0.85).add(_t.copy(sun.color).multiplyScalar(sun.intensity*0.55)).multiplyScalar(0.3183*0.95);
+    foamMat.uniforms.uCol.value.copy(sprayMat.uniforms.uCol.value); foamMat.uniforms.uSun.value.copy(SUN_DIR);
+    u.uSkyC.value.copy(hemi.color).lerp(hemi.groundColor,0.25).multiplyScalar(hemi.intensity); u.uRefl.value.copy(skyU.uHor.value).lerp(skyU.uMid.value,m===seaMat?0.85:0.35); u.uReflTop.value.copy(skyU.uMid.value).lerp(skyU.uTop.value,0.5); }
+  const h=Math.floor(state.hour), mi=Math.round((state.hour-h)*60); document.getElementById('hV').textContent=String(h).padStart(2,'0')+':'+String(mi).padStart(2,'0');
+}
+
+let world=null, INFO={};
+function build(){
+  const t0=performance.now();
+  if (world){ scene.remove(world); world.traverse(o=>{ if (o.geometry) o.geometry.dispose(); }); }
+  world=new THREE.Group(); scene.add(world);
+  setTerrain(); MOUTH=null; buildCourse(); profile(); buildIndex(); classify();
+  const t1=performance.now();
+  for (const [k,kd] of KIND){ const cx=Math.floor(k/1000)-100, cz=k%1000-100; world.add(blockMesh(cx,cz,kd===2?0.5:1)); }
+  world.add(coarseMesh()); world.add(channelMesh());
+  const t2=performance.now();
+  VG=new FL.GB(0); const gb=buildProps(); buildLand(gb); world.add(gb.mesh(propMat)); world.add(buildPlants());
+  world.add(waterMesh()); world.add(seaMesh()); world.add(sprayMesh()); world.add(foamRingMesh());
+  if (VG.p.length){ const m=new THREE.Mesh(VG.geometry(0,0),floraMat); m.castShadow=true; world.add(m); }
+  const t3=performance.now();
+  // the figures shown below the settings
+  let tall=0; for (const d of DROPS) tall=Math.max(tall,d.H);
+  const len=S[ISEA], straight=Math.hypot(X[ISEA]-X[0],Z[ISEA]-Z[0]), plan=(()=>{ let l=0; for (let i=1;i<=ISEA;i++) l+=Math.hypot(X[i]-X[i-1],Z[i]-Z[i-1]); return l; })();
+  const big=DROPS.filter(d=>d.H>=2).length, cul=CULV.reduce((a,v)=>a+v,0)*DS;
+  const cls=[[0,0.08],[0.08,0.16],[0.16,9]].map(([a,b])=>{ let L=0, n=0; for (let i=0;i<=ISEA;i++) if (SLOPE[i]>=a&&SLOPE[i]<b&&!CULV[i]) L+=DS; for (const d of DROPS) if (d.i<=ISEA&&SLOPE[d.i]>=a&&SLOPE[d.i]<b) n++; return {km:L/1000,drops:n,perKm:L>0?n/(L/1000):0}; });
+  INFO={length:len, drops:DROPS.length, byGround:cls, big, tallest:tall, sinuosity:plan/straight, source:BED[0], route:ROUTE, culvert:cul, ms:{course:t1-t0,ground:t2-t1,rest:t3-t2}};
+  document.getElementById('stats').innerHTML=
+    `Length ${(len/1000).toFixed(2)} km, from ${GM[0].toFixed(0)} m<br>Drops ${DROPS.length}, of 2 m or more ${big}, highest ${tall.toFixed(1)} m<br>Sinuosity ${(plan/straight).toFixed(2)}`+
+    (ROUTE==='round'?'<br>Village: course turned round it':ROUTE==='culvert'?`<br>Village: culvert of ${cul.toFixed(0)} m`:'')+
+    `<br>Built in ${((t3-t0)/1000).toFixed(1)} s`;
+  console.log('streams',JSON.stringify(INFO));
+}
+
+/* ---------- the views ---------- */
+function aim(){
+  const v=state.view; let pos, tgt, near=0.1, fogN=150, fogF=2400, sh=70;
+  const ground=(x,z)=>terrainAt(x,z);
+  const lift=(p,min)=>{ const g=ground(p[0],p[2]); if (p[1]<g+min) p[1]=g+min; return p; };
+  if (v==='overview'){ let x0=1e9,x1=-1e9,z0=1e9,z1=-1e9; for (let i=0;i<NS;i+=20){ x0=Math.min(x0,X[i]); x1=Math.max(x1,X[i]); z0=Math.min(z0,Z[i]); z1=Math.max(z1,Z[i]); }
+    const m=at(S[ISEA]), mid=at(S[ISEA]*0.5);
+    pos=[m.x+260,330+HTOP*0.55,m.z+330]; tgt=[mid.x,GM[Math.round(mid.t)]*0.7,mid.z]; near=1; fogN=2200; fogF=7000; sh=1200; }
+  else if (v==='reach'||v==='reach15'){
+    // a gentle reach with a good bend, well clear of any fall
+    let best=-1, bs=-1; for (let i=Math.floor(NS*0.45);i<ISEA-120;i+=4){ if (CULV[i]) continue; const kk=Math.abs(KAP[i])*RKAP;
+      if (DROPS.some(d=>Math.abs(S[d.i]-S[i])<22)) continue; const sc=Math.min(1,kk)+0.35*Math.min(2,GM[i]-WL[i])-SLOPE[i]*3; if (sc>bs){ bs=sc; best=i; } }
+    if (best<0) best=Math.floor(NS*0.7);
+    const inner=KAP[best]>0?1:-1, a=at(S[best]-(v==='reach'?5:9)), b=at(S[best]+(v==='reach'?5:2)), hs=HW[best], bar=BAR[best]*Math.min(1,Math.abs(KAP[best])*RKAP);
+    const off=v==='reach'?hs+bar*0.55:hs+14;
+    pos=[a.x+a.nx*inner*off,0,a.z+a.nz*inner*off]; pos[1]=ground(pos[0],pos[2])+(v==='reach'?1.6:7);
+    tgt=[b.x-b.nx*inner*hs*0.3,WL[Math.round(b.t)]+0.2,b.z-b.nz*inner*hs*0.3]; sh=40; }
+  else if (v==='fall'){
+    let d=DROPS[0]; for (const q of DROPS) if (q.H>d.H && S[q.i]>60) d=q;
+    const H=d.H, i=d.i, p=at(d.s), c=at(d.s+6+1.2*H), side=KAP[i]>0?1:-1, hs=HW[i];
+    const c2=at(d.s+9+2.2*H); pos=[c2.x+c2.nx*side*0.5,d.top+BH[i]+1.2,c2.z+c2.nz*side*0.5]; lift(pos,1.2);
+    tgt=[p.x,d.top-H*0.45,p.z]; sh=40; }
+  else if (v==='brink'){
+    // side on to the lip of the highest fall, to show the water bending over it
+    let d=DROPS[0]; for (const q of DROPS) if (q.H>d.H && S[q.i]>60) d=q;
+    const p=at(d.sLip+0.4), side=KAP[d.i]>0?-1:1, off=HW[d.i]+1.2;
+    const c=at(d.sLip+d.th+2.2); pos=[c.x+c.nx*side*HW[d.i]*0.7,d.wlTop+0.4,c.z+c.nz*side*HW[d.i]*0.7]; lift(pos,0.5); tgt=[p.x-p.tx*0.6,d.wlTop-0.25,p.z-p.tz*0.6]; sh=20; }
+  else if (v==='cascade'){
+    let best=0, bc=-1; for (let k=0;k<DROPS.length;k++){ let c=0, hsum=0; for (let q=k;q<DROPS.length && S[DROPS[q].i]-S[DROPS[k].i]<60;q++){ c++; hsum+=DROPS[q].H; } if (hsum>bc){ bc=hsum; best=k; } }
+    const d0=DROPS[best]; let last=d0; for (let q=best;q<DROPS.length && S[DROPS[q].i]-S[d0.i]<60;q++) last=DROPS[q];
+    const c=at(S[last.i]+12), p=at((S[d0.i]+S[last.i])/2);
+    pos=[c.x,WL[Math.round(c.t)]+5,c.z]; lift(pos,2.5);
+    tgt=[p.x,BED[Math.round(p.t)]+0.5,p.z]; sh=60; }
+  else if (v==='source'){ const c=at(9), p=at(0); pos=[c.x+c.nx*3.2,0,c.z+c.nz*3.2]; pos[1]=ground(pos[0],pos[2])+1.7; tgt=[p.x-p.tx*1.2,BED[0]+0.5,p.z-p.tz*1.2]; sh=30; }
+  else if (v==='mouth'){ const m=at(S[ISEA]), up=at(S[ISEA]-70);
+    pos=[m.x+m.tx*13+m.nx*9,3.2,m.z+m.tz*13+m.nz*9]; tgt=[m.x-m.tx*10,0.4,m.z-m.tz*10]; sh=50; }
+  else if (v==='village' && CULVR){ let a=-1; for (let i=0;i<NS;i++) if (CULV[i]){ a=i; break; }
+    const p=at(S[a]-1), c=at(S[a]-16), side=KAP[a]>0?1:-1; pos=[c.x+c.nx*side*7,0,c.z+c.nz*side*7]; pos[1]=ground(pos[0],pos[2])+3.5; tgt=[p.x,BED[a]+1.2,p.z]; sh=60; }
+  else if (v==='village'){ let x=0,z=0; if (VB.length){ for (const b of VB){ x+=b.x0+20; z+=b.z0+20; } x/=VB.length; z/=VB.length; } else { const p=at(S[NS-1]*0.55); x=p.x; z=p.z; }
+    const g=groundAt(x,z); pos=[x+170,g+150,z+190]; tgt=[x,g,z-10]; near=0.5; sh=320; fogN=600; fogF=4000; }
+  camera.near=near; camera.updateProjectionMatrix(); scene.fog.near=fogN; scene.fog.far=fogF;
+  Object.assign(sun.shadow.camera,{left:-sh,right:sh,top:sh,bottom:-sh,near:1,far:Math.max(500,sh*4)}); sun.shadow.camera.updateProjectionMatrix();
+  sun.shadow.normalBias=sh>200?0.4:0.03;
+  camera.position.set(...pos); controls.target.set(...tgt); controls.update();
+}
+
+/* ---------- the panel ---------- */
+const el=id=>document.getElementById(id);
+const fmt={g:v=>Math.round(v*100)+' %',m:v=>v.toFixed(2),d:v=>v.toFixed(2)+' m',w:v=>v.toFixed(1)+' m'};
+const keys={g:'grad',m:'mea',d:'drop',w:'width'};
+function syncPanel(){ el('view').value=state.view; el('vil').value=state.vil; el('seed').value=state.seed; el('h').value=state.hour;
+  for (const k in keys){ el(k).value=state[keys[k]]; el(k+'V').textContent=fmt[k](state[keys[k]]); } }
+function rebuild(){ build(); aim(); }
+el('view').onchange=e=>{ state.view=e.target.value; aim(); };
+el('vil').onchange=e=>{ state.vil=e.target.value; rebuild(); };
+el('seed').onchange=e=>{ state.seed=Math.max(1,Math.round(+e.target.value||1)); rebuild(); };
+el('next').onclick=()=>{ state.seed++; el('seed').value=state.seed; rebuild(); };
+for (const k in keys){ el(k).oninput=e=>{ el(k+'V').textContent=fmt[k](+e.target.value); }; el(k).onchange=e=>{ state[keys[k]]=+e.target.value; rebuild(); }; }
+el('h').oninput=e=>{ state.hour=+e.target.value; daylight(); };
+if (Q.get('panel')==='0') el('panel').classList.add('hide');
+function resize(){ const w=innerWidth, h=innerHeight; renderer.setSize(w,h,false); camera.aspect=w/h; camera.updateProjectionMatrix(); }
+addEventListener('resize',resize); resize();
+syncPanel(); daylight(); build(); aim();
+const clock=new THREE.Clock(); let frames=0;
+renderer.setAnimationLoop(()=>{ const t=clock.getElapsedTime(); streamMat.uniforms.uTime.value=t; seaMat.uniforms.uTime.value=t; sprayMat.uniforms.uTime.value=t; foamMat.uniforms.uTime.value=t;
+  sprayMat.uniforms.uScale.value=renderer.domElement.height/(2*Math.tan(camera.fov*Math.PI/360));
+  controls.update(); sun.target.position.copy(controls.target); sun.position.copy(controls.target).addScaledVector(SUN_DIR,Math.max(300,camera.far*0.2)); sky.position.copy(camera.position);
+  renderer.render(scene,camera); if (++frames===3) window.__streams.ready=true; });
+window.__streams={state,info:()=>INFO,ready:false,set(o){ Object.assign(state,o); syncPanel(); daylight(); if (o.view && Object.keys(o).length===1) aim(); else rebuild(); },
+  drops:()=>DROPS.map(d=>({s:S[d.i],H:d.H})), show(name,v){ world.traverse(o=>{ if (o.name===name) o.visible=v; }); }, noShadow(){ sun.castShadow=false; renderer.shadowMap.needsUpdate=true; }};
+</script>
+</body>
+</html>

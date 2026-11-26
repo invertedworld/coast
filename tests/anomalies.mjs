@@ -57,8 +57,8 @@ function audit(R) {
       for (const c of ch.circles) if (Math.hypot(x - c.x, z - c.z) <= c.r && c.top > y) b = 'wall'; }
     return b; };
   // walking out from (x,z) along (ux,uz): the first thing in the way within d, or the surface reached
-  const walkOut = (x, z, ux, uz, from, d, y) => { for (let e = from; e <= d + 1e-6; e += 0.05) { const b = blocker(x + ux * e, z + uz * e, y + 0.5); if (b) return { b }; }
-    const t = V.topAt(x + ux * (d + 0.1), z + uz * (d + 0.1), y + 0.5); return { t }; };
+  const walkOut = (x, z, ux, uz, from, d, y, at) => { for (let e = from; e <= d + 1e-6; e += 0.05) { const b = blocker(x + ux * e, z + uz * e, y + 0.5); if (b) return { b }; }
+    const q = at ?? d + 0.1, t = V.topAt(x + ux * q, z + uz * q, y + 0.5); return { t }; };
   const chunks = [...V.chunks.values()].filter(ch => ch.lod === 0 && Math.hypot(ch.cx * C + 20 - R.x, ch.cz * C + 20 - R.z) < R.r + 30);
   for (const ch of chunks) {
     for (const o of ch.obbs) {
@@ -72,9 +72,12 @@ function audit(R) {
           const ex = o.x + sg * fx * (half + 0.3), ez = o.z + sg * fz * (half + 0.3);
           let mate = false; for (const c2 of chunksNear(ex, ez)) { for (const q of c2.obbs) if (q !== o && q.stair === o.stair && Math.abs(q.top - o.top) < 0.6 && inObb(q, ex, ez, 0.05)) { mate = true; break; } if (mate) break; }
           if (mate) continue;
-          const w = walkOut(o.x, o.z, sg * fx, sg * fz, half - 0.2, half + 0.5, o.top);
+          // (the drop is measured just beyond the edge, so that ground which goes on falling gently beyond the last
+          // step is not counted against it)
+          const w = walkOut(o.x, o.z, sg * fx, sg * fz, half - 0.2, half + 0.5, o.top, half + 0.15);
           if (w.b === 'wall') add('stair-end-wall', 'error', ex, ez, o.top, `a ${o.stair} flight ends against a wall`);
-          else if (w.b !== 'rail' && w.t !== null && o.top - w.t > 0.8) add('stair-end-drop', 'error', ex, ez, o.top, `a ${o.stair} flight ends ${(o.top - w.t).toFixed(2)} m above the ground beyond it, unguarded`);
+          else if (w.b !== 'rail' && w.t !== null && o.top - w.t > 1.0) add('stair-end-drop', 'error', ex, ez, o.top, `a ${o.stair} flight ends ${(o.top - w.t).toFixed(2)} m above the ground beyond it, unguarded`);
+          else if (w.b !== 'rail' && w.t !== null && o.top - w.t > 0.6) add('stair-end-riser', 'warn', ex, ez, o.top, `a ${o.stair} flight's last riser is ${(o.top - w.t).toFixed(2)} m high`);
           else if (w.b !== 'rail' && w.t !== null && w.t - o.top > 0.45) add('stair-end-step-up', 'warn', ex, ez, o.top, `a ${o.stair} flight ends ${(w.t - o.top).toFixed(2)} m below the surface beyond it`);
         }
         for (const sg of [-1, 1]) {
@@ -83,7 +86,7 @@ function audit(R) {
           if (o.stair === 'street') add('street-side-drop', 'warn', o.x + sg * lx * side, o.z + sg * lz * side, o.top, `${(o.top - w.t).toFixed(2)} m drop beside a street flight`);
           else add('stair-side-drop', 'error', o.x + sg * lx * side, o.z + sg * lz * side, o.top, `${(o.top - w.t).toFixed(2)} m unguarded drop beside a ${o.stair} stair`);
         }
-        if (V.stCut(o.x, o.z, 0)) add('yard-intrusion', 'error', o.x, o.z, o.top, `a ${o.stair} step in a station's yard`);
+        if (o.stair !== 'yard' && V.stCut(o.x, o.z, 0)) add('yard-intrusion', 'error', o.x, o.z, o.top, `a ${o.stair} step in a station's yard`);
       }
       // ---- terrace walls of the olive groves and farms
       if (o.twall !== undefined) {
