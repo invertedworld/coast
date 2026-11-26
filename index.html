@@ -528,7 +528,7 @@ const T={
   box:tpl(new THREE.BoxGeometry(1,1,1).translate(0,.5,0),false),
   boxC:tpl(new THREE.BoxGeometry(1,1,1),false),
   cyl:tpl(new THREE.CylinderGeometry(.5,.5,1,28).translate(0,.5,0),true),
-  cylC:tpl(new THREE.CylinderGeometry(.5,.5,1,12),true),
+  cylC:tpl(new THREE.CylinderGeometry(.5,.5,1,28),true),
   cyl8:tpl(new THREE.CylinderGeometry(.5,.5,1,8).translate(0,.5,0),false),
   bowl:tpl(new THREE.CylinderGeometry(.5,.28,1,16).translate(0,.5,0),true),
   pyr:tpl(new THREE.ConeGeometry(Math.SQRT1_2,1,4,1).rotateY(Math.PI/4).translate(0,.5,0),false),
@@ -3731,9 +3731,9 @@ function addCafes(gb,ch,P){
   const free=(o)=>!ch.obbs.some(q=>obbOverlap(o,q,0.6)) && !ch.circles.some(c=>obbCircleDist(o,c.x,c.z)<c.r+0.6)
     && !(ch.treeSpots||[]).some(([x,z,sc])=>obbCircleDist(o,x,z)<2.2*sc) && !placed.some(q=>obbOverlap(o,q,1.2));
   const table=(H,x,z,cc,nc)=>{
-    gb.add(T.cyl8, mm(H,mat(x,0,z,0.42,0.04,0.42)), metal, 0);
-    gb.add(T.cyl8, mm(H,mat(x,0.04,z,0.07,0.68,0.07)), metal, null);
-    gb.add(T.cyl8, mm(H,mat(x,0.72,z,0.78,0.04,0.78)), RC()<0.5?C_.white:hex('#d9cfbf'), null);
+    gb.add(T.cyl, mm(H,mat(x,0,z,0.42,0.04,0.42)), metal, 0);
+    gb.add(T.cyl, mm(H,mat(x,0.04,z,0.07,0.68,0.07)), metal, null);
+    gb.add(T.cyl, mm(H,mat(x,0.72,z,0.78,0.04,0.78)), RC()<0.5?C_.white:hex('#d9cfbf'), null);
     for (let k=0;k<nc;k++){ const a=k/nc*Math.PI*2+0.4+RC()*0.3, d=0.66, cx=x+Math.sin(a)*d, cz=z+Math.cos(a)*d, C=mm(H,mat(cx,0,cz,1,1,1,a+Math.PI));
       for (const lx of [-0.17,0.17]) for (const lz of [-0.17,0.17]) gb.add(T.box, mm(C,mat(lx,0,lz,0.03,0.44,0.03)), cc, null);
       gb.add(T.box, mm(C,mat(0,0.44,0,0.42,0.04,0.42)), cc, null);
@@ -4470,9 +4470,9 @@ const fwCoping=(ri,seg,smooth)=>fwForm('coping'+ri+':'+seg,[[0.5,0],[0.5,1],[ri,
 function addFountain(gb,ch,R,px,pz,big){
   const oy=gb.oy, pool=hex('#5b7f8e'); (ch.snd||(ch.snd=[])).push({id:'fountain',x:px,y:oy+1.2,z:pz,big});
   if (big){
-    gb.add(fwBasin(0.46,8,false), mat(px,-0.2,pz,5.4,0.95,5.4,Math.PI/8), shade(C_.stone,R,0.03), -0.2, SS);
-    gb.add(fwCoping(0.435,8,false), mat(px,0.7,pz,5.6,0.12,5.6,Math.PI/8), C_.trim, null, SS);
-    gb.add(T.cyl8, mat(px,0.5,pz,4.85,0.24,4.85,Math.PI/8), pool, null);
+    gb.add(fwBasin(0.46,28,true), mat(px,-0.2,pz,5.4,0.95,5.4), shade(C_.stone,R,0.03), -0.2, SS);
+    gb.add(fwCoping(0.435,28,true), mat(px,0.7,pz,5.6,0.12,5.6), C_.trim, null, SS);
+    gb.add(T.cyl, mat(px,0.5,pz,4.85,0.24,4.85), pool, null);
     gb.add(T.cyl, mat(px,0,pz,0.8,2.1,0.8), C_.stone, null, SS);
     gb.add(fwBowl(), mat(px,1.8,pz,2.6,0.5,2.6), C_.stone, null, SS);
     gb.add(T.cylC, mat(px,2.27,pz,2.35,0.04,2.35), pool, null);
@@ -4493,7 +4493,7 @@ function addFountain(gb,ch,R,px,pz,big){
     gb.add(fwBasin(0.45,28,true), mat(px,-0.2,pz,2.8,0.85,2.8), shade(C_.stone,R,0.03), -0.2, SS);
     gb.add(fwCoping(0.43,28,true), mat(px,0.62,pz,2.95,0.1,2.95), C_.trim, null, SS);
     gb.add(T.cylC, mat(px,0.52,pz,2.45,0.04,2.45), pool, null);
-    gb.add(T.cyl8, mat(px,0,pz,0.5,2.2,0.5), C_.stone, null, SS);
+    gb.add(T.cyl, mat(px,0,pz,0.5,2.2,0.5), C_.stone, null, SS);
     gb.add(T.sphLo, mat(px,2.3,pz,0.62,0.4,0.62), C_.stone, null, SS);
     // four spouts, each pouring a round stream into the basin, with its splash and rings
     for (let k=0;k<4;k++){ const a=k/4*6.283+0.4, c=Math.cos(a), sn=Math.sin(a);
@@ -4825,25 +4825,29 @@ function buildBridge(gb,ch,R,X){
 function buildStation(gb,ch,R,S){
   const sd=S.side, stone=shade(C_.stone,R,0.03), canopyC=hex('#6f7f74'), posts=hex('#3b3f3c');
   const at=(x,off)=>{ const z=railZ(x), s=(railZ(x+1)-railZ(x-1))/2, l=Math.hypot(1,s); return [x-(s/l)*off, z+(1/l)*off, Math.atan2(1,s)]; };
-  // platform with ramps at both ends
+  // platform with ramps at both ends: its top a sloping surface 0.95 m above the rails, following their grade, and
+  // falling to 0.2 m over the last 3 m at each end; it is built in 2 m lengths whose tops meet, and walked on in
+  // lengths of 0.5 m
+  const platTop=x=>railY(x)+Math.min(0.95,0.2+Math.max(0,Math.min(x-(S.x-30),(S.x+30)-x))*0.25);
   for (let x=S.x-30; x<S.x+30; x+=2){
-    const [px,pz,rot]=at(x+1,sd*3.4), ry=railY(x+1), e=Math.min(x+1-(S.x-30),(S.x+30)-(x+1)), top=ry+Math.min(0.95,0.2+e*0.25);
-    gb.add(T.box, mat(px,ry-0.6,pz,3.0,top-ry+0.6,2.06,rot), stone, ry-0.6, SS);
-    const [ex,ez]=at(x+1,sd*1.95); gb.add(T.box, mat(ex,top-0.04,ez,0.2,0.08,2.06,rot), hex('#e8d26a'), null);
-    ch.obbs.push({x:px,z:pz,hw:1.5,hd:1.03,rot,top});
+    const ya=platTop(x), yb=platTop(x+2), lo=Math.min(railY(x),railY(x+2))-0.6, [ax,az]=at(x,sd*3.4), [bx,bz]=at(x+2,sd*3.4);
+    shearBox(gb,ax,az,ya,bx,bz,yb,Math.max(ya,yb)-lo,3.0,stone,SS);
+    const [ex,ez]=at(x,sd*1.95), [fx,fz]=at(x+2,sd*1.95); shearBox(gb,ex,ez,ya+0.04,fx,fz,yb+0.04,0.08,0.2,hex('#e8d26a'));
+    for (let k=0;k<4;k++){ const xq=x+k*0.5+0.25, [px,pz,rot]=at(xq,sd*3.4);
+      ch.obbs.push({x:px,z:pz,hw:1.5,hd:0.27,rot,top:Math.max(platTop(xq-0.25),platTop(xq+0.25))}); }
   }
   // canopy on iron posts over the middle of the platform
-  for (let x=S.x-14; x<=S.x+14; x+=4){ const [px,pz]=at(x,sd*4.1), ry=railY(x); gb.add(T.cyl8, mat(px,ry+0.95,pz,0.16,3.3,0.16), posts, null); ch.circles.push({x:px,z:pz,r:0.15,top:Infinity}); }
+  for (let x=S.x-14; x<=S.x+14; x+=4){ const [px,pz]=at(x,sd*4.1), ry=railY(x); gb.add(T.cyl8, mat(px,platTop(x),pz,0.16,3.3,0.16), posts, null); ch.circles.push({x:px,z:pz,r:0.15,top:Infinity}); }
   for (let x=S.x-15; x<S.x+15; x+=2){ const [px,pz,rot]=at(x+1,sd*3.6), ry=railY(x+1);
     gb.add(T.boxC, mat(px,ry+4.35,pz,3.4,0.12,2.06,rot,0,sd*0.12), canopyC, null);
     gb.add(T.boxC, mat(...at(x+1,sd*1.95).slice(0,1),ry+4.15,at(x+1,sd*1.95)[1],0.08,0.35,2.06,rot), C_.trim, null); }
   // benches and lamps
-  for (const dx of [-8,8]){ const [bx,bz,rot]=at(S.x+dx,sd*4.3), ry=railY(S.x+dx); gb.add(T.box, mat(bx,ry+0.95,bz,0.5,0.45,1.8,rot), hex('#7a5a3a'), null, SW);
+  for (const dx of [-8,8]){ const [bx,bz,rot]=at(S.x+dx,sd*4.3), ry=railY(S.x+dx); gb.add(T.box, mat(bx,platTop(S.x+dx),bz,0.5,0.45,1.8,rot), hex('#7a5a3a'), null, SW);
     // seats facing the track
-    const [tx,tz]=at(S.x+dx,0), M=mat(bx,ry+0.95,bz,1,1,1,Math.atan2(tx-bx,tz-bz));
+    const [tx,tz]=at(S.x+dx,0), M=mat(bx,platTop(S.x+dx),bz,1,1,1,Math.atan2(tx-bx,tz-bz));
     for (const sx of [-0.5,0.5]) addSeat(ch,M,gb.oy,sx,0.45,0,0.45,'bench'); }
   for (const dx of [-24,-18,18,24]){ const [lx,lz]=at(S.x+dx,sd*4.4), ry=railY(S.x+dx);
-    gb.add(T.cyl8, mat(lx,ry+0.95,lz,0.14,3.4,0.14), posts, null); gb.add(T.boxC, mat(lx,ry+4.45,lz,0.32,0.4,0.32), BULB, null, 6); glow(ch,lx,ry+4.45,lz,2.8); }
+    gb.add(T.cyl8, mat(lx,platTop(S.x+dx),lz,0.14,3.4,0.14), posts, null); gb.add(T.boxC, mat(lx,ry+4.45,lz,0.32,0.4,0.32), BULB, null, 6); glow(ch,lx,ry+4.45,lz,2.8); }
   // station building facing the track
   const [hx,hz]=at(S.x,sd*(4.9+3.6)), s=(railZ(S.x+1)-railZ(S.x-1))/2, l=Math.hypot(1,s), fx=(s/l)*sd, fz=-(1/l)*sd;
   // its floor is level with the platform's top, on a plinth down into the ground, so that its door opens onto the
@@ -4887,7 +4891,7 @@ function buildHarbour(gb,ch,R,H){
     const sd=H.sd, z=coastZ(sd,x)-sd*0.25, rot=Math.atan2(-(coastZ(sd,x+1)-coastZ(sd,x-1)),2);
     gb.add(T.box, mat(x,-3.9,z,2.06,1.3+3.9,0.9,rot), stone, -3.9, SS);
     gb.add(T.box, mat(x,1.3,z,2.06,0.12,1.05,rot), C_.trim, null, SS);
-    if (Math.round(x)%6===0){ const zb=z+sd*1.0; gb.add(T.cyl8, mat(x,1.3,zb,0.34,0.55,0.34), dark, null); gb.add(T.cyl8, mat(x,1.85,zb,0.44,0.12,0.44), dark, null); ch.circles.push({x,z:zb,r:0.22,top:Infinity}); }
+    if (Math.round(x)%6===0){ const zb=z+sd*1.0; gb.add(T.cyl, mat(x,1.3,zb,0.34,0.55,0.34), dark, null); gb.add(T.cyl, mat(x,1.85,zb,0.44,0.12,0.44), dark, null); ch.circles.push({x,z:zb,r:0.22,top:Infinity}); }
   }
   // moles: walkable stone breakwaters with a parapet on the seaward side
   // where the ferry's gangway lands on the cross mole, the parapet is left open
@@ -5079,7 +5083,7 @@ function buildLighthouseGeo(D){
       if (last.some(q=>Math.abs(Math.atan2(Math.sin(tm-(q.ta+q.tb)/2),Math.cos(tm-(q.ta+q.tb)/2)))<LH_STEP)) continue;
       F.push(0,H+0.41,0, 1.1*Math.sin(t1),H+0.41,1.1*Math.cos(t1), 1.1*Math.sin(t0),H+0.41,1.1*Math.cos(t0)); }
     gb.add(triTpl(F), M, wood, null, SW); }
-  gb.add(T.cyl8, mm(M,mat(0,H+0.41,0,0.5,0.7,0.5)), dark, null);
+  gb.add(T.cyl, mm(M,mat(0,H+0.41,0,0.5,0.7,0.5)), dark, null);
   gb.add(T.cyl, mm(M,mat(0,H+1.1,0,0.55,0.75,0.55)), hex('#fff4cc'), null);
   for (const s of [-1,1]){ const t=D.gd+s*0.37; gb.add(T.cyl8, mm(M,mat(1.12*Math.sin(t),H+0.41,1.12*Math.cos(t),0.07,1.85,0.07)), dark, null); }
   return gb.geometry(D.x,D.z);
@@ -5356,7 +5360,7 @@ function genChunk(cx,cz,lod=0){
       ch.obbs.push({x:px,z:pz,hw:1.5,hd:1.5,rot:0,top:Infinity});
     } else if (feat==='tree'){
       addTree(gb,ch,px,pz,R,P.small?1.1:1.55,0.45,'round');
-      gb.add(T.cyl8, mat(px,-0.2,pz,P.small?2.6:3.6,0.65,P.small?2.6:3.6), C_.stone, -0.2, SS);
+      gb.add(T.cyl, mat(px,-0.2,pz,P.small?2.6:3.6,0.65,P.small?2.6:3.6), C_.stone, -0.2, SS);
       ch.circles.push({x:px,z:pz,r:P.small?1.35:1.85,top:Infinity});
     }
     const nst=ch.kind==='piazza'?Math.floor(R()*3.5):0;
@@ -5448,14 +5452,23 @@ function genChunk(cx,cz,lod=0){
         for (const sx of [-0.5,0.5]) addSeat(ch,mat(bx,0,bz,1,1,1,rot),gb.oy,sx,0.45,0,0.45,'bench'); }
       // stair down through the gap
       if (stairA!==null){ const rot=Math.atan2(Math.cos(stairA),Math.sin(stairA)), go=stairPlan.go;
-      for (const {x,z,top,g} of stairPlan.steps){
+      const SP=stairPlan.steps, ux=Math.cos(stairA), uz=Math.sin(stairA);
+      for (const {x,z,top,g} of SP){
         gb.add(T.box, mat(x,g-0.6-P.level,z,2.1,top-g+0.6,go+0.02,rot), shade(C_.stone,R,0.03), g-0.6-P.level, SS);
-        for (const sd of [-1,1]) gb.add(T.box, mat(x+Math.cos(rot)*sd*1.15,top-P.level,z-Math.sin(rot)*sd*1.15,0.22,0.9,go+0.04,rot), C_.trim, null, SS);
         ch.obbs.push({x,z,hw:1.05,hd:go/2,rot,top});
         ch.placeCircles.push({x,z,r:1.8});
       }
+      // a parapet each side, its top 0.9 m above the line of the nosings and sloping with it, under a coping: one
+      // piece from each step's nosing to the next, the last running out to the foot of the flight
+      for (const sd of [-1,1]){ const ox=Math.cos(rot)*sd*1.15, oz=-Math.sin(rot)*sd*1.15;
+        const pts=SP.map(q=>[q.x-ux*go/2+ox,q.top-P.level,q.z-uz*go/2+oz]), L=SP[SP.length-1];
+        pts.push([L.x+ux*go/2+ox,L.top-P.level,L.z+uz*go/2+oz]);
+        for (let i=0;i+1<pts.length;i++){ const A=pts[i], B=pts[i+1], cs=Math.hypot(B[0]-A[0],B[2]-A[2])/Math.hypot(B[0]-A[0],B[1]-A[1],B[2]-A[2]);
+          const dw=0.9-0.45/cs, dc=0.9+0.05/cs;
+          segBox(gb,[A[0],A[1]+dw,A[2]],[B[0],B[1]+dw,B[2]],0.22,0.9,C_.trim,SS);
+          segBox(gb,[A[0],A[1]+dc,A[2]],[B[0],B[1]+dc,B[2]],0.34,0.1,C_.trim,SS); } }
       // the landing at the foot is kept clear of houses
-      const fd=P.r+0.95+stairPlan.steps.length*go+0.9;
+      const fd=P.r+0.95+SP.length*go+0.9;
       ch.placeCircles.push({x:P.x+Math.cos(stairA)*fd,z:P.z+Math.sin(stairA)*fd,r:1.6}); }
       if (ch.kind==='piazza') ch.desc+=' Its open side looks out over the roofs to the sea.';
       else if (ch.kind==='church') ch.desc=stairA!==null?'Church square on a terrace, with a balustrade and steps on the downhill side.':'Church square on a terrace, with a balustrade on the downhill side.';
@@ -5863,7 +5876,7 @@ function genChunk(cx,cz,lod=0){
         const R2=rng(Math.floor(hash(H.n,B.sd,961)*4294967296)), yt=BR_Y;
         { const xc=H.x+(R2()-0.5)*Tq*0.6, [cx,cz]=at(xc,-B.sd*4.2), cy=yt-0.2;
           if (inChunk(cx,cz)){ const iron=hex('#4a5560'), jr=Math.atan2(H.x-cx,B.zt(H.x)-B.sd*20-cz);
-            gb.add(T.cyl, mat(cx,cy,cz,1.6,0.5,1.6), hex('#7d8086'), null); gb.add(T.cyl8, mat(cx,cy+0.5,cz,0.5,6.5,0.5), iron, null);
+            gb.add(T.cyl, mat(cx,cy,cz,1.6,0.5,1.6), hex('#7d8086'), null); gb.add(T.cyl, mat(cx,cy+0.5,cz,0.5,6.5,0.5), iron, null);
             gb.add(T.box, mat(cx,cy+6.6,cz,1.4,1.2,1.6), iron, null);
             const tip=[cx+Math.sin(jr)*9,cy+9.5,cz+Math.cos(jr)*9]; segBox(gb,[cx,cy+6.9,cz],tip,0.35,0.35,hex('#c9a227'));
             segBox(gb,tip,[tip[0],cy+3.5,tip[2]],0.03,0.03,hex('#2a2624')); gb.add(T.boxC, mat(tip[0],cy+3.3,tip[2],0.3,0.4,0.3), hex('#2a2624'), null);
@@ -14331,8 +14344,11 @@ function coachStep(dt,turnIn){
     if (doorOpen<0.85) return;
     for (let i=1;i<train.cars.length-1;i++){ const m=train.cars[i].m; m.updateMatrix(); _cm.copy(m.matrix).invert();
       _cvv.set(player.x,player.y+1,player.z).applyMatrix4(_cm); const lx=_cvv.x, lz=_cvv.z;
-      if (Math.abs(_cvv.y)>3 || Math.abs(lx)<CW/2-0.3 || Math.abs(lx)>CW/2+0.9) continue;
-      if (Math.abs(Math.abs(lz)-CDZ)<CDW/2-0.15){ coachEnter(i,clamp(lx,-(CW/2+0.6),CW/2+0.6),lz); return; } }
+      if (Math.abs(_cvv.y)>3 || Math.abs(lx)<CW/2-0.3 || Math.abs(lx)>CW/2+0.6) continue;
+      // only a step towards the coach boards it, and only inside the place where a step out of the door alights
+      // (CW/2+0.75), so that someone who has just stepped out onto the platform is not taken straight back in
+      _cvv.set(player.ox,player.y+1,player.oz).applyMatrix4(_cm); if (Math.abs(lx)>=Math.abs(_cvv.x)-1e-4) continue;
+      if (Math.abs(Math.abs(lz)-CDZ)<CDW/2-0.15){ coachEnter(i,lx,lz); return; } }
     return; }
   if (mode!=='coach') return;
   co.yaw+=turnIn*dt*1.8;
@@ -14358,7 +14374,8 @@ function coachStep(dt,turnIn){
     yaw=m.rotation.y+Math.PI+co.yaw; fpPitch=co.pitch; mode='street';
     tunnelK=0; sky.visible=true; scene.fog.near=90; scene.fog.far=1500; return; }
   _cvv.set(co.lx,1.25+lerp(1.6,0.95,crouchK),co.lz).applyMatrix4(m.matrix);
-  camera.position.copy(_cvv); camera.rotation.set(co.pitch,m.rotation.y+Math.PI+co.yaw,0,'YXZ');
+  // the look is held in the coach's frame, so that it tilts with the coach on a grade
+  camera.position.copy(_cvv); camera.quaternion.setFromEuler(_se.set(co.pitch,Math.PI+co.yaw,0,'YXZ')).premultiply(m.quaternion);
   player.x=_cvv.x; player.z=_cvv.z; player.y=_cvv.y-lerp(1.6,0.95,crouchK); eyeY=player.y; sky.position.copy(camera.position);
 }
 /* ---------- sitting ----------
@@ -14378,7 +14395,7 @@ const SIT_LIE={lounger:0.8,tent:0.3,bed:0.8};
 let sit=null;
 const _sm=new THREE.Matrix4(), _sq=new THREE.Quaternion(), _sq2=new THREE.Quaternion(), _stP=new THREE.Vector3(), _sp2=new THREE.Vector3(), _se=new THREE.Euler(), _sY=new THREE.Vector3(0,1,0);
 function sitM(fr){
-  if (fr==='coach'){ const m=train.cars[co.car].m; m.updateMatrix(); _sm.copy(m.matrix); _sq.setFromAxisAngle(_sY,m.rotation.y); }
+  if (fr==='coach'){ const m=train.cars[co.car].m; m.updateMatrix(); _sm.copy(m.matrix); _sq.copy(m.quaternion); }
   else if (fr==='ferry'){ const m=ridden.m; m.updateMatrix(); _sm.copy(m.matrix); _sq.copy(m.quaternion); }
   else { _sm.identity(); _sq.identity(); } }
 const sitLookGet=fr=>fr==='coach'?[co.yaw,co.pitch]:fr==='ferry'?[fe.yaw,fe.pitch]:[yaw-Math.PI,fpPitch];
