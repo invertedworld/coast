@@ -731,8 +731,8 @@ function trueX(x){ return ringW(x-STRIP*STRIP_K); }
 function trueZ(z){ return z+STRIP*STRIP_W; }
 
 /* ================= terrain ================= */
-// The land is an endless island running east-west. Its centre line wanders and its width varies;
-// sd=+1 is the south shore, sd=-1 the north shore. Hills rise behind each shore, and where the island is wide a
+// The land is an endless island running north-south. Its centre line wanders and its width varies;
+// sd=+1 is the east shore, sd=-1 the west shore. Hills rise behind each shore, and where the island is wide a
 // range of mountains runs down the middle.
 // (in Orbital mode each function of x alone is closed round the ring, RB1, and the island is half as wide again, so that
 // its land reads on the far arch)
@@ -825,7 +825,7 @@ function mtX(i){ let v=mtxCache.get(i);
   return v; }
 function mtXq(x,q){ const i=Math.floor(x), a=mtX(i)[q]; return a+(mtX(i+1)[q]-a)*(x-i); }
 const mtLevel=x=>mtXq(x,0), mtCrest=x=>mtXq(x,1), mtSpine=x=>mtXq(x,2);
-// a spur: from the crest at x0 towards one shore, on a bearing that leans a little east or west
+// a spur: from the crest at x0 towards one shore, on a bearing that leans a little south or north
 // (each is asked for five times over by every point of the range, so it is kept once worked out)
 const spCache=new Map();
 function mtSpur(sd,k){ const key=k*2+(sd>0?1:0); let P=spCache.get(key); if (P) return P;
@@ -1338,7 +1338,7 @@ function cvTop(cv,u,s,hNat,noCut){ const e=cvExtF(cv,u), sc=s-cvShore(cv,u), Lr=
 const cvL2W=(cv,u,s)=>[cv.X+u*cv.tx+s*cv.nx,cv.Z0+u*cv.tz+s*cv.nz];
 const cvU=(cv,x,z)=>(x-cv.X)*cv.tx+(z-cv.Z0)*cv.tz, cvS=(cv,x,z)=>(x-cv.X)*cv.nx+(z-cv.Z0)*cv.nz;
 // sets the frame from its origin and the unit direction (tx,tz) of u; s runs hand times a quarter turn from u, so
-// that on the mainland, where u runs eastward on both coasts, hand is the side of the coast. The cove's bounding box
+// that on the mainland, where u runs southward on both coasts, hand is the side of the coast. The cove's bounding box
 // in the world is kept for a quick test
 function cvFrame(P,X,Z0,tx,tz,hand){
   P.X=X; P.Z0=Z0; P.tx=tx; P.tz=tz; P.hand=hand; P.nx=hand*-tz; P.nz=hand*tx; P.tab=null;
@@ -2186,7 +2186,7 @@ function harbourShape(H,x,z,h){
   if (s<-0.2 && s>-H.L+1.5 && ax<H.W/2-1.5) return Math.min(h,-3.2); // dredged basin
   return h;
 }
-/* ---------- coastal railway on the south side, held to a gentle grade ---------- */
+/* ---------- coastal railway on the east side, held to a gentle grade ---------- */
 // The line swings from near one shore to near the other every ~4.5 km, weaving as it goes,
 // so it crosses the ridge (in tunnel) and visits both coasts.
 // It keeps to the coastal belt, about RAIL_IN m inland of the mean shore, for most of the way, and crosses the island
@@ -2316,8 +2316,8 @@ function stCut(x,z,m=0){ const S=stationNear(x,40+m); if (!S || !stSide(S,x,z)) 
    along it averaged over 40 m, never below dock level, and then lowered where needed to hold the grade under 1 in 40.
    A line is laid only where the track stays within 45 m of the water and 40 m of the main line, and the ground is
    within 12 m above and 5 m below its bed. The coast road keeps GL_RD from the track, moving inland where needed.
-   The harbours of each GL_ZONE stretch of each shore are taken from west to east: where a hash allows, a harbour is
-   joined to the first harbour 2 to 6 km further east to which a line fits, and the next line on that shore starts
+   The harbours of each GL_ZONE stretch of each shore are taken from north to south: where a hash allows, a harbour is
+   joined to the first harbour 2 to 6 km further south to which a line fits, and the next line on that shore starts
    at least 3 km beyond the end of the last. */
 const BR_Q=8.5, BR_Y=1.6, GL_ZONE=12000, GL_P=0.8, brZones=new Map(), brBucket=new Map();
 function glY(L,x){ const f=x/10-L.K0, i=Math.floor(f), t=f-i, v=L.v, n=v.length-1, q=k=>v[clamp(k,0,n)];
@@ -2378,9 +2378,9 @@ const brIn=(B,x,m=0)=>x>=B.x0-m && x<=B.x1+m;
 const brTerm=(B,x)=>Math.abs(x-B.A.x)<B.TA || Math.abs(x-B.B.x)<B.TB;
 function brPerp(B,x,z){ if (!brIn(B,x)) return 1e9; const s=(brZ(B,x+1)-brZ(B,x-1))/2; return Math.abs(z-brZ(B,x))/Math.sqrt(1+s*s); }
 function branchPerp(x,z){ let d=1e9; for (const B of branchesAt(x)) d=Math.min(d,brPerp(B,x,z)); return d; }
-/* ---------- road bridges where north-south streets cross the line ---------- */
+/* ---------- road bridges where east-west streets cross the line ---------- */
 const rxCache=new Map();
-// where north-south street i meets the line, whether a street runs there, and the bridge that could carry it over a
+// where east-west street i meets the line, whether a street runs there, and the bridge that could carry it over a
 // cutting (X), worked out from the ground alone, before the line's state is known
 const rgCache=new Map();
 function railXing(i){
@@ -2473,7 +2473,12 @@ function isleVillage(cx,cz){
 function offshoreAt(x,z){ if (seaDist(x,z)>=-150) return false;
   for (const a of [-6,6]) for (const b of [-6,6]) if (isVillage(Math.floor((x+a)/C),Math.floor((z+b)/C))) return false;
   return true; }
-function isVillage(cx,cz){ const k=cx+','+cz; let v=vgCache.get(k); if (v===undefined){ v=!nearJoin(cx*C,6000) && !highGround(cx,cz) && (seaDist(cx*C+C/2,cz*C+C/2)>-150 ? (fbm(cx*0.12+3.3,cz*0.12+1.7,990,3)>0.5 || !!peakNear(cx*C+C/2,cz*C+C/2,1.05)) : isleVillage(cx,cz)); if (vgCache.size>50000) vgCache.clear(); vgCache.set(k,v); } return v; }
+// a block too steep to build a village on: the hillside across it rises more than VG_STEEP (about 37 degrees), save
+// the block that holds a summit, whose top is levelled for its church
+const VG_STEEP=0.75;
+function tooSteep(cx,cz){ if (peakInChunk(cx,cz)) return false; const x=cx*C+C/2, z=cz*C+C/2, d=12;
+  return Math.hypot(baseH(x+d,z)-baseH(x-d,z),baseH(x,z+d)-baseH(x,z-d))/(2*d)>VG_STEEP; }
+function isVillage(cx,cz){ const k=cx+','+cz; let v=vgCache.get(k); if (v===undefined){ v=!nearJoin(cx*C,6000) && !highGround(cx,cz) && (seaDist(cx*C+C/2,cz*C+C/2)>-150 ? (fbm(cx*0.12+3.3,cz*0.12+1.7,990,3)>0.5 || !!peakNear(cx*C+C/2,cz*C+C/2,1.05)) && !tooSteep(cx,cz) : isleVillage(cx,cz)); if (vgCache.size>50000) vgCache.clear(); vgCache.set(k,v); } return v; }
 const COUNTRY=new Set(['olives','rocky','farm','coast','wild','isle','mount']);
 // The kind each block would have on its own, drawn from the seed before every village and district is given its church: a
 // summit, and about one block of town in six, would hold a church here.
@@ -2485,6 +2490,7 @@ function kind0(cx,cz){
   if (!isVillage(cx,cz)){
     if (hc<2.5) return 'coast';
     if ((hc>75 && r<0.6) || (mtnH(cx*C+C/2,cz*C+C/2)>8 && r<0.85)) return 'wild';   // the foot of the mountains is mostly left wild
+    if (tooSteep(cx,cz)) return r<0.6?'wild':'rocky';   // nor are olives or fields terraced into a slope that steep
     return r<0.5?'olives':r<0.85?'rocky':'farm';
   }
   if (hc<2.5) return 'shore';
@@ -2520,7 +2526,14 @@ const HAMLET=6, TOWN=60, PARISH=40, CH_APART=8.5, VG_MAX=8000, VG_W=120, vmCache
 let vgPend=0;
 // the deterministic places tried for a church once the block's own random tries have failed: the nave set beside the
 // square in each of 24 directions, at five lengths from 16 m down to the 10.5 m of the shortest random try
+// A church is oriented, its altar towards the east (-z, the sunrise sea) and its door to the west, as near as its
+// square allows: it stands on the square's edge at angle a from the middle, its door facing the square, so that its
+// altar points along a, and EAST_A is the angle that points east. The places of CHURCH_SITES are taken in bands of
+// 30 degrees from the east, the nearest band first, and within a band the largest church first, so that a smaller
+// church turned to the east is preferred to a larger one turned away from it.
+const EAST_A=-Math.PI/2, eastOff=a=>Math.abs(Math.atan2(Math.sin(a-EAST_A),Math.cos(a-EAST_A)));
 const CHURCH_SITES=[]; for (const [L,W] of [[16,7.6],[14.5,7.6],[13,7.6],[11.75,7],[10.5,7]]) for (let i=0;i<24;i++) CHURCH_SITES.push({a:i/24*Math.PI*2,L,W});
+CHURCH_SITES.sort((p,q)=>Math.floor(eastOff(p.a)/(Math.PI/6)+1e-6)-Math.floor(eastOff(q.a)/(Math.PI/6)+1e-6) || q.L-p.L || eastOff(p.a)-eastOff(q.a));
 function churchOb(P,a,L,W){ const dx=Math.cos(a), dz=Math.sin(a), rot=Math.atan2(-dx,-dz);
   return {x:P.peak?P.x:P.x+dx*(P.r+L/2+0.4),z:P.peak?P.z:P.z+dz*(P.r+L/2+0.4),hw:W/2,hd:L/2+W*0.35,rot,dx,dz}; }
 function villageOf(cx,cz){
@@ -4353,13 +4366,24 @@ function streetPlan(cx,cz){ const key=cx*1e6+cz; let out=stpCache.get(key); if (
     // clear of the ground, so that it comes down to the ground there rather than ending over a drop
     const EXT=F.alley?0:3.6, ua=F.u0-EXT, n=Math.max(1,Math.floor((F.u1-F.u0+2*EXT)/DU)), P=[], g=[];
     for (let i=0;i<=n;i++){ const u=ua+i*DU, [x,z]=F.pt(u); P.push([x,z,u]); g.push(H(x,z)); }
-    // the gentlest gradient, from 0.65 up to 1, at which the flight meets the ground within 0.3 m at both its ends
-    let hp;
+    // the profile is the ground raised, never lowered, until no stretch of it is steeper than the gradient: a step is
+    // never sunk into the ground, and where the ground rises sharply (to a square levelled above the street) the flight
+    // climbs to it beforehand, standing on its own masonry. The gentlest gradient, from 0.65 up to 1, is taken at which
+    // the flight nowhere stands more than 0.5 m above the ground, so that it meets the streets it crosses and ends on
+    // the ground
+    // Where no gradient will do (the ground climbs faster than any stair), an alley has no steps, and the square it would
+    // have come up into keeps its wall across it; a street's flight is then cut as before, from the ground's profile
+    // limited both ways at the steepest gradient
+    let hp, fits=false;
     for (const K of [0.65,0.75,0.85,1.0]){ const k=K*DU; hp=g.slice();
+      for (let i=1;i<=n;i++) hp[i]=Math.max(hp[i],hp[i-1]-k);
+      for (let i=n-1;i>=0;i--) hp[i]=Math.max(hp[i],hp[i+1]-k);
+      let lift=0; for (let i=0;i<=n;i++) lift=Math.max(lift,hp[i]-g[i]);
+      if (lift<0.5){ fits=true; break; } }
+    if (!fits){ if (F.alley) continue; const k=DU; hp=g.slice();
       for (let pass=0;pass<3;pass++){
         for (let i=1;i<=n;i++) hp[i]=clamp(hp[i],hp[i-1]-k,hp[i-1]+k);
-        for (let i=n-1;i>=0;i--) hp[i]=clamp(hp[i],hp[i+1]-k,hp[i+1]+k); }
-      if (hp[0]-g[0]<0.3 && hp[n]-g[n]<0.3) break; }
+        for (let i=n-1;i>=0;i--) hp[i]=clamp(hp[i],hp[i+1]-k,hp[i+1]+k); } }
     const inside=u=>u>=F.u0-1e-6 && u<=F.u1+1e-6;
     let i0=0;
     for (let i=1;i<=n;i++){
@@ -5380,8 +5404,10 @@ function genChunk(cx,cz,lod=0){
     // village's church, so that one which now does not keeps the rest of its layout
     if (ch.kind==='church' || kind0(cx,cz)==='church'){
       let site=null;
+      // the tries turn the church towards the east: within about 40 degrees of it at first, then 75, then 100; where
+      // none fits, CHURCH_SITES are tried from the east round
       for (let t=0;t<12;t++){
-        const a=R()*Math.PI*2, L=16-t*0.5+R()*2, W=7+R()*1.6, ob=churchOb(P,a,L,W);
+        const a=EAST_A+(R()-0.5)*(t<6?1.4:t<9?2.6:3.5), L=16-t*0.5+R()*2, W=7+R()*1.6, ob=churchOb(P,a,L,W);
         if (P.peak || canPlace(ob,0.04,{ignorePiazza:true,maxRange:8})){ site={L,W,ob}; break; }
       }
       // the church of a village is always built: where the random tries fail, the places of CHURCH_SITES are tried
@@ -5430,6 +5456,8 @@ function genChunk(cx,cz,lod=0){
           // window's own and the two never share a plane
           gb.add(T.cylC, mm(H,mat(s*(W/2+0.01),h-1.4,z,0.6,0.1,0.6,Math.PI/2,Math.PI/2)), C_.win, null, 5); }
         ch.obbs.push({x:cxp,z:czp,hw:W/2,hd:L/2,rot,top:Infinity,room:CR||undefined}); ch.place.push(ob); ch.churchOb=ob; ch.churchFoot=tower?[ob,tower]:[ob];
+        // the church's walls and the steps before its door, which the square's balustrade must not cross
+        ch.churchBody={x:cxp+Math.sin(rot)*0.85,z:czp+Math.cos(rot)*0.85,hw:W/2,hd:L/2+0.85,rot};
         if (!CR) ch.circles.push({x:cxp+dx*(L/2),z:czp+dz*(L/2),r:W*0.35,top:Infinity});   // the apse, behind the altar end
         if (tower){ const th=17+R()*6, top=R(); (ch.snd||(ch.snd=[])).push({id:'church_bell',x:tower.x,y:heightAt(tower.x,tower.z)+th-2,z:tower.z});
           house({x:tower.x,z:tower.z,rot,w:S,d:S,h:th,wall:shade(C_.stone,R,0.04),stoneWalls:true,roof:'spire',crenel:false,flag:false,
@@ -5511,9 +5539,11 @@ function genChunk(cx,cz,lod=0){
     for (let g=0;g<groups;g++){ const a=R()*6.28, r=2.4+R()*(P.r-3.4), gx=px+Math.cos(a)*r, gz=pz+Math.sin(a)*r, n=1+Math.floor(R()*(P.small?2:4));
       for (let q=0;q<n;q++) addFigure(gb,gx+(R()-0.5)*1.8,0,gz+(R()-0.5)*1.8,R,R()*6.28); }
     // belvedere: where the hill falls away, a retaining wall and balustrade replace the houses
-    // the balustrade stops short of the church, which may stand out over the drop with its steps
-    const openAt=a=>baseH(P.x+Math.cos(a)*(P.r+2.6),P.z+Math.sin(a)*(P.r+2.6))<P.level-0.8 && !(ch.churchOb && obbCircleDist(ch.churchOb,P.x+Math.cos(a)*(P.r+1.25),P.z+Math.sin(a)*(P.r+1.25))<0.9);
-    const rw=P.r+1.25, nseg=Math.ceil(2*Math.PI*rw/1.1);
+    // the balustrade stops short of the church, which may stand out over the drop with its steps: it is left out only
+    // where a length of it would run into the church's walls or the steps before its door, and runs on up to them
+    // elsewhere, so that no stretch of the edge is left open over the drop
+    const rw=P.r+1.25, nseg=Math.ceil(2*Math.PI*rw/1.1), segL=2*Math.PI*rw/nseg;
+    const openAt=a=>baseH(P.x+Math.cos(a)*(P.r+2.6),P.z+Math.sin(a)*(P.r+2.6))<P.level-0.8 && !(ch.churchBody && obbOverlap({x:P.x+Math.cos(a)*rw,z:P.z+Math.sin(a)*rw,hw:segL/2,hd:0.35,rot:Math.atan2(Math.cos(a),Math.sin(a))},ch.churchBody,0.05));
     const cands=[];
     // nor does it run across the art gallery, which may stand out over the drop too, its doorway on the square
     const galAt=a=>!!ch.galleryOb && obbCircleDist(ch.galleryOb,P.x+Math.cos(a)*(P.r+1.25),P.z+Math.sin(a)*(P.r+1.25))<0.9;
@@ -5559,7 +5589,7 @@ function genChunk(cx,cz,lod=0){
         const da=stairA===null?Infinity:Math.abs(Math.atan2(Math.sin(a-stairA),Math.cos(a-stairA)));
         const wx=P.x+Math.cos(a)*rw, wz=P.z+Math.sin(a)*rw, rot=Math.atan2(Math.cos(a),Math.sin(a)), seg=2*Math.PI*rw/nseg+0.06;
         // an alley that runs through the square comes up through an opening in the wall, where its steps meet the paving
-        if (ch.alleys.some(A=>Math.abs(alleyS(A,wx,wz))<A.hw+seg/2)) continue;
+        if (ch.alleys.some(A=>Math.abs(alleyS(A,wx,wz))<A.hw+seg/2) && (streetTread(wx,wz,0.6)??-1e9)>P.level-0.6) continue;
         if (galAt(a)){ R(); continue; }   // (its stone's draw kept, so that the rest of the square is as before)
         const bot=baseH(P.x+Math.cos(a)*(P.r+2.4),P.z+Math.sin(a)*(P.r+2.4))-0.8-P.level;
         gb.add(T.box, mat(wx,bot,wz,seg,-bot+0.1,0.6,rot), shade(C_.stone,R,0.03), bot, SS);
@@ -5821,7 +5851,7 @@ function genChunk(cx,cz,lod=0){
           for (let q=0;q<U.length;q++){ if (!U[q][2]) continue; let a=q, b=q; while (a>0&&U[a-1][2]) a--; while (b<U.length-1&&U[b+1][2]) b++; if (b-a<2) continue;
           const [x,z]=U[q], g=heightAt(x,z), rot=Math.atan2(ux,uz)+Math.PI/2;
           gb.add(T.box, mat(x,g-0.7,z,2.25,1.35,0.6,rot), wallC, g-0.7, SS);
-          ch.obbs.push({x,z,hw:1.12,hd:0.3,rot,top:g+0.65}); } }
+          ch.obbs.push({x,z,hw:1.12,hd:0.3,rot,top:g+0.65,twall:g-0.7}); } }
       }
     }
     if (ch.kind==='rocky'||ch.kind==='coast'||ch.kind==='isle'){
@@ -6303,8 +6333,8 @@ function updateOrigin(){
   QORIGIN.set(Math.round(ox/OP)*OP,0,Math.round(oz/OP)*OP); origU.value.set(ox-QORIGIN.x,0,oz-QORIGIN.z);
   originMoved++; return true;
 }
-/* The world repeats every WRAP_Z metres from north to south: whoever goes far enough out to sea to the north comes
-   in from the open sea to the south shore, and the other way about. The join lies WRAP_Z/2 from the island's middle
+/* The world repeats every WRAP_Z metres from west to east: whoever goes far enough out to sea to the west comes
+   in from the open sea to the east shore, and the other way about. The join lies WRAP_Z/2 from the island's middle
    line, beyond the furthest offshore island (about 5.4 km) by more than the fog and the outermost ring of blocks, so
    the sea on either side of it is empty and the same; crossing it moves the player, the camera and whatever travels
    with them by WRAP_Z in one frame, and the blocks round them are rebuilt as on any long move. WRAP_Z is a whole
@@ -6365,7 +6395,7 @@ let torchOn=false;
    floor (a cylinder of radius RING_R whose axis runs across the ring RING_R above sea level) or to the inner face of a
    rim wall, and the point it meets is coloured from a map of the whole ring sampled from the generator once for each
    seed: the shores, the mountains, the towns and the islands. Each point is lit by its own sun, which stands as high
-   over it as the turn of the ring allows, and hidden by the far floor or the southern wall (sunVis); where it is night
+   over it as the turn of the ring allows, and hidden by the far floor or the eastern wall (sunVis); where it is night
    there, the towns are lit. Between the eye and the point lies the air of both ends of the line of sight, worked out
    from the length of the path within ATM_H of the floor; at low angles the line runs through so much of it that the
    ring is lost in the haze, and it rises out of the haze a few degrees above the horizon. The rim walls near the eye
@@ -6509,7 +6539,7 @@ function orbitalSky(){
     vec3 r=reflect(d,up); float sp=pow(max(dot(r,s),0.0),300.0)*8.0+pow(max(dot(r,s),0.0),18.0)*0.25;
     vec3 W=ringLight(sea,ks*max(mu,0.0),mu,0.0)+vec3(1.0,0.93,0.8)*sp*ks;
     return mix(W,L,lm); }
-  // the height of a rim wall's inner face at u = (distance beyond FZ)/WA, and its normal there (side +1 the north wall)
+  // the height of a rim wall's inner face at u = (distance beyond FZ)/WA, and its normal there (side +1 the west wall)
   float wallHw(float u){ u=clamp(u,0.0,1.0); return WH0+(WH-WH0)*(1.0-sqrt(1.0-u*u)); }
   vec3 wallN(float u, float side, vec3 up){ u=clamp(u,0.0,1.0); return normalize(up*WA*sqrt(max(1.0-u*u,0.0))-vec3(0.0,0.0,side*(WH-WH0)*u)); }
   // the inner face of a rim wall at xr along the ring, hw above the sea and u across its curve, seen along d. The land
@@ -6776,13 +6806,13 @@ const SKY={
 const _c1=new THREE.Color(), _c2=new THREE.Color();
 const mix3=(out,k,wd,wk,wn)=>out.setRGB(SKY.day[k].r*wd+SKY.dusk[k].r*wk+SKY.night[k].r*wn, SKY.day[k].g*wd+SKY.dusk[k].g*wk+SKY.night[k].g*wn, SKY.day[k].b*wd+SKY.dusk[k].b*wk+SKY.night[k].b*wn);
 function updateDaylight(){
-  // the sun rises over the south sea at 06:00 and sets over the north sea at 18:00
+  // the sun rises over the east sea at 06:00 and sets over the west sea at 18:00
   const ang=(hour-6)/24*Math.PI*2;
   // In Orbital mode the ring's axis is tilted SUN_TILT from the plane of its orbit, so that the star stands that far to
-  // the south of the ring's own plane and its light reaches the floor over the southern wall. As the ring turns, the sun
-  // rises out of the haze beside the arch to the east at 06:00, crosses the southern sky at SUN_TILT from the zenith
-  // and sets beside the arch to the west; the night is the half turn the floor spends facing away from it. The
-  // southern wall hides the sun when it stands lower, seen across the ring, than the wall's top
+  // the east of the ring's own plane and its light reaches the floor over the eastern wall. As the ring turns, the sun
+  // rises out of the haze beside the arch to the south at 06:00, crosses the eastern sky at SUN_TILT from the zenith
+  // and sets beside the arch to the north; the night is the half turn the floor spends facing away from it. The
+  // eastern wall hides the sun when it stands lower, seen across the ring, than the wall's top
   if (ORBITAL){ SUN_DIR.set(Math.cos(ang)*Math.cos(SUN_TILT),Math.sin(ang)*Math.cos(SUN_TILT),-Math.sin(SUN_TILT)); WALL_SUN=wallSun(trueZ(player.z),Math.max(0,player.y)); }
   else SUN_DIR.set(0.32,Math.sin(ang)*0.94,-Math.cos(ang)).normalize();
   const e=SUN_DIR.y;
@@ -7506,7 +7536,7 @@ function createSea(parent, opts={}){
   function turnSets(){ const A=sets[0], dd=Math.abs(Math.atan2(Math.sin(st.dirT-A.dir),Math.cos(st.dirT-A.dir)));
     if (dd>0.12 && A.w>=0.6){ sets[1]=A; sets[0]={dir:st.dirT,w:0,ph:LAM.map(()=>R()*TAU)}; } }
   function setSwell(h,dirFrom,lens){ st.swellH=Math.max(0,h); if (dirFrom!==undefined) st.swellDir=dirFrom+Math.PI; if (lens) st.swLens=lens.slice(0,3); }
-  // with a world that repeats every wrapZ from north to south, each wave runs a whole number of times across it
+  // with a world that repeats every wrapZ from west to east, each wave runs a whole number of times across it
   function wrapK(k,th){ let kz=k*Math.cos(th); if (!O.wrapZ) return [k*Math.sin(th),kz];
     kz=Math.round(kz*O.wrapZ/TAU)*TAU/O.wrapZ; return [(Math.sin(th)<0?-1:1)*Math.sqrt(Math.max(0,k*k-kz*kz)),kz]; }
   function writeComponents(){
@@ -7581,7 +7611,7 @@ const seaGust={uGustTex:{value:null},uGust:{value:new THREE.Vector4(0,1,0,36)},u
 /* Coast's sea is createSea: a wind sea raised by the island's wind (WIND) and the swell of the day, over the sea bed
    of heightAt, seen into through its depth. Its mesh follows the camera; its positions are given less QORIGIN, with
    origU carrying the rest, so that they stay precise however far one travels. Each wave runs a whole number of times
-   over WRAP_Z, so the sea runs on unbroken across the north-south join. */
+   over WRAP_Z, so the sea runs on unbroken across the east-west join. */
 const SEA=createSea(world,{wrapZ:WRAP_Z,outside:[0,0.55,20],ease:25,clarity:14.4,seed:7,rings:250,segs:224,coarse:[120,160]});
 const sea=SEA.mesh;
 /* ---------- the swell ----------
@@ -7603,6 +7633,8 @@ const swComp=[];
 let swH=0.8, swDayN=0, swLastHour=null, swSeed=null, swOverride=null;   // swOverride: a height set for tests
 function swellSetup(){
   swSeed=SEED; swComp.length=0;
+  // (the wind's own bearings count from -z: the world's compass is that turned a quarter, so 205 to 315 is from
+  // west-north-west round to north-east)
   const bearing=205+110*hash(SEED,4,972), towards=Math.PI-bearing*Math.PI/180+Math.PI;   // where the prevailing wind blows
   for (const [si,sd] of [[0,1],[1,-1]]){
     const base=sd>0?0:Math.PI, lean=clamp(Math.atan2(Math.sin(towards-base),Math.cos(towards-base))*0.3,-0.4,0.4);
@@ -8113,7 +8145,7 @@ const islandMesh=new THREE.Mesh(islandGeo,islandMat); islandMesh.frustumCulled=f
 let islandKey=null;
 const islandCols={step:0,m:new Map()};
 function updateIsland(){ COVE_FAST++; try{ updateIsland0(); } finally{ COVE_FAST--; }
-  // the island repeats every WRAP_Z to the north and south, but only one copy is drawn: the one round the point the
+  // the island repeats every WRAP_Z to the west and east, but only one copy is drawn: the one round the point the
   // camera looks at, which is the player's own, since the player is always within WRAP_Z/2 of its middle
 }
 function updateIsland0(){
@@ -8954,7 +8986,7 @@ function createDolphins(parent, opts={}){
       pod.mode='approach'; pod.boat=B; pod.t2=0; pod.rideT=rr(25,55); rideSlots(pod); } }
   // a new island: every pod is placed afresh in its waters, and the foam and spray of the old one are cleared
   function reset(){ RG.length=0; PT.length=0; for (const p of pods){ p.dormant=true; p.retry=0; } if (started) write(); }
-  // the world has moved by dz from north to south (Coast repeats every WRAP_Z)
+  // the world has moved by dz from west to east (Coast repeats every WRAP_Z)
   function shift(dz){ for (const p of pods) p.z+=dz; for (const d of dolphins) d.z+=dz; for (const g of RG) g.z+=dz; for (const q of PT) q.z+=dz; if (started) write(); }
   function dispose(){ parent.remove(body,mask,ghost,rings,spray); geo.dispose(); ringGeo.dispose(); pGeo.dispose();
     for (const m of [bodyMat,depthMat,ghostMat,maskMat,ringMat,sprayMat]) m.dispose(); }
@@ -8964,7 +8996,7 @@ function createDolphins(parent, opts={}){
 /* Coast's pods: two within reach of the player, appearing in open water clear of harbours and of the channels into
    coves, and seldom close inshore. The ferries and the sailing boats are offered for bow-riding, each through one
    object kept for good, so that a riding pod keeps hold of its boat. A new island (I) places the pods afresh, and
-   the north-south repeat moves them with the player. onSound is left as a hook, since there is no sample yet. */
+   the east-west repeat moves them with the player. onSound is left as a hook, since there is no sample yet. */
 const dolphins=createDolphins(world,{pods:2,podSize:[3,7],leapsPerMinute:2,range:380,minDepth:12,ghost:0.28,
   // a dolphin falling back into the sea after a leap is heard where it lands
   onSound:(kind,x,y,z,st)=>{ if (kind==='splash') sndPlay('splash','world',[x,0,z],{gain:0.5+0.5*Math.min(1,st||1),rate:0.95+Math.random()*0.1}); },seed:(SEED*7919+13)>>>0});
@@ -9747,7 +9779,7 @@ function createWhales(parent, opts={}){
    within about 700 m of the player. They surface to blow, raise their flukes to dive, and now and then breach; the
    fall back after a breach is heard (the crash of whale_breach comes 1.25 s into the sample, and the sound is
    started that long before the whale lands) and sends a ring of waves across the sea, which boats ride. A new
-   island places them afresh, and the north-south repeat moves them with the player. */
+   island places them afresh, and the east-west repeat moves them with the player. */
 // whales are heard only close by: at full level within 80 m, fading to nothing at 200 m
 const whNear=(x,z)=>1-smooth((Math.hypot(x-_sl.x,z-_sl.z)-80)/120);
 function whKeepOut(x,z){
@@ -9786,7 +9818,7 @@ function updateWhales(wdt){
 
    const W=createWind(opts)
      opts: speed (m/s, 5), dir (radians, the heading the wind comes FROM, in Coast's convention where a heading h
-           points along (sin h, cos h); north is -z, so a wind from the north has dir = PI), gust (0..1, 0.4),
+           points along (sin h, cos h); east is -z, so a wind from the east has dir = PI), gust (0..1, 0.4),
            shift (0..1, 1: the direction wanders by up to 20 degrees), scale (m, 36, the size of a gust),
            seed, shelter(x,z) -> 0..1 (1 where fully sheltered, as in a harbour or a cove; the wind there is cut by
            70 per cent), hour() -> 0..24 and onshore(x,z) -> the heading the sea lies in, seen from the shore (both
@@ -11739,7 +11771,7 @@ xWrapHooks.push(d=>{ if (sailD) sailD.shift(d,0); for (const e of [...dinghies.v
    wind is strong or gusting, few in shelter and none below about 1.5 m/s. At street level a few drift along the
    shore. One mesh draws them all, after the sea; each ribbon waves and curls in the vertex shader and is turned to
    face the camera, and fades in and out at both ends. Positions are kept relative to ORIGIN, nothing is allocated
-   per frame, they stand still while the world is paused, and the north-south repeat moves them with the player. */
+   per frame, they stand still while the world is paused, and the east-west repeat moves them with the player. */
 const WISP_N=72, WISP_SEG=16;
 const wispGeo=new THREE.InstancedBufferGeometry();
 { const P=[], I=[]; for (let i=0;i<=WISP_SEG;i++){ const s=i/WISP_SEG; P.push(s,-1,0, s,1,0); if (i<WISP_SEG){ const a=i*2; I.push(a,a+1,a+3,a,a+3,a+2); } }
@@ -12293,7 +12325,7 @@ const routeZ=brZ, routeY=brY;
 function routeBack(R,x,D,dir){ let u=D; const z0=routeZ(R,x), y0=routeY(R,x);
   for (let k=0;k<5;k++){ const x1=x-dir*u, c=Math.hypot(u,routeZ(R,x1)-z0,routeY(R,x1)-y0); u*=D/c; }
   return x-dir*u; }
-// the train set down at the west quay, its leading shunter against the buffers, being loaded
+// the train set down at the north quay, its leading shunter against the buffers, being loaded
 // how far short of the end of its line the goods train's leading end comes to rest, clear of the buffer stops
 const GOODS_STAND=5.8;
 function goodsStart(R,w){ const g=goods; g.R=R; g.lead=0; g.dir=-1; g.x=R.x0+GOODS_STAND; g.v=0; g.wait=w; g.toB=false; g.legs=[]; for (const c of g.cars) c.m.visible=!!R; }
@@ -14396,7 +14428,7 @@ const ferryFloor=()=>fe.lv===0?FD0:fe.lv===2?FD1:FD0+clamp((fe.lz-FSTB)/(FUZ0-FS
 let prevModeF='street';
 const _fq=new THREE.Quaternion(), _fe=new THREE.Euler();
 // G: to the goods train, beside its leading shunter; if none works near the player, to the nearest goods line, where
-// its train is being loaded at the west quay
+// its train is being loaded at the north quay
 function jumpToGoods(){
   if (mode==='coach') mode='street'; if (riding()) leaveTrain(prevMode); if (mode==='ferry'||ridden) leaveFerry('street');
   const g=goods, near=g.R && Math.hypot(g.cars[0].m.position.x-player.x,g.cars[0].m.position.z-player.z)<6000;
@@ -17283,7 +17315,7 @@ function updateGulls(dt){
   gullCtx.perches=gullPerches(); gullCtx.boats=gullBoats();
   GULLS.update(dt,gullCtx);
 }
-// the world repeats from north to south every WRAP_Z metres: the flock moves with it
+// the world repeats from west to east every WRAP_Z metres: the flock moves with it
 wrapHooks.push(d=>{ GULLS.shift(0,d); gullPerch.x=NaN; }); xWrapHooks.push(d=>{ GULLS.shift(d,0); gullPerch.x=NaN; });
 // for automated checks: the flock, its context, and a switch that removes the gulls entirely
 window.__gulls={G:GULLS,ctx:gullCtx,get on(){ return gullsOn; },set on(v){ gullsOn=v; GULLS.mesh.visible=v; }};
@@ -17435,7 +17467,7 @@ function updateFleet(dt){
     if (Math.abs(f.H.x-player.x)>FISH.showWay+1000) continue;
     if (!f.plan){ if (plans>=4) continue; plans++; }   // no more than four courses are worked out in one frame
     fishState(f,hour);
-    // across the north-south join the boat is seen where it lies on the player's side
+    // across the east-west join the boat is seen where it lies on the player's side
     f.dz=WRAP_Z*Math.round((player.z-f.z)/WRAP_Z);
     // drawn by its distance from the camera, which in the bird's-eye view may be far from the player
     const z=f.z+f.dz, d=Math.hypot(f.x-player.x,z-player.z), dc=Math.hypot(f.x-camera.position.x,z-camera.position.z);

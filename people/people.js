@@ -1272,7 +1272,7 @@ export function createPeople(ctx){
     const cap=Math.round(6*Math.min(mult,8)); while (pax.filter(p=>p.veh.state==='sit').length>cap*2){ const i=pax.findIndex(p=>p.veh.state==='sit'); if (i<0) break; pax.splice(i,1); }
     fillUntil=simT+6;
   }
-  // when the world repeats from north to south, or a new island is made, everyone is let go; the places fill again
+  // when the world repeats from west to east, or a new island is made, everyone is let go; the places fill again
   // out of view
   function reset(){ clearAll(); places.clear(); }
   return { update, setLevel, reset, setSailor, get on(){ return on; }, get level(){ return level; }, people, pax, places, groups, inView,

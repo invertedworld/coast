@@ -543,7 +543,7 @@ function createDolphins(parent, opts={}){
       pod.mode='approach'; pod.boat=B; pod.t2=0; pod.rideT=rr(25,55); rideSlots(pod); } }
   // a new island: every pod is placed afresh in its waters, and the foam and spray of the old one are cleared
   function reset(){ RG.length=0; PT.length=0; for (const p of pods){ p.dormant=true; p.retry=0; } if (started) write(); }
-  // the world has moved by dz from north to south (Coast repeats every WRAP_Z)
+  // the world has moved by dz from west to east (Coast repeats every WRAP_Z)
   function shift(dz){ for (const p of pods) p.z+=dz; for (const d of dolphins) d.z+=dz; for (const g of RG) g.z+=dz; for (const q of PT) q.z+=dz; if (started) write(); }
   function dispose(){ parent.remove(body,mask,ghost,rings,spray); geo.dispose(); ringGeo.dispose(); pGeo.dispose();
     for (const m of [bodyMat,depthMat,ghostMat,maskMat,ringMat,sprayMat]) m.dispose(); }

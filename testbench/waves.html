@@ -352,7 +352,7 @@ function createSea(parent, opts={}){
   function turnSets(){ const A=sets[0], dd=Math.abs(Math.atan2(Math.sin(st.dirT-A.dir),Math.cos(st.dirT-A.dir)));
     if (dd>0.12 && A.w>=0.6){ sets[1]=A; sets[0]={dir:st.dirT,w:0,ph:LAM.map(()=>R()*TAU)}; } }
   function setSwell(h,dirFrom,lens){ st.swellH=Math.max(0,h); if (dirFrom!==undefined) st.swellDir=dirFrom+Math.PI; if (lens) st.swLens=lens.slice(0,3); }
-  // with a world that repeats every wrapZ from north to south, each wave runs a whole number of times across it
+  // with a world that repeats every wrapZ from west to east, each wave runs a whole number of times across it
   function wrapK(k,th){ let kz=k*Math.cos(th); if (!O.wrapZ) return [k*Math.sin(th),kz];
     kz=Math.round(kz*O.wrapZ/TAU)*TAU/O.wrapZ; return [(Math.sin(th)<0?-1:1)*Math.sqrt(Math.max(0,k*k-kz*kz)),kz]; }
   function writeComponents(){

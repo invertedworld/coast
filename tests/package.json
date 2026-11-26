@@ -1,0 +1,7 @@
+{
+  "name": "coast-tests",
+  "private": true,
+  "type": "module",
+  "description": "The anomaly suite for Coast: node anomalies.mjs",
+  "dependencies": { "puppeteer-core": "^23.0.0" }
+}
