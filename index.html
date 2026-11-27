@@ -1817,9 +1817,31 @@ function onRoomFloor(x,z,y){
     const A=o.room.area||o, [au,av]=obbLocal(A,x,z); if (Math.abs(au)<=A.hw && Math.abs(av)<=A.hd && y>o.room.fl-1.2 && y<o.room.fl+1.2) return true; }
   return false; }
 function inTunnel(x,z,y){ return tunFloor(x,z,y)!==null; }
+/* The ground as it is drawn near by: a block at full detail is a mesh on the whole-metre grid, each cell split into two
+   triangles by its diagonal from (i+1,j) to (i,j+1). In a hollow, as at the foot of a steep face, the triangles stand
+   above the ground's own height between the samples, by as much as 2 or 3 m where the face is near vertical, so that
+   a walker standing on the ground's own height had the eye inside the hill. groundMeshH gives the height on those
+   triangles, and its gradient in _gmG; the walker stands on whichever is the higher. */
+const _gmG=[0,0];
+function groundMeshH(x,z){ const i=Math.floor(x), j=Math.floor(z), u=x-i, v=z-j, b=hgSample(i+1,j), c=hgSample(i,j+1);
+  if (u+v<=1){ const a=hgSample(i,j); _gmG[0]=b-a; _gmG[1]=c-a; return a+(b-a)*u+(c-a)*v; }
+  const d=hgSample(i+1,j+1); _gmG[0]=d-c; _gmG[1]=d-b; return d+(c-d)*(1-u)+(b-d)*(1-v); }
+function groundWalkH(x,z){ return Math.max(heightAt(x,z),groundMeshH(x,z)); }
+// ground steeper than WALK_STEEP (60 degrees) cannot be walked up, so that the eye is never carried against a face
+// closer than the camera's near plane: a step from (x0,z0) on to the bare ground at (x1,z1), standing at g1, is
+// refused where the ground there is that steep and the step climbs it
+const WALK_STEEP=1.73;
+// refused, too, is a step that brings the ground within 0.45 m of the eye (held 1.3 m above the feet, as low as it
+// trails on a climb) higher than the eye, unless it leaves more room than before
+function eyeRoom(x,z,g){ let m=Infinity; for (let k=0;k<8;k++){ const a=k*Math.PI/4; m=Math.min(m,g+1.3-groundWalkH(x+Math.cos(a)*0.45,z+Math.sin(a)*0.45)); } return m; }
+function steepClimb(x0,z0,x1,z1,g1){ const h=groundWalkH(x1,z1); if (Math.abs(g1-h)>0.02) return false;
+  { const e=0.25, gx=(groundWalkH(x1+e,z1)-groundWalkH(x1-e,z1))/(2*e), gz=(groundWalkH(x1,z1+e)-groundWalkH(x1,z1-e))/(2*e);
+    if (Math.hypot(gx,gz)>WALK_STEEP && gx*(x1-x0)+gz*(z1-z0)>0) return true; }
+  const r1=eyeRoom(x1,z1,g1); if (r1>=0) return false;
+  return r1<eyeRoom(x0,z0,groundWalkH(x0,z0))-1e-3; }
 function walkGround(x,z,y){
   { const f=tunFloor(x,z,y); if (f!==null) return f; }
-  const cv=coveAtXZ(x,z); if (!cv || !cv.geo) return heightAt(x,z);
+  const cv=coveAtXZ(x,z); if (!cv || !cv.geo) return groundWalkH(x,z);
   const G=cv.geo, u=cvU(cv,x,z), s=cvS(cv,x,z);
   { const f=cvCaveFloor(G.cave,u,s,y); if (f!==null) return f; }
   if (!cvSdf(G,u,s) || _ci<0) return heightAt(x,z);
@@ -7085,6 +7107,7 @@ float ashlar(vec2 uv, float bw, float bh){
   float row=floor(uv.y/bh); vec2 q=vec2(uv.x/bw+0.5*mod(row,2.), uv.y/bh); vec2 id=floor(q), f=fract(q);
   float m=min(min(f.x,1.-f.x)*bw, min(f.y,1.-f.y)*bh);
   return mix(0.7, 0.88+0.2*h21(id)+0.06*vn(uv*7.), smoothstep(0.012,0.04,m)); }
+float ashlarA(vec2 uv, float bw, float bh, float fw){ return mix(0.93, ashlar(uv,bw,bh), 1.0-smoothstep(0.015,0.06,fw)); }
 `;
 // the surface patterns are worked from the position in the world, or for a thing that moves (local), from the
 // position on the thing itself, so that the pattern stays fixed to it however it moves; the light, the fading with
@@ -7129,12 +7152,12 @@ function patchBuildings(mat,clip=false,local=false){
             float a=pp.x/0.3, ridge=0.5+0.5*cos(6.2832*a), row=fract(pp.y/0.38);
             float id=h21(vec2(floor(a),floor(pp.y/0.38)));
             float aa=PAT_BL(0.05,0.12,fwidth(pp.x)); k=mix(0.88,(0.8+0.2*ridge)*mix(0.78,1.,smoothstep(0.,0.14,row))*(0.9+0.16*id),aa); }
-        } else if (vSurf>2.5 && vSurf<3.5){ vec2 uv=abs(n.y)>0.7?_pp.xz:wallUV(_pp,n); k=ashlar(uv,0.75,0.38);
+        } else if (vSurf>2.5 && vSurf<3.5){ vec2 uv=abs(n.y)>0.7?_pp.xz:wallUV(_pp,n); vec2 dw=fwidth(uv); float fw=max(dw.x,dw.y), fa=1.0-smoothstep(0.004,0.02,fw); k=ashlarA(uv,0.75,0.38,fw);
           // dressed stone: each block a little warmer or cooler, its face pitted; on a wall, streaks of grime in columns
           // each running down from a ledge of its own height, and here and there grey-green or orange lichen
           { float rw=floor(uv.y/0.38); vec2 sid=floor(vec2(uv.x/0.75+0.5*mod(rw,2.),rw)); float t=h21(sid+4.4);
-            diffuseColor.rgb*=mix(vec3(1.0),mix(vec3(1.07,1.0,0.9),vec3(0.92,0.97,1.04),t)*(0.92+0.14*h21(sid+9.1)),amp);
-            k*=0.88+0.14*vn(uv*25.)+0.08*vn(uv*70.);
+            diffuseColor.rgb*=mix(vec3(1.0),mix(vec3(1.07,1.0,0.9),vec3(0.92,0.97,1.04),t)*(0.92+0.14*h21(sid+9.1)),amp*(1.0-smoothstep(0.08,0.25,fw)));
+            k*=0.88+0.14*mix(0.5,vn(uv*25.),1.0-smoothstep(0.01,0.04,fw))+0.08*mix(0.5,vn(uv*70.),fa);
             if (abs(n.y)<0.7){
               float cols=smoothstep(0.55,0.8,vn(vec2(uv.x*1.1,7.0))), rag=0.6+0.4*fb(vec2(uv.x*3.0,uv.y*0.2)+5.0);
               float seg=4.0+2.0*vn(vec2(uv.x*0.5,3.0)), ht=(1.0-fract((uv.y+vn(vec2(uv.x*0.7,9.0))*seg)/seg))*seg;
@@ -7156,15 +7179,18 @@ function patchBuildings(mat,clip=false,local=false){
         else if (vSurf>6.5 && vSurf<7.5){ vec2 uv=wallUV(_pp,n); float row=floor(uv.y/0.075);
           vec2 q=vec2(uv.x/0.225+0.5*mod(row,2.), uv.y/0.075), f=fract(q), id=floor(q);
           float m=min(min(f.x,1.-f.x)*0.225, min(f.y,1.-f.y)*0.075);
+          // the pixel's footprint on the wall (fw, m): the speckle, the joints and the bricks' own hues fade in turn to
+          // their mean as it reaches their size, so that the courses never break into moire at a distance or a glancing angle
+          vec2 dw=fwidth(uv); float fw=max(dw.x,dw.y), fsp=1.0-smoothstep(0.004,0.012,fw), fbk=1.0-smoothstep(0.02,0.06,fw);
           // each brick its own hue and depth of firing, now and then a dark over-fired one, its face speckled; patches
           // darkened by soot and weather; the joints of pale lime mortar, a little in shadow, between them
           float r1=h21(id), r2=h21(id+5.3), r3=h21(id+11.1);
-          vec3 bc=mix(vec3(1.07,0.94,0.86),vec3(0.9,0.95,1.0),r2)*(0.8+0.32*r1+0.08*vn(uv*9.))*(r3>0.95?0.6:1.0);
-          bc*=0.93+0.12*vn(uv*vec2(60.,40.)+id*3.1);
+          vec3 bc=mix(vec3(0.98,0.945,0.93),mix(vec3(1.07,0.94,0.86),vec3(0.9,0.95,1.0),r2)*(0.8+0.32*r1+0.08*vn(uv*9.))*(r3>0.95?0.6:1.0),fbk);
+          bc*=0.93+0.12*mix(0.5,vn(uv*vec2(60.,40.)+id*3.1),fsp);
           bc*=1.0-0.2*smoothstep(0.55,0.85,fb(uv*0.45+2.));
-          float bm=smoothstep(0.004,0.011,m), aa=PAT_BL(0.02,0.05,fwidth(uv.y));
+          float bm=smoothstep(0.004,0.011,m), aa=1.0-smoothstep(0.003,0.012,fw);
           vec3 brick=diffuseColor.rgb*bc, mortar=vec3(0.5,0.46,0.39)*(0.9+0.15*vn(uv*30.));
-          vec3 cb=mix(mortar,brick,bm), cf=mix(mortar,diffuseColor.rgb,0.82);
+          vec3 cb=mix(mortar,brick,bm), cf=mix(mortar,brick,0.82);
           amp=max(amp,1.-smoothstep(25.,60.,dist)); diffuseColor.rgb=mix(diffuseColor.rgb,mix(cf,cb,aa),amp); k=1.; }
         diffuseColor.rgb*=mix(1.,k,amp); }`);
   };
@@ -7176,6 +7202,7 @@ function patchBuildings(mat,clip=false,local=false){
       .replace('#include <normal_fragment_begin>',`#include <normal_fragment_begin>
         if ((vSurf>6.5 && vSurf<7.5) || (vSurf>2.5 && vSurf<3.5)){ vec3 nw=normalize(vWN); if (abs(nw.y)<0.7){
           float fd=1.0-smoothstep(8.0,25.0,length(vWP-cameraPosition));
+          { vec2 dw=fwidth(wallUV(_pp,nw)); fd*=1.0-smoothstep(0.002,0.006,max(dw.x,dw.y)); }
           if (fd>0.0){ vec2 uv=wallUV(_pp,nw); bool br=vSurf>6.5; float bw=br?0.225:0.75, bh=br?0.075:0.38, bv=br?0.012:0.03;
             float row=floor(uv.y/bh); vec2 f=fract(vec2(uv.x/bw+0.5*mod(row,2.),uv.y/bh)), d=vec2(f.x*bw,f.y*bh), e=vec2((1.-f.x)*bw,(1.-f.y)*bh);
             float sx=(1.-smoothstep(0.0,bv,d.x))-(1.-smoothstep(0.0,bv,e.x)), sy=(1.-smoothstep(0.0,bv,d.y))-(1.-smoothstep(0.0,bv,e.y));
@@ -16814,11 +16841,11 @@ function frame0(now){
     else { const g0=standableAt(ox,oz); player.x+=vx*dt; const g1=standableAt(player.x,player.z);
       // deep water stops a walker, unless they step off an edge into it deliberately, or are in the air over it
       let offK=null; const offOk=()=>offK??(offK=mode==='street'&&swimStepOffOk(mx,mz));
-      if ((g1<-1.0&&!offOk()) || !coveMoveOk(ox,oz,player.y,g0,player.x,player.z,g1)) player.x=ox;
+      if ((g1<-1.0&&!offOk()) || !coveMoveOk(ox,oz,player.y,g0,player.x,player.z,g1) || steepClimb(ox,oz,player.x,player.z,g1)) player.x=ox;
       const g2=player.x===ox?g0:g1; player.z+=vz*dt; const g3=standableAt(player.x,player.z);
-      if ((g3<-1.0&&!offOk()) || !coveMoveOk(player.x,oz,player.y,g2,player.x,player.z,g3)) player.z=oz;
+      if ((g3<-1.0&&!offOk()) || !coveMoveOk(player.x,oz,player.y,g2,player.x,player.z,g3) || steepClimb(player.x,oz,player.x,player.z,g3)) player.z=oz;
       // on a narrow path each step along one axis alone may leave it while the step along both stays on it
-      if (player.x===ox && player.z===oz){ const nx=ox+vx*dt, nz=oz+vz*dt, g4=standableAt(nx,nz); if (g4>=-1.0 && coveMoveOk(ox,oz,player.y,g0,nx,nz,g4)){ player.x=nx; player.z=nz; } }
+      if (player.x===ox && player.z===oz){ const nx=ox+vx*dt, nz=oz+vz*dt, g4=standableAt(nx,nz); if (g4>=-1.0 && coveMoveOk(ox,oz,player.y,g0,nx,nz,g4) && !steepClimb(ox,oz,nx,nz,g4)){ player.x=nx; player.z=nz; } }
       // held on a ledge just climbed, the step is not taken over its far edge: the part of it along the edge is kept
       if (ledgeHold && mode==='street' && !ledgeOk(player.x,player.z)){
         if (ledgeOk(player.x,oz)) player.z=oz; else if (ledgeOk(ox,player.z)) player.x=ox; else { player.x=ox; player.z=oz; } } }
