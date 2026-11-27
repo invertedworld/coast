@@ -6825,37 +6825,44 @@ function orbitalSky(){
   return {ringTex,townTex,isleTex,buildRingMap,RING_GLSL,RING_CLOUDS,uniforms,skyFrag};
 }
 if (ORBITAL) ORB=orbitalSky();
-const skyU={uTop:{value:new THREE.Color()},uMid:{value:new THREE.Color()},uHor:{value:new THREE.Color()},uSun:{value:new THREE.Vector3(0,1,0)},uSunCol:{value:new THREE.Color()},uNight:{value:0},uDay:{value:1},uRot:{value:0},uCres:{value:0},uMetA:{value:new THREE.Vector3(0,1,0)},uMetB:{value:new THREE.Vector3(0,1,0)},uMet:{value:new THREE.Vector3()},uCloud:cloudVU,uCloudM:cloudMU,uCloudTex:cloudTU};
-if (ORBITAL) Object.assign(skyU,ORB.uniforms);
-const sky=new THREE.Mesh(ORBITAL?new THREE.SphereGeometry(500,64,32):new THREE.SphereGeometry(500,48,24),new THREE.ShaderMaterial({uniforms:skyU,side:THREE.BackSide,depthWrite:false,fog:false,
-  vertexShader:`varying vec3 vDir; void main(){ vDir=normalize(position); gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
-  fragmentShader:ORBITAL?ORB.skyFrag:`uniform vec3 uTop,uMid,uHor,uSun,uSunCol,uMetA,uMetB,uMet; uniform float uNight,uDay,uRot,uCres; varying vec3 vDir;
-    ${CLOUD_GLSL}${CLOUD_SKY_GLSL}
+// the moon and the stars, the light they add to the sky in the direction d: drawn by the sky, and by the sea in the
+// direction of its reflection, so that they are seen in the water as sharply as in the sky
+const NIGHT_SKY_GLSL=`
     float h3(vec3 p){ return fract(sin(dot(p,vec3(12.9898,78.233,37.719)))*43758.5453); }
-    void main(){
-      vec3 d=normalize(vDir); float y=d.y;
-      vec3 c = y>0.12 ? mix(uMid,uTop,clamp((y-0.12)/0.6,0.0,1.0)) : mix(uHor,uMid,clamp((y+0.04)/0.16,0.0,1.0));
-      float sd=max(dot(d,uSun),0.0);
-      c += uSunCol*(pow(sd,900.0)*6.0 + pow(sd,12.0)*0.35 + pow(sd,3.0)*0.12*(1.0-uDay));
-      vec3 m=-uSun; float md=max(dot(d,m),0.0);
+    vec3 nightSky(vec3 d, vec3 sd_, float nt_, float rot_, float cres_){ vec3 a=vec3(0.0);
+      vec3 m=-sd_; float md=max(dot(d,m),0.0);
       float disc=smoothstep(0.99955,0.99975,md);
       float crater=0.85+0.15*sin(d.x*900.0)*sin(d.z*800.0);
-      // the phase (uCres 0 full, 1 a crescent): the disc in its own frame, across (e1) and up (e2), in moon radii; the
+      // the phase (cres_ 0 full, 1 a crescent): the disc in its own frame, across (e1) and up (e2), in moon radii; the
       // dark part is a circle of the same size set off up and to the left, so that a thin crescent is left lit on the side
       // towards the sun, below the horizon; the part in shadow is not seen
       vec3 e1=normalize(cross(m,vec3(0.0,1.0,0.0))+vec3(1e-5,0.0,0.0)), e2=cross(e1,m); vec2 q=vec2(dot(d,e1),dot(d,e2))/0.0265;
-      float lit=mix(1.0,smoothstep(0.97,1.03,length(q-vec2(-0.21,0.29))),uCres);
-      c += vec3(0.92,0.94,1.0)*disc*uNight*crater*1.6*lit + vec3(0.35,0.42,0.6)*pow(md,40.0)*0.35*uNight*(1.0-0.75*uCres);
+      float lit=mix(1.0,smoothstep(0.97,1.03,length(q-vec2(-0.21,0.29))),cres_);
+      a += vec3(0.92,0.94,1.0)*disc*nt_*crater*1.6*lit + vec3(0.35,0.42,0.6)*pow(md,40.0)*0.35*nt_*(1.0-0.75*cres_);
       // the star field turns about the same axis as the sun and moon
-      float cr=cos(uRot), sr=sin(uRot); vec3 ds=vec3(d.x, d.y*cr+d.z*sr, -d.y*sr+d.z*cr);
+      float cr=cos(rot_), sr=sin(rot_); vec3 ds=vec3(d.x, d.y*cr+d.z*sr, -d.y*sr+d.z*cr);
       vec3 g=ds*190.0, cell=floor(g); float st=h3(cell);
       if (st>0.985){
         vec3 o=vec3(h3(cell+1.7),h3(cell+5.3),h3(cell+9.1))*0.6+0.2;   // star position inside its cell
         float dd=length(fract(g)-o), size=0.06+0.1*h3(cell+3.3);
         float b=exp(-dd*dd/(size*size))*(0.35+0.65*h3(cell+7.7));
-        float tw=0.75+0.25*sin(st*900.0+uRot*400.0);
-        c += vec3(0.9,0.93,1.0)*b*tw*uNight*smoothstep(0.02,0.25,y)*1.6;
+        float tw=0.75+0.25*sin(st*900.0+rot_*400.0);
+        a += vec3(0.9,0.93,1.0)*b*tw*nt_*smoothstep(0.02,0.25,d.y)*1.6;
       }
+      return a; }
+`;
+const skyU={uTop:{value:new THREE.Color()},uMid:{value:new THREE.Color()},uHor:{value:new THREE.Color()},uSun:{value:new THREE.Vector3(0,1,0)},uSunCol:{value:new THREE.Color()},uNight:{value:0},uDay:{value:1},uRot:{value:0},uCres:{value:0},uMetA:{value:new THREE.Vector3(0,1,0)},uMetB:{value:new THREE.Vector3(0,1,0)},uMet:{value:new THREE.Vector3()},uCloud:cloudVU,uCloudM:cloudMU,uCloudTex:cloudTU};
+if (ORBITAL) Object.assign(skyU,ORB.uniforms);
+const sky=new THREE.Mesh(ORBITAL?new THREE.SphereGeometry(500,64,32):new THREE.SphereGeometry(500,48,24),new THREE.ShaderMaterial({uniforms:skyU,side:THREE.BackSide,depthWrite:false,fog:false,
+  vertexShader:`varying vec3 vDir; void main(){ vDir=normalize(position); gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+  fragmentShader:ORBITAL?ORB.skyFrag:`uniform vec3 uTop,uMid,uHor,uSun,uSunCol,uMetA,uMetB,uMet; uniform float uNight,uDay,uRot,uCres; varying vec3 vDir;
+    ${CLOUD_GLSL}${CLOUD_SKY_GLSL}${NIGHT_SKY_GLSL}
+    void main(){
+      vec3 d=normalize(vDir); float y=d.y;
+      vec3 c = y>0.12 ? mix(uMid,uTop,clamp((y-0.12)/0.6,0.0,1.0)) : mix(uHor,uMid,clamp((y+0.04)/0.16,0.0,1.0));
+      float sd=max(dot(d,uSun),0.0);
+      c += uSunCol*(pow(sd,900.0)*6.0 + pow(sd,12.0)*0.35 + pow(sd,3.0)*0.12*(1.0-uDay));
+      c += nightSky(d,uSun,uNight,uRot,uCres);
       // a shooting star (uMet: how far along its path its head is, the length of its tail, its brightness): a streak
       // along the great circle from uMetA to uMetB, brightest at its head and fading to nothing along its tail
       if (uMet.z>0.0){
@@ -7454,7 +7461,7 @@ function createSea(parent, opts={}){
     uOff:{value:new THREE.Vector3()},uGustC:{value:0},uScale:{value:1},uOutside:{value:new THREE.Vector3(...O.outside)},
     uRing:{value:[...Array(8)].map(()=>new THREE.Vector4())},uRingK:{value:[...Array(8)].map(()=>new THREE.Vector4())},uRingD:{value:[...Array(8)].map(()=>new THREE.Vector4())},uRingN:{value:0},
     uScene:{value:null},uSceneDepth:{value:null},uRes:{value:new THREE.Vector2(1,1)},uProjInv:{value:new THREE.Matrix4()},uCamWorld:{value:new THREE.Matrix4()},uClarity:{value:12},uHasScene:{value:0},uPassFar:{value:1e6},uDetail:{value:1},
-    uRefl:{value:null},uReflM:{value:new THREE.Matrix4()},uReflOn:{value:0},uReflK:{value:0.45}};
+    uRefl:{value:null},uReflD:{value:null},uReflM:{value:new THREE.Matrix4()},uReflPI:{value:new THREE.Matrix4()},uReflOn:{value:0},uReflK:{value:0.45}};
   const st={U:5,Ut:5,dirT:0,swellH:0.6,swellDir:0,swLens:[82,108,64],time:0,hs:0,lp:0,tp:0,Q:1,cx:0,cz:0,scale:1,qx:0,qz:0,detail:1};
 
   /* ---------- the shore field: [swell factor, wind factor, depth] in a texture, read alike by GPU and CPU ---------- */
@@ -7570,7 +7577,8 @@ function createSea(parent, opts={}){
       ${CLOUD_GLSL}
       uniform vec3 uSunDir, uSunCol, uSkyTop, uSkyHor, uDeep, uMid, uThin, uShallow, uFoam; uniform float uTime, uWind, uWhite, uBright, uSwellA;
       uniform vec2 uWindDir, uDrift, uStep; uniform sampler2D uGustTex; uniform vec4 uGust; uniform float uGustAmt;
-      uniform sampler2D uScene, uSceneDepth; uniform vec2 uRes; uniform mat4 uProjInv, uCamWorld; uniform float uClarity, uHasScene, uPassFar, uDetail; uniform sampler2D uRefl; uniform mat4 uReflM; uniform float uReflOn, uReflK;
+      uniform sampler2D uScene, uSceneDepth; uniform vec2 uRes; uniform mat4 uProjInv, uCamWorld; uniform float uClarity, uHasScene, uPassFar, uDetail; uniform sampler2D uRefl, uReflD; uniform mat4 uReflM, uReflPI; uniform float uReflOn, uReflK; uniform vec3 uSkySun; uniform float uSkyNight, uSkyRot, uSkyCres;
+      ${NIGHT_SKY_GLSL}
       varying vec3 vP; varying vec3 vN; varying float vFold, vDepth, vSwl, vH, vWf; varying vec2 vQ;
       uniform float uGustC; uniform vec3 uOff; uniform sampler2D uField; uniform vec4 uFieldR; uniform vec3 uOutside;
       // the shore field again, read for each pixel, so that the edges of the shallows follow the sea bed and not the mesh
@@ -7616,8 +7624,29 @@ function createSea(parent, opts={}){
         // level), broken up by the waves, in place of the sky where they stand in it; the water reflects them more
         // strongly than a true surface would, as a calm harbour seems to
         if (uReflOn>0.0){ vec4 rp=uReflM*vec4(vP.x,0.0,vP.z,1.0); vec2 ruv=rp.xy/rp.w+N.xz*0.06*(1.0-smoothstep(200.0,900.0,cd));
-          vec4 rc=texture2D(uRefl,clamp(ruv,0.001,0.999)); float rA=rc.a*uReflOn;
-          sky=mix(sky,rc.rgb,rA); Fr=mix(Fr,max(Fr,uReflK),rA); }
+          ruv=clamp(ruv,0.001,0.999); vec4 rc=texture2D(uRefl,ruv); float rA=rc.a*uReflOn;
+          // (at an edge the colour is blended with the clear black around it, which is divided out)
+          rc.rgb/=max(rc.a,0.02);
+          // the water is made to reflect more strongly (uReflK) only what lies near enough to be seen clearly: over the
+          // fog's reach along the path to it the share falls back to the water's own, so that an island far off in the
+          // haze, already hazed in the reflection as it is in the view, leaves no clearer shape in the sea than it
+          // stands against the sky
+          // Land far off fades back to the sky's reflection from 1.5 km to 4.5 km along the reflected path, so that an
+          // island lost in the haze leaves no clearer shape in the sea
+          float rk=0.0;
+          { float dz=texture2D(uReflD,ruv).x;
+            if (dz>0.99999) rA=0.0;
+            else { vec4 rv=uReflPI*vec4(ruv*2.0-1.0,dz*2.0-1.0,1.0); float rd=-rv.z/rv.w;
+              rA*=1.0-smoothstep(1500.0,4500.0,rd); rk=rA;
+              #ifdef USE_FOG
+              rk*=1.0-smoothstep(fogNear,fogFar,rd);
+              #endif
+            } }
+          sky=mix(sky,rc.rgb,rA); Fr=mix(Fr,max(Fr,uReflK),rk); }
+        // the moon and the stars reflected, where nothing stands before them, as strongly as the rest of the reflection
+        vec3 ns=vec3(0.0);
+        if (uSkyNight>0.0){ ns=nightSky(Rf,uSkySun,uSkyNight,uSkyRot,uSkyCres);
+          if (uReflOn>0.0){ vec4 rp2=uReflM*vec4(vP.x,0.0,vP.z,1.0); ns*=1.0-texture2D(uRefl,clamp(rp2.xy/rp2.w+N.xz*0.06,0.001,0.999)).a; } }
         // the water itself: the light scattered back out of its body, darker in the troughs and where the faces turn to
         // the eye, and a lighter green-blue in the thin tops of the crests with the light behind them
         float L=max(dot(N,uSunDir),0.0);
@@ -7669,7 +7698,7 @@ function createSea(parent, opts={}){
           under=mix(under,vec3(0.04,0.07,0.11)*(0.6+0.4*L)*uBright*TrO+under*(1.0-TrO.g),om); }
         // the shadow of the clouds on the water, and on the sun's glitter
         float cldK=uCloud.w>0.0?1.0-0.6*cloudAt(vP.xz+uSunDir.xz*(${CLOUD_H.toFixed(1)}-vP.y)/max(uSunDir.y,0.06),0.0):1.0;
-        vec3 col=mix(under*cldK,sky*uBright,Fr);
+        vec3 col=mix(under*cldK,sky*uBright,Fr)+ns*max(Fr,uReflK*uReflOn);
         float sd=max(dot(Rf,uSunDir),0.0); col+=cldK*uSunCol*(pow(sd,900.0)*7.0+pow(sd,90.0)*0.25)*smoothstep(0.0,0.08,uSunDir.y);   // the sun's glitter
         // foam: soft flecks on the swell's crests, lacy whitecaps on the steepest wind crests, and the shore wash
         float fl=n2(q*0.7+vec2(t*0.15,-t*0.1))*0.6+mix(0.5,n2(q*1.9-vec2(t*0.25,t*0.2)),steady(1.9,0.0))*0.4;
@@ -7688,7 +7717,7 @@ function createSea(parent, opts={}){
         #include <colorspace_fragment>
         #include <fog_fragment>${ORB_FADE}
       }`});
-  Object.assign(mat.uniforms,U,{uCloud:cloudVU,uCloudM:cloudMU,uCloudTex:cloudTU});
+  Object.assign(mat.uniforms,U,{uCloud:cloudVU,uCloudM:cloudMU,uCloudTex:cloudTU,uSkySun:skyU.uSun,uSkyNight:skyU.uNight,uSkyRot:skyU.uRot,uSkyCres:skyU.uCres});
   const mesh=new THREE.Mesh(geo,mat); mesh.frustumCulled=false; mesh.renderOrder=1; parent.add(mesh);
   if (O.gust){ U.uGustTex.value=O.gust.uniforms.uGustTex.value; }
 
@@ -16145,14 +16174,15 @@ function seaFrame(wdt){
     bright:surfMat.uniforms.uBright.value,paused,detail:onWater?1:0,camera:seaDepth.cam,behind:seaDepth.on?seaDepth.behind:null,gustU:seaGust});
 }
 /* ---------- the sea's reflection ----------
-   The blocks, the distant terrain and the boats (layers 1 and REFL_L) are drawn from the eye mirrored in the sea's mean
+   The blocks, the distant terrain, the boats and the gulls (layers 1 and REFL_L) are drawn from the eye mirrored in
+   the sea's mean
    level, at half the resolution, into a target whose alpha is clear where nothing stands, with everything below the
-   level cut away by an oblique near plane, the shadows not drawn again and the sky left out; the sea reads it back
+   level cut away by a clipping plane, the shadows not drawn again and the sky left out; the sea reads it back
    through the projection of the mirrored eye. It is drawn, once turned on (Shift+U), while the eye is above the sea
    and out of the tunnels */
-const seaRefl={rt:new THREE.WebGLRenderTarget(1,1),cam:new THREE.PerspectiveCamera(),on:false,lights:[],lightT:0,
+const seaRefl={rt:new THREE.WebGLRenderTarget(1,1,{depthTexture:new THREE.DepthTexture(1,1)}),cam:new THREE.PerspectiveCamera(),on:false,lights:[],lightT:0,
   M:new THREE.Matrix4(),_p:new THREE.Vector3(),_t:new THREE.Vector3(),_r:new THREE.Matrix4(),_v:new THREE.Vector3(),_pl:new THREE.Plane(),_cp:new THREE.Vector4(),_q:new THREE.Vector4()};
-seaRefl.cam.layers.set(1); seaRefl.cam.layers.enable(REFL_L);
+seaRefl.cam.layers.set(1); seaRefl.cam.layers.enable(REFL_L); seaRefl.planes=[seaRefl._pl];
 const _reflClear=new THREE.Color();
 // the reflection's strength, cycled with Shift+U: off, low, medium or high, the least share of the light the water
 // reflects where something stands in it (REFL_K). It is medium until set otherwise; the setting is kept
@@ -16174,17 +16204,17 @@ function seaReflPass(){
   const look=R._t.set(0,0,-1).applyMatrix4(rot).add(cp); look.y=2*L-look.y;
   V.up.set(0,1,0).applyMatrix4(rot); V.up.y=-V.up.y; V.lookAt(look);
   V.near=C.near; V.far=Math.min(C.far,3600); V.fov=C.fov; V.aspect=C.aspect; V.updateProjectionMatrix(); V.updateMatrixWorld(); V.matrixWorldInverse.copy(V.matrixWorld).invert();
-  // the oblique near plane: nothing below the level is drawn
-  const pl=R._pl.setFromNormalAndCoplanarPoint(R._v.set(0,1,0),R._t.set(cp.x,L,cp.z)).applyMatrix4(V.matrixWorldInverse);
-  const c=R._cp.set(pl.normal.x,pl.normal.y,pl.normal.z,pl.constant), P=V.projectionMatrix.elements, q=R._q;
-  q.x=(Math.sign(c.x)+P[8])/P[0]; q.y=(Math.sign(c.y)+P[9])/P[5]; q.z=-1; q.w=(1+P[10])/P[14];
-  c.multiplyScalar(2/c.dot(q)); P[2]=c.x; P[6]=c.y; P[10]=c.z+1; P[14]=c.w; V.projectionMatrixInverse.copy(V.projectionMatrix).invert();
+  // nothing below the level is drawn: a clipping plane, for this render alone (an oblique near plane, which costs no
+  // second version of the materials, crowded the depth of things far off together, and the sea's reading of it showed
+  // them in bands)
+  R._pl.set(R._v.set(0,1,0),-L);
   R.M.set(0.5,0,0,0.5, 0,0.5,0,0.5, 0,0,0.5,0.5, 0,0,0,1).multiply(V.projectionMatrix).multiply(V.matrixWorldInverse);
-  U.uReflM.value.copy(R.M); U.uRefl.value=R.rt.texture;
+  U.uReflM.value.copy(R.M); U.uRefl.value=R.rt.texture; U.uReflD.value=R.rt.depthTexture; U.uReflPI.value.copy(V.projectionMatrixInverse);
   const au=renderer.shadowMap.autoUpdate, bg=scene.background, ca=renderer.getClearAlpha(); renderer.getClearColor(_reflClear);
   renderer.shadowMap.autoUpdate=false; scene.background=null; renderer.setClearColor(0x000000,0);
+  const cps=renderer.clippingPlanes; renderer.clippingPlanes=R.planes;
   try { renderer.setRenderTarget(R.rt); renderer.clear(); renderer.render(scene,V); }
-  finally { renderer.setRenderTarget(null); renderer.setClearColor(_reflClear,ca); scene.background=bg; renderer.shadowMap.autoUpdate=au; }
+  finally { renderer.clippingPlanes=cps; renderer.setRenderTarget(null); renderer.setClearColor(_reflClear,ca); scene.background=bg; renderer.shadowMap.autoUpdate=au; }
 }
 function seaDepthPass(){
   if (!seaDepth.on) return;
@@ -17480,7 +17510,7 @@ function gullCall(e){
   if (time-gullCallT<2.5 || Math.hypot(e.x-player.x,e.z-player.z)>140) return;
   gullCallT=time; sndPlay('gulls','world',[e.x,e.y,e.z],{rate:0.9+Math.random()*0.2});
 }
-const GULLS=createGulls(world,{count:16,scale:1.25,range:260,onCall:gullCall});
+const GULLS=createGulls(world,{count:16,scale:1.25,range:260,onCall:gullCall}); GULLS.mesh.layers.enable(REFL_L);   // seen in the sea's reflection
 // places a gull may stand within 320 m of the player, gathered again only when the player has moved 60 m or after
 // ten seconds (so that coves whose cliffs have since been built are included)
 const gullPerch={x:NaN,z:NaN,t:0,list:[]};
