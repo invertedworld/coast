@@ -8214,11 +8214,13 @@ function rebuildOut0(px,pz){
   for (let j=0;j<=OUT_N;j++) for (let i=0;i<=OUT_N;i++){
     const gi=gx+(i-OUT_N/2)*3, gj=gz+(j-OUT_N/2)*3, F=farPoint(gi,ORBITAL?gj:gj-WRAP_J*Math.round(gj/WRAP_J)), o=(j*W+i)*3;
     // under the whole square of the distant terrain (to its corners, 3.1 km out) the outline is sunk out of its way,
-    // so the two never fight for the same depth
+    // so the two never fight for the same depth: 400 m down, where it had been 60 m, which between points 66 m apart on
+    // either side of a basin's wall left a triangle standing in the bore of a tunnel through it; drawn into the depth
+    // alone, it hid the lining behind it and let the sky's colour through as a flat sheet across the bore
     const x=gi*FS, z=gj*FS, inFar=Math.max(Math.abs(x-Math.round(px/FS)*FS),Math.abs(z-Math.round(pz/FS)*FS))<FN/2*FS+FS*2;
     // (Orbital mode) on a rim wall it lies under the wall's near face, which draws that land itself
     const e=ORBITAL?wallE(z):-1;
-    P[o]=x-ORIGIN.x; P[o+1]=e>0?Math.min(Math.max(F.h,-1)-0.6-(inFar?60:0),wallHw(e)-80):Math.max(F.h,-1)-0.6-(inFar?60:0); P[o+2]=z-ORIGIN.z; }
+    P[o]=x-ORIGIN.x; P[o+1]=e>0?Math.min(Math.max(F.h,-1)-0.6-(inFar?400:0),wallHw(e)-80):Math.max(F.h,-1)-0.6-(inFar?400:0); P[o+2]=z-ORIGIN.z; }
   outGeo.attributes.position.needsUpdate=true; outMesh.position.copy(ORIGIN); }
 const farGlowGeo=new THREE.BufferGeometry();
 const farGlow=new THREE.Points(farGlowGeo,glowMat); farGlow.frustumCulled=false; farGlow.renderOrder=3; world.add(farGlow);
@@ -16733,8 +16735,11 @@ function frame0(now){
     // the cab view's eye rides just ahead of the locomotive's nose; the chase view follows the driver's position
     const RT=rideTrain(), xe=mode==='train'?RT.x+RT.dir*1.2:RT.x-RT.dir*1.8, ye=RT.Y(xe), xa=xe+RT.dir*14, xb=xe-RT.dir*14;
     const head=Math.atan2(xa-xb,RT.Z(xa)-RT.Z(xb)), kf=1-Math.exp(-dt*3);
-    if (cam.y===null){ cam.y=ye+2.9; cam.head=head; }
-    cam.y+=(ye+2.9-cam.y)*kf; cam.head+=Math.atan2(Math.sin(head-cam.head),Math.cos(head-cam.head))*kf;
+    // the cab view looks along the line's grade, eased, so that on a steep descent in a tunnel it looks down the bore
+    // rather than into its vault
+    const grade=Math.atan2(RT.Y(xa)-RT.Y(xb),Math.hypot(xa-xb,RT.Z(xa)-RT.Z(xb)));
+    if (cam.y===null){ cam.y=ye+2.9; cam.head=head; cam.grade=grade; }
+    cam.y+=(ye+2.9-cam.y)*kf; cam.head+=Math.atan2(Math.sin(head-cam.head),Math.cos(head-cam.head))*kf; cam.grade=(cam.grade??grade)+(grade-(cam.grade??grade))*kf;
     const rot=cam.head;
     player.x=xe; player.z=RT.Z(xe); player.y=ye; eyeY=player.y;
     // the trackside view rides in the cab while the locomotive is in a tunnel
@@ -16761,7 +16766,7 @@ function frame0(now){
       // cab view: the eye rides on the track just in front of the train, which is drawn behind it
       if (mode!=='train'){ chase.cab=true; const xc=RT.x+RT.dir*1.2; camera.position.set(xc,cam.y,RT.Z(xc)); } else
       camera.position.set(xe,cam.y,RT.Z(xe));
-      camera.rotation.set(tPitch, rot+Math.PI+tYaw, 0, 'YXZ');
+      camera.rotation.set(tPitch+cam.grade, rot+Math.PI+tYaw, 0, 'YXZ');
     } else if (sideOk){
       const S=chase.spot, loco=RT.lead;
       if (S){ camera.position.set(S.x,S.y,S.z); camPos.copy(camera.position);
