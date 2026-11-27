@@ -16155,11 +16155,10 @@ const seaRefl={rt:new THREE.WebGLRenderTarget(1,1),cam:new THREE.PerspectiveCame
 seaRefl.cam.layers.set(1); seaRefl.cam.layers.enable(REFL_L);
 const _reflClear=new THREE.Color();
 // the reflection's strength, cycled with Shift+U: off, low, medium or high, the least share of the light the water
-// reflects where something stands in it (REFL_K). It is off until set, since it draws the scene a second time; the
-// setting is kept
+// reflects where something stands in it (REFL_K). It is medium until set otherwise; the setting is kept
 const REFL_NAMES=['off','low','medium','high'], REFL_K=[0,0.2,0.35,0.55];
-let reflLvl=0;
-try{ reflLvl=Math.min(3,Math.max(0,parseInt(localStorage.getItem('borgo-refl'))||0)); }catch(_){}
+let reflLvl=2;
+try{ const v=localStorage.getItem('borgo-refl'); if (v!==null) reflLvl=Math.min(3,Math.max(0,parseInt(v)||0)); }catch(_){}
 function setRefl(l){ reflLvl=((l%4)+4)%4; try{ localStorage.setItem('borgo-refl',String(reflLvl)); }catch(_){} }
 function seaReflPass(){
   const R=seaRefl, U=SEA.uniforms, L=0, C=camera;
