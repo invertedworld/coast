@@ -6879,6 +6879,8 @@ const sky=new THREE.Mesh(ORBITAL?new THREE.SphereGeometry(500,64,32):new THREE.S
       #include <colorspace_fragment>
     }`}));
 sky.renderOrder=-1; world.add(sky);
+// (in Orbital mode the sky, with the ring it draws, is seen in the sea's reflection: it alone carries layer REFL_SKY)
+const REFL_SKY=4; if (ORBITAL) sky.layers.enable(REFL_SKY);
 // the top of the cloud layer, seen from above it: a dome about the eye drawn over the scene, all of which lies below the
 // layer, after everything else; it is shown only while the clouds are and the eye is above them (updateClouds)
 const cloudTop=new THREE.Mesh(new THREE.SphereGeometry(400,48,24),new THREE.ShaderMaterial({uniforms:{uSun:skyU.uSun,uSunCol:skyU.uSunCol,uHor:skyU.uHor,uCloud:cloudVU,uCloudM:cloudMU,uCloudTex:cloudTU},
@@ -7635,7 +7637,7 @@ function createSea(parent, opts={}){
           // island lost in the haze leaves no clearer shape in the sea
           float rk=0.0;
           { float dz=texture2D(uReflD,ruv).x;
-            if (dz>0.99999) rA=0.0;
+            if (dz>0.99999){ ${ORBITAL?'':'rA=0.0;'} }   // (in Orbital mode the sky, which writes no depth, is drawn into the reflection, the ring across it)
             else { vec4 rv=uReflPI*vec4(ruv*2.0-1.0,dz*2.0-1.0,1.0); float rd=-rv.z/rv.w;
               rA*=1.0-smoothstep(1500.0,4500.0,rd); rk=rA;
               #ifdef USE_FOG
@@ -7648,7 +7650,7 @@ function createSea(parent, opts={}){
         // (seen in a surface much calmer than the waves', and a little larger and softer, so that each star shimmers in
         // the water rather than showing for a frame at a time as the ripples swing the reflected ray across it)
         if (uSkyNight>0.0){ vec3 Rs=reflect(-V,normalize(mix(vec3(0.0,1.0,0.0),N,0.06))); Rs.y=abs(Rs.y);
-          ns=nightSky(Rs,uSkySun,uSkyNight,uSkyRot,uSkyCres,3.0);
+          ns=nightSky(Rs,uSkySun,uSkyNight,uSkyRot,uSkyCres,3.0)*0.75;
           if (uReflOn>0.0){ vec4 rp2=uReflM*vec4(vP.x,0.0,vP.z,1.0); ns*=1.0-texture2D(uRefl,clamp(rp2.xy/rp2.w+N.xz*0.06,0.001,0.999)).a; } }
         // the water itself: the light scattered back out of its body, darker in the troughs and where the faces turn to
         // the eye, and a lighter green-blue in the thin tops of the crests with the light behind them
@@ -7720,7 +7722,7 @@ function createSea(parent, opts={}){
         #include <colorspace_fragment>
         #include <fog_fragment>${ORB_FADE}
       }`});
-  Object.assign(mat.uniforms,U,{uCloud:cloudVU,uCloudM:cloudMU,uCloudTex:cloudTU,uSkySun:skyU.uSun,uSkyNight:skyU.uNight,uSkyRot:skyU.uRot,uSkyCres:skyU.uCres});
+  Object.assign(mat.uniforms,U,{uCloud:cloudVU,uCloudM:cloudMU,uCloudTex:cloudTU,uSkySun:skyU.uSun,uSkyNight:ORBITAL?{value:0}:skyU.uNight,uSkyRot:skyU.uRot,uSkyCres:skyU.uCres});   // (in Orbital mode the ring hides the stars where it crosses the sky, which the sea does not know, and they are not reflected)
   const mesh=new THREE.Mesh(geo,mat); mesh.frustumCulled=false; mesh.renderOrder=1; parent.add(mesh);
   if (O.gust){ U.uGustTex.value=O.gust.uniforms.uGustTex.value; }
 
@@ -16182,10 +16184,11 @@ function seaFrame(wdt){
    level, at half the resolution, into a target whose alpha is clear where nothing stands, with everything below the
    level cut away by a clipping plane, the shadows not drawn again and the sky left out; the sea reads it back
    through the projection of the mirrored eye. It is drawn, once turned on (Shift+U), while the eye is above the sea
-   and out of the tunnels */
+   and out of the tunnels, in Orbital mode as in Coast */
 const seaRefl={rt:new THREE.WebGLRenderTarget(1,1,{depthTexture:new THREE.DepthTexture(1,1)}),cam:new THREE.PerspectiveCamera(),on:false,lights:[],lightT:0,
   M:new THREE.Matrix4(),_p:new THREE.Vector3(),_t:new THREE.Vector3(),_r:new THREE.Matrix4(),_v:new THREE.Vector3(),_pl:new THREE.Plane(),_cp:new THREE.Vector4(),_q:new THREE.Vector4()};
 seaRefl.cam.layers.set(1); seaRefl.cam.layers.enable(REFL_L); seaRefl.planes=[seaRefl._pl];
+seaRefl.skyCam=new THREE.PerspectiveCamera(); seaRefl.skyCam.layers.set(REFL_SKY);
 const _reflClear=new THREE.Color();
 // the reflection's strength, cycled with Shift+U: off, low, medium or high, the least share of the light the water
 // reflects where something stands in it (REFL_K). It is medium until set otherwise; the setting is kept
@@ -16196,7 +16199,7 @@ function setRefl(l){ reflLvl=((l%4)+4)%4; try{ localStorage.setItem('borgo-refl'
 function seaReflPass(){
   const R=seaRefl, U=SEA.uniforms, L=0, C=camera;
   C.updateMatrixWorld(); const cp=R._p.setFromMatrixPosition(C.matrixWorld);
-  R.on=reflLvl>0 && !seaHidden && !ORBITAL && cp.y>L+0.3 && tunnelK<0.5 && !(wetView&&wetView()) && SEA.mesh.visible;
+  R.on=reflLvl>0 && !seaHidden && cp.y>L+0.3 && tunnelK<0.5 && !(wetView&&wetView()) && SEA.mesh.visible;
   U.uReflOn.value=R.on?1:0; U.uReflK.value=REFL_K[reflLvl]; if (!R.on) return;
   // every light lights the reflection as it lights the scene, so that the materials need no second version
   if ((R.lightT-=1)<=0){ R.lightT=120; R.lights.length=0; scene.traverse(o=>{ if (o.isLight){ o.layers.enable(REFL_L); R.lights.push(o); } }); }
@@ -16216,8 +16219,14 @@ function seaReflPass(){
   const au=renderer.shadowMap.autoUpdate, bg=scene.background, ca=renderer.getClearAlpha(); renderer.getClearColor(_reflClear);
   renderer.shadowMap.autoUpdate=false; scene.background=null; renderer.setClearColor(0x000000,0);
   const cps=renderer.clippingPlanes; renderer.clippingPlanes=R.planes;
-  try { renderer.setRenderTarget(R.rt); renderer.clear(); renderer.render(scene,V); }
-  finally { renderer.clippingPlanes=cps; renderer.setRenderTarget(null); renderer.setClearColor(_reflClear,ca); scene.background=bg; renderer.shadowMap.autoUpdate=au; }
+  // (in Orbital mode the sky, the ring across it, is drawn first in the mirrored directions but from the eye itself,
+  // since from the mirrored eye, under the sea, the ring's floor would be all it saw)
+  const ac=renderer.autoClear;
+  try { renderer.setRenderTarget(R.rt); renderer.clear();
+    if (ORBITAL){ const S=R.skyCam; S.position.copy(cp); S.quaternion.copy(V.quaternion); S.projectionMatrix.copy(V.projectionMatrix); S.projectionMatrixInverse.copy(V.projectionMatrixInverse); S.updateMatrixWorld(true);
+      renderer.clippingPlanes=cps; renderer.render(scene,S); renderer.clippingPlanes=R.planes; renderer.autoClear=false; }
+    renderer.render(scene,V); }
+  finally { renderer.autoClear=ac; renderer.clippingPlanes=cps; renderer.setRenderTarget(null); renderer.setClearColor(_reflClear,ca); scene.background=bg; renderer.shadowMap.autoUpdate=au; }
 }
 function seaDepthPass(){
   if (!seaDepth.on) return;
