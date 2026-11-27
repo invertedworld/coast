@@ -6402,11 +6402,14 @@ function genChunk(cx,cz,lod=0){
     gpos.push(px,ph,pz); gnor.push(-dx/nl,1/nl,-dz/nl); gcol.push(cA.r,cA.g,cA.b); gpav.push(cob,flag); gplz.push(plz[0],plz[1],plz[2],plz[3]);
   }
   const portals=[]; { let pv=railState(x0-13); for (let x=x0-12; x<x0+C+12; x+=2){ const st=railState(x+1);
-    if (st!==pv && (st==='tunnel'||pv==='tunnel')){ const sl=(railZ(x+1)-railZ(x-1))/2, l=Math.hypot(1,sl); portals.push({x,z:railZ(x),tx:1/l,tz:sl/l,into:st==='tunnel'?1:-1}); } pv=st; } }
-  const inPortal=(px,pz)=>portals.some(P=>{ const dx=px-P.x, dz=pz-P.z, a=(dx*P.tx+dz*P.tz)*P.into, q=dx*P.tz-dz*P.tx; return a>step/2-0.2&&a<4.5&&Math.abs(q)<5.6; });
+    if (st!==pv && (st==='tunnel'||pv==='tunnel')){ const sl=(railZ(x+1)-railZ(x-1))/2, l=Math.hypot(1,sl); portals.push({x,z:railZ(x),y:railY(x),tx:1/l,tz:sl/l,into:st==='tunnel'?1:-1}); } pv=st; } }
+  // a cell is left out only where it may reach into the opening, within 4.4 m of the line, and down below the crown of
+  // the arch; one wholly above it, or behind the wing walls, which hide the ground within them, is kept, or on a hill
+  // rising steeply behind the portal the sky showed through the hill over the coping
+  const inPortal=(px,pz,lo)=>portals.some(P=>{ const dx=px-P.x, dz=pz-P.z, a=(dx*P.tx+dz*P.tz)*P.into, q=dx*P.tz-dz*P.tx; return a>step/2-0.2&&a<4.5&&Math.abs(q)<4.4&&lo<P.y+7.6; });
   for (let j=0;j<N;j++) for (let i=0;i<N;i++){ const a=j*(N+1)+i, b=a+1, c=a+N+1, d=c+1;
     if (portals.length){ const h00=hg[(j+1)*G+i+1], h10=hg[(j+1)*G+i+2], h01=hg[(j+2)*G+i+1], h11=hg[(j+2)*G+i+2];
-      if (Math.max(h00,h10,h01,h11)-Math.min(h00,h10,h01,h11)>2.5 && inPortal(x0+(i+0.5)*step,z0+(j+0.5)*step)) continue; }
+      if (Math.max(h00,h10,h01,h11)-Math.min(h00,h10,h01,h11)>2.5 && inPortal(x0+(i+0.5)*step,z0+(j+0.5)*step,Math.min(h00,h10,h01,h11))) continue; }
     // the ground is left out where it would run through a sea cave
     if (cvNear && coveCaveCell(x0+(i+0.5)*step,z0+(j+0.5)*step,Math.min(hg[(j+1)*G+i+1],hg[(j+1)*G+i+2],hg[(j+2)*G+i+1],hg[(j+2)*G+i+2]))) continue;
     idx.push(a,c,b,b,c,d); }
