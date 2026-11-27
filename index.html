@@ -218,6 +218,7 @@ function goThereShow(src,fov,aspect){
       <div class="row"><span><kbd>Shift</kbd>+<kbd>+</kbd><kbd>−</kbd></span><span>Field of view</span></div>
       <div class="row"><span><kbd>B</kbd></span><span>Tilt-shift effect</span></div>
       <div class="row"><span><kbd>Shift</kbd>+<kbd>B</kbd></span><span>Ambient occlusion</span></div>
+      <div class="row"><span><kbd>Shift</kbd>+<kbd>U</kbd></span><span>Reflections in the sea: off, low, medium, high</span></div>
       <div class="row"><span><kbd>U</kbd></span><span>Clouds</span></div>
     </div>
     <div class="group"><h3>Pictures</h3>
@@ -6413,6 +6414,21 @@ function genChunk(cx,cz,lod=0){
     // the ground is left out where it would run through a sea cave
     if (cvNear && coveCaveCell(x0+(i+0.5)*step,z0+(j+0.5)*step,Math.min(hg[(j+1)*G+i+1],hg[(j+1)*G+i+2],hg[(j+2)*G+i+1],hg[(j+2)*G+i+2]))) continue;
     idx.push(a,c,b,b,c,d); }
+  // a skirt hangs from each edge of the block, facing both ways, so that where a neighbour is drawn at another level of
+  // detail, whose edge does not follow this one's between its coarser points, no crack opens between them on a steep
+  // slope through which the sky is seen. It hangs deeper the steeper the ground, and is left out by a cove, whose caves
+  // run under the ground, and where the line runs in a tunnel beneath, so that it never stands in a bore
+  if (!cvNear){ const tun=[x0-12,x0+C/2,x0+C+12].some(x=>railState(x)==='tunnel');
+    const edges=[[],[],[],[]]; for (let k=0;k<=N;k++){ edges[0].push(k); edges[1].push(N*(N+1)+k); edges[2].push(k*(N+1)); edges[3].push(k*(N+1)+N); }
+    const low=new Map(), lower=v=>{ let w=low.get(v); if (w!==undefined) return w;
+      const i=v%(N+1), j=(v-i)/(N+1), H=(p,q)=>hg[(q+1)*G+p+1], s=Math.max(Math.abs(H(i+1,j)-H(i-1,j)),Math.abs(H(i,j+1)-H(i,j-1)))/(2*step);
+      const x=gpos[v*3], y=gpos[v*3+1], z=gpos[v*3+2]; let dr=clamp(1.5+s*14,1.5,40);
+      if (tun && mainPerp(x,z)<14 && railState(x)==='tunnel') dr=Math.min(dr,Math.max(0,y-railY(x)-9.5));
+      w=gpos.length/3; gpos.push(x,y-dr,z); gnor.push(gnor[v*3],gnor[v*3+1],gnor[v*3+2]); gcol.push(gcol[v*3],gcol[v*3+1],gcol[v*3+2]);
+      gpav.push(gpav[v*2],gpav[v*2+1]); gplz.push(gplz[v*4],gplz[v*4+1],gplz[v*4+2],gplz[v*4+3]); low.set(v,w); return w; };
+    for (const E of edges) for (let k=0;k<N;k++){ const a=E[k], b=E[k+1], a2=lower(a), b2=lower(b);
+      if (gpos[a2*3+1]>=gpos[a*3+1]-0.01 && gpos[b2*3+1]>=gpos[b*3+1]-0.01) continue;
+      idx.push(a,a2,b,b,a2,b2, a,b,a2,b,b2,a2); } }
   const gg=new THREE.BufferGeometry();
   gg.setAttribute('position',new THREE.BufferAttribute(relPos(gpos,x0,z0),3));
   gg.setAttribute('normal',new THREE.Float32BufferAttribute(gnor,3));
@@ -6527,6 +6543,9 @@ scene.fog=new THREE.Fog(FOG,90,1500); scene.background=FOG.clone();
 // the field of view at street level, in the water, at the helm and in a coach (vertical, in degrees), set on the help panel
 let FOV=70; try{ const v=+localStorage.getItem('coast.fov'); if (v>=50&&v<=125) FOV=v; }catch(_){}
 const camera=new THREE.PerspectiveCamera(FOV,1,0.3,3600); world.add(camera);
+// the layer of what is seen reflected in the sea (with layer 1, the boats and the blocks along the shore): the blocks, the
+// distant terrain and the lights that light them
+const REFL_L=3;
 // the torch (F, under the water or on foot): a spot carried with the eye, pointing where it looks. It stays in the scene
 // at nothing while off, so that turning it on does not make every material compile again
 const torch=new THREE.SpotLight(0xfff1dc,0,32,0.42,0.55,1.4), torchAim=new THREE.Object3D();
@@ -7434,7 +7453,8 @@ function createSea(parent, opts={}){
     uGustTex:{value:null},uGust:{value:new THREE.Vector4(0,1,0,36)},uGustAmt:{value:0},
     uOff:{value:new THREE.Vector3()},uGustC:{value:0},uScale:{value:1},uOutside:{value:new THREE.Vector3(...O.outside)},
     uRing:{value:[...Array(8)].map(()=>new THREE.Vector4())},uRingK:{value:[...Array(8)].map(()=>new THREE.Vector4())},uRingD:{value:[...Array(8)].map(()=>new THREE.Vector4())},uRingN:{value:0},
-    uScene:{value:null},uSceneDepth:{value:null},uRes:{value:new THREE.Vector2(1,1)},uProjInv:{value:new THREE.Matrix4()},uCamWorld:{value:new THREE.Matrix4()},uClarity:{value:12},uHasScene:{value:0},uPassFar:{value:1e6},uDetail:{value:1}};
+    uScene:{value:null},uSceneDepth:{value:null},uRes:{value:new THREE.Vector2(1,1)},uProjInv:{value:new THREE.Matrix4()},uCamWorld:{value:new THREE.Matrix4()},uClarity:{value:12},uHasScene:{value:0},uPassFar:{value:1e6},uDetail:{value:1},
+    uRefl:{value:null},uReflM:{value:new THREE.Matrix4()},uReflOn:{value:0},uReflK:{value:0.45}};
   const st={U:5,Ut:5,dirT:0,swellH:0.6,swellDir:0,swLens:[82,108,64],time:0,hs:0,lp:0,tp:0,Q:1,cx:0,cz:0,scale:1,qx:0,qz:0,detail:1};
 
   /* ---------- the shore field: [swell factor, wind factor, depth] in a texture, read alike by GPU and CPU ---------- */
@@ -7550,7 +7570,7 @@ function createSea(parent, opts={}){
       ${CLOUD_GLSL}
       uniform vec3 uSunDir, uSunCol, uSkyTop, uSkyHor, uDeep, uMid, uThin, uShallow, uFoam; uniform float uTime, uWind, uWhite, uBright, uSwellA;
       uniform vec2 uWindDir, uDrift, uStep; uniform sampler2D uGustTex; uniform vec4 uGust; uniform float uGustAmt;
-      uniform sampler2D uScene, uSceneDepth; uniform vec2 uRes; uniform mat4 uProjInv, uCamWorld; uniform float uClarity, uHasScene, uPassFar, uDetail;
+      uniform sampler2D uScene, uSceneDepth; uniform vec2 uRes; uniform mat4 uProjInv, uCamWorld; uniform float uClarity, uHasScene, uPassFar, uDetail; uniform sampler2D uRefl; uniform mat4 uReflM; uniform float uReflOn, uReflK;
       varying vec3 vP; varying vec3 vN; varying float vFold, vDepth, vSwl, vH, vWf; varying vec2 vQ;
       uniform float uGustC; uniform vec3 uOff; uniform sampler2D uField; uniform vec4 uFieldR; uniform vec3 uOutside;
       // the shore field again, read for each pixel, so that the edges of the shallows follow the sea bed and not the mesh
@@ -7592,6 +7612,12 @@ function createSea(parent, opts={}){
         float Fr=0.02+0.7*pow(1.0-NV,5.0);
         vec3 Rf=reflect(-V,N); Rf.y=abs(Rf.y);
         vec3 sky=mix(uSkyHor,uSkyTop,smoothstep(0.0,0.55,Rf.y));
+        // the land, the town and the boats reflected (the reflection pass, drawn from the eye mirrored in the sea's mean
+        // level), broken up by the waves, in place of the sky where they stand in it; the water reflects them more
+        // strongly than a true surface would, as a calm harbour seems to
+        if (uReflOn>0.0){ vec4 rp=uReflM*vec4(vP.x,0.0,vP.z,1.0); vec2 ruv=rp.xy/rp.w+N.xz*0.06*(1.0-smoothstep(200.0,900.0,cd));
+          vec4 rc=texture2D(uRefl,clamp(ruv,0.001,0.999)); float rA=rc.a*uReflOn;
+          sky=mix(sky,rc.rgb,rA); Fr=mix(Fr,max(Fr,uReflK),rA); }
         // the water itself: the light scattered back out of its body, darker in the troughs and where the faces turn to
         // the eye, and a lighter green-blue in the thin tops of the crests with the light behind them
         float L=max(dot(N,uSunDir),0.0);
@@ -8194,7 +8220,7 @@ farMat.onBeforeCompile=(sh)=>{ Object.assign(sh.uniforms,maskU,farU,{uTop:skyU.u
     { vec2 c=floor(vFarW.xz/${C.toFixed(1)})-uMaskRel;
       if (c.x>=0.0 && c.y>=0.0 && c.x<${MASK.toFixed(1)} && c.y<${MASK.toFixed(1)} && texture2D(uMask,(c+0.5)/${MASK.toFixed(1)}).r>0.5) discard; }`).replace('#include <fog_fragment>',landHaze('vFarW',true)); };
 farMat.customProgramCacheKey=()=>'farmask-skyfade-haze-cut';
-const farMesh=new THREE.Mesh(farGeo,farMat); farMesh.frustumCulled=false; world.add(farMesh);
+const farMesh=new THREE.Mesh(farGeo,farMat); farMesh.frustumCulled=false; farMesh.layers.enable(REFL_L); world.add(farMesh);
 /* ---------- the land beyond the distant terrain, as depth alone: a coarse grid out to 3.6 km, every third point of
    the distant terrain's grid, drawn into the depth buffer but not the picture, so that an island or headland beyond
    the land that is drawn still hides a lighthouse's beams and lantern, a boat or a train behind it. Under the
@@ -8357,6 +8383,7 @@ function addChunkToScene(ch){
   // only the blocks that reach below the sea are seen through the water, in the sea's depth pass
   if (!ch.groundGeo.boundingBox) ch.groundGeo.computeBoundingBox();
   if (ch.groundGeo.boundingBox.min.y<0.2){ ch.mesh.layers.enable(1); ch.ground.layers.enable(1); }
+  ch.mesh.layers.enable(REFL_L); ch.ground.layers.enable(REFL_L);   // seen in the sea's reflection
   world.add(ch.mesh,ch.ground);
   if (ch.surfGeo){ ch.surf=at(new THREE.Mesh(ch.surfGeo,surfMat)); ch.surf.renderOrder=2; world.add(ch.surf); }
   if (ch.fw && ch.fw.i.length){ const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.BufferAttribute(relPos(ch.fw.p,x0,z0),3)); g.setAttribute('wa',new THREE.Float32BufferAttribute(ch.fw.a,4)); g.setIndex(ch.fw.i); g.computeBoundingSphere();
@@ -8436,8 +8463,8 @@ function updateTiles(budgetMs=2){
     const add=(geo,make)=>{ if (!geo || !geo.attributes.position.count){ if (geo) geo.dispose(); return; } const m=make(geo); m.position.set(X0,0,Z0); world.add(m); T.objs.push(m);
       for (const a of Object.values(geo.attributes)) a.onUpload(dropArray); if (geo.index) geo.index.onUpload(dropArray);
       m.frustumCulled=false; m.onAfterRender=uploaded; };
-    add(mergeGeos(B,oB),g=>{ const m=new THREE.Mesh(g,matB); m.receiveShadow=true; if (deep) m.layers.enable(1); return m; });
-    add(mergeGeos(G,oB),g=>{ const m=groundCasts(new THREE.Mesh(g,matG)); m.receiveShadow=true; if (deep) m.layers.enable(1); return m; });
+    add(mergeGeos(B,oB),g=>{ const m=new THREE.Mesh(g,matB); m.receiveShadow=true; m.layers.enable(REFL_L); if (deep) m.layers.enable(1); return m; });
+    add(mergeGeos(G,oB),g=>{ const m=groundCasts(new THREE.Mesh(g,matG)); m.receiveShadow=true; m.layers.enable(REFL_L); if (deep) m.layers.enable(1); return m; });
     add(mergeGeos(S,oS),g=>{ const m=new THREE.Mesh(g,surfMat); m.renderOrder=2; return m; });
     add(mergeGeos(L,oL),g=>{ const m=new THREE.Points(g,glowMat); m.renderOrder=3; return m; });
   }
@@ -14138,7 +14165,8 @@ addEventListener('keydown',e=>{ keys[e.code]=true;
   if (code==='ToStart' && !e.repeat) homeKey();
   if (code==='KeyB' && e.shiftKey){ if (!e.repeat){ setAO(!aoOn); toast('Ambient occlusion',aoOn?'on':'off'); } }
   else if (code==='KeyB'){ setTilt(!tiltShift); toast('Tilt-shift',tiltShift?'on':'off'); }
-  if (code==='KeyU' && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey){ setClouds(!cloudsOn); toast('Clouds',cloudsOn?'on':'off'); }
+  if (code==='KeyU' && !e.repeat && e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey){ setRefl(reflLvl+1); toast('Reflections',REFL_NAMES[reflLvl]); }
+  else if (code==='KeyU' && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey){ setClouds(!cloudsOn); toast('Clouds',cloudsOn?'on':'off'); }
   if (code==='KeyP' && !e.repeat){ paused=!paused; lastClock=null; }
   // the help panel frees the mouse, so that its tabs can be clicked
   if (code==='KeyH' && !e.repeat){ helpEl.hidden=!helpEl.hidden; aboutEl.hidden=true; lastCell=null; if (!helpEl.hidden && document.pointerLockElement) document.exitPointerLock(); }
@@ -16116,6 +16144,49 @@ function seaFrame(wdt){
   SEA.update(wdt,{centre:C,eye:C,qorigin:QORIGIN,offset:origU.value,scale,sunDir:LIGHT_DIR,sunColor:_seaSun,skyTop:skyU.uMid.value,skyHorizon:skyU.uHor.value,
     bright:surfMat.uniforms.uBright.value,paused,detail:onWater?1:0,camera:seaDepth.cam,behind:seaDepth.on?seaDepth.behind:null,gustU:seaGust});
 }
+/* ---------- the sea's reflection ----------
+   The blocks, the distant terrain and the boats (layers 1 and REFL_L) are drawn from the eye mirrored in the sea's mean
+   level, at half the resolution, into a target whose alpha is clear where nothing stands, with everything below the
+   level cut away by an oblique near plane, the shadows not drawn again and the sky left out; the sea reads it back
+   through the projection of the mirrored eye. It is drawn, once turned on (Shift+U), while the eye is above the sea
+   and out of the tunnels */
+const seaRefl={rt:new THREE.WebGLRenderTarget(1,1),cam:new THREE.PerspectiveCamera(),on:false,lights:[],lightT:0,
+  M:new THREE.Matrix4(),_p:new THREE.Vector3(),_t:new THREE.Vector3(),_r:new THREE.Matrix4(),_v:new THREE.Vector3(),_pl:new THREE.Plane(),_cp:new THREE.Vector4(),_q:new THREE.Vector4()};
+seaRefl.cam.layers.set(1); seaRefl.cam.layers.enable(REFL_L);
+const _reflClear=new THREE.Color();
+// the reflection's strength, cycled with Shift+U: off, low, medium or high, the least share of the light the water
+// reflects where something stands in it (REFL_K). It is off until set, since it draws the scene a second time; the
+// setting is kept
+const REFL_NAMES=['off','low','medium','high'], REFL_K=[0,0.2,0.35,0.55];
+let reflLvl=0;
+try{ reflLvl=Math.min(3,Math.max(0,parseInt(localStorage.getItem('borgo-refl'))||0)); }catch(_){}
+function setRefl(l){ reflLvl=((l%4)+4)%4; try{ localStorage.setItem('borgo-refl',String(reflLvl)); }catch(_){} }
+function seaReflPass(){
+  const R=seaRefl, U=SEA.uniforms, L=0, C=camera;
+  C.updateMatrixWorld(); const cp=R._p.setFromMatrixPosition(C.matrixWorld);
+  R.on=reflLvl>0 && !seaHidden && !ORBITAL && cp.y>L+0.3 && tunnelK<0.5 && !(wetView&&wetView()) && SEA.mesh.visible;
+  U.uReflOn.value=R.on?1:0; U.uReflK.value=REFL_K[reflLvl]; if (!R.on) return;
+  // every light lights the reflection as it lights the scene, so that the materials need no second version
+  if ((R.lightT-=1)<=0){ R.lightT=120; R.lights.length=0; scene.traverse(o=>{ if (o.isLight){ o.layers.enable(REFL_L); R.lights.push(o); } }); }
+  renderer.getDrawingBufferSize(_sz2); const w=Math.max(1,_sz2.x>>1), h=Math.max(1,_sz2.y>>1); if (R.rt.width!==w||R.rt.height!==h) R.rt.setSize(w,h);
+  // the eye and the point it looks at, mirrored in the level, and its up likewise
+  const V=R.cam, rot=R._r.extractRotation(C.matrixWorld);
+  V.position.set(cp.x,2*L-cp.y,cp.z);
+  const look=R._t.set(0,0,-1).applyMatrix4(rot).add(cp); look.y=2*L-look.y;
+  V.up.set(0,1,0).applyMatrix4(rot); V.up.y=-V.up.y; V.lookAt(look);
+  V.near=C.near; V.far=Math.min(C.far,3600); V.fov=C.fov; V.aspect=C.aspect; V.updateProjectionMatrix(); V.updateMatrixWorld(); V.matrixWorldInverse.copy(V.matrixWorld).invert();
+  // the oblique near plane: nothing below the level is drawn
+  const pl=R._pl.setFromNormalAndCoplanarPoint(R._v.set(0,1,0),R._t.set(cp.x,L,cp.z)).applyMatrix4(V.matrixWorldInverse);
+  const c=R._cp.set(pl.normal.x,pl.normal.y,pl.normal.z,pl.constant), P=V.projectionMatrix.elements, q=R._q;
+  q.x=(Math.sign(c.x)+P[8])/P[0]; q.y=(Math.sign(c.y)+P[9])/P[5]; q.z=-1; q.w=(1+P[10])/P[14];
+  c.multiplyScalar(2/c.dot(q)); P[2]=c.x; P[6]=c.y; P[10]=c.z+1; P[14]=c.w; V.projectionMatrixInverse.copy(V.projectionMatrix).invert();
+  R.M.set(0.5,0,0,0.5, 0,0.5,0,0.5, 0,0,0.5,0.5, 0,0,0,1).multiply(V.projectionMatrix).multiply(V.matrixWorldInverse);
+  U.uReflM.value.copy(R.M); U.uRefl.value=R.rt.texture;
+  const au=renderer.shadowMap.autoUpdate, bg=scene.background, ca=renderer.getClearAlpha(); renderer.getClearColor(_reflClear);
+  renderer.shadowMap.autoUpdate=false; scene.background=null; renderer.setClearColor(0x000000,0);
+  try { renderer.setRenderTarget(R.rt); renderer.clear(); renderer.render(scene,V); }
+  finally { renderer.setRenderTarget(null); renderer.setClearColor(_reflClear,ca); scene.background=bg; renderer.shadowMap.autoUpdate=au; }
+}
 function seaDepthPass(){
   if (!seaDepth.on) return;
   // the pass's camera is the main camera as it is about to be drawn, after everything that moves it this frame
@@ -16135,6 +16206,7 @@ function farWallHide(){
   else if (farWallHid){ farWallHid=false; farMesh.visible=farGlow.visible=!(mode==='above'&&dist>=2500); } }
 function render(){
   if (ORBITAL) farWallHide();
+  seaReflPass();
   SEA.mesh.material.visible=!seaHidden; surfMat.visible=!seaHidden; bedViewU.value=seaHidden?1:0; if (UW.surface.material) UW.surface.material.visible=!seaHidden;
   seaDepthPass();
   // in the water, under it or with the waterline across the lens, the water draws the frame
@@ -17865,6 +17937,7 @@ if (TOUCH){
   const viewG=sec('View');
   item(viewG,'Tilt-shift',()=>setTilt(!tiltShift),{toggle:()=>tiltShift});
   item(viewG,'Ambient occlusion',()=>setAO(!aoOn),{toggle:()=>aoOn});
+  item(viewG,'Reflections',()=>{ setRefl(reflLvl+1); toast('Reflections',REFL_NAMES[reflLvl]); },{toggle:()=>reflLvl>0,stay:true});
   item(viewG,'Full screen',()=>{ try{ if (document.fullscreenElement) document.exitFullscreen(); else { const q=document.documentElement.requestFullscreen(); if (q&&q.catch) q.catch(()=>{}); } }catch(_){} },{toggle:()=>!!document.fullscreenElement});
   const nudge=code=>{ keys[code]=true; setTimeout(()=>{ keys[code]=false; },350); };
   item(viewG,'Camera nearer',()=>nudge('Equal'),{stay:true}); item(viewG,'Camera further',()=>nudge('Minus'),{stay:true});
