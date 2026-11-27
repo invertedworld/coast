@@ -1068,6 +1068,9 @@ function lhMake(id,sd,x,z,ix,iz,kind,R){
   // the keeper's cottage stands beside the tower on whichever side the ground is higher
   const tx=-iz, tz=ix, side=heightAtExact(x+tx*7,z+tz*7)>=heightAtExact(x-tx*7,z-tz*7)?1:-1;
   let g=1e9; for (let a=0;a<6.28;a+=0.785) g=Math.min(g,heightAtExact(x+Math.cos(a)*3,z+Math.sin(a)*3));
+  // the plinth's top (g+1.6) is never below the ground before the door, so that the doorway is not sunk into a slope
+  // rising behind the tower; on the side the ground falls away the plinth stands the taller
+  if (kind!=='rock'){ const l=Math.hypot(ix,iz)||1, gd=heightAtExact(x+ix/l*4.2,z+iz/l*4.2); if (gd>g+1.55) g=gd-1.55; }
   const H=kind==='head'?16:kind==='rock'?17:13;
   return {id,sd,x,z,g,ix,iz,kind,H,y:g+H+1.6,foot:10.5,hx:x+tx*side*7.8,hz:z+tz*side*7.8,hrot:Math.atan2(tx,tz),
     beams:R(0)<0.5?2:1,period:9+R(1)*8,phase:R(2)*6.283,spin:R(3)<0.8?1:-1,sea:kind==='head'?Math.atan2(sd,0):null};
