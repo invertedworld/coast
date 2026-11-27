@@ -6829,7 +6829,7 @@ if (ORBITAL) ORB=orbitalSky();
 // direction of its reflection, so that they are seen in the water as sharply as in the sky
 const NIGHT_SKY_GLSL=`
     float h3(vec3 p){ return fract(sin(dot(p,vec3(12.9898,78.233,37.719)))*43758.5453); }
-    vec3 nightSky(vec3 d, vec3 sd_, float nt_, float rot_, float cres_){ vec3 a=vec3(0.0);
+    vec3 nightSky(vec3 d, vec3 sd_, float nt_, float rot_, float cres_, float sz_){ vec3 a=vec3(0.0);
       vec3 m=-sd_; float md=max(dot(d,m),0.0);
       float disc=smoothstep(0.99955,0.99975,md);
       float crater=0.85+0.15*sin(d.x*900.0)*sin(d.z*800.0);
@@ -6844,8 +6844,8 @@ const NIGHT_SKY_GLSL=`
       vec3 g=ds*190.0, cell=floor(g); float st=h3(cell);
       if (st>0.985){
         vec3 o=vec3(h3(cell+1.7),h3(cell+5.3),h3(cell+9.1))*0.6+0.2;   // star position inside its cell
-        float dd=length(fract(g)-o), size=0.06+0.1*h3(cell+3.3);
-        float b=exp(-dd*dd/(size*size))*(0.35+0.65*h3(cell+7.7));
+        float dd=length(fract(g)-o), size=(0.06+0.1*h3(cell+3.3))*sz_;
+        float b=exp(-dd*dd/(size*size))*(0.35+0.65*h3(cell+7.7))/sz_;
         float tw=0.75+0.25*sin(st*900.0+rot_*400.0);
         a += vec3(0.9,0.93,1.0)*b*tw*nt_*smoothstep(0.02,0.25,d.y)*1.6;
       }
@@ -6862,7 +6862,7 @@ const sky=new THREE.Mesh(ORBITAL?new THREE.SphereGeometry(500,64,32):new THREE.S
       vec3 c = y>0.12 ? mix(uMid,uTop,clamp((y-0.12)/0.6,0.0,1.0)) : mix(uHor,uMid,clamp((y+0.04)/0.16,0.0,1.0));
       float sd=max(dot(d,uSun),0.0);
       c += uSunCol*(pow(sd,900.0)*6.0 + pow(sd,12.0)*0.35 + pow(sd,3.0)*0.12*(1.0-uDay));
-      c += nightSky(d,uSun,uNight,uRot,uCres);
+      c += nightSky(d,uSun,uNight,uRot,uCres,1.0);
       // a shooting star (uMet: how far along its path its head is, the length of its tail, its brightness): a streak
       // along the great circle from uMetA to uMetB, brightest at its head and fading to nothing along its tail
       if (uMet.z>0.0){
@@ -7645,7 +7645,10 @@ function createSea(parent, opts={}){
           sky=mix(sky,rc.rgb,rA); Fr=mix(Fr,max(Fr,uReflK),rk); }
         // the moon and the stars reflected, where nothing stands before them, as strongly as the rest of the reflection
         vec3 ns=vec3(0.0);
-        if (uSkyNight>0.0){ ns=nightSky(Rf,uSkySun,uSkyNight,uSkyRot,uSkyCres);
+        // (seen in a surface much calmer than the waves', and a little larger and softer, so that each star shimmers in
+        // the water rather than showing for a frame at a time as the ripples swing the reflected ray across it)
+        if (uSkyNight>0.0){ vec3 Rs=reflect(-V,normalize(mix(vec3(0.0,1.0,0.0),N,0.06))); Rs.y=abs(Rs.y);
+          ns=nightSky(Rs,uSkySun,uSkyNight,uSkyRot,uSkyCres,3.0);
           if (uReflOn>0.0){ vec4 rp2=uReflM*vec4(vP.x,0.0,vP.z,1.0); ns*=1.0-texture2D(uRefl,clamp(rp2.xy/rp2.w+N.xz*0.06,0.001,0.999)).a; } }
         // the water itself: the light scattered back out of its body, darker in the troughs and where the faces turn to
         // the eye, and a lighter green-blue in the thin tops of the crests with the light behind them
