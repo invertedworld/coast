@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coast · textures</title>
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Alegreya+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#9fc0dc;font-family:'Alegreya Sans',system-ui,sans-serif;}
+  canvas{display:block;width:100%;height:100%;touch-action:none;}
+  #panel{position:fixed;top:12px;right:12px;width:270px;padding:12px 14px;border-radius:10px;
+    background:rgba(250,246,238,0.9);color:#2b2b35;font-size:15px;box-shadow:0 2px 14px rgba(0,0,0,0.15);}
+  #panel h2{font-size:13px;font-weight:500;color:#777;margin:10px 0 4px;letter-spacing:0.04em;text-transform:uppercase;}
+  #panel h2:first-child{margin-top:0}
+  #panel .row{display:grid;grid-template-columns:70px 1fr 50px;align-items:center;gap:6px;margin:5px 0;}
+  #panel .row.sel{grid-template-columns:70px 1fr;}
+  #panel label{color:#555}
+  #panel output{text-align:right;font-variant-numeric:tabular-nums;}
+  #panel input[type=range]{width:100%;accent-color:#2f5f8f;}
+  #panel .fx{display:grid;grid-template-columns:1fr;gap:5px;}
+  #panel button,#panel select{font:inherit;font-size:14px;padding:4px 8px;border:1px solid #c9bda9;border-radius:6px;background:#fffaf2;color:#2b2b35;cursor:pointer;text-align:left;}
+  #panel button.on{background:#2f5f8f;color:#fff;border-color:#2f5f8f;}
+  #panel .pair{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:6px;}
+  #panel .pair button{text-align:center;}
+  #panel .stats{margin-top:8px;font-size:13px;color:#555;font-variant-numeric:tabular-nums;}
+  @media (max-width:520px){ #panel{left:12px;right:12px;width:auto;top:auto;bottom:12px;} }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="panel">
+  <h2>Ground</h2>
+  <div class="fx"><button id="fx-gmacro">Variation across the land</button><button id="fx-gdetail">Grit, pebbles and relief</button></div>
+  <h2>Walls</h2>
+  <div class="fx"><button id="fx-wweather">Streaks</button><button id="fx-whouse">Shade and repairs by house</button><button id="fx-wrelief">Relief</button></div>
+  <div class="pair"><button id="all">All</button><button id="none">None</button></div>
+  <h2>Scene</h2>
+  <div class="row sel"><label for="view">View</label><select id="view"><option value="street">Street</option><option value="door">Doorstep</option><option value="hill">Hillside</option></select></div>
+  <div class="row"><label for="h">Time</label><input id="h" type="range" min="5.8" max="19.5" step="0.05" value="10.5"><output id="hV">10:30</output></div>
+  <div class="stats" id="stats"></div>
+</div>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"}}</script>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js';
+
+/* Texture realism for the ground and the walls of Coast, each effect switched on and off on its own, in the game's
+   palette, daylight (its hemisphere and sun and the sun's course through the day), sky colours and fog. The effects
+   are written as GLSL that works from the position in the world and the surface's normal, so that they can be added
+   to the game's ground (patchGround) and buildings (patchBuildings) shaders:
+     GROUND_MACRO   brightness and the balance of dry and green ground varied over 25 to 200 m, at every distance
+     GROUND_DETAIL  grit, pebbles and darker patches of earth, and a small relief that catches the sun, faded out by 40 m
+     WALL_WEATHER   streaks of grime running down from the eaves; it needs the height of the wall's top at each vertex
+                    (here the attribute wt; the game, which has no such attribute, runs each column of streaks down
+                    from a ledge of its own height instead). A band of damp at the foot and plaster bleached towards
+                    the top were tried here and left out
+     WALL_HOUSE     each house a little lighter or darker, warmer or cooler, and patches of fresher plaster where it
+                    has been mended; it needs a number for each house (here the attribute wid)
+     WALL_RELIEF    a small relief in the plaster, faded out by 30 m
+   The query string chooses what is shown: ?v=street|door|hill&h=<hour>&fx=<effects, e.g. gmacro,wweather>. */
+
+const Q=new URLSearchParams(location.search);
+const PAL={ walls:['#f3e4d0','#efd6bf','#f6ebdd','#eacbb0','#f1dcc4','#e9c3ab','#f4dfcc','#edd0b8','#f2d8c8'],
+  roofs:['#d65a52','#de6b5b','#cc514c','#d8645a','#c94f48','#dd5f55'], trim:'#f8f1e7', win:'#3a2b2b', door:'#6a4530',
+  sand2:'#e6c99a', road:'#e9d2a6', grass:'#a6a661', grass2:'#8f9a53', scrub:'#9a9a5c', rock:'#b8a48e' };
+const hex=h=>new THREE.Color(h);
+const SKY={ day:{top:hex('#1f5c9c'),mid:hex('#5f95c4'),hor:hex('#9fc0dc')}, dusk:{top:hex('#2c3f74'),mid:hex('#9b7898'),hor:hex('#f2a477')} };
+function h1(i){ const x=Math.sin(i*127.1+311.7)*43758.5453; return x-Math.floor(x); }
+
+/* ---------- the effects, as GLSL ---------- */
+const NOISE_GLSL=`
+float h21(vec2 p){ p=fract(p*vec2(123.34,456.21)); p+=dot(p,p+45.32); return fract(p.x*p.y); }
+float vn(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.-2.*f);
+  return mix(mix(h21(i),h21(i+vec2(1.,0.)),f.x), mix(h21(i+vec2(0.,1.)),h21(i+vec2(1.,1.)),f.x), f.y); }
+float fb(vec2 p){ return vn(p)*.5+vn(p*2.1)*.3+vn(p*4.3)*.2; }
+vec2 wallUV(vec3 p, vec3 n){ return abs(n.x)>abs(n.z) ? vec2(p.z,p.y) : vec2(p.x,p.y); }
+`;
+// the ground over 25 to 200 m: brighter and darker, and drier (warmer, yellower) or greener, at every distance
+const GROUND_MACRO=`
+  { vec2 q=wp.xz; float m1=fb(q/60.0), m2=fb(q/190.0+7.3), m3=vn(q/24.0+3.1);
+    float br=1.0+0.18*(m1-0.5)+0.10*(m3-0.5), green=smoothstep(0.38,0.66,m2);
+    col*=br*mix(vec3(1.05,1.0,0.86),vec3(0.9,1.03,0.9),green); }`;
+// close by: grit, pebbles and darker patches of earth, fading out from 15 to 40 m
+const GROUND_DETAIL=`
+  { vec2 q=wp.xz; float fd=1.0-smoothstep(15.0,40.0,dist);
+    float grit=vn(q*6.0)*.5+vn(q*17.0)*.3+vn(q*43.0)*.2;
+    vec2 c=floor(q*3.5), f=fract(q*3.5); float pb=0.0;
+    if (h21(c)>0.86){ vec2 o=vec2(h21(c+1.7),h21(c+4.1))*0.6+0.2; pb=1.0-smoothstep(0.05,0.13+0.08*h21(c+2.3),length(f-o)); }
+    float earth=smoothstep(0.58,0.8,fb(q*0.35+2.0));
+    col*=mix(1.0,(0.9+0.2*grit)*(1.0-0.16*earth)*(1.0+0.22*pb),fd); }`;
+// the relief of the ground close by, as a tilt of its normal in the world, from a field of heights (grit and pebbles)
+const GROUND_BUMP=`
+  { float fd=1.0-smoothstep(15.0,40.0,dist); vec2 q=wp.xz; float e=0.02;
+    #define GH(p) (0.6*vn((p)*2.5)+0.3*vn((p)*7.0)+0.15*vn((p)*19.0))
+    float gx=(GH(q+vec2(e,0.))-GH(q-vec2(e,0.)))/(2.*e), gz=(GH(q+vec2(0.,e))-GH(q-vec2(0.,e)))/(2.*e);
+    nw=normalize(nw-vec3(gx,0.0,gz)*0.05*fd); }`;
+// a wall's weathering, from the height below its top (ht): grime streaks down from the eaves
+const WALL_WEATHER=`
+  { vec2 uv=wallUV(wp,nw); float hb=wp.y-vWB, ht=vWT-wp.y;
+    float cols=smoothstep(0.55,0.8,vn(vec2(uv.x*1.1,7.0))), rag=0.6+0.4*fb(vec2(uv.x*3.0,uv.y*0.2)+5.0);
+    float streak=cols*rag*exp(-ht/3.0)*smoothstep(0.0,0.25,ht);
+    col*=1.0-0.16*streak; }`;
+// each house a little lighter or darker, warmer or cooler (wid), and mended patches of fresher plaster in a grid
+const WALL_HOUSE=`
+  { float id=vWID; float a=fract(sin(id*91.7)*4375.85), b=fract(sin(id*47.3)*9182.7);
+    col*=(0.95+0.1*a)*mix(vec3(1.02,0.99,0.95),vec3(0.97,0.99,1.03),b);
+    vec2 uv=wallUV(wp,nw)+id*13.1; vec2 cs=vec2(1.7,1.15), c=floor(uv/cs), f=fract(uv/cs);
+    if (h21(c+id)>0.94){ vec2 m=min(f,1.0-f)*cs; float e=smoothstep(0.02,0.1,min(m.x,m.y)+0.06*(vn(uv*6.0)-0.5));
+      col=mix(col,col*vec3(1.04,1.04,1.06)+0.01,e*0.7); } }`;
+// the plaster's relief close by, as a tilt of the normal within the wall's plane
+const WALL_RELIEF=`
+  { float fd=1.0-smoothstep(10.0,30.0,dist); vec2 uv=wallUV(wp,nw); float e=0.01;
+    #define WH(p) (0.6*vn((p)*4.0)+0.4*vn((p)*13.0))
+    float gu=(WH(uv+vec2(e,0.))-WH(uv-vec2(e,0.)))/(2.*e), gv=(WH(uv+vec2(0.,e))-WH(uv-vec2(0.,e)))/(2.*e);
+    vec3 tu=abs(nw.x)>abs(nw.z)?vec3(0.,0.,1.):vec3(1.,0.,0.);
+    nw=normalize(nw-(tu*gu+vec3(0.,1.,0.)*gv)*0.014*fd); }`;
+
+/* ---------- renderer, light and fog, as in the game ---------- */
+const canvas=document.getElementById('c');
+const renderer=new THREE.WebGLRenderer({canvas,antialias:true}); renderer.setPixelRatio(Math.min(2,devicePixelRatio));
+renderer.shadowMap.enabled=true; renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+const scene=new THREE.Scene(); scene.fog=new THREE.Fog(0x9fc0dc,90,1500);
+const camera=new THREE.PerspectiveCamera(60,1,0.1,4000);
+const controls=new OrbitControls(camera,canvas); controls.enableDamping=true;
+const hemi=new THREE.HemisphereLight(hex('#d8cde0'),hex('#f0c49a'),2.3); scene.add(hemi);
+const sun=new THREE.DirectionalLight(hex('#fff1dc'),2.6); sun.castShadow=true; sun.shadow.mapSize.set(2048,2048);
+Object.assign(sun.shadow.camera,{left:-80,right:80,top:80,bottom:-80,near:1,far:600}); sun.shadow.bias=-0.0005; scene.add(sun,sun.target);
+
+const FX={gmacro:false,gdetail:false,wweather:false,whouse:false,wrelief:false};
+const fxU={uGM:{value:0},uGD:{value:0},uWW:{value:0},uWH:{value:0},uWR:{value:0}};
+
+function patch(mat,kind){
+  mat.onBeforeCompile=sh=>{
+    Object.assign(sh.uniforms,fxU);
+    const walls=kind==='wall';
+    sh.vertexShader=sh.vertexShader.replace('#include <common>','#include <common>\nvarying vec3 vWP; varying vec3 vWN;'+(walls?' attribute float wb, wt, wid; varying float vWB, vWT, vWID;':''))
+      .replace('#include <project_vertex>','#include <project_vertex>\nvWP=(modelMatrix*vec4(transformed,1.0)).xyz; vWN=normalize(mat3(modelMatrix)*objectNormal);'+(walls?' vWB=wb; vWT=wt; vWID=wid;':''));
+    sh.fragmentShader=sh.fragmentShader.replace('#include <common>','#include <common>\nvarying vec3 vWP; varying vec3 vWN; uniform float uGM,uGD,uWW,uWH,uWR;'+(walls?' varying float vWB, vWT, vWID;':'')+NOISE_GLSL)
+      .replace('#include <color_fragment>',`#include <color_fragment>
+        { vec3 wp=vWP, nw=normalize(vWN), col=diffuseColor.rgb; float dist=length(wp-cameraPosition);
+          ${walls?`bool plaster=abs(nw.y)<0.5 && dot(col,vec3(0.33))>0.45;   // (the plaster alone, not the doors and windows)
+          if (uWW>0.5 && plaster) ${WALL_WEATHER}
+          if (uWH>0.5 && plaster) ${WALL_HOUSE}`:`if (uGM>0.5) ${GROUND_MACRO}
+          if (uGD>0.5) ${GROUND_DETAIL}`}
+          diffuseColor.rgb=col; }`)
+      .replace('#include <normal_fragment_begin>',`#include <normal_fragment_begin>
+        { vec3 wp=vWP, nw=normalize(vWN); float dist=length(wp-cameraPosition); vec3 n0=nw;
+          ${walls?`if (uWR>0.5 && abs(nw.y)<0.5) ${WALL_RELIEF}`:`if (uGD>0.5) ${GROUND_BUMP}`}
+          if (nw!=n0) normal=normalize((viewMatrix*vec4(nw,0.0)).xyz); }`);
+  };
+  // (the two materials' patches share one function, so each is given a key of its own, or one would be built with the
+  // other's shader)
+  mat.customProgramCacheKey=()=>'textures-'+kind;
+  return mat;
+}
+
+/* ---------- the ground: rolling, with a bank, coloured as the game colours it by vertex ---------- */
+const G=180, S=600;
+function groundH0(x,z){ return 3.0*Math.sin(x*0.011+0.6)*Math.cos(z*0.013)+60*Math.max(0,(z-30)/90)**1.6+1.5*Math.sin(x*0.05)*Math.sin(z*0.043); }
+// the street and the houses' plot are level, at 0, blending into the land round them
+function groundH(x,z){ const ss=t=>t<=0?0:t>=1?1:t*t*(3-2*t), k=ss((Math.abs(x)-60)/20)+ss((z-18)/14)+ss((-z-6)/14); return groundH0(x,z)*Math.min(1,k); }
+{ const g=new THREE.PlaneGeometry(S,S,G,G).rotateX(-Math.PI/2), P=g.attributes.position, col=[], c=new THREE.Color();
+  for (let i=0;i<P.count;i++){ const x=P.getX(i), z=P.getZ(i); P.setY(i,groundH(x,z));
+    const r=0.5+0.25*Math.sin(x*0.09+1.3)*Math.cos(z*0.07)+0.25*Math.sin(x*0.031-z*0.045);   // (a smooth stand-in for the game's colouring)
+    c.set(PAL.grass).lerp(hex(PAL.scrub),r).lerp(hex(PAL.sand2),0.35);
+    if (Math.abs(z-1)<3.2 && Math.abs(x)<70) c.set(PAL.road);
+    col.push(c.r,c.g,c.b); }
+  g.setAttribute('color',new THREE.Float32BufferAttribute(col,3)); g.computeVertexNormals();
+  const m=new THREE.Mesh(g,patch(new THREE.MeshLambertMaterial({vertexColors:true}),'ground')); m.receiveShadow=true; scene.add(m); }
+
+/* ---------- a street of plaster houses, each with its windows, door and roof ---------- */
+{ const pos=[], nor=[], col=[], wb=[], wt=[], wid=[], c=new THREE.Color();
+  const box=(x0,y0,z0,x1,y1,z1,colour,id,foot,top)=>{ const B=new THREE.BoxGeometry(x1-x0,y1-y0,z1-z0).translate((x0+x1)/2,(y0+y1)/2,(z0+z1)/2).toNonIndexed();
+    const p=B.attributes.position, n=B.attributes.normal; c.set(colour);
+    for (let i=0;i<p.count;i++){ pos.push(p.getX(i),p.getY(i),p.getZ(i)); nor.push(n.getX(i),n.getY(i),n.getZ(i)); col.push(c.r,c.g,c.b); wb.push(foot); wt.push(top); wid.push(id); } };
+  const roofs=[]; let x=-46;
+  for (let k=0;k<12;k++){ const w=6+h1(k)*3.5, hgt=6.5+Math.floor(h1(k+9)*3)*2.8, d=8, z0=7.5, foot=groundH(x+w/2,z0)-0.3, top=foot+hgt;
+    box(x,foot-1,z0,x+w-0.1,top,z0+d,PAL.walls[k%PAL.walls.length],k+1,foot+0.3,top);
+    // windows, with sills, and a door
+    const floors=Math.round((hgt-1)/2.8);
+    for (let f=0;f<floors;f++) for (let j=0;j<2;j++){ const wx=x+w*(0.27+0.46*j), wy=foot+1.6+f*2.8+(f>0?0.3:0);
+      if (f===0 && j===0){ box(wx-0.55,foot,z0-0.06,wx+0.55,foot+2.2,z0,PAL.door,k+1,foot,top); continue; }
+      box(wx-0.5,wy,z0-0.05,wx+0.5,wy+1.3,z0,PAL.win,k+1,foot,top); box(wx-0.62,wy-0.1,z0-0.18,wx+0.62,wy,z0+0.01,PAL.trim,k+1,foot,top); }
+    roofs.push({x,w,top,z0,d,c:PAL.roofs[k%PAL.roofs.length]}); x+=w; }
+  const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3)); g.setAttribute('normal',new THREE.Float32BufferAttribute(nor,3));
+  g.setAttribute('color',new THREE.Float32BufferAttribute(col,3)); g.setAttribute('wb',new THREE.Float32BufferAttribute(wb,1)); g.setAttribute('wt',new THREE.Float32BufferAttribute(wt,1)); g.setAttribute('wid',new THREE.Float32BufferAttribute(wid,1));
+  const m=new THREE.Mesh(g,patch(new THREE.MeshLambertMaterial({vertexColors:true}),'wall')); m.castShadow=m.receiveShadow=true; scene.add(m);
+  for (const R of roofs){ const r=new THREE.Mesh(new THREE.ConeGeometry(Math.hypot(R.w,R.d)/2*1.08,2.4,4,1).rotateY(Math.PI/4).scale(R.w/Math.hypot(R.w,R.d)*1.41,1,R.d/Math.hypot(R.w,R.d)*1.41),new THREE.MeshLambertMaterial({color:R.c}));
+    r.position.set(R.x+R.w/2,R.top+1.2,R.z0+R.d/2); r.castShadow=r.receiveShadow=true; scene.add(r); } }
+
+/* ---------- daylight, as in the game ---------- */
+function setHour(hr){
+  const ang=(hr-6)/24*Math.PI*2, d=new THREE.Vector3(0.32,Math.sin(ang)*0.94,-Math.cos(ang)).normalize();
+  sun.position.copy(d).multiplyScalar(300); sun.target.position.set(0,0,0);
+  const e=d.y, wd=THREE.MathUtils.smoothstep(e,0.04,0.34), wk=1-wd;
+  const hor=SKY.day.hor.clone().multiplyScalar(wd).add(SKY.dusk.hor.clone().multiplyScalar(wk));
+  scene.fog.color.copy(hor); scene.background=hor.clone(); renderer.setClearColor(hor);
+  sun.intensity=2.6*THREE.MathUtils.smoothstep(e,-0.02,0.12); sun.color.set('#ffb070').lerp(hex('#fff1dc'),wd);
+  document.getElementById('hV').textContent=String(Math.floor(hr)).padStart(2,'0')+':'+String(Math.floor((hr%1)*60)).padStart(2,'0');
+}
+
+/* ---------- views ---------- */
+const VIEWS={ street:{p:[-6,5,-14],t:[-6,4,7]}, door:{p:[-20,1.7,2.5],t:[-17,1.2,7.5]}, hill:{p:[40,40,-120],t:[0,0,0]} };
+function setView(v){ const V=VIEWS[v]||VIEWS.street; camera.position.set(...V.p); controls.target.set(...V.t); controls.update(); document.getElementById('view').value=v; }
+
+/* ---------- the panel ---------- */
+function refresh(){ for (const k in FX) document.getElementById('fx-'+k).classList.toggle('on',FX[k]);
+  fxU.uGM.value=FX.gmacro?1:0; fxU.uGD.value=FX.gdetail?1:0; fxU.uWW.value=FX.wweather?1:0; fxU.uWH.value=FX.whouse?1:0; fxU.uWR.value=FX.wrelief?1:0; }
+for (const k in FX) document.getElementById('fx-'+k).onclick=()=>{ FX[k]=!FX[k]; refresh(); };
+document.getElementById('all').onclick=()=>{ for (const k in FX) FX[k]=true; refresh(); };
+document.getElementById('none').onclick=()=>{ for (const k in FX) FX[k]=false; refresh(); };
+document.getElementById('view').onchange=e=>setView(e.target.value);
+const hIn=document.getElementById('h'); hIn.oninput=()=>setHour(+hIn.value);
+for (const k of (Q.get('fx')||'').split(',')) if (k in FX) FX[k]=true;
+if (Q.get('h')) hIn.value=Q.get('h');
+refresh(); setHour(+hIn.value); setView(Q.get('v')||'street');
+
+function resize(){ const w=innerWidth, h=innerHeight; renderer.setSize(w,h,false); camera.aspect=w/h; camera.updateProjectionMatrix(); }
+addEventListener('resize',resize); resize();
+let fr=0, ft=performance.now(); const st=document.getElementById('stats');
+renderer.setAnimationLoop(()=>{ controls.update(); renderer.render(scene,camera); fr++; const t=performance.now(); if (t-ft>1000){ st.textContent=Math.round(fr*1000/(t-ft))+' frames a second'; fr=0; ft=t; } });
+window.__tb={FX,refresh,setView,setHour};
+</script>
+</body>
+</html>
