@@ -1070,7 +1070,7 @@ function lhMake(id,sd,x,z,ix,iz,kind,R){
   let g=1e9; for (let a=0;a<6.28;a+=0.785) g=Math.min(g,heightAtExact(x+Math.cos(a)*3,z+Math.sin(a)*3));
   // the plinth's top (g+1.6) is never below the ground before the door, so that the doorway is not sunk into a slope
   // rising behind the tower; on the side the ground falls away the plinth stands the taller
-  if (kind!=='rock'){ const l=Math.hypot(ix,iz)||1, gd=heightAtExact(x+ix/l*4.2,z+iz/l*4.2); if (gd>g+1.55) g=gd-1.55; }
+  { const l=Math.hypot(ix,iz)||1, gd=heightAtExact(x+ix/l*4.2,z+iz/l*4.2); if (gd>g+1.55) g=gd-1.55; }
   const H=kind==='head'?16:kind==='rock'?17:13;
   return {id,sd,x,z,g,ix,iz,kind,H,y:g+H+1.6,foot:10.5,hx:x+tx*side*7.8,hz:z+tz*side*7.8,hrot:Math.atan2(tx,tz),
     beams:R(0)<0.5?2:1,period:9+R(1)*8,phase:R(2)*6.283,spin:R(3)<0.8?1:-1,sea:kind==='head'?Math.atan2(sd,0):null};
@@ -5272,7 +5272,7 @@ function buildHarbour(gb,ch,R,H){
    At full detail the tower is built with its doorway cut out of the wall, and inside a stair of stone treads winds
    round a newel up the tapering tower, through the floor of the gallery into the lantern, from which a glazed door
    leads out onto the gallery. Heights are relative to the foot of the tower, the top of its plinth. */
-const LH_T=0.3, LH_DH=2.4, LH_DA=0.224, LH_N=28, LH_STEP=Math.PI*2/20;   // wall, doorway height and half-angle, tread angle
+const LH_T=0.3, LH_DH=2.4, LH_DA=0.224, LH_N=28, LH_STEP=Math.PI*2/20, LH_WELL=13;   // wall, doorway height and half-angle, tread angle, treads under the stairwell
 const lhR=(H,y)=>2.5-0.7*clamp(y/H,0,1);   // the outer radius at height y
 // a tapering tube from y=0 to y=H, its radius from r(0) to r(H), with the faces of the doorway left out; inward
 // turns it inside out, for the lining
@@ -5314,12 +5314,15 @@ function lighthouseRoom(ch,L,g,H,top,ry){
   D.walls.push({x:L.x,z:L.z,hw:0.2,hd:0.2,rot:ry,top:B+H+0.4});   // the newel
   for (const t of D.tr){ const tm=(t.ta+t.tb)/2;
     for (const [a,b] of [[t.r0,(t.r0+t.r1)/2],[(t.r0+t.r1)/2,t.r1]]){ const rm=(a+b)/2; D.walls.push(seg(rm,tm,2*rm*Math.sin(LH_STEP/2)+0.06,b-a,t.top,t.top-0.25)); } }
-  // the lantern's floor, round the stairwell left by the last treads, out to the edge of its base
-  const last=D.tr.slice(-10), hatch=t=>last.some(q=>{ const d=Math.atan2(Math.sin(t-(q.ta+q.tb)/2),Math.cos(t-(q.ta+q.tb)/2)); return Math.abs(d)<LH_STEP; });
+  // the lantern's floor, round the stairwell left by the last treads, out to the edge of its base. The stairwell is
+  // as long as the last 13 treads, so that whoever comes down from the lantern has headroom (2.2 m above the feet)
+  // under the floor once past it; left as long as 10, the floor stopped the way down 8 treads below it
+  const last=D.tr.slice(-LH_WELL), hatch=t=>last.some(q=>{ const d=Math.atan2(Math.sin(t-(q.ta+q.tb)/2),Math.cos(t-(q.ta+q.tb)/2)); return Math.abs(d)<LH_STEP; });
   for (let i=0;i<20;i++){ const t=2*Math.PI*(i+0.5)/20; if (hatch(t)) continue; D.walls.push(seg(0.75,t,0.75*Math.sin(Math.PI/20)*2+1.2*0.25,1.1,H+0.4,H+0.15)); }
   D.walls.push({x:L.x,z:L.z,hw:0.3,hd:0.3,rot:ry,top:Infinity,bot:B+H+0.45});   // the lamp
   // the glazing, with its door towards the land, the gallery outside it and the railing round the gallery
-  for (let i=0;i<16;i++){ const t=-Math.PI+2*Math.PI*(i+0.5)/16; if (adiff(t,D.gd)<0.3) continue; D.walls.push(seg(1.15,t,2*Math.PI*1.15/16+0.05,0.12,H+2.3,H+0.45)); }
+  // (the glazing's panels 0.3 m thick and overlapping at their ends, so that no one slips out between two of them)
+  for (let i=0;i<16;i++){ const t=-Math.PI+2*Math.PI*(i+0.5)/16; if (adiff(t,D.gd)<0.3) continue; D.walls.push(seg(1.2,t,2*Math.PI*1.2/16+0.2,0.3,H+2.3,H+0.45)); }
   for (let i=0;i<20;i++){ const t=2*Math.PI*(i+0.5)/20; D.walls.push(seg(1.75,t,2*Math.PI*1.75/20+0.1,0.95,H,H-0.5)); D.walls.push(seg(2.25,t,2*Math.PI*2.25/20+0.05,0.1,H+1.3,H+0.05)); }   // the railing, too high to step onto from the lantern
   { const [hx,hz]=loc(-DR,lhR(H,1)-LH_T/2);
     const lf={x:L.x,z:L.z,rot:ry,w:5,d:5,hx,hz,y:B+DF,fl:B+DF,s:1,lw:DOOR_W,leaf:'house',owner:D,a:0,av:0,idle:9,col:hex('#2f4d6b'),idx:-1};
@@ -5362,7 +5365,7 @@ function buildLighthouseGeo(D){
     for (const [a,b] of [[t.r0,(t.r0+t.r1)/2],[(t.r0+t.r1)/2,t.r1]]){ const rm=(a+b)/2, w=2*b*Math.sin(LH_STEP/2)+0.02;
       gb.add(T.box, mm(M,mat(rm*Math.sin(tm),t.top-0.4,rm*Math.cos(tm),w,0.4,b-a+0.01,tm)), stone, null, SS); } }
   // the lantern: its floor round the hatch, the lamp with its lens, and a doorway in the glazing to the gallery
-  const last=D.tr.slice(-10);
+  const last=D.tr.slice(-LH_WELL);
   { const F=[]; for (let i=0;i<20;i++){ const t0=2*Math.PI*i/20, t1=t0+2*Math.PI/20, tm=(t0+t1)/2;
       if (last.some(q=>Math.abs(Math.atan2(Math.sin(tm-(q.ta+q.tb)/2),Math.cos(tm-(q.ta+q.tb)/2)))<LH_STEP)) continue;
       F.push(0,H+0.41,0, 1.1*Math.sin(t1),H+0.41,1.1*Math.cos(t1), 1.1*Math.sin(t0),H+0.41,1.1*Math.cos(t0)); }
@@ -5378,14 +5381,14 @@ function buildLighthouse(gb,ch,R,L){
   // a stone plinth, then a tower that narrows as it rises
   gb.add(T.cyl, mat(x,gmin-1.2,z,7.2,g+1.6-(gmin-1.2),7.2), stone, gmin, SS);
   gb.add(T.cyl, mat(x,g+1.6,z,7.5,0.14,7.5), C_.trim, null, SS);
-  const top=g+1.6+H, ry=Math.atan2(L.ix,L.iz), LR=gb.lod===0 && L.kind!=='rock'?lighthouseRoom(ch,L,g,H,top,ry):null;
+  const top=g+1.6+H, ry=Math.atan2(L.ix,L.iz), LR=gb.lod===0?lighthouseRoom(ch,L,g,H,top,ry):null;   // (a lighthouse on a rock at sea too can be entered and climbed)
   // the plinth is solid, and can be stood on; a flight of stone steps, 1.6 m wide with treads of 0.32 m and risers of
   // no more than 0.2 m, runs down from its edge before the door until it meets the ground
   ch.circles.push({x,z,r:3.6,top:g+1.6});
-  if (L.kind!=='rock'){ const ux=L.ix/Math.hypot(L.ix,L.iz), uz=L.iz/Math.hypot(L.ix,L.iz);
+  { const ux=L.ix/Math.hypot(L.ix,L.iz), uz=L.iz/Math.hypot(L.ix,L.iz);
     let y=g+1.6, r=3.55, n=0;
     while (n<14){ const rc=r+0.16, gx=x+ux*rc, gz=z+uz*rc, gh=Math.max(heightAt(gx-uz*0.7,gz+ux*0.7),heightAt(gx+uz*0.7,gz-ux*0.7),heightAt(gx,gz));
-      const rise=Math.min(0.2,(y-gh)/Math.max(1,Math.ceil((y-gh)/0.2))); if (y-gh<0.12) break;
+      const rise=Math.min(0.2,(y-gh)/Math.max(1,Math.ceil((y-gh)/0.2))); if (y-gh<0.12 || gh<0.3) break;   // (on a rock, down to the water's edge)
       y-=rise; gb.add(T.box, mat(gx,gh-0.6,gz,1.6,y-(gh-0.6),0.34,ry), stone, gh, SS);
       ch.obbs.push({x:gx,z:gz,hw:0.8,hd:0.17,rot:ry,top:y,stair:true}); r+=0.32; n++; } }
   if (LR){ gb.add(lhTube(H,y=>lhR(H,y),false), mat(x,g+1.6,z,1,1,1,ry), white, g+1.6, SP);
@@ -7740,8 +7743,10 @@ function createSea(parent, opts={}){
         vec3 faF=seaFieldF(q); float vDepth=faF.z, vWf=faF.y;
         float clar=uClarity*(1.0+0.4*(1.0-smoothstep(0.15,0.7,vWf)));   // clearer where the water is sheltered and shallow
         float g=0.0;
-        if (uDetail>0.0){ vec2 dq=fwidth(q); float px=max(dq.x,dq.y); g=gustAt(q)*uDetail;
-          float rk=(0.03+0.01*uWind)*(1.0+1.5*g)*(1.0-smoothstep(30.0,300.0,cd))*uDetail, e=0.15;
+        // the ripples on the surface, from wherever it is seen and not only from on the water, so that the water of a
+        // sheltered harbour is never a still mirror; the gusts' darkening only close by, on the water
+        { vec2 dq=fwidth(q); float px=max(dq.x,dq.y); g=uDetail>0.0?gustAt(q)*uDetail:0.0;
+          float rk=(0.035+0.01*uWind)*(1.0+1.5*g)*(1.0-smoothstep(30.0,300.0,cd)), e=0.15;
           float rx=rip(q+vec2(e,0.0),t,px)-rip(q-vec2(e,0.0),t,px), rz=rip(q+vec2(0.0,e),t,px)-rip(q-vec2(0.0,e),t,px);
           N=normalize(N+vec3(-rx,0.0,-rz)*rk/e*0.5); }
         vec3 V=normalize(cameraPosition-vP); float NV=clamp(dot(N,V),0.0,1.0);
@@ -11084,6 +11089,8 @@ ${GLSL} uniform float uPx; attribute vec2 aPar; varying float vA;
   // nothing extra: the host calls it once at load, with whatever else it wants warmed made visible
   // a splash where a body enters the water (x, y, z in the drawn frame; strength 0..1)
   function splash(x,y,z,k=1){ SPU.uSplO.value.set(x,y,z); SPU.uSplK.value=0.5+0.5*k; SPU.uSplT.value=0; }
+  // the splash runs its course out of the water too, where update is not called, rather than hanging in the air
+  function splashTick(dt){ if (SPU.uSplT.value<1.0){ SPU.uSplT.value+=dt; spray.visible=SPU.uSplT.value<1.0; } }
   function prewarm(r,scene,camera,drawAbove,parent){
     const host=parent||scene; if (st.attached!==host){ host.add(surf,parts,spray); st.attached=host; } spray.visible=true;
     const v0=[surf.visible,parts.visible]; surf.visible=parts.visible=true; const u0=st.under, b0=st.bub;
@@ -11104,7 +11111,7 @@ ${GLSL} uniform float uPx; attribute vec2 aPar; varying float vA;
     if (fresh.length){ const rt0=r.getRenderTarget(); r.setRenderTarget(sceneRT); try { r.compile(few,camera,scene); } finally { r.setRenderTarget(rt0); } }
     fresh.length=0; return performance.now()-t; }
   function dispose(){ sceneRT.dispose(); splitRT.dispose(); rayRT.dispose(); underRT.dispose(); mixMat.dispose(); rayMat.dispose(); compMat.dispose(); surfMat.dispose(); partMat.dispose(); disc.dispose(); pg.dispose(); tri.dispose(); surf.removeFromParent(); parts.removeFromParent(); }
-  return {update,render,prewarm,warm,splash,isUnder,get lens(){ return st.lens; },get wet(){ return st.lens==='under'?1:st.lens==='above'?0:st.wet; },setOptions,dispose,glsl:GLSL,uniforms:U,surface:surf,particles:parts,options:O,passes:{rayMat,compMat,sceneRT,rayRT},get under(){ return st.under; }};
+  return {update,render,prewarm,warm,splash,splashTick,isUnder,get lens(){ return st.lens; },get wet(){ return st.lens==='under'?1:st.lens==='above'?0:st.wet; },setOptions,dispose,glsl:GLSL,uniforms:U,surface:surf,particles:parts,options:O,passes:{rayMat,compMat,sceneRT,rayRT},get under(){ return st.under; }};
 }
 /* ================= end of underwater ================= */
 
@@ -16564,6 +16571,7 @@ const _dvSun=new THREE.Color(), _dvSky=new THREE.Color(), _dvEye={x:0,y:0,z:0};
 function diveFrame(dt,wdt){
   // out of the water, what has come into the scene is compiled for the water's passes every few seconds
   if (!wetView() && (uwWarmT-=dt)<=0){ uwWarmT=3; uwWarmMs=UW.warm(renderer,scene,camera); }
+  if (!wetView()) UW.splashTick(dt);
   // on foot the torch lights the way, in a tunnel or at night
   if (!wetView()){ torch.intensity=torchOn && mode==='street' ? 60 : 0; if (diveOn){ diveOn=false; UW.uniforms.uUnderOn.value=0; UW.surface.visible=UW.particles.visible=false; if (seabedLife) seabedLife.update(0,{active:false}); } return; }
   diveOn=true; const S=swimmer.state, L=seabedLifeNow(), sw=mode==='swim';
@@ -17742,7 +17750,7 @@ window.__gulls={G:GULLS,ctx:gullCtx,get on(){ return gullsOn; },set on(v){ gulls
    within FISH.near of the player are listed; those within sight are drawn. A boat coming home carries catch:true
    for the gulls. */
 // speeds in m/s: in the harbour, under way and while fishing
-const FISH={vHarb:1.8, vWay:5, vFish:1.0, near:4500, showWay:2600, showMoored:700};
+const FISH={vHarb:1.8, vWay:5, vFish:1.0, near:4500, showWay:2600, showMoored:700, turn:25};   // (turn: seconds to turn round off the berth)
 const FISH_TRAWLERS=[5,6,7];
 const fishCache=new Map();
 // the fishing boats of a harbour and their berths, the same whenever they are asked for
@@ -17842,9 +17850,13 @@ function fishPlan(f){
   const td=clamp(taW-fishH-out.T/HOUR_SEC-estBack,2.0,5.5), tG=td+out.T/HOUR_SEC, tr=Math.max(tG+1,taW-estBack);
   const Q=loop((tr-tG)*HOUR_SEC);
   const backPts=[[Q[0],Q[1]],...fishRoute(Q,P4,obs),...fishRoute(P4,harbOut[3],obs),harbOut[2],[f.bx,f.bz-S*16],[f.bx,f.bz]];
-  const back=fishLine(backPts,0,3), ta=tr+back.T/HOUR_SEC;
-  // the last piece of the way home is made astern, so that the boat lies stern-to as it did
-  f.plan={td,tG,tr,ta,out,back,loop,astern:back.len-16};
+  const back=fishLine(backPts,0,3);
+  // the last piece of the way home is made astern, so that the boat lies stern-to as it did: 16 m off the berth she
+  // stops and turns round where she lies over FISH.turn seconds, from the way she came in to the way she will lie,
+  // and then backs in
+  const astern=back.len-16; let tTurn=back.T; for (let i=1;i<back.D.length;i++) if (back.D[i]>=astern){ const k=(astern-back.D[i-1])/Math.max(1e-6,back.D[i]-back.D[i-1]); tTurn=lerp(back.Tm[i-1],back.Tm[i],k); break; }
+  const hIn=Math.atan2(f.bx-harbOut[2][0],(f.bz-S*16)-harbOut[2][1]), ta=tr+(back.T+FISH.turn)/HOUR_SEC;
+  f.plan={td,tG,tr,ta,out,back,loop,astern,tTurn,hIn};
   return f.plan;
 }
 const _fa=[0,0,0], _fb=[0,0,0];
@@ -17854,7 +17866,12 @@ function fishState(f,h){
   if (h<P.td || h>=P.ta){ f.x=f.bx; f.z=f.bz; f.heading=f.brot; f.speed=0; f.phase=h>=P.ta&&h<P.ta+0.4?'settle':'moored'; return f; }
   let line=null, ts=0;
   if (h<P.tG){ line=P.out; ts=(h-P.td)*HOUR_SEC; f.phase='out'; }
-  else if (h>=P.tr){ line=P.back; ts=(h-P.tr)*HOUR_SEC; f.phase='back'; }
+  else if (h>=P.tr){ line=P.back; ts=(h-P.tr)*HOUR_SEC; f.phase='back';
+    // turning round off the berth, where she lies: the heading eased from the way she came in to the way she will lie
+    if (ts>=P.tTurn){ const u=(ts-P.tTurn)/FISH.turn;
+      if (u<1){ fishAt(line,P.tTurn,_fa); f.x=_fa[0]; f.z=_fa[1]; f.speed=0.15;
+        const d=Math.atan2(Math.sin(f.brot-P.hIn),Math.cos(f.brot-P.hIn)), e=u*u*(3-2*u); f.heading=P.hIn+d*e; return f; }
+      ts-=FISH.turn; } }
   if (line){
     fishAt(line,ts,_fa); f.x=_fa[0]; f.z=_fa[1];
     fishAt(line,ts-0.5,_fb); const ax=_fb[0], az=_fb[1]; fishAt(line,ts+0.5,_fb);
