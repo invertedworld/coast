@@ -5376,6 +5376,15 @@ function buildLighthouse(gb,ch,R,L){
   gb.add(T.cyl, mat(x,gmin-1.2,z,7.2,g+1.6-(gmin-1.2),7.2), stone, gmin, SS);
   gb.add(T.cyl, mat(x,g+1.6,z,7.5,0.14,7.5), C_.trim, null, SS);
   const top=g+1.6+H, ry=Math.atan2(L.ix,L.iz), LR=gb.lod===0 && L.kind!=='rock'?lighthouseRoom(ch,L,g,H,top,ry):null;
+  // the plinth is solid, and can be stood on; a flight of stone steps, 1.6 m wide with treads of 0.32 m and risers of
+  // no more than 0.2 m, runs down from its edge before the door until it meets the ground
+  ch.circles.push({x,z,r:3.6,top:g+1.6});
+  if (L.kind!=='rock'){ const ux=L.ix/Math.hypot(L.ix,L.iz), uz=L.iz/Math.hypot(L.ix,L.iz);
+    let y=g+1.6, r=3.55, n=0;
+    while (n<14){ const rc=r+0.16, gx=x+ux*rc, gz=z+uz*rc, gh=Math.max(heightAt(gx-uz*0.7,gz+ux*0.7),heightAt(gx+uz*0.7,gz-ux*0.7),heightAt(gx,gz));
+      const rise=Math.min(0.2,(y-gh)/Math.max(1,Math.ceil((y-gh)/0.2))); if (y-gh<0.12) break;
+      y-=rise; gb.add(T.box, mat(gx,gh-0.6,gz,1.6,y-(gh-0.6),0.34,ry), stone, gh, SS);
+      ch.obbs.push({x:gx,z:gz,hw:0.8,hd:0.17,rot:ry,top:y,stair:true}); r+=0.32; n++; } }
   if (LR){ gb.add(lhTube(H,y=>lhR(H,y),false), mat(x,g+1.6,z,1,1,1,ry), white, g+1.6, SP);
     const [lx,lz]=localToWorld(LR,0,lhR(H,LH_DH)+0.02); gb.add(T.boxC, mat(lx,g+1.6+LH_DH+0.08,lz,1.4,0.16,0.14,ry), C_.trim, null, SS); }
   else { gb.add(T.taper, mat(x,g+1.6,z,5,H,5), white, g+1.6, SP);
@@ -7740,8 +7749,9 @@ function createSea(parent, opts={}){
         // the land, the town and the boats reflected (the reflection pass, drawn from the eye mirrored in the sea's mean
         // level), broken up by the waves, in place of the sky where they stand in it; the water reflects them more
         // strongly than a true surface would, as a calm harbour seems to
+        float rOcc=0.0;   // how far what the reflection shows stands before the sky, and so hides the sun's glitter
         if (uReflOn>0.0){ vec4 rp=uReflM*vec4(vP.x,0.0,vP.z,1.0); vec2 ruv=rp.xy/rp.w+N.xz*0.06*(1.0-smoothstep(200.0,900.0,cd));
-          ruv=clamp(ruv,0.001,0.999); vec4 rc=texture2D(uRefl,ruv); float rA=rc.a*uReflOn;
+          ruv=clamp(ruv,0.001,0.999); vec4 rc=texture2D(uRefl,ruv); float rA=rc.a*uReflOn; rOcc=rA;
           // (at an edge the colour is blended with the clear black around it, which is divided out)
           rc.rgb/=max(rc.a,0.02);
           // the water is made to reflect more strongly (uReflK) only what lies near enough to be seen clearly: over the
@@ -7819,7 +7829,7 @@ function createSea(parent, opts={}){
         // the shadow of the clouds on the water, and on the sun's glitter
         float cldK=uCloud.w>0.0?1.0-0.6*cloudAt(vP.xz+uSunDir.xz*(${CLOUD_H.toFixed(1)}-vP.y)/max(uSunDir.y,0.06),0.0):1.0;
         vec3 col=mix(under*cldK,sky*uBright,Fr)+ns*max(Fr,uReflK*uReflOn);
-        float sd=max(dot(Rf,uSunDir),0.0); col+=cldK*uSunCol*(pow(sd,900.0)*7.0+pow(sd,90.0)*0.25)*smoothstep(0.0,0.08,uSunDir.y);   // the sun's glitter
+        float sd=max(dot(Rf,uSunDir),0.0); col+=cldK*uSunCol*(pow(sd,900.0)*7.0+pow(sd,90.0)*0.25)*smoothstep(0.0,0.08,uSunDir.y)*(1.0-rOcc);   // the sun's glitter
         // foam: soft flecks on the swell's crests, lacy whitecaps on the steepest wind crests, and the shore wash
         float fl=n2(q*0.7+vec2(t*0.15,-t*0.1))*0.6+mix(0.5,n2(q*1.9-vec2(t*0.25,t*0.2)),steady(1.9,0.0))*0.4;
         float lace=0.5+0.5*sin(q.x*2.3+q.y*1.1+fl*6.0-t*1.3);
