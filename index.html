@@ -7752,11 +7752,19 @@ function createSea(parent, opts={}){
       // cells of its noise: 1 while it moves less than a quarter of a cell, falling to 0 by 0.45, so that a pattern
       // never moves so far between frames that it seems to stand still or run backwards
       float steady(float f,float k){ return 1.0-smoothstep(0.25,0.45,f*uStep.x+k*f*uStep.y); }
-      // ripples too small for the mesh, each layer fading out as it nears the size of a pixel or moves too far in a frame
+      // ripples too small for the mesh, each layer fading out as it nears the size of a pixel or moves too far in a frame.
+      // What the three layers lose to the eye's speed alone (their slope, amplitude times frequency) is carried by two
+      // coarser layers, of 2.9 and 7.7 m, the second as the first in turn moves too far, so that the water seen while
+      // flying fast over it keeps its roughness and its broken reflections, where it had turned to a still mirror
       float rip(vec2 q,float t,float px){
-        return n2(rot2(0.3)*q*0.9+uDrift*0.5)*0.45*(1.0-smoothstep(0.12,0.3,px*0.9))*steady(0.9,0.5)
-             + n2(rot2(1.9)*q*2.1+uDrift*0.8)*0.3*(1.0-smoothstep(0.12,0.3,px*2.1))*steady(2.1,0.8/2.1)
-             + n2(rot2(4.1)*q*4.7+uDrift*1.2)*0.25*(1.0-smoothstep(0.12,0.3,px*4.7))*steady(4.7,1.2/4.7); }
+        float p1=1.0-smoothstep(0.12,0.3,px*0.9), p2=1.0-smoothstep(0.12,0.3,px*2.1), p3=1.0-smoothstep(0.12,0.3,px*4.7);
+        float s1=steady(0.9,0.5), s2=steady(2.1,0.8/2.1), s3=steady(4.7,1.2/4.7);
+        float lost=0.405*p1*(1.0-s1)+0.63*p2*(1.0-s2)+1.175*p3*(1.0-s3);
+        float c1=steady(0.35,0.3), c2=steady(0.13,0.2);
+        return n2(rot2(0.3)*q*0.9+uDrift*0.5)*0.45*p1*s1
+             + n2(rot2(1.9)*q*2.1+uDrift*0.8)*0.3*p2*s2
+             + n2(rot2(4.1)*q*4.7+uDrift*1.2)*0.25*p3*s3
+             + (lost>0.0 ? lost*(n2(rot2(2.7)*q*0.35+uDrift*0.3)*c1/0.35+n2(rot2(5.3)*q*0.13+uDrift*0.2)*(1.0-c1)*c2/0.13) : 0.0); }
       // where the scene behind the water lies, from the depth of the pass drawn without the sea
       vec3 scenePos(vec2 uv,float d){ vec4 v=uProjInv*vec4(uv*2.0-1.0,d*2.0-1.0,1.0); v/=v.w; return (uCamWorld*v).xyz; }
       // light focused by the waves on the sea bed
@@ -16333,10 +16341,20 @@ const seaDepth={on:false,cam:new THREE.PerspectiveCamera(70,1,0.1,170),rt:new TH
 seaDepth.cam.layers.set(1); world.add(seaDepth.cam);
 seaDepth.behind.texture=seaDepth.rt.texture; seaDepth.behind.depthTexture=seaDepth.rt.depthTexture;
 const _seaSun=new THREE.Color(), _sz2=new THREE.Vector2();
+// whether the sea lies within 40 m of a point by the ground itself, not by the line of the coast: a cove's bay runs in
+// far behind that line, and its water had been drawn opaque until the eye came within 40 m of the line. The answer
+// is kept for each cell of 4 m
+const _wn={k:'',v:false};
+function waterNear(x,z){
+  const k=Math.floor(x/4)+','+Math.floor(z/4); if (k===_wn.k) return _wn.v;
+  let v=heightAt(x,z)<0;
+  for (let r=8;r<=40 && !v;r+=8) for (let a=0;a<16 && !v;a++){ const t=a*Math.PI/8+r*0.37; if (heightAt(x+r*Math.cos(t),z+r*Math.sin(t))<0) v=true; }
+  _wn.k=k; _wn.v=v; return v; }
 function seaFrame(wdt){
   // the full sea, with its depth pass, only on the water: in the dinghy, aboard a ferry, or with the eye a few metres
-  // above the sea and close to it; elsewhere the coarse sea, which costs no more than the old one did
-  const C=camera.position, onWater=mode==='dinghy' || mode==='ferry' || (mode!=='above' && C.y<9 && seaDist(C.x,C.z)<40);
+  // above the sea and close to it (to the line of the coast, or to the water of a cove); elsewhere the coarse sea,
+  // which costs no more than the old one did
+  const C=camera.position, onWater=mode==='dinghy' || mode==='ferry' || (mode!=='above' && C.y<9 && (seaDist(C.x,C.z)<40 || waterNear(C.x,C.z)));
   seaDepth.on=onWater;
   if (seaDepth.on){ renderer.getDrawingBufferSize(_sz2); seaDepth.behind.width=_sz2.x; seaDepth.behind.height=_sz2.y;
     const ds=Math.min(1,Math.sqrt(1.3e6/(_sz2.x*_sz2.y))), w=Math.max(1,Math.floor(_sz2.x*ds)), h=Math.max(1,Math.floor(_sz2.y*ds)); if (seaDepth.rt.width!==w || seaDepth.rt.height!==h) seaDepth.rt.setSize(w,h); }
