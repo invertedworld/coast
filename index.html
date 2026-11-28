@@ -11967,7 +11967,9 @@ function dinghyKey(){
   // afloat and the view rises to the bird's-eye view, as 5 does
   if (sailD){ if (!dinghyAshore(false)){ const HB=dgyHarbourAt(sailD.state.x,sailD.state.z); if (HB) dinghyDock(HB); else if (!dinghyToLand()) toggleView(); } return; }
   const N=dgyNearest(player.x,player.z);
+  if (mode==='swim' && dinghySummon(N)) return;
   if (mode==='street' && N && N.e.D.canBoard(player.x,player.z)){ dinghyBoard(N.e); return; }
+  if (mode==='street' && wading() && dinghySummon(N)) return;
   // within 100 m of a dinghy (from the street, the water or the bird's-eye view), the player takes her helm where she
   // lies, rather than travelling to a harbour
   if (N && N.d<100 && (mode==='street'||mode==='swim'||mode==='above')){
@@ -11975,6 +11977,23 @@ function dinghyKey(){
     if (mode==='above'){ startSwoop(camera); }
     player.x=S.x; player.z=S.z; player.y=0; player.vy=0; eyeY=null; descent.t=ascent.t=-1; dinghyBoard(N.e); return; }
   dinghyGo(); }
+// standing in the sea: the feet below the water's level, on ground that lies below it
+function wading(){ return player.y<-0.02 && heightAt(player.x,player.z)<0; }
+// swimming, or standing in shallow water: the nearest dinghy within 100 m, or else the dinghy of the nearest harbour,
+// is brought to the player, heading the way they face, and they take her helm. In water shallower than 0.8 m she is
+// brought to the nearest point within 40 m where it is deeper; failing one, 6 does what it does on land
+function dinghySummon(N){
+  const S=swimmer.state; let x=mode==='swim'?S.x:player.x, z=mode==='swim'?S.z:player.z;
+  if (heightAt(x,z)>-0.8){ let f=null;
+    for (let r=1;r<=40 && !f;r+=1){ const n=Math.max(12,Math.round(r*4));
+      for (let k=0;k<n;k++){ const a=k/n*Math.PI*2, px=x+Math.cos(a)*r, pz=z+Math.sin(a)*r; if (heightAt(px,pz)<=-0.8){ f={x:px,z:pz}; break; } } }
+    if (!f) return false; x=f.x; z=f.z; }
+  let e=N && N.d<100 ? N.e : null;
+  if (!e){ const H=dgyHarbourNear(x,z); e=H&&dgyMake(H); }
+  if (!e) return false;
+  if (mode==='swim') swimLeaveHere(); uwReturn=null; ridden=null; sit=null; crouch=false;
+  e.D.moor({x,z,head:Math.atan2(-Math.sin(yaw),-Math.cos(yaw))}); e.D.moor(null);
+  player.x=x; player.z=z; player.y=0; player.vy=0; eyeY=null; descent.t=ascent.t=-1; dinghyBoard(e); return true; }
 // a wind that lets the boat sail out of her harbour: if the prevailing wind comes from within 70 degrees of the
 // heading straight out to sea from the basin, it is turned to blow across that heading, from the side nearer to
 // where it was, so that she can reach out (the sea breeze of the afternoon then brings it a little further ahead)
@@ -14352,9 +14371,9 @@ const OLD_VIEW=new Set(['KeyR','KeyG','KeyF','KeyY','KeyV','KeyC']);
 addEventListener('keydown',e=>{ keys[e.code]=true;
   const code=VIEW_KEY[e.code]||(OLD_VIEW.has(e.code)?'':e.code);
   // in the water C dives (it is held, and read by the swimmer), 5 does nothing, and the keys that take the player to a
-  // train, a ferry or a dinghy first bring them out of the water where they are
+  // train or a ferry first bring them out of the water where they are (6 brings a dinghy to the swimmer instead)
   const inWater=mode==='swim';
-  if (inWater && !e.repeat && ['KeyR','KeyF','KeyG','KeyY'].includes(code)) swimLeaveHere();
+  if (inWater && !e.repeat && ['KeyR','KeyF','KeyG'].includes(code)) swimLeaveHere();
   if (code==='KeyJ' && !e.repeat) jumpKey();
   if (code==='KeyV' && !e.repeat && flying()) flyLand();
   else if (code==='KeyV' && !e.repeat && !inWater) toggleView();
